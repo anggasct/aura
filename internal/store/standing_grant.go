@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type StandingGrant struct {
@@ -60,7 +62,7 @@ func (s *sqliteStandingGrantStore) Grant(ctx context.Context, grant *StandingGra
 INSERT INTO standing_grant (id, principal_id, agent_id, tool_name, granted_at, expires_at, granted_by)
 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		stored.ID, stored.PrincipalID, stored.AgentID, stored.ToolName,
-		formatTime(stored.GrantedAt), formatTime(stored.ExpiresAt), stored.GrantedBy,
+		sqlite.FormatTime(stored.GrantedAt), sqlite.FormatTime(stored.ExpiresAt), stored.GrantedBy,
 	)
 	if err != nil {
 		return StandingGrant{}, classifyBusy(fmt.Errorf("record standing grant: %w", err))
@@ -115,7 +117,7 @@ func (s *sqliteStandingGrantStore) Revoke(ctx context.Context, id string, at tim
 	if strings.TrimSpace(id) == "" {
 		return false, Errorf(ErrorCodeInvalidArgument, "standing grant id must not be empty")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE standing_grant SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, formatTime(at.UTC()), id)
+	result, err := s.db.ExecContext(ctx, `UPDATE standing_grant SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at.UTC()), id)
 	if err != nil {
 		return false, classifyBusy(fmt.Errorf("revoke standing grant: %w", err))
 	}
@@ -139,10 +141,10 @@ func (s *sqliteStandingGrantStore) query(ctx context.Context, query string, args
 		if err := rows.Scan(&grant.ID, &grant.PrincipalID, &grant.AgentID, &grant.ToolName, &grantedAt, &expiresAt, &grant.GrantedBy); err != nil {
 			return nil, fmt.Errorf("scan standing grant: %w", err)
 		}
-		if grant.GrantedAt, err = parseTime(grantedAt); err != nil {
+		if grant.GrantedAt, err = sqlite.ParseTime(grantedAt); err != nil {
 			return nil, fmt.Errorf("parse standing grant time: %w", err)
 		}
-		if grant.ExpiresAt, err = parseTime(expiresAt); err != nil {
+		if grant.ExpiresAt, err = sqlite.ParseTime(expiresAt); err != nil {
 			return nil, fmt.Errorf("parse standing grant expiry: %w", err)
 		}
 		grants = append(grants, grant)

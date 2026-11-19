@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type TelegramCursorStore interface {
@@ -51,7 +53,7 @@ ON CONFLICT(source) DO UPDATE SET
     next_update_id = MAX(telegram_cursor.next_update_id, excluded.next_update_id),
     updated_at = excluded.updated_at
 `
-	if _, err := s.db.ExecContext(ctx, query, source, nextUpdateID, formatTime(at.UTC())); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, source, nextUpdateID, sqlite.FormatTime(at.UTC())); err != nil {
 		return classifyBusy(fmt.Errorf("advance telegram cursor: %w", err))
 	}
 	return nil

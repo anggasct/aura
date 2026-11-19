@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -159,7 +161,7 @@ func (s *sqliteScheduleStore) InsertJob(ctx context.Context, job *ScheduledJob) 
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Name, job.CronExpression, job.Timezone, job.Prompt,
 		job.OriginChannel, job.OriginDestination, job.OverlapPolicy, job.CatchUpGraceSeconds,
-		job.State, job.Version, formatTime(job.CreatedAt.UTC()), formatTime(job.UpdatedAt.UTC()),
+		job.State, job.Version, sqlite.FormatTime(job.CreatedAt.UTC()), sqlite.FormatTime(job.UpdatedAt.UTC()),
 		nullableText(job.WorkflowID), nullableText(job.WorkflowInputJSON),
 	)
 	if err != nil {
@@ -215,7 +217,7 @@ func (s *sqliteScheduleStore) EditJob(ctx context.Context, id string, edit *JobE
 		version = ?, updated_at = ? WHERE id = ? AND version = ? AND state != ?`,
 		edit.Name, edit.CronExpression, edit.Timezone, edit.Prompt,
 		edit.OriginChannel, edit.OriginDestination, edit.OverlapPolicy, edit.CatchUpGraceSeconds,
-		edit.ExpectedVersion+1, formatTime(now.UTC()), id, edit.ExpectedVersion, ScheduleJobDeleted)
+		edit.ExpectedVersion+1, sqlite.FormatTime(now.UTC()), id, edit.ExpectedVersion, ScheduleJobDeleted)
 	if err != nil {
 		return ScheduledJob{}, classifyBusy(fmt.Errorf("edit schedule job: %w", err))
 	}
@@ -241,7 +243,7 @@ func (s *sqliteScheduleStore) SetJobState(ctx context.Context, id, state string,
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE scheduled_job SET state = ?, updated_at = ? WHERE id = ? AND state != ?`,
-		state, formatTime(now.UTC()), id, ScheduleJobDeleted)
+		state, sqlite.FormatTime(now.UTC()), id, ScheduleJobDeleted)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("set schedule job state: %w", err))
 	}
@@ -277,9 +279,9 @@ func (s *sqliteScheduleStore) RecordFire(ctx context.Context, occurrence *Schedu
 			result_event_id, safe_error_code, created_at, updated_at
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		occurrence.ID, occurrence.JobID, occurrence.JobVersion,
-		formatTime(occurrence.ScheduledForUTC.UTC()), occurrence.State,
+		sqlite.FormatTime(occurrence.ScheduledForUTC.UTC()), occurrence.State,
 		nullText(occurrence.TurnID), nullText(occurrence.ResultEventID), nullText(occurrence.SafeErrorCode),
-		formatTime(occurrence.CreatedAt.UTC()), formatTime(occurrence.UpdatedAt.UTC()),
+		sqlite.FormatTime(occurrence.CreatedAt.UTC()), sqlite.FormatTime(occurrence.UpdatedAt.UTC()),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -309,7 +311,7 @@ func (s *sqliteScheduleStore) SettleOccurrence(ctx context.Context, id, state, t
 		result_event_id = ?, safe_error_code = ?, updated_at = ?
 		WHERE id = ? AND state = ?`,
 		state, nullText(turnID), nullText(resultEventID), nullText(safeErrorCode),
-		formatTime(now.UTC()), id, OccurrenceFired)
+		sqlite.FormatTime(now.UTC()), id, OccurrenceFired)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("settle occurrence: %w", err))
 	}
@@ -374,11 +376,11 @@ func scanOneScheduledJob(row rowScanner) (ScheduledJob, bool, error) {
 	if err != nil {
 		return ScheduledJob{}, false, classifyBusy(fmt.Errorf("load schedule job: %w", err))
 	}
-	createdAt, err := parseTime(createdAtRaw)
+	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
 		return ScheduledJob{}, false, Errorf(ErrorCodeScheduleInvalid, "job created_at is not a valid timestamp")
 	}
-	updatedAt, err := parseTime(updatedAtRaw)
+	updatedAt, err := sqlite.ParseTime(updatedAtRaw)
 	if err != nil {
 		return ScheduledJob{}, false, Errorf(ErrorCodeScheduleInvalid, "job updated_at is not a valid timestamp")
 	}
@@ -415,15 +417,15 @@ func scanScheduledOccurrence(rows *sql.Rows) (ScheduledOccurrence, error) {
 	if !validOccurrenceState(item.State) {
 		return ScheduledOccurrence{}, Errorf(ErrorCodeScheduleInvalid, "occurrence row carries invalid state")
 	}
-	scheduledFor, err := parseTime(scheduledForRaw)
+	scheduledFor, err := sqlite.ParseTime(scheduledForRaw)
 	if err != nil {
 		return ScheduledOccurrence{}, Errorf(ErrorCodeScheduleInvalid, "occurrence fire time is not valid")
 	}
-	createdAt, err := parseTime(createdAtRaw)
+	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
 		return ScheduledOccurrence{}, Errorf(ErrorCodeScheduleInvalid, "occurrence created_at is not valid")
 	}
-	updatedAt, err := parseTime(updatedAtRaw)
+	updatedAt, err := sqlite.ParseTime(updatedAtRaw)
 	if err != nil {
 		return ScheduledOccurrence{}, Errorf(ErrorCodeScheduleInvalid, "occurrence updated_at is not valid")
 	}
@@ -473,7 +475,7 @@ func (s *sqliteScheduleStore) AttachTurn(ctx context.Context, id, turnID string,
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE scheduled_occurrence SET turn_id = ?, updated_at = ? WHERE id = ? AND state = ?`,
-		turnID, formatTime(now.UTC()), id, OccurrenceFired)
+		turnID, sqlite.FormatTime(now.UTC()), id, OccurrenceFired)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("attach turn: %w", err))
 	}
@@ -501,7 +503,7 @@ func (s *sqliteScheduleStore) OccurrenceByFire(ctx context.Context, jobID string
 		`SELECT id, job_id, job_version, scheduled_for_utc, state, turn_id,
 		result_event_id, safe_error_code, created_at, updated_at
 		FROM scheduled_occurrence WHERE job_id = ? AND scheduled_for_utc = ?`,
-		jobID, formatTime(scheduledFor.UTC()))
+		jobID, sqlite.FormatTime(scheduledFor.UTC()))
 	if err != nil {
 		return ScheduledOccurrence{}, false, classifyBusy(fmt.Errorf("load occurrence by fire: %w", err))
 	}
@@ -600,7 +602,7 @@ func (s *sqliteScheduleStore) PruneOccurrences(ctx context.Context, jobID string
 			WHERE job_id = ? AND state IN ('completed','failed','expired','skipped_overlap','cancelled')
 			AND updated_at < ? ORDER BY updated_at, id LIMIT ?
 		)`,
-		jobID, formatTime(before.UTC()), limit)
+		jobID, sqlite.FormatTime(before.UTC()), limit)
 	if err != nil {
 		return 0, classifyBusy(fmt.Errorf("prune occurrences: %w", err))
 	}

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type DedupeStore interface {
@@ -51,7 +53,7 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *DedupeClaim) (origina
 	).Scan(&claimedTurnID, &expiresAtRaw)
 	switch {
 	case err == nil:
-		storedExpiry, parseErr := parseTime(expiresAtRaw)
+		storedExpiry, parseErr := sqlite.ParseTime(expiresAtRaw)
 		if parseErr != nil {
 			return "", false, fmt.Errorf("parse dedupe expiry: %w", parseErr)
 		}
@@ -69,7 +71,7 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *DedupeClaim) (origina
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO ingress_dedupe (source, external_id, accepted_at, expires_at, turn_id) VALUES (?, ?, ?, ?, ?)`,
-		claim.Source, claim.ExternalID, formatTime(claim.Now), formatTime(claim.ExpiresAt), claim.TurnID,
+		claim.Source, claim.ExternalID, sqlite.FormatTime(claim.Now), sqlite.FormatTime(claim.ExpiresAt), claim.TurnID,
 	); err != nil {
 		return "", false, classifyBusy(fmt.Errorf("claim dedupe key: %w", err))
 	}
@@ -131,7 +133,7 @@ func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID stri
 	case err != nil:
 		return false, fmt.Errorf("read dedupe key: %w", err)
 	}
-	return expiresAtRaw >= formatTime(time.Now().UTC()), nil
+	return expiresAtRaw >= sqlite.FormatTime(time.Now().UTC()), nil
 }
 
 func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]RuntimeEvent, error) {

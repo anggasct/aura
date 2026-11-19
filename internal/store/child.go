@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ChildRun struct {
@@ -122,7 +124,7 @@ func (s *sqliteChildStore) InsertRun(ctx context.Context, run *ChildRun) error {
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		run.ID, run.IdempotencyKey, run.ParentSessionID, run.ParentTurnID, run.ParentInvocation,
 		run.ChildSessionID, run.DurableKey, run.ContextDigest, run.GrantsJSON, run.BudgetJSON,
-		run.State, formatTime(run.Deadline.UTC()), formatTime(run.CreatedAt.UTC()), formatTime(run.UpdatedAt.UTC()),
+		run.State, sqlite.FormatTime(run.Deadline.UTC()), sqlite.FormatTime(run.CreatedAt.UTC()), sqlite.FormatTime(run.UpdatedAt.UTC()),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -151,7 +153,7 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 		return ChildRun{}, fmt.Errorf("scan child run: %w", err)
 	}
 	for target, raw := range map[*time.Time]string{&run.Deadline: deadline, &run.CreatedAt: created, &run.UpdatedAt: updated} {
-		parsed, err := parseTime(raw)
+		parsed, err := sqlite.ParseTime(raw)
 		if err != nil {
 			return ChildRun{}, fmt.Errorf("parse child run timestamps: %w", err)
 		}
@@ -164,7 +166,7 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 		run.ResultOutput = resultOutput.String
 	}
 	if completedAt.Valid && completedAt.String != "" {
-		parsed, err := parseTime(completedAt.String)
+		parsed, err := sqlite.ParseTime(completedAt.String)
 		if err != nil {
 			return ChildRun{}, fmt.Errorf("parse child result timestamp: %w", err)
 		}
@@ -269,7 +271,7 @@ func (s *sqliteChildStore) SetState(ctx context.Context, id, state string, now t
 	}
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE child_run SET state = ?, updated_at = ? WHERE id = ?`,
-		state, formatTime(now.UTC()), id,
+		state, sqlite.FormatTime(now.UTC()), id,
 	)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("set child run state: %w", err))
@@ -320,7 +322,7 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 	}
 	var completedRaw any
 	if !completedAt.IsZero() {
-		completedRaw = formatTime(completedAt.UTC())
+		completedRaw = sqlite.FormatTime(completedAt.UTC())
 	}
 	var provenanceRaw any
 	if strings.TrimSpace(result.Provenance) != "" {
@@ -353,7 +355,7 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 		result.TokensUsed, result.CostMicros, completedRaw, provenanceRaw,
 		nullable(result.ChildID), nullable(result.SessionID), nullable(result.ContextDigest), nullable(result.DurableKey),
 		nullable(result.SourceRange), nullable(result.Model), nullable(result.PromptVersion), nullable(result.Trust),
-		formatTime(now.UTC()), id,
+		sqlite.FormatTime(now.UTC()), id,
 	)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("set child result: %w", err))

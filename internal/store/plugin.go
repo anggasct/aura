@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -137,12 +139,12 @@ func (s *sqlitePluginStore) Install(ctx context.Context, in *PluginInstall) erro
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO plugin (id, state, version, approved_version, updated_at) VALUES (?, ?, ?, NULLIF(?, ''), ?)
 ON CONFLICT(id) DO UPDATE SET state = excluded.state, version = excluded.version, approved_version = excluded.approved_version, updated_at = excluded.updated_at`,
-		in.Plugin.ID, in.Plugin.State, in.Plugin.Version, in.Plugin.ApprovedVersion, formatTime(in.Plugin.UpdatedAt)); err != nil {
+		in.Plugin.ID, in.Plugin.State, in.Plugin.Version, in.Plugin.ApprovedVersion, sqlite.FormatTime(in.Plugin.UpdatedAt)); err != nil {
 		return pluginWriteError(err, "install plugin")
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO plugin_version (plugin_id, version, digest, manifest_json, installed_at) VALUES (?, ?, ?, ?, ?)`,
-		in.Version.PluginID, in.Version.Version, in.Version.Digest, in.Version.ManifestJSON, formatTime(in.Version.InstalledAt)); err != nil {
+		in.Version.PluginID, in.Version.Version, in.Version.Digest, in.Version.ManifestJSON, sqlite.FormatTime(in.Version.InstalledAt)); err != nil {
 		return pluginWriteError(err, "record plugin version")
 	}
 	for _, key := range in.DropGrants {
@@ -183,7 +185,7 @@ WHERE p.id = ?`, in.Version, in.PluginID).Scan(&current, &digest)
 		return Errorf(ErrorCodePluginConflict, "plugin changed since the review")
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE plugin SET state = ?, approved_version = ?, updated_at = ? WHERE id = ?`,
-		PluginStateActive, in.Version, formatTime(in.At), in.PluginID); err != nil {
+		PluginStateActive, in.Version, sqlite.FormatTime(in.At), in.PluginID); err != nil {
 		return pluginWriteError(err, "approve plugin")
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM plugin_grant WHERE plugin_id = ?`, in.PluginID); err != nil {
@@ -196,7 +198,7 @@ WHERE p.id = ?`, in.Version, in.PluginID).Scan(&current, &digest)
 		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO plugin_grant (plugin_id, surface, value, fingerprint, approved_at, approved_by) VALUES (?, ?, ?, ?, ?, ?)`,
-			grant.PluginID, grant.Surface, grant.Value, grant.Fingerprint, formatTime(grant.ApprovedAt), grant.ApprovedBy); err != nil {
+			grant.PluginID, grant.Surface, grant.Value, grant.Fingerprint, sqlite.FormatTime(grant.ApprovedAt), grant.ApprovedBy); err != nil {
 			return pluginWriteError(err, "record plugin grant")
 		}
 	}
@@ -210,7 +212,7 @@ func (s *sqlitePluginStore) SetState(ctx context.Context, id, state string, at t
 	if err := validatePluginState(state); err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE plugin SET state = ?, updated_at = ? WHERE id = ?`, state, formatTime(at), id)
+	result, err := s.db.ExecContext(ctx, `UPDATE plugin SET state = ?, updated_at = ? WHERE id = ?`, state, sqlite.FormatTime(at), id)
 	if err != nil {
 		return pluginWriteError(err, "set plugin state")
 	}
@@ -267,7 +269,7 @@ SELECT plugin_id, version, digest, manifest_json, installed_at FROM plugin_versi
 	if err != nil {
 		return PluginVersion{}, classifyBusy(fmt.Errorf("read plugin version: %w", err))
 	}
-	if out.InstalledAt, err = parseTime(installed); err != nil {
+	if out.InstalledAt, err = sqlite.ParseTime(installed); err != nil {
 		return PluginVersion{}, fmt.Errorf("parse plugin version install time: %w", err)
 	}
 	return out, nil
@@ -287,7 +289,7 @@ SELECT plugin_id, surface, value, fingerprint, approved_at, approved_by FROM plu
 		if err := rows.Scan(&grant.PluginID, &grant.Surface, &grant.Value, &grant.Fingerprint, &approved, &grant.ApprovedBy); err != nil {
 			return nil, fmt.Errorf("list plugin grants: %w", err)
 		}
-		if grant.ApprovedAt, err = parseTime(approved); err != nil {
+		if grant.ApprovedAt, err = sqlite.ParseTime(approved); err != nil {
 			return nil, fmt.Errorf("parse plugin grant time: %w", err)
 		}
 		grants = append(grants, grant)
@@ -330,7 +332,7 @@ func scanPlugin(row rowScanner) (Plugin, error) {
 		return Plugin{}, err
 	}
 	var err error
-	if plugin.UpdatedAt, err = parseTime(updated); err != nil {
+	if plugin.UpdatedAt, err = sqlite.ParseTime(updated); err != nil {
 		return Plugin{}, fmt.Errorf("parse plugin update time: %w", err)
 	}
 	return plugin, nil

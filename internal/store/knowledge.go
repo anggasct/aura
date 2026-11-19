@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"modernc.org/sqlite"
+	sqlitedriver "modernc.org/sqlite"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -179,7 +181,7 @@ func (s *sqliteKBStore) ReplaceSource(ctx context.Context, write *KBSourceWrite)
 }
 
 func replaceKBSource(ctx context.Context, tx *sql.Tx, write *KBSourceWrite) (KBWriteResult, error) {
-	stamp := formatTime(write.IngestedAt)
+	stamp := sqlite.FormatTime(write.IngestedAt)
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO kb_collection (id, generation, created_at) VALUES (?, 0, ?) ON CONFLICT(id) DO NOTHING`,
 		write.Collection, stamp); err != nil {
@@ -344,7 +346,7 @@ func (s *sqliteKBStore) ListCollections(ctx context.Context) ([]KBCollectionSumm
 		if err := rows.Scan(&summary.ID, &summary.Generation, &created, &summary.Sources, &summary.Chunks); err != nil {
 			return nil, fmt.Errorf("scan knowledge collection: %w", err)
 		}
-		if summary.CreatedAt, err = parseTime(created); err != nil {
+		if summary.CreatedAt, err = sqlite.ParseTime(created); err != nil {
 			return nil, fmt.Errorf("parse knowledge collection time: %w", err)
 		}
 		out = append(out, summary)
@@ -365,7 +367,7 @@ func scanKBSource(row rowScanner) (KBSource, error) {
 		&source.ContentSHA256, &source.IngestVersion, &ingested, &source.Chunks); err != nil {
 		return KBSource{}, err
 	}
-	at, err := parseTime(ingested)
+	at, err := sqlite.ParseTime(ingested)
 	if err != nil {
 		return KBSource{}, fmt.Errorf("parse knowledge source time: %w", err)
 	}
@@ -561,7 +563,7 @@ func (s *sqliteKBStore) indexDamaged(ctx context.Context) (bool, error) {
 	if err == nil {
 		return false, nil
 	}
-	var sqliteErr *sqlite.Error
+	var sqliteErr *sqlitedriver.Error
 	if errors.As(err, &sqliteErr) && sqliteErr.Code()&kbSQLitePrimary == kbSQLiteCorrupt {
 		return true, nil
 	}

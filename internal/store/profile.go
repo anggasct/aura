@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ProfileFact struct {
@@ -130,7 +132,7 @@ func nullProfileTime(value *time.Time) sql.NullString {
 	if value == nil || value.IsZero() {
 		return sql.NullString{}
 	}
-	return sql.NullString{String: formatTime(value.UTC()), Valid: true}
+	return sql.NullString{String: sqlite.FormatTime(value.UTC()), Valid: true}
 }
 
 func (s *sqliteProfileStore) InsertFact(ctx context.Context, fact *ProfileFact) error {
@@ -149,7 +151,7 @@ func (s *sqliteProfileStore) InsertFact(ctx context.Context, fact *ProfileFact) 
 		fact.ID, fact.OwnerID, fact.Category, fact.Key, fact.Value, fact.ValueDigest,
 		fact.Status, fact.Origin, profileBool(fact.OwnerVerified), fact.Confidence,
 		fact.ConfidencePolicy, nullProfileText(fact.ConflictsWithID),
-		nullProfileTime(fact.ExpiresAt), formatTime(fact.CreatedAt.UTC()), formatTime(fact.UpdatedAt.UTC()),
+		nullProfileTime(fact.ExpiresAt), sqlite.FormatTime(fact.CreatedAt.UTC()), sqlite.FormatTime(fact.UpdatedAt.UTC()),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -175,17 +177,17 @@ func scanProfileFact(rows *sql.Rows) (ProfileFact, error) {
 	}
 	fact.OwnerVerified = verified == 1
 	fact.ConflictsWithID = conflicts.String
-	createdAt, err := parseTime(created)
+	createdAt, err := sqlite.ParseTime(created)
 	if err != nil {
 		return ProfileFact{}, fmt.Errorf("parse profile fact timestamps: %w", err)
 	}
-	updatedAt, err := parseTime(updated)
+	updatedAt, err := sqlite.ParseTime(updated)
 	if err != nil {
 		return ProfileFact{}, fmt.Errorf("parse profile fact timestamps: %w", err)
 	}
 	fact.CreatedAt, fact.UpdatedAt = createdAt, updatedAt
 	if expires.Valid {
-		expiresAt, err := parseTime(expires.String)
+		expiresAt, err := sqlite.ParseTime(expires.String)
 		if err != nil {
 			return ProfileFact{}, fmt.Errorf("parse profile fact expiry: %w", err)
 		}
@@ -245,7 +247,7 @@ func (s *sqliteProfileStore) UpdateFact(ctx context.Context, fact *ProfileFact) 
 		fact.Value, fact.ValueDigest, fact.Status, fact.Origin,
 		profileBool(fact.OwnerVerified), fact.Confidence, fact.ConfidencePolicy,
 		nullProfileText(fact.ConflictsWithID), nullProfileTime(fact.ExpiresAt),
-		formatTime(fact.UpdatedAt.UTC()), fact.ID,
+		sqlite.FormatTime(fact.UpdatedAt.UTC()), fact.ID,
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -285,7 +287,7 @@ func (s *sqliteProfileStore) AddEvidence(ctx context.Context, evidence *ProfileE
 		evidence.FactID, evidence.SourceEventID, evidence.SourceDigest,
 		nullProfileText(evidence.Provider), nullProfileText(evidence.Model),
 		nullProfileText(evidence.ModelVersion), nullProfileText(evidence.PromptVersion),
-		nullProfileText(evidence.PromptDigest), formatTime(evidence.ObservedAt.UTC()),
+		nullProfileText(evidence.PromptDigest), sqlite.FormatTime(evidence.ObservedAt.UTC()),
 	)
 	if err != nil {
 		if isConstraintForeignKey(err) {
@@ -331,7 +333,7 @@ func (s *sqliteProfileStore) ListEvidence(ctx context.Context, factID string) ([
 		evidence.Provider, evidence.Model = provider.String, model.String
 		evidence.ModelVersion, evidence.PromptVersion = modelVersion.String, promptVersion.String
 		evidence.PromptDigest = promptDigest.String
-		observedAt, err := parseTime(observed)
+		observedAt, err := sqlite.ParseTime(observed)
 		if err != nil {
 			return nil, fmt.Errorf("parse profile evidence timestamp: %w", err)
 		}
@@ -439,7 +441,7 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 	match := strings.TrimSpace(query)
 	sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
 		AND (expires_at IS NULL OR expires_at > ?)`
-	args := []any{ownerID, formatTime(now.UTC())}
+	args := []any{ownerID, sqlite.FormatTime(now.UTC())}
 	if verifiedOnly {
 		sqlQuery += ` AND owner_verified = 1`
 	}
@@ -464,7 +466,7 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 			JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
 			WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
 			AND (f.expires_at IS NULL OR f.expires_at > ?)`
-		args = []any{sanitized, ownerID, formatTime(now.UTC())}
+		args = []any{sanitized, ownerID, sqlite.FormatTime(now.UTC())}
 		if verifiedOnly {
 			sqlQuery += ` AND f.owner_verified = 1`
 		}
@@ -505,7 +507,7 @@ func ProfileExpiresAt(expiresAt *time.Time) any {
 	if expiresAt == nil || expiresAt.IsZero() {
 		return nil
 	}
-	return formatTime(expiresAt.UTC())
+	return sqlite.FormatTime(expiresAt.UTC())
 }
 
 func ProfileConflictsWith(conflictsWith string) any {

@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -133,12 +135,12 @@ func (s *sqliteBroadcastStore) InsertItem(ctx context.Context, item *BroadcastIt
 		item.DestinationAlias,
 		item.ContentJSON,
 		item.State,
-		formatTime(item.NotBefore.UTC()),
+		sqlite.FormatTime(item.NotBefore.UTC()),
 		item.AttemptCount,
 		nullText(item.EffectID),
 		nullText(item.DigestParentID),
-		formatTime(item.CreatedAt.UTC()),
-		formatTime(item.UpdatedAt.UTC()),
+		sqlite.FormatTime(item.CreatedAt.UTC()),
+		sqlite.FormatTime(item.UpdatedAt.UTC()),
 	)
 	if err == nil {
 		return *item, false, nil
@@ -220,12 +222,12 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 		parent.DestinationAlias,
 		parent.ContentJSON,
 		parent.State,
-		formatTime(parent.NotBefore.UTC()),
+		sqlite.FormatTime(parent.NotBefore.UTC()),
 		parent.AttemptCount,
 		nullText(parent.EffectID),
 		nullText(parent.DigestParentID),
-		formatTime(parent.CreatedAt.UTC()),
-		formatTime(parent.UpdatedAt.UTC()),
+		sqlite.FormatTime(parent.CreatedAt.UTC()),
+		sqlite.FormatTime(parent.UpdatedAt.UTC()),
 	)
 	if err != nil {
 		if !isConstraintUnique(err) {
@@ -249,7 +251,7 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 	var linked int64
 	for _, id := range childIDs {
 		result, err := link.ExecContext(ctx,
-			BroadcastStateCancelled, parent.ID, formatTime(parent.UpdatedAt.UTC()), id, BroadcastStateHeld)
+			BroadcastStateCancelled, parent.ID, sqlite.FormatTime(parent.UpdatedAt.UTC()), id, BroadcastStateHeld)
 		if err != nil {
 			return BroadcastItem{}, false, classifyBusy(fmt.Errorf("link digest children: %w", err))
 		}
@@ -339,15 +341,15 @@ func finishBroadcastItemScan(item *BroadcastItem, notBeforeRaw, createdAtRaw, up
 	if !validBroadcastPriority(item.Priority) || !validBroadcastState(item.State) {
 		return BroadcastItem{}, false, Errorf(ErrorCodeBroadcastInvalid, "broadcast row carries an invalid priority or state")
 	}
-	notBefore, err := parseTime(notBeforeRaw)
+	notBefore, err := sqlite.ParseTime(notBeforeRaw)
 	if err != nil {
 		return BroadcastItem{}, false, Errorf(ErrorCodeBroadcastInvalid, "broadcast not_before is not a valid timestamp")
 	}
-	createdAt, err := parseTime(createdAtRaw)
+	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
 		return BroadcastItem{}, false, Errorf(ErrorCodeBroadcastInvalid, "broadcast created_at is not a valid timestamp")
 	}
-	updatedAt, err := parseTime(updatedAtRaw)
+	updatedAt, err := sqlite.ParseTime(updatedAtRaw)
 	if err != nil {
 		return BroadcastItem{}, false, Errorf(ErrorCodeBroadcastInvalid, "broadcast updated_at is not a valid timestamp")
 	}
@@ -375,7 +377,7 @@ func (s *sqliteBroadcastStore) DestinationCursor(ctx context.Context, alias stri
 	if err != nil {
 		return time.Time{}, false, classifyBusy(fmt.Errorf("load destination cursor: %w", err))
 	}
-	cursor, err := parseTime(raw)
+	cursor, err := sqlite.ParseTime(raw)
 	if err != nil {
 		return time.Time{}, false, Errorf(ErrorCodeBroadcastInvalid, "destination cursor is not a valid timestamp")
 	}
@@ -411,7 +413,7 @@ func (s *sqliteBroadcastStore) ClaimDispatchSlot(ctx context.Context, alias stri
 	case err != nil:
 		return time.Time{}, classifyBusy(fmt.Errorf("load destination cursor: %w", err))
 	default:
-		cursor, parseErr := parseTime(raw)
+		cursor, parseErr := sqlite.ParseTime(raw)
 		if parseErr != nil {
 			return time.Time{}, Errorf(ErrorCodeBroadcastInvalid, "destination cursor is not a valid timestamp")
 		}
@@ -424,7 +426,7 @@ func (s *sqliteBroadcastStore) ClaimDispatchSlot(ctx context.Context, alias stri
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO broadcast_destination (alias, next_eligible_at, updated_at) VALUES (?, ?, ?)
 		ON CONFLICT(alias) DO UPDATE SET next_eligible_at = excluded.next_eligible_at, updated_at = excluded.updated_at`,
-		alias, formatTime(next), formatTime(now.UTC()),
+		alias, sqlite.FormatTime(next), sqlite.FormatTime(now.UTC()),
 	)
 	if err != nil {
 		return time.Time{}, classifyBusy(fmt.Errorf("advance destination cursor: %w", err))
@@ -461,7 +463,7 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 	case err != nil:
 		return classifyBusy(fmt.Errorf("load destination cursor: %w", err))
 	default:
-		cursor, parseErr := parseTime(raw)
+		cursor, parseErr := sqlite.ParseTime(raw)
 		if parseErr != nil {
 			return Errorf(ErrorCodeBroadcastInvalid, "destination cursor is not a valid timestamp")
 		}
@@ -472,7 +474,7 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO broadcast_destination (alias, next_eligible_at, updated_at) VALUES (?, ?, ?)
 		ON CONFLICT(alias) DO UPDATE SET next_eligible_at = excluded.next_eligible_at, updated_at = excluded.updated_at`,
-		alias, formatTime(until.UTC()), formatTime(time.Now().UTC()),
+		alias, sqlite.FormatTime(until.UTC()), sqlite.FormatTime(time.Now().UTC()),
 	)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("defer destination cursor: %w", err))
@@ -507,7 +509,7 @@ func (s *sqliteBroadcastStore) ListHeld(ctx context.Context, alias, priority str
 		`SELECT `+selectBroadcastItemColumns+` FROM broadcast_item
 		WHERE state = '`+BroadcastStateHeld+`' AND destination_alias = ? AND priority = ? AND not_before <= ?
 		ORDER BY created_at, id LIMIT ?`,
-		alias, priority, formatTime(notBefore.UTC()), limit)
+		alias, priority, sqlite.FormatTime(notBefore.UTC()), limit)
 	if err != nil {
 		return nil, classifyBusy(fmt.Errorf("list held broadcast items: %w", err))
 	}
@@ -571,7 +573,7 @@ func (s *sqliteBroadcastStore) Settle(ctx context.Context, id, state, effectID s
 	result, err := s.db.ExecContext(ctx,
 		`UPDATE broadcast_item SET state = ?, effect_id = ?, updated_at = ?
 		WHERE id = ? AND state IN ('`+BroadcastStateHeld+`','`+BroadcastStateScheduled+`','`+BroadcastStateStarted+`','`+BroadcastStateUnknown+`')`,
-		state, nullText(effectID), formatTime(now.UTC()), id)
+		state, nullText(effectID), sqlite.FormatTime(now.UTC()), id)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("settle broadcast item: %w", err))
 	}
@@ -602,7 +604,7 @@ func (s *sqliteBroadcastStore) NoteAttempt(ctx context.Context, id string, attem
 	_, err := s.db.ExecContext(ctx,
 		`UPDATE broadcast_item SET attempt_count = CASE WHEN attempt_count < ? THEN ? ELSE attempt_count END,
 		updated_at = ? WHERE id = ?`,
-		attempt, attempt, formatTime(now.UTC()), id)
+		attempt, attempt, sqlite.FormatTime(now.UTC()), id)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("note broadcast attempt: %w", err))
 	}

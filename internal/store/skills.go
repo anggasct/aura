@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -84,10 +86,10 @@ func (s *sqliteSkillStore) UpsertScan(ctx context.Context, row *SkillRow) (bool,
 			return false, Errorf(ErrorCodeSkillInvalid, "skill %s must be valid JSON", field.name)
 		}
 	}
-	now := formatTime(time.Now().UTC())
+	now := sqlite.FormatTime(time.Now().UTC())
 	created := now
 	if !row.CreatedAt.IsZero() {
-		created = formatTime(row.CreatedAt)
+		created = sqlite.FormatTime(row.CreatedAt)
 	}
 	result, err := s.db.ExecContext(ctx, `
 INSERT INTO skill_package (id, canonical_name, origin_json, content_digest, state, validation_json, requested_capabilities_json, granted_capabilities_json, reviewed_at, created_at, updated_at)
@@ -175,12 +177,12 @@ func nullSkillTime(value *time.Time) any {
 	if value == nil {
 		return nil
 	}
-	return formatTime(*value)
+	return sqlite.FormatTime(*value)
 }
 
 func (row *SkillRow) bindTimes(reviewed, created, updated sql.NullString) error {
 	if reviewed.Valid && reviewed.String != "" {
-		parsed, err := parseTime(reviewed.String)
+		parsed, err := sqlite.ParseTime(reviewed.String)
 		if err != nil {
 			return Errorf(ErrorCodeSkillInvalid, "skill reviewed_at is not valid")
 		}
@@ -189,7 +191,7 @@ func (row *SkillRow) bindTimes(reviewed, created, updated sql.NullString) error 
 	if !created.Valid {
 		return Errorf(ErrorCodeSkillInvalid, "skill created_at is not valid")
 	}
-	createdAt, err := parseTime(created.String)
+	createdAt, err := sqlite.ParseTime(created.String)
 	if err != nil {
 		return Errorf(ErrorCodeSkillInvalid, "skill created_at is not valid")
 	}
@@ -197,7 +199,7 @@ func (row *SkillRow) bindTimes(reviewed, created, updated sql.NullString) error 
 	if !updated.Valid {
 		return Errorf(ErrorCodeSkillInvalid, "skill updated_at is not valid")
 	}
-	updatedAt, err := parseTime(updated.String)
+	updatedAt, err := sqlite.ParseTime(updated.String)
 	if err != nil {
 		return Errorf(ErrorCodeSkillInvalid, "skill updated_at is not valid")
 	}
@@ -215,7 +217,7 @@ func (s *sqliteSkillStore) AcceptSkill(ctx context.Context, id, digest, granted 
 	if !json.Valid([]byte(granted)) {
 		return Errorf(ErrorCodeSkillInvalid, "skill grants must be valid JSON")
 	}
-	now := formatTime(time.Now().UTC())
+	now := sqlite.FormatTime(time.Now().UTC())
 	result, err := s.db.ExecContext(ctx, `
 UPDATE skill_package
 SET state = ?, granted_capabilities_json = ?, reviewed_at = ?, updated_at = ?
@@ -241,7 +243,7 @@ func (s *sqliteSkillStore) RejectSkill(ctx context.Context, id string) error {
 	if id == "" {
 		return Errorf(ErrorCodeInvalidArgument, "skill id must not be empty")
 	}
-	now := formatTime(time.Now().UTC())
+	now := sqlite.FormatTime(time.Now().UTC())
 	result, err := s.db.ExecContext(ctx, `
 UPDATE skill_package
 SET state = ?, reviewed_at = ?, updated_at = ?
@@ -321,7 +323,7 @@ func (s *sqliteSkillStore) DisableSkill(ctx context.Context, id string) error {
 	if id == "" {
 		return Errorf(ErrorCodeInvalidArgument, "skill id must not be empty")
 	}
-	now := formatTime(time.Now().UTC())
+	now := sqlite.FormatTime(time.Now().UTC())
 	result, err := s.db.ExecContext(ctx, `
 UPDATE skill_package
 SET state = ?, updated_at = ?

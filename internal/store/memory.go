@@ -9,6 +9,8 @@ import (
 	"math"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -128,7 +130,7 @@ func nullMemoryTime(value *time.Time) sql.NullString {
 	if value == nil || value.IsZero() {
 		return sql.NullString{}
 	}
-	return sql.NullString{String: formatTime(value.UTC()), Valid: true}
+	return sql.NullString{String: sqlite.FormatTime(value.UTC()), Valid: true}
 }
 
 func (s *sqliteMemoryStore) UpsertDocument(ctx context.Context, document *MemoryDocument) (bool, error) {
@@ -163,7 +165,7 @@ func (s *sqliteMemoryStore) UpsertDocument(ctx context.Context, document *Memory
 		document.ID, document.OwnerID, document.SessionID, document.Kind,
 		document.FromSequence, document.ToSequence, document.Content, document.TrustLabel,
 		document.PromptVersion, nullMemoryText(document.ModelProtocol), nullMemoryText(document.ModelName),
-		formatTime(document.CreatedAt.UTC()), nullMemoryTime(document.ExpiresAt), document.SessionID,
+		sqlite.FormatTime(document.CreatedAt.UTC()), nullMemoryTime(document.ExpiresAt), document.SessionID,
 	)
 	if err != nil {
 		return false, classifyBusy(fmt.Errorf("upsert memory document: %w", err))
@@ -230,11 +232,11 @@ func (s *sqliteMemoryStore) Search(ctx context.Context, query *MemoryQuery) ([]M
 	}
 	if !query.Before.IsZero() {
 		sqlQuery += ` AND d.created_at <= ?`
-		args = append(args, formatTime(query.Before.UTC()))
+		args = append(args, sqlite.FormatTime(query.Before.UTC()))
 	}
 	now := time.Now().UTC()
 	sqlQuery += ` AND (d.expires_at IS NULL OR d.expires_at > ?)`
-	args = append(args, formatTime(now))
+	args = append(args, sqlite.FormatTime(now))
 	sqlQuery += ` ORDER BY bm25(memory_document_fts), d.id LIMIT ?`
 	args = append(args, query.Limit)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
@@ -271,7 +273,7 @@ func scanMemoryHit(rows *sql.Rows) (MemoryHit, error) {
 	if err != nil {
 		return MemoryHit{}, classifyBusy(fmt.Errorf("scan memory hit: %w", err))
 	}
-	createdAt, err := parseTime(createdAtRaw)
+	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
 		return MemoryHit{}, Errorf(ErrorCodeMemoryInvalid, "memory created_at is not valid")
 	}
@@ -280,7 +282,7 @@ func scanMemoryHit(rows *sql.Rows) (MemoryHit, error) {
 	hit.ModelProtocol = modelProtocol.String
 	hit.ModelName = modelName.String
 	if expiresAtRaw.Valid {
-		expiresAt, err := parseTime(expiresAtRaw.String)
+		expiresAt, err := sqlite.ParseTime(expiresAtRaw.String)
 		if err != nil {
 			return MemoryHit{}, Errorf(ErrorCodeMemoryInvalid, "memory expires_at is not valid")
 		}
@@ -314,7 +316,7 @@ func (s *sqliteMemoryStore) DeleteExpiredSummaries(ctx context.Context, now time
 			SELECT id FROM memory_document
 			WHERE kind = ? AND expires_at IS NOT NULL AND expires_at <= ?
 			ORDER BY expires_at, id LIMIT ?
-		)`, MemoryKindSummary, formatTime(now.UTC()), limit)
+		)`, MemoryKindSummary, sqlite.FormatTime(now.UTC()), limit)
 	if err != nil {
 		return 0, classifyBusy(fmt.Errorf("delete expired summaries: %w", err))
 	}
@@ -381,7 +383,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKind(ctx context.Context, owne
 			AND (expires_at IS NULL OR expires_at > ?)
 		ORDER BY source_from_sequence ASC, source_to_sequence ASC, id ASC
 		LIMIT ?`,
-		ownerID, sessionID, kind, formatTime(time.Now().UTC()), limit)
+		ownerID, sessionID, kind, sqlite.FormatTime(time.Now().UTC()), limit)
 	if err != nil {
 		return nil, classifyBusy(fmt.Errorf("list session documents by kind: %w", err))
 	}
@@ -427,7 +429,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKindInRange(ctx context.Contex
 			AND (expires_at IS NULL OR expires_at > ?)
 		ORDER BY source_from_sequence ASC, source_to_sequence ASC, id ASC
 		LIMIT ?`,
-		ownerID, sessionID, kind, from, to, formatTime(time.Now().UTC()), limit)
+		ownerID, sessionID, kind, from, to, sqlite.FormatTime(time.Now().UTC()), limit)
 	if err != nil {
 		return nil, classifyBusy(fmt.Errorf("list session documents in range: %w", err))
 	}
@@ -461,7 +463,7 @@ func scanMemoryDocument(rows rowScanner) (MemoryDocument, error) {
 	if err != nil {
 		return MemoryDocument{}, classifyBusy(fmt.Errorf("scan memory document: %w", err))
 	}
-	createdAt, err := parseTime(createdAtRaw)
+	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
 		return MemoryDocument{}, Errorf(ErrorCodeMemoryInvalid, "memory created_at is not valid")
 	}
@@ -470,7 +472,7 @@ func scanMemoryDocument(rows rowScanner) (MemoryDocument, error) {
 	document.ModelProtocol = modelProtocol.String
 	document.ModelName = modelName.String
 	if expiresAtRaw.Valid {
-		expiresAt, err := parseTime(expiresAtRaw.String)
+		expiresAt, err := sqlite.ParseTime(expiresAtRaw.String)
 		if err != nil {
 			return MemoryDocument{}, Errorf(ErrorCodeMemoryInvalid, "memory expires_at is not valid")
 		}

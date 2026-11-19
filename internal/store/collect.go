@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ReconciliationReport = ReconcileReport
@@ -97,7 +99,7 @@ type collectionCandidate struct {
 func collectionCandidates(ctx context.Context, db *sql.DB, before time.Time) ([]collectionCandidate, error) {
 	rows, err := db.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob b
 		WHERE NOT EXISTS (SELECT 1 FROM artifact_ref r WHERE r.blob_digest = b.digest)
-		AND b.created_at < ?`, formatTime(before))
+		AND b.created_at < ?`, sqlite.FormatTime(before))
 	if err != nil {
 		return nil, classifyBusy(err)
 	}

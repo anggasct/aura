@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -82,9 +84,9 @@ func (s *sqliteWebhookExecutionStore) InsertExecution(ctx context.Context, execu
 		execution.State,
 		nullText(execution.ResultEventID),
 		nullText(execution.ErrorCode),
-		formatTime(execution.CreatedAt.UTC()),
-		formatTime(execution.UpdatedAt.UTC()),
-		formatTime(execution.ExpiresAt.UTC()),
+		sqlite.FormatTime(execution.CreatedAt.UTC()),
+		sqlite.FormatTime(execution.UpdatedAt.UTC()),
+		sqlite.FormatTime(execution.ExpiresAt.UTC()),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -145,7 +147,7 @@ func (s *sqliteWebhookExecutionStore) MarkRunning(ctx context.Context, id string
 		`UPDATE webhook_execution
 		 SET state = ?, updated_at = ?
 		 WHERE id = ? AND state = 'accepted'`,
-		WebhookExecutionStateRunning, formatTime(updatedAt.UTC()), id)
+		WebhookExecutionStateRunning, sqlite.FormatTime(updatedAt.UTC()), id)
 }
 
 func (s *sqliteWebhookExecutionStore) MarkTerminal(ctx context.Context, id, state, resultEventID, errorCode string, updatedAt time.Time) (bool, error) {
@@ -161,7 +163,7 @@ func (s *sqliteWebhookExecutionStore) MarkTerminal(ctx context.Context, id, stat
 		`UPDATE webhook_execution
 		 SET state = ?, result_event_id = ?, error_code = ?, updated_at = ?
 		 WHERE id = ? AND state IN ('accepted','running')`,
-		state, nullText(resultEventID), nullText(errorCode), formatTime(updatedAt.UTC()), id)
+		state, nullText(resultEventID), nullText(errorCode), sqlite.FormatTime(updatedAt.UTC()), id)
 }
 
 func (s *sqliteWebhookExecutionStore) advanceState(ctx context.Context, query string, args ...any) (bool, error) {
@@ -200,7 +202,7 @@ func (s *sqliteWebhookExecutionStore) ListUnfinished(ctx context.Context, query 
 		`SELECT `+selectWebhookExecutionColumns+` FROM webhook_execution
 		 WHERE state IN ('accepted','running') AND expires_at > ? AND id > ?
 		 ORDER BY id LIMIT ?`,
-		formatTime(query.Now.UTC()), query.AfterID, query.Limit)
+		sqlite.FormatTime(query.Now.UTC()), query.AfterID, query.Limit)
 	if err != nil {
 		return nil, classifyBusy(fmt.Errorf("list unfinished webhook executions: %w", err))
 	}
@@ -267,19 +269,19 @@ func scanWebhookExecution(row rowScanner) (WebhookExecution, error) {
 		execution.ErrorCode = errorCode.String
 	}
 	var parseErr error
-	if execution.CreatedAt, parseErr = parseTime(createdAtRaw); parseErr != nil {
+	if execution.CreatedAt, parseErr = sqlite.ParseTime(createdAtRaw); parseErr != nil {
 		return WebhookExecution{}, &Error{
 			Code:   ErrorCodeWebhookExecutionInvalid,
 			Detail: "stored creation timestamp is not a valid time",
 		}
 	}
-	if execution.UpdatedAt, parseErr = parseTime(updatedAtRaw); parseErr != nil {
+	if execution.UpdatedAt, parseErr = sqlite.ParseTime(updatedAtRaw); parseErr != nil {
 		return WebhookExecution{}, &Error{
 			Code:   ErrorCodeWebhookExecutionInvalid,
 			Detail: "stored update timestamp is not a valid time",
 		}
 	}
-	if execution.ExpiresAt, parseErr = parseTime(expiresAtRaw); parseErr != nil {
+	if execution.ExpiresAt, parseErr = sqlite.ParseTime(expiresAtRaw); parseErr != nil {
 		return WebhookExecution{}, &Error{
 			Code:   ErrorCodeWebhookExecutionInvalid,
 			Detail: "stored expiry timestamp is not a valid time",

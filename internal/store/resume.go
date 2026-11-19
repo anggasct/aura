@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ChannelResume struct {
@@ -64,7 +66,7 @@ ON CONFLICT(source, instance) DO UPDATE SET
 		resume.GatewaySessionID,
 		resume.LastSequence,
 		resume.ConfigDigest,
-		formatTime(resume.UpdatedAt.UTC()),
+		sqlite.FormatTime(resume.UpdatedAt.UTC()),
 	)
 	if err != nil {
 		return classifyBusy(fmt.Errorf("save channel resume: %w", err))
@@ -97,7 +99,7 @@ WHERE source = ? AND instance = ?
 	if err != nil {
 		return ChannelResume{}, false, classifyBusy(fmt.Errorf("load channel resume: %w", err))
 	}
-	updatedAt, err := parseTime(updatedAtRaw)
+	updatedAt, err := sqlite.ParseTime(updatedAtRaw)
 	if err != nil {
 		return ChannelResume{}, false, Errorf(ErrorCodeChannelResumeInvalid, "channel resume updated_at is not a valid timestamp")
 	}

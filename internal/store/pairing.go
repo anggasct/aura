@@ -8,6 +8,8 @@ import (
 	"slices"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const AccessOwnerActionEventKind = "access.owner_action.v1"
@@ -112,7 +114,7 @@ func (s *sqlitePairingStore) Issue(ctx context.Context, issue *PairingIssue) (st
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO pairing_request (code_sha256, principal_id, account, created_at, expires_at)
 VALUES (?, ?, ?, ?, ?)`,
-		issue.CodeSHA256, issue.PrincipalID, issue.Account, formatTime(now), formatTime(now.Add(issue.TTL)),
+		issue.CodeSHA256, issue.PrincipalID, issue.Account, sqlite.FormatTime(now), sqlite.FormatTime(now.Add(issue.TTL)),
 	); err != nil {
 		return "", classifyBusy(fmt.Errorf("record pairing request: %w", err))
 	}
@@ -146,7 +148,7 @@ func (s *sqlitePairingStore) approve(ctx context.Context, principalPrefix, codeS
 		return PairingRequest{}, false, nil
 	}
 	request := rows[0].PairingRequest
-	at := formatTime(now.UTC())
+	at := sqlite.FormatTime(now.UTC())
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pairing_request WHERE code_sha256 = ?`, codeSHA256); err != nil {
 		return PairingRequest{}, false, classifyBusy(fmt.Errorf("consume pairing request: %w", err))
 	}
@@ -210,7 +212,7 @@ WHERE kind = ? AND json_extract(payload_json, '$.action') = ? AND json_extract(p
 		if err := rows.Scan(&raw); err != nil {
 			return nil, fmt.Errorf("scan failed pairing approval: %w", err)
 		}
-		at, err := parseTime(raw)
+		at, err := sqlite.ParseTime(raw)
 		if err != nil {
 			return nil, fmt.Errorf("parse failed pairing approval time: %w", err)
 		}
@@ -252,7 +254,7 @@ WHERE revoked_at IS NULL ORDER BY principal_id, account`)
 		if err := rows.Scan(&grant.PrincipalID, &grant.Account, &grant.Class, &grant.GrantedBy, &grantedAt); err != nil {
 			return nil, fmt.Errorf("scan principal grant: %w", err)
 		}
-		if grant.GrantedAt, err = parseTime(grantedAt); err != nil {
+		if grant.GrantedAt, err = sqlite.ParseTime(grantedAt); err != nil {
 			return nil, fmt.Errorf("parse principal grant time: %w", err)
 		}
 		grants = append(grants, grant)
@@ -273,7 +275,7 @@ func (s *sqlitePairingStore) Revoke(ctx context.Context, principalID string, at 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE principal_grant SET revoked_at = ? WHERE principal_id = ? AND revoked_at IS NULL`, formatTime(at.UTC()), principalID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE principal_grant SET revoked_at = ? WHERE principal_id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at.UTC()), principalID); err != nil {
 		return nil, classifyBusy(fmt.Errorf("revoke principal grant: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
@@ -324,10 +326,10 @@ func scanPairingRequests(ctx context.Context, q pairingQuerier, query string, ar
 		if err := rows.Scan(&row.PrincipalID, &row.Account, &createdAt, &expiresAt, &row.code); err != nil {
 			return nil, fmt.Errorf("scan pairing request: %w", err)
 		}
-		if row.CreatedAt, err = parseTime(createdAt); err != nil {
+		if row.CreatedAt, err = sqlite.ParseTime(createdAt); err != nil {
 			return nil, fmt.Errorf("parse pairing request time: %w", err)
 		}
-		if row.ExpiresAt, err = parseTime(expiresAt); err != nil {
+		if row.ExpiresAt, err = sqlite.ParseTime(expiresAt); err != nil {
 			return nil, fmt.Errorf("parse pairing request expiry: %w", err)
 		}
 		requests = append(requests, row)
@@ -356,7 +358,7 @@ func ListPrincipalActivity(ctx context.Context, db *sql.DB) ([]PrincipalActivity
 		if err := rows.Scan(&owner, &updatedAt); err != nil {
 			return nil, fmt.Errorf("scan principal session: %w", err)
 		}
-		at, err := parseTime(updatedAt)
+		at, err := sqlite.ParseTime(updatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("parse principal session time: %w", err)
 		}

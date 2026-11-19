@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -60,7 +62,7 @@ func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *Session) error {
 	}
 	_, err := tx.ExecContext(ctx,
 		`INSERT INTO session (id, owner_id, agent_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		sess.ID, sess.OwnerID, agentID, string(metadata), formatTime(sess.CreatedAt), formatTime(sess.UpdatedAt),
+		sess.ID, sess.OwnerID, agentID, string(metadata), sqlite.FormatTime(sess.CreatedAt), sqlite.FormatTime(sess.UpdatedAt),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {

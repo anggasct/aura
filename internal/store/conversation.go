@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ConversationSessionStore interface {
@@ -48,7 +50,7 @@ INSERT INTO conversation_session (conversation_key, session_id, updated_at) VALU
 ON CONFLICT(conversation_key) DO UPDATE SET
     session_id = excluded.session_id,
     updated_at = excluded.updated_at`,
-		conversationKey, sessionID, formatTime(s.now().UTC()),
+		conversationKey, sessionID, sqlite.FormatTime(s.now().UTC()),
 	)
 	if err != nil {
 		if isConstraintForeignKey(err) {
