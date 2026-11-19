@@ -107,8 +107,8 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
 		return LoadResult{}, resolveErr
 	}
-	if cfg.Tools != nil && len(cfg.Tools.GitHub.Credentials) > 0 && !slices.Contains(report.Active(), githubCapability) {
-		return LoadResult{}, positionProblems(doc, configkit.Invalid("tools.github.credentials", "needs the "+githubCapability+" capability: compile it into the build and list it in capabilities.enabled"))
+	if err := validateGitHubCredentials(cfg, report.Active()); err != nil {
+		return LoadResult{}, positionProblems(doc, err)
 	}
 	return LoadResult{
 		Config:               cfg,
@@ -124,15 +124,14 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 	return errors.Join(
 		legacyconfig.ValidateCapabilities(cfg.Capabilities),
 		validateLoadedModels(cfg.Models, doc),
-		validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models),
-		legacyconfig.ValidateTools(cfg.Tools, profile),
-		legacyconfig.ValidateSkills(cfg.Skills, profile),
-		legacyconfig.ValidateContext(cfg.Context, profile),
-		legacyconfig.ValidateProfile(cfg.Profile, profile),
-		legacyconfig.ValidateChildren(cfg.Children, profile),
+		legacyconfig.ValidateTools(cfg.Tools),
+		legacyconfig.ValidateSkills(cfg.Skills),
+		legacyconfig.ValidateContext(cfg.Context),
+		legacyconfig.ValidateProfile(cfg.Profile),
+		legacyconfig.ValidateChildren(cfg.Children),
 		legacyconfig.ValidateAccess(cfg.Access),
 		legacyconfig.ValidateSync(cfg.Sync),
-		legacyconfig.ValidateVision(cfg.Vision, profile),
+		legacyconfig.ValidateVision(cfg.Vision),
 		legacyconfig.ValidateKnowledge(cfg.Knowledge),
 		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
 		legacyconfig.ValidateRuntime(cfg.Runtime),
@@ -146,20 +145,18 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateWorkflows(cfg.Workflows),
 		legacyconfig.ValidateMCP(cfg.MCP),
 		legacyconfig.ValidatePlugins(cfg.Plugins),
-		legacyconfig.ValidateWebhook(&cfg.Webhook, cfg.Health.Listen),
+		legacyconfig.ValidateWebhook(&cfg.Webhook),
 		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
-		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner),
-		legacyconfig.ValidateEmail(&cfg.Channels.Email, cfg.Owner),
+		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
+		legacyconfig.ValidateEmail(&cfg.Channels.Email),
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
-		legacyconfig.ValidateBindings(cfg.Bindings, &cfg.Channels),
 		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
 		legacyconfig.ValidateScheduler(&cfg.Scheduler),
 		legacyconfig.ValidateMemory(&cfg.Memory),
 		legacyconfig.ValidateOwner(cfg.Owner),
 		legacyconfig.ValidateOwnerIdentities(cfg.Owner),
-		screenOwnerSecrets(cfg.Owner, cfg),
-		validatePersonaNames(cfg),
-		validatePersonaAccess(cfg),
+		validateAgainstBuild(cfg, profile),
+		validateReferences(cfg, doc),
 	)
 }
 
@@ -276,7 +273,6 @@ func validateLoadedModels(models legacyconfig.Models, doc *document) error {
 		definition := models.Definitions[name]
 		problems = append(problems, modelDefinitionProblems(models, name, &definition)...)
 	}
-	problems = append(problems, validateRouting(models, doc))
 	return errors.Join(problems...)
 }
 
