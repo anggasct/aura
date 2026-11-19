@@ -8,8 +8,8 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/durable/sqlite"
-	"github.com/anggasct/aura/internal/store"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const runFirstLifeEnv = "AURA_DURABLE_RUN_FIRST_LIFE"
@@ -27,7 +27,7 @@ type runLife struct {
 	plan        runPlan
 	scenario    runScenario
 	db          *sql.DB
-	runtime     *sqlite.Runtime
+	runtime     *durablesqlite.Runtime
 	ledger      *turnLedger
 	workflows   *workflow.Store
 	interpreter *workflow.Interpreter
@@ -39,7 +39,7 @@ func openRunLife(t *testing.T, plan runPlan) *runLife {
 	if !ok {
 		t.Fatalf("unknown scenario %q", plan.Scenario)
 	}
-	db, err := store.OpenDB(t.Context(), plan.Database)
+	db, err := sqlite.Open(t.Context(), plan.Database, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open the database: %v", err)
 	}

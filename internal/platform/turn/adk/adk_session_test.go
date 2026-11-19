@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -22,7 +23,7 @@ func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventS
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
 	storetest.Seed(t, dsn)
-	db, err := store.OpenDB(ctx, dsn)
+	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

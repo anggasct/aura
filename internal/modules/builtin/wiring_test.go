@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -42,7 +43,7 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	workspace := t.TempDir()
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -99,7 +100,7 @@ func (p *countingPublisher) Publish(*store.RuntimeEvent) { p.count++ }
 func TestNewRefusesANilLiveEventsPublisher(t *testing.T) {
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestNewChannelEffectsBuildsExecutor(t *testing.T) {
 	}
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

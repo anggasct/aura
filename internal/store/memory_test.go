@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func seedMemorySession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
@@ -254,7 +257,7 @@ func TestMemoryStore_RejectsInvalidRows(t *testing.T) {
 
 func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
 	db := newTestDB(t)
-	applied, latest, err := SchemaVersions(t.Context(), db)
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}

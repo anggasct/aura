@@ -1,4 +1,4 @@
-package store
+package history
 
 import (
 	"context"
@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
@@ -52,12 +54,12 @@ func collapseWhitespaceOutsideQuotes(text string) string {
 
 func renderSchemaSnapshot(ctx context.Context, t *testing.T) string {
 	t.Helper()
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "aura.db"), sqlite.Options{})
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("Open: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	rows, err := db.QueryContext(ctx, schemaSnapshotQuery)
@@ -81,8 +83,8 @@ func renderSchemaSnapshot(ctx context.Context, t *testing.T) string {
 
 func renderMigrationChecksums() string {
 	var out strings.Builder
-	for _, m := range migrations {
-		fmt.Fprintf(&out, "%d %s\n", m.version, checksumOf(m.sql))
+	for _, m := range Migrations() {
+		fmt.Fprintf(&out, "%d %s\n", m.Version, sqlite.Checksum(m.SQL))
 	}
 	return out.String()
 }
@@ -124,9 +126,9 @@ func compareWithGolden(t *testing.T, goldenPath, got string) {
 
 func TestFreshDatabaseMatchesTheSchemaSnapshot(t *testing.T) {
 	got := renderSchemaSnapshot(context.Background(), t)
-	compareWithGolden(t, filepath.Join("..", "..", "testdata", "golden", "schema.txt"), got)
+	compareWithGolden(t, filepath.Join("..", "..", "..", "testdata", "golden", "schema.txt"), got)
 }
 
 func TestMigrationHistoryMatchesItsChecksums(t *testing.T) {
-	compareWithGolden(t, filepath.Join("..", "..", "testdata", "golden", "migration-checksums.txt"), renderMigrationChecksums())
+	compareWithGolden(t, filepath.Join("..", "..", "..", "testdata", "golden", "migration-checksums.txt"), renderMigrationChecksums())
 }

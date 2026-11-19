@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -20,7 +21,7 @@ func seedUnknownEffect(t *testing.T, dataRoot string) (configPath, intentID stri
 	t.Helper()
 	ctx := context.Background()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -111,7 +112,7 @@ func TestEffectsPruneUsesThirtyDayDefault(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(fmt.Sprintf("version: 1\nstorage:\n  path: %s\n", dataRoot)), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db for aging: %v", err)
 	}

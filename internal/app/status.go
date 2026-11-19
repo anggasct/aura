@@ -17,7 +17,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 const (
@@ -282,12 +283,12 @@ func schemaVersionsReadOnly(ctx context.Context, dbPath string) (applied, latest
 	if _, err := os.Stat(dbPath); err != nil {
 		return 0, 0, err
 	}
-	db, err := store.OpenReadOnly(ctx, dbPath)
+	db, err := sqlite.OpenReadOnly(ctx, dbPath)
 	if err != nil {
 		return 0, 0, err
 	}
 	defer func() { _ = db.Close() }()
-	return store.SchemaVersions(ctx, db)
+	return sqlite.SchemaVersions(ctx, db, history.Migrations())
 }
 
 func lastBackupTime(backupDir string) (time.Time, error) {

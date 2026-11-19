@@ -14,7 +14,9 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 const (
@@ -76,12 +78,11 @@ func openStorage(ctx context.Context, cfg *appconfig.Config) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
-	db, err := store.OpenDBWithOptions(ctx, dbPath, store.OpenOptions{BusyTimeout: time.Duration(cfg.Storage.BusyTimeout)})
+	db, err := sqlite.Open(ctx, dbPath, sqlite.Options{BusyTimeout: time.Duration(cfg.Storage.BusyTimeout), MaxOpenConnections: cfg.Storage.MaxOpenConnections})
 	if err != nil {
 		return nil, err
 	}
-	db.SetMaxOpenConns(cfg.Storage.MaxOpenConnections)
-	if err := store.Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
@@ -157,7 +158,7 @@ func runStorageUpgrade(ctx context.Context, logger *slog.Logger, cfg *appconfig.
 	} else if err != nil {
 		return fmt.Errorf("stat live database: %w", err)
 	}
-	db, err := store.OpenDBWithOptions(ctx, dbPath, store.OpenOptions{BusyTimeout: time.Duration(cfg.Storage.BusyTimeout)})
+	db, err := sqlite.Open(ctx, dbPath, sqlite.Options{BusyTimeout: time.Duration(cfg.Storage.BusyTimeout)})
 	if err != nil {
 		return err
 	}

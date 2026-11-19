@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -36,7 +37,7 @@ func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 	if _, err := os.Stat(dbPath); errors.Is(err, fs.ErrNotExist) {
 		storetest.Seed(t, dbPath)
 	}
-	db, err := store.OpenDB(t.Context(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

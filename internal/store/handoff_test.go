@@ -4,6 +4,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func TestHandoffOpenCheckReleaseAndTimeout(t *testing.T) {
@@ -145,14 +148,15 @@ func TestHandoffChannelColumnRejectsUnknownChannels(t *testing.T) {
 }
 
 func TestHandoffChannelMigrationKeepsExistingDiscordRows(t *testing.T) {
+	migrations := history.Migrations()
 	ctx := t.Context()
 	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
 	sessionID := "lobby/discord:owner/dm:601"
 	seedPersonaSession(t, db, sessionID, "discord:601", "lobby")
 	if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, principal_id, agent_id, account, reply_channel_id) VALUES (?, 'refund', '2026-11-04T09:00:00Z', 'discord:601', 'lobby', 'owner', '4400')`, sessionID); err != nil {
-		t.Fatalf("seed v%d handoff: %v", migrations[len(migrations)-2].version, err)
+		t.Fatalf("seed v%d handoff: %v", migrations[len(migrations)-2].Version, err)
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	got, found, err := NewHandoffStore(db).Get(ctx, sessionID)
@@ -165,6 +169,7 @@ func TestHandoffChannelMigrationKeepsExistingDiscordRows(t *testing.T) {
 }
 
 func TestHandoffHTTPChannelMigrationKeepsRowsAndAcceptsHTTP(t *testing.T) {
+	migrations := history.Migrations()
 	ctx := t.Context()
 	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
 	seeded := []struct {
@@ -181,7 +186,7 @@ func TestHandoffHTTPChannelMigrationKeepsRowsAndAcceptsHTTP(t *testing.T) {
 			t.Fatalf("seed %s handoff: %v", row.channel, err)
 		}
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	handoffs := NewHandoffStore(db)
@@ -215,6 +220,7 @@ func TestHandoffHTTPChannelMigrationKeepsRowsAndAcceptsHTTP(t *testing.T) {
 }
 
 func TestHandoffEmailChannelMigrationKeepsRowsAndAcceptsEmail(t *testing.T) {
+	migrations := history.Migrations()
 	ctx := t.Context()
 	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
 	seeded := []struct {
@@ -232,7 +238,7 @@ func TestHandoffEmailChannelMigrationKeepsRowsAndAcceptsEmail(t *testing.T) {
 			t.Fatalf("seed %s handoff: %v", row.channel, err)
 		}
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	handoffs := NewHandoffStore(db)

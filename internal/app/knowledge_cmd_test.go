@@ -23,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -471,7 +472,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 	dataRoot := t.TempDir()
 	seedHealthyStorage(t, dataRoot)
 	dbPath := filepath.Join(dataRoot, "aura.db")
-	db, err := store.OpenDB(t.Context(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
@@ -400,7 +401,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	dbPath := filepath.Join(dir, "aura.db")
 
 	storetest.Seed(t, dbPath)
-	db1, err := store.OpenDB(context.Background(), dbPath)
+	db1, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -433,7 +434,7 @@ func TestTerminalRestartResume(t *testing.T) {
 		t.Fatalf("close first process: %v", err)
 	}
 
-	db2, err := store.OpenDB(context.Background(), dbPath)
+	db2, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open second process store: %v", err)
 	}
@@ -488,7 +489,7 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
 	storetest.Seed(t, dbPath)
-	db, err := store.OpenDB(context.Background(), dbPath)
+	db, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

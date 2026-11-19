@@ -6,6 +6,9 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func webhookFixture(now time.Time) *WebhookExecution {
@@ -259,7 +262,7 @@ func TestWebhookExecutionSessionMigration(t *testing.T) {
 	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_never_admitted", state: WebhookExecutionStateAccepted})
 	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_events_gone", state: WebhookExecutionStateCompleted})
 
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	s := NewWebhookExecutionStore(db)

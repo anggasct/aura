@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
@@ -63,7 +64,7 @@ func newRefusingTestRuntime(t *testing.T, executor TurnExecutor, refusedKind str
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
 	storetest.Seed(t, dsn)
-	db, err := store.OpenDB(t.Context(), dsn)
+	db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

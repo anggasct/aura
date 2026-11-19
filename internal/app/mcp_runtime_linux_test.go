@@ -27,6 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -199,7 +200,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	ctx := t.Context()
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

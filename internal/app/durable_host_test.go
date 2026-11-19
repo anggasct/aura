@@ -11,13 +11,13 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func openDatabaseFile(t *testing.T, dbPath string) *sql.DB {
 	t.Helper()
-	db, err := store.OpenDB(t.Context(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open the database file: %v", err)
 	}

@@ -14,6 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -82,7 +83,7 @@ func seedBenchVectors(b *testing.B, db *sql.DB, collection string) {
 func BenchmarkKnowledgeHybridSearchOverAHundredThousandVectors(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "aura.db")
 	storetest.Seed(b, path)
-	db, err := store.OpenDB(b.Context(), path)
+	db, err := sqlite.Open(b.Context(), path, sqlite.Options{})
 	if err != nil {
 		b.Fatalf("OpenDB: %v", err)
 	}
@@ -95,7 +96,7 @@ func BenchmarkKnowledgeHybridSearchOverAHundredThousandVectors(b *testing.B) {
 		b.Fatalf("openKnowledgeReadPool: %v", err)
 	}
 	b.Cleanup(func() { _ = pool.Close() })
-	loader, err := store.OpenReadOnly(b.Context(), path)
+	loader, err := sqlite.OpenReadOnly(b.Context(), path)
 	if err != nil {
 		b.Fatalf("OpenReadOnly: %v", err)
 	}

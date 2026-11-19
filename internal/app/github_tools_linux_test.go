@@ -35,6 +35,7 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
@@ -59,7 +60,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	storetest.Seed(t, filepath.Join(dir, "aura.db"))
-	db, err := store.OpenDB(t.Context(), filepath.Join(dir, "aura.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -131,7 +132,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = r.credentials
 	storetest.Seed(t, filepath.Join(dir, "aura.db"))
-	db, err := store.OpenDB(t.Context(), filepath.Join(dir, "aura.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

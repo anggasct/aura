@@ -12,6 +12,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -55,7 +56,7 @@ func TestHealthEventLogRoundTrip(t *testing.T) {
 func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -103,7 +104,7 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	ctx := context.Background()
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -223,7 +224,7 @@ func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(dataRoot(t), "aura.db")
 	storetest.Seed(t, dbPath)
-	db, err := store.OpenDB(ctx, dbPath)
+	db, err := sqlite.Open(ctx, dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

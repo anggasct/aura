@@ -7,6 +7,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -80,7 +81,7 @@ func startKnowledgeVectors(ctx context.Context, cfg *appconfig.Config, pool *sql
 	if wiring.settings == nil || wiring.embedder == nil {
 		return nil, false, nil
 	}
-	loader, err := store.OpenReadOnly(ctx, dbPath)
+	loader, err := sqlite.OpenReadOnly(ctx, dbPath)
 	if err != nil {
 		return nil, false, err
 	}

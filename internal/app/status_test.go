@@ -19,7 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -133,7 +133,7 @@ func seedConfiguredStorage(t *testing.T, configPath string) {
 func seedHealthyStorage(t *testing.T, dataRoot string) {
 	t.Helper()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(t.Context(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

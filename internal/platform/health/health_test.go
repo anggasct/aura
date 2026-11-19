@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/history"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -21,7 +23,7 @@ func TestMigrationCheckerAgainstRealStore(t *testing.T) {
 	db := storetest.OpenMigrated(t)
 
 	checker := MigrationChecker{Versions: func(ctx context.Context) (int, int, error) {
-		return store.SchemaVersions(ctx, db)
+		return sqlite.SchemaVersions(ctx, db, history.Migrations())
 	}}
 	findings := checker.Check(ctx)
 	if len(findings) != 1 || findings[0].Status != StatusUp {

@@ -346,37 +346,6 @@ func TestEventAppendRejectsInvalidPayload(t *testing.T) {
 	}
 }
 
-func TestMigrateRejectsVersionAboveBinary(t *testing.T) {
-	ctx := context.Background()
-	db := newTestDB(t)
-	mustCreateSession(t, db, "session-1")
-
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, ?, ?)`,
-		migrations[len(migrations)-1].version+1, "future", "2026-08-01T00:00:00Z",
-	); err != nil {
-		t.Fatalf("insert future migration: %v", err)
-	}
-
-	wantCode(t, Migrate(ctx, db), ErrorCodeMigrationSequenceInvalid)
-}
-
-func TestValidateMigrationOrder(t *testing.T) {
-	if err := validateMigrationOrder([]migration{{version: 1}, {version: 2}}); err != nil {
-		t.Errorf("strictly increasing list rejected: %v", err)
-	}
-	for _, ms := range [][]migration{
-		{{version: 1}, {version: 1}},
-		{{version: 2}, {version: 1}},
-	} {
-		if err := validateMigrationOrder(ms); err == nil {
-			t.Errorf("validateMigrationOrder(%+v) accepted a non-increasing list", ms)
-		} else {
-			wantCode(t, err, ErrorCodeMigrationSequenceInvalid)
-		}
-	}
-}
-
 func TestReconcileDetectsCorruptedBlobs(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

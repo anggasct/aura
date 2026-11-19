@@ -3,6 +3,9 @@ package store
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 var pluginTestTime = time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
@@ -20,7 +23,7 @@ func pluginGrant(id, surface, value string) PluginGrant {
 
 func TestPluginMigrationV37Schema(t *testing.T) {
 	db := newTestDB(t)
-	applied, latest, err := SchemaVersions(t.Context(), db)
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil || applied != 48 || latest != 48 {
 		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
 	}

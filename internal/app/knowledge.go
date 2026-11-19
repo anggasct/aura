@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -237,7 +238,7 @@ func (i *knowledgeIndex) Search(ctx context.Context, collections, terms []string
 const knowledgeReadPoolConns = 4
 
 func openKnowledgeReadPool(ctx context.Context, dbPath string) (*sql.DB, error) {
-	pool, err := store.OpenReadOnly(ctx, dbPath)
+	pool, err := sqlite.OpenReadOnly(ctx, dbPath)
 	if err != nil {
 		return nil, err
 	}

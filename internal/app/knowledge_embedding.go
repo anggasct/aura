@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -146,7 +147,7 @@ func knowledgeEmbeddingReader(cfg *appconfig.Config, dbPath string) func(ctx con
 		if _, err := os.Stat(dbPath); err != nil {
 			return health.KnowledgeEmbeddingState{}, err
 		}
-		db, err := store.OpenReadOnly(ctx, dbPath)
+		db, err := sqlite.OpenReadOnly(ctx, dbPath)
 		if err != nil {
 			return health.KnowledgeEmbeddingState{}, err
 		}

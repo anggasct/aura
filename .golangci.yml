@@ -248,7 +248,7 @@ linters:
       - linters:
           - gosec
         text: G304
-        path: internal/(store|config|app/config|platform/usage)/
+        path: internal/(store|config|app/config|platform/usage|platform/sqlite)/
 
       # The cgroup v2 directory comes from the kernel's /proc/self/cgroup for
       # this very process, never from external input.
@@ -263,7 +263,7 @@ linters:
       - linters:
           - gosec
         text: G302
-        path: internal/store/connection\.go
+        path: internal/platform/sqlite/open\.go
 
       # unsafe.Pointer is required to hand the seccomp action word to the
       # kernel probe; the value is a stack-local uint32.

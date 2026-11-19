@@ -17,13 +17,13 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -38,7 +38,7 @@ type hostedBody func(ctx context.Context, inv durable.Invocation) error
 
 type hostedRuntime struct {
 	db   *sql.DB
-	rt   *sqlite.Runtime
+	rt   *durablesqlite.Runtime
 	halt func() bool
 
 	mu       sync.Mutex
@@ -51,7 +51,7 @@ func startHostedRuntime(t *testing.T) *hostedRuntime {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "aura.db")
 	storetest.Seed(t, path)
-	db, err := store.OpenDB(t.Context(), path)
+	db, err := sqlite.Open(t.Context(), path, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
@@ -63,7 +63,7 @@ func startHostedRuntime(t *testing.T) *hostedRuntime {
 
 func (h *hostedRuntime) serve(t *testing.T) {
 	t.Helper()
-	rt, err := sqlite.New(&sqlite.Options{DB: h.db, Logger: slog.New(slog.DiscardHandler), PollInterval: 10 * time.Millisecond, HostTTL: time.Second, StopGrace: 5 * time.Second})
+	rt, err := durablesqlite.New(&durablesqlite.Options{DB: h.db, Logger: slog.New(slog.DiscardHandler), PollInterval: 10 * time.Millisecond, HostTTL: time.Second, StopGrace: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
@@ -858,7 +858,7 @@ func TestDurableApprovalErrorsReplayWithTheirClass(t *testing.T) {
 				err = fixture.broker.validateDurable(endedCtx, callSlot(endedCtx), &request)
 				return nil
 			})
-			if !fault.HasCode(err, sqlite.ErrorCodeActionFailed) {
+			if !fault.HasCode(err, durablesqlite.ErrorCodeActionFailed) {
 				t.Errorf("error = %v, want the runtime's failed action", err)
 			}
 			if code, ok := fault.CodeOf[ResultClass](err); ok {

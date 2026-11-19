@@ -4,6 +4,9 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func occurrenceIDs(items []ScheduledOccurrence) []string {
@@ -123,12 +126,12 @@ func TestScheduleStore_OccurrenceFireAndSettle(t *testing.T) {
 	if err := s.SettleOccurrence(ctx, "cron-job-1-1", OccurrenceFailed, "", "", "x", now); err == nil {
 		t.Error("double settle accepted")
 	}
-	history, err := s.Occurrences(ctx, "job-1", 10)
+	occurrences, err := s.Occurrences(ctx, "job-1", 10)
 	if err != nil {
 		t.Fatalf("Occurrences(): %v", err)
 	}
-	if len(history) != 1 || history[0].State != OccurrenceCompleted || history[0].TurnID != "turn-1" {
-		t.Errorf("history = %+v", history)
+	if len(occurrences) != 1 || occurrences[0].State != OccurrenceCompleted || occurrences[0].TurnID != "turn-1" {
+		t.Errorf("history = %+v", occurrences)
 	}
 }
 
@@ -266,7 +269,7 @@ func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
 
 func TestScheduleStore_SchemaAppliesCleanly(t *testing.T) {
 	db := newTestDB(t)
-	applied, latest, err := SchemaVersions(t.Context(), db)
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}

@@ -7,6 +7,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -45,7 +46,7 @@ func knowledgeScopeReader(cfg *appconfig.Config, dbPath string) func(ctx context
 		if _, err := os.Stat(dbPath); err != nil {
 			return nil, false, err
 		}
-		db, err := store.OpenReadOnly(ctx, dbPath)
+		db, err := sqlite.OpenReadOnly(ctx, dbPath)
 		if err != nil {
 			return nil, false, err
 		}
