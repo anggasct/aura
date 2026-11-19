@@ -65,11 +65,11 @@ func (r accessRouter) Persona(id string) (auraagent.Definition, bool) {
 }
 
 func (r accessRouter) ServesPublic(channel, account string) bool {
-	return r.public && channel == config.BindingChannelTelegram && account == "pocket"
+	return r.public && channel == auraagent.BindingChannelTelegram && account == "pocket"
 }
 
 func (r accessRouter) ServesPersona(channel, account, persona string) bool {
-	return channel == config.BindingChannelTelegram && account == "pocket" && persona == r.definition.ID
+	return channel == auraagent.BindingChannelTelegram && account == "pocket" && persona == r.definition.ID
 }
 
 type fakePairing struct {
@@ -196,7 +196,7 @@ func newAccessRig(t *testing.T, opts accessOpts) *accessRig {
 func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore, effects EffectRunner, sessions SessionEnsurer) *accessRig {
 	t.Helper()
 	if opts.definition.ID == "" {
-		opts.definition = auraagent.Definition{ID: testPersona, Name: "Main", Audience: config.AudiencePublic}
+		opts.definition = auraagent.Definition{ID: testPersona, Name: "Main", Audience: auraagent.AudiencePublic}
 	}
 	cfg := &config.Telegram{
 		Enabled:            true,
@@ -363,7 +363,7 @@ func TestRoutingGateDropsUnroutedSender(t *testing.T) {
 }
 
 func TestAudienceGateDropsClassesThePersonaDoesNotAdmit(t *testing.T) {
-	trusted := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted}
+	trusted := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted}
 	rig := newAccessRig(t, accessOpts{definition: trusted, public: true})
 	rig.run(t, privateText(10, publicUserID, "hello"))
 	rig.assertQuiet(t, "audience")
@@ -377,14 +377,14 @@ func TestAudienceGateDropsClassesThePersonaDoesNotAdmit(t *testing.T) {
 
 func TestPairingRepliesToUnknownSendersWithTheIssuedCode(t *testing.T) {
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD2345"}}
-	definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
 	rig.run(t, privateText(10, strangerID, "/start"))
 	rig.assertQuiet(t, "pairing")
 	if got := pairing.requested(); !slices.Equal(got, []string{"telegram:999001@pocket"}) {
 		t.Fatalf("pairing requests = %v", got)
 	}
-	want := strings.ReplaceAll(personaMessage(config.MessagePairingCode), config.PairingCodePlaceholder, "ABCD2345")
+	want := strings.ReplaceAll(personaMessage(auraagent.MessagePairingCode), auraagent.PairingCodePlaceholder, "ABCD2345")
 	if got := sentTo(rig.h.api, strangerID); !slices.Equal(got, []string{want}) {
 		t.Fatalf("pairing reply = %q, want %q", got, want)
 	}
@@ -397,14 +397,14 @@ func TestPairingRepliesToUnknownSendersWithTheIssuedCode(t *testing.T) {
 }
 
 func TestPairingOutcomesPickTheMatchingMessage(t *testing.T) {
-	definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	cases := map[string]struct {
 		result access.PairingResult
 		err    error
 		want   string
 	}{
-		"pending": {result: access.PairingResult{Outcome: access.PairingOutcomePending}, want: personaMessage(config.MessagePairingPending)},
-		"locked":  {result: access.PairingResult{Outcome: access.PairingOutcomeLocked}, want: personaMessage(config.MessagePairingLocked)},
+		"pending": {result: access.PairingResult{Outcome: access.PairingOutcomePending}, want: personaMessage(auraagent.MessagePairingPending)},
+		"locked":  {result: access.PairingResult{Outcome: access.PairingOutcomeLocked}, want: personaMessage(auraagent.MessagePairingLocked)},
 		"failed":  {err: errors.New("store down")},
 	}
 	for name, tc := range cases {
@@ -429,7 +429,7 @@ func TestPairingOutcomesPickTheMatchingMessage(t *testing.T) {
 
 func TestPairingFallsBackWhenTheAudienceRefusesAPublicSender(t *testing.T) {
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ZXCV5678"}}
-	definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	rig := newAccessRig(t, accessOpts{definition: definition, public: true, settings: AccessSettings{Pairing: pairing}})
 	rig.run(t, privateText(10, publicUserID, "hi"))
 	rig.assertQuiet(t, "pairing")
@@ -441,8 +441,8 @@ func TestPairingFallsBackWhenTheAudienceRefusesAPublicSender(t *testing.T) {
 func TestPairingNeverStartsFromAPersonaWithoutPairing(t *testing.T) {
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "NOPE0000"}}
 	for name, definition := range map[string]auraagent.Definition{
-		"pairing off":       {ID: testPersona, Audience: config.AudienceTrusted},
-		"audience is owner": {ID: testPersona, Audience: config.AudienceOwner, Pairing: true},
+		"pairing off":       {ID: testPersona, Audience: auraagent.AudienceTrusted},
+		"audience is owner": {ID: testPersona, Audience: auraagent.AudienceOwner, Pairing: true},
 	} {
 		t.Run(name, func(t *testing.T) {
 			rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
@@ -460,7 +460,7 @@ func TestPairingNeverStartsFromAPersonaWithoutPairing(t *testing.T) {
 
 func TestPairingGrantAdmitsATrustedSender(t *testing.T) {
 	pairing := &fakePairing{granted: map[string]bool{"telegram:999001@pocket": true}}
-	definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
 	rig.run(t, privateText(10, strangerID, "hi"))
 	if id, class, _ := rig.onlyEnvelope(t); id != "telegram:999001" || class != string(principal.ClassTrusted) {
@@ -483,7 +483,7 @@ func TestPrivateChatsDisabledRejectsEveryNonOwnerWithoutPairing(t *testing.T) {
 		granted: map[string]bool{"telegram:555002@pocket": true},
 		result:  access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD2345"},
 	}
-	definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	rig := newAccessRig(t, accessOpts{
 		allowed:    []string{strconv.Itoa(allowedUserID)},
 		privateOff: true,
@@ -533,7 +533,7 @@ func TestEvalGateRefusesNonOwnersOfUnevaluatedPersonas(t *testing.T) {
 			if got := rig.h.denied(); !slices.Equal(got, []string{access.DeniedReasonEvalMissing}) {
 				t.Errorf("denials = %v", got)
 			}
-			want := personaMessage(config.MessageUnavailable)
+			want := personaMessage(auraagent.MessageUnavailable)
 			if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{want}) {
 				t.Errorf("notice = %q, want %q", got, want)
 			}
@@ -546,7 +546,7 @@ func TestEvalGateSkipsOwnersAndOwnerOnlyPersonas(t *testing.T) {
 	rig := newAccessRig(t, accessOpts{settings: AccessSettings{Evals: evals}})
 	rig.run(t, privateText(10, ownerUserID, "hello"))
 	rig.onlyEnvelope(t)
-	ownerOnly := auraagent.Definition{ID: testPersona, Audience: config.AudienceOwner}
+	ownerOnly := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceOwner}
 	other := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, definition: ownerOnly, settings: AccessSettings{Evals: evals}})
 	other.run(t, privateText(10, allowedUserID, "hello"))
 	other.assertQuiet(t, "audience")
@@ -561,8 +561,8 @@ func TestBudgetGateRefusesWithThePersonaMessage(t *testing.T) {
 		wantDrop  string
 		wantReply string
 	}{
-		"rate limited": {budgets: &fakeBudgets{refusal: access.BudgetRefusalRateLimited}, wantDrop: "rate_limited", wantReply: personaMessage(config.MessageRateLimited)},
-		"exhausted":    {budgets: &fakeBudgets{refusal: access.BudgetRefusalExhausted}, wantDrop: "budget_exhausted", wantReply: personaMessage(config.MessageBudgetExhausted)},
+		"rate limited": {budgets: &fakeBudgets{refusal: access.BudgetRefusalRateLimited}, wantDrop: "rate_limited", wantReply: personaMessage(auraagent.MessageRateLimited)},
+		"exhausted":    {budgets: &fakeBudgets{refusal: access.BudgetRefusalExhausted}, wantDrop: "budget_exhausted", wantReply: personaMessage(auraagent.MessageBudgetExhausted)},
 		"check fails":  {budgets: &fakeBudgets{err: errors.New("ledger down")}, wantDrop: "budget_check_failed"},
 	}
 	for name, tc := range cases {
@@ -620,7 +620,7 @@ func TestHandoffGate(t *testing.T) {
 		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: &fakeHandoffs{state: access.HandoffStateExpired}}})
 		rig.run(t, privateText(10, allowedUserID, "hello again"))
 		rig.onlyEnvelope(t)
-		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageHandoffClosed)}) {
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageHandoffClosed)}) {
 			t.Errorf("notice = %q", got)
 		}
 	})
@@ -668,7 +668,7 @@ func TestForgetMeCommand(t *testing.T) {
 		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetme"))
 		rig.assertQuiet(t)
-		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageForgetmeConfirm)}) {
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeConfirm)}) {
 			t.Errorf("reply = %q", got)
 		}
 		if erased := eraser.erased(); len(erased) != 0 {
@@ -683,7 +683,7 @@ func TestForgetMeCommand(t *testing.T) {
 		if erased := eraser.erased(); !slices.Equal(erased, []string{"telegram:555001"}) {
 			t.Errorf("erased %v", erased)
 		}
-		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageForgetmeDone)}) {
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeDone)}) {
 			t.Errorf("reply = %q", got)
 		}
 	})
@@ -701,7 +701,7 @@ func TestForgetMeCommand(t *testing.T) {
 		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
-		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(config.MessageForgetmeStopping)}) {
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeStopping)}) {
 			t.Errorf("reply = %q", got)
 		}
 	})
@@ -710,7 +710,7 @@ func TestForgetMeCommand(t *testing.T) {
 		rig := newAccessRig(t, accessOpts{settings: AccessSettings{Erasure: eraser}})
 		rig.run(t, privateText(10, ownerUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
-		if got := sentTo(rig.h.api, ownerUserID); !slices.Equal(got, []string{personaMessage(config.MessageNotPermitted)}) {
+		if got := sentTo(rig.h.api, ownerUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageNotPermitted)}) {
 			t.Errorf("reply = %q", got)
 		}
 		if erased := eraser.erased(); len(erased) != 0 {
@@ -732,7 +732,7 @@ func TestForgetMeCommand(t *testing.T) {
 }
 
 func TestEveryDroppedMessageProducesOneReasonedRecordWithoutContentOrIDs(t *testing.T) {
-	definition := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted}
+	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted}
 	rig := newAccessRig(t, accessOpts{
 		allowed:    []string{strconv.Itoa(allowedUserID)},
 		definition: definition,

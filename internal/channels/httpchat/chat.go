@@ -13,7 +13,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -191,7 +190,7 @@ func (c *Chat) admitPersona(ctx context.Context, caller *Principal) *errorSpec {
 		c.observeDenied(ctx, access.DeniedReasonAudience)
 		return &errAudienceDenied
 	}
-	if caller.Class == principal.ClassOwner || definition.Audience == config.AudienceOwner {
+	if caller.Class == principal.ClassOwner || definition.Audience == agent.AudienceOwner {
 		return nil
 	}
 	evaluated, err := c.evals.Evaluated(ctx, caller.PersonaID)

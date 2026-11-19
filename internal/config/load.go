@@ -620,7 +620,7 @@ func snowflakeListProblems(field string, ids []string) []error {
 		switch {
 		case id == "":
 			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
-		case !IsSnowflake(id):
+		case !principal.IsDecimalSnowflake(id):
 			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a decimal snowflake", id)))
 		case seen[id]:
 			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
@@ -938,18 +938,6 @@ func validBroadcastAlias(alias string) bool {
 func ValidBroadcastRoute(route string) bool {
 	_, _, err := broadcastpkg.ParseRoute(route)
 	return err == nil
-}
-
-func IsSnowflake(id string) bool {
-	if id == "" {
-		return false
-	}
-	for i := range len(id) {
-		if id[i] < '0' || id[i] > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func ValidateTools(toolsConfig *Tools) error {

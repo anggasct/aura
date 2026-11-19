@@ -51,8 +51,8 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolContro
 	fake := durabletest.NewFake()
 	t.Cleanup(fake.Close)
 	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	registry, err := auraagent.Build([]config.AgentDefinition{{
-		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: config.AudiencePublic,
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"workflow_start"}, PublicTools: []string{"workflow_start"}, Workflows: allowlist,
 	}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {
@@ -169,12 +169,12 @@ func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := workflow.NewStore(db)
 	interpreter := workflow.NewInterpreter(runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	registry, err := auraagent.Build([]config.AgentDefinition{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, toolsbuiltin.DefinitionNames(), nil)
+	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, err = newWorkflowToolController(interpreter, runs, registry, nil)
-	if !fault.HasCode(err, config.ErrorCodePersonaInvalid) || !strings.Contains(err.Error(), "ghost") {
+	if !fault.HasCode(err, auraagent.ErrorCodePersonaInvalid) || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("startup with an unknown allowlisted workflow = %v", err)
 	}
 }

@@ -13,7 +13,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -294,7 +293,7 @@ func (a *Adapter) routePersona(userID string, msg *message) (string, bool) {
 		return "", false
 	}
 	scope := &auraagent.RouteScope{
-		Channel: config.BindingChannelTelegram,
+		Channel: auraagent.BindingChannelTelegram,
 		Account: a.account.Name,
 		UserID:  userID,
 	}

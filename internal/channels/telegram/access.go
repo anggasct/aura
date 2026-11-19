@@ -11,7 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -48,7 +47,7 @@ type authorAccess struct {
 }
 
 func (a *Adapter) authorAccess(ctx context.Context) authorAccess {
-	result := authorAccess{servesPublic: a.router != nil && a.router.ServesPublic(config.BindingChannelTelegram, a.account.Name)}
+	result := authorAccess{servesPublic: a.router != nil && a.router.ServesPublic(auraagent.BindingChannelTelegram, a.account.Name)}
 	if a.access.Pairing == nil {
 		return result
 	}
@@ -97,7 +96,7 @@ func (a *Adapter) personaEvaluated(ctx context.Context, target destination, pers
 		return true
 	}
 	definition, ok := a.personaDefinition(persona)
-	if ok && definition.Audience == config.AudienceOwner {
+	if ok && definition.Audience == auraagent.AudienceOwner {
 		return true
 	}
 	evaluated, err := a.access.Evals.Evaluated(ctx, persona)
@@ -108,7 +107,7 @@ func (a *Adapter) personaEvaluated(ctx context.Context, target destination, pers
 		return true
 	}
 	a.deny(ctx, access.DeniedReasonEvalMissing)
-	a.postNotice(ctx, target, definition.Message(config.MessageUnavailable))
+	a.postNotice(ctx, target, definition.Message(auraagent.MessageUnavailable))
 	return false
 }
 
@@ -134,7 +133,7 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *message, reach authorAcce
 		return false
 	}
 	definition, ok := a.personaDefinition(persona)
-	if !ok || !definition.Pairing || definition.Audience != config.AudienceTrusted {
+	if !ok || !definition.Pairing || definition.Audience != auraagent.AudienceTrusted {
 		return false
 	}
 	result, err := a.access.Pairing.Request(ctx, principal.Namespaced(principal.ChannelTelegram, userID), a.account.Name)
@@ -145,11 +144,11 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *message, reach authorAcce
 	var reply string
 	switch result.Outcome {
 	case access.PairingOutcomeIssued:
-		reply = strings.ReplaceAll(definition.Message(config.MessagePairingCode), config.PairingCodePlaceholder, result.Code)
+		reply = strings.ReplaceAll(definition.Message(auraagent.MessagePairingCode), auraagent.PairingCodePlaceholder, result.Code)
 	case access.PairingOutcomeLocked:
-		reply = definition.Message(config.MessagePairingLocked)
+		reply = definition.Message(auraagent.MessagePairingLocked)
 	default:
-		reply = definition.Message(config.MessagePairingPending)
+		reply = definition.Message(auraagent.MessagePairingPending)
 	}
 	a.postNotice(ctx, msg.destination(), reply)
 	return true
@@ -177,21 +176,21 @@ func (a *Adapter) budgetDrop(ctx context.Context, target destination, envelope *
 func (a *Adapter) forgetMe(ctx context.Context, target destination, inv *command.Invocation, envelope *runtimeingress.IngressEnvelope) {
 	definition, _ := a.personaDefinition(envelope.AgentID)
 	if principal.ParseClass(envelope.PrincipalClass) == principal.ClassOwner {
-		a.postNotice(ctx, target, definition.Message(config.MessageNotPermitted))
+		a.postNotice(ctx, target, definition.Message(auraagent.MessageNotPermitted))
 		return
 	}
 	if len(inv.Args) != 1 || !strings.EqualFold(inv.Args[0], command.ArgConfirm) {
-		a.postNotice(ctx, target, definition.Message(config.MessageForgetmeConfirm))
+		a.postNotice(ctx, target, definition.Message(auraagent.MessageForgetmeConfirm))
 		return
 	}
 	if err := a.access.Erasure.Forget(ctx, envelope.PrincipalID); err != nil {
 		a.logger.WarnContext(ctx, "forgetme erasure failed", "component", "telegram")
 		if errors.Is(err, access.ErrForgetRunsStopping) {
-			a.postNotice(ctx, target, definition.Message(config.MessageForgetmeStopping))
+			a.postNotice(ctx, target, definition.Message(auraagent.MessageForgetmeStopping))
 		}
 		return
 	}
-	a.postNotice(ctx, target, definition.Message(config.MessageForgetmeDone))
+	a.postNotice(ctx, target, definition.Message(auraagent.MessageForgetmeDone))
 }
 
 func (a *Adapter) handoffHeld(ctx context.Context, target destination, text string, envelope *runtimeingress.IngressEnvelope) (held bool, reason dropReason) {
@@ -215,7 +214,7 @@ func (a *Adapter) handoffHeld(ctx context.Context, target destination, text stri
 		return true, ""
 	case access.HandoffStateExpired:
 		definition, _ := a.personaDefinition(envelope.AgentID)
-		a.postNotice(ctx, target, definition.Message(config.MessageHandoffClosed))
+		a.postNotice(ctx, target, definition.Message(auraagent.MessageHandoffClosed))
 		return false, ""
 	default:
 		return false, ""

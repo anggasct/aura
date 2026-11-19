@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 const (
@@ -155,12 +155,12 @@ func NewService(deps *Deps) (*Service, error) {
 }
 
 func ValidCollectionID(id string) bool {
-	return config.ValidKnowledgeCollectionID(id)
+	return auraagent.ValidKnowledgeCollectionID(id)
 }
 
 func requireCollection(id string) error {
 	if !ValidCollectionID(id) {
-		return Errorf(ErrorCodeCollectionInvalid, "collection id must match %s", config.KnowledgeCollectionIDPattern)
+		return Errorf(ErrorCodeCollectionInvalid, "collection id must match %s", auraagent.KnowledgeCollectionIDPattern)
 	}
 	return nil
 }

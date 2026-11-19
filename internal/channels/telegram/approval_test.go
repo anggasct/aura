@@ -15,7 +15,6 @@ import (
 	"unicode/utf16"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -665,12 +664,12 @@ func routedDefinition() auraagent.Definition {
 	return auraagent.Definition{
 		ID:              testPersona,
 		Name:            "Main",
-		Audience:        config.AudienceTrusted,
+		Audience:        auraagent.AudienceTrusted,
 		ApprovalTimeout: 30 * time.Second,
 		Messages: map[string]string{
-			config.MessageWaitingForOwner: "waiting for the owner",
-			config.MessageApprovalDenied:  "the owner said no",
-			config.MessageApprovalTimeout: "the owner did not answer",
+			auraagent.MessageWaitingForOwner: "waiting for the owner",
+			auraagent.MessageApprovalDenied:  "the owner said no",
+			auraagent.MessageApprovalTimeout: "the owner did not answer",
 		},
 	}
 }

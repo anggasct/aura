@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -36,7 +37,7 @@ type accountAdapter struct {
 	sessions *fakeSessionEnsurer
 }
 
-func newAccountAdapter(t *testing.T, cfg *config.Discord, index int, bindings []config.Binding, stub *restStub, selfID string) *accountAdapter {
+func newAccountAdapter(t *testing.T, cfg *config.Discord, index int, bindings []auraagent.Binding, stub *restStub, selfID string) *accountAdapter {
 	t.Helper()
 	sessions := &fakeSessionEnsurer{}
 	adapter, err := New(cfg, &cfg.Accounts[index], &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, sessions, nil)
@@ -136,7 +137,7 @@ func TestSameChannelServedByTwoPersonasKeepsSeparateSessions(t *testing.T) {
 	})
 	cfg := twoAccountConfig()
 	cfg.Accounts[0].AllowedUserIDs = append(cfg.Accounts[0].AllowedUserIDs, "112")
-	bindings := []config.Binding{{Persona: "researcher", Channel: config.BindingChannelDiscord, Account: "home", UserID: "112"}}
+	bindings := []auraagent.Binding{{Persona: "researcher", Channel: auraagent.BindingChannelDiscord, Account: "home", UserID: "112"}}
 	home := newAccountAdapter(t, &cfg, 0, bindings, stub, "901")
 	kuma := newAccountAdapter(t, &cfg, 1, bindings, stub, "902")
 
@@ -222,7 +223,7 @@ func TestThreadKeepsItsPersonaAfterBindingsChange(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	})
 	cfg := testAdapterConfig()
-	bindings := []config.Binding{{Persona: "reviewer", Channel: config.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
+	bindings := []auraagent.Binding{{Persona: "reviewer", Channel: auraagent.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
 	restarted := newAccountAdapter(t, &cfg, 0, bindings, stub, "999")
 	if err := restarted.sessions.EnsureSession(t.Context(), "engineer/discord:owner/thread:777300", "discord:111", "engineer"); err != nil {
 		t.Fatalf("seed session: %v", err)
@@ -262,7 +263,7 @@ func TestUnownedThreadFollowsBindingsWhenNoSessionExists(t *testing.T) {
 		w.WriteHeader(http.StatusForbidden)
 	})
 	cfg := testAdapterConfig()
-	bindings := []config.Binding{{Persona: "reviewer", Channel: config.BindingChannelDiscord, Account: "owner", ThreadID: "777301"}}
+	bindings := []auraagent.Binding{{Persona: "reviewer", Channel: auraagent.BindingChannelDiscord, Account: "owner", ThreadID: "777301"}}
 	adapter := newAccountAdapter(t, &cfg, 0, bindings, stub, "999")
 
 	admitted, err := adapter.adapter.admit(t.Context(), textMessage("8501", "777301", "222", "111", "hello thread", nil))
@@ -314,7 +315,7 @@ func TestMentionInUnownedThreadFollowsParentBinding(t *testing.T) {
 	})
 	cfg := testAdapterConfig()
 	cfg.Accounts[0].AllowedChannelIDs = nil
-	bindings := []config.Binding{{Persona: "reviewer", Channel: config.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
+	bindings := []auraagent.Binding{{Persona: "reviewer", Channel: auraagent.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
 	adapter := newAccountAdapter(t, &cfg, 0, bindings, stub, "999")
 
 	threadType := channelTypePublicThread
@@ -337,7 +338,7 @@ func TestTriggerThreadInheritsTriggerPersona(t *testing.T) {
 		writeMessage(t, w, "m-any")
 	})
 	cfg := testAdapterConfig()
-	bindings := []config.Binding{{Persona: "reviewer", Channel: config.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
+	bindings := []auraagent.Binding{{Persona: "reviewer", Channel: auraagent.BindingChannelDiscord, Account: "owner", ChannelID: "333"}}
 	adapter := newAccountAdapter(t, &cfg, 0, bindings, stub, "999")
 	adapter.adapter.rememberThread("", "777302", threadRoute{parent: "333", persona: "engineer"})
 

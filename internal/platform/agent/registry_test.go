@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
@@ -43,81 +42,81 @@ func TestBuildRegistersBuiltins(t *testing.T) {
 func TestBuildRejectsInvalidOverrides(t *testing.T) {
 	cases := []struct {
 		name      string
-		overrides []config.AgentDefinition
+		overrides []Persona
 		wantCode  ErrorCode
 		wantField string
 		routes    []string
 	}{
 		{
 			name:      "empty id",
-			overrides: []config.AgentDefinition{{Instructions: "x", Description: "d"}},
+			overrides: []Persona{{Instructions: "x", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".id",
 		},
 		{
 			name:      "id that would split a session key",
-			overrides: []config.AgentDefinition{{ID: "kuma/discord:home", Instructions: "x", Description: "d"}},
+			overrides: []Persona{{ID: "kuma/discord:home", Instructions: "x", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".id",
 		},
 		{
 			name:      "uppercase id",
-			overrides: []config.AgentDefinition{{ID: "Kuma", Instructions: "x", Description: "d"}},
+			overrides: []Persona{{ID: "Kuma", Instructions: "x", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".id",
 		},
 		{
 			name:      "unknown tool",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Tools: []string{"git_push"}}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", Tools: []string{"git_push"}}},
 			wantCode:  ErrorCodeUnknownTool,
 			wantField: ".tools",
 		},
 		{
 			name:      "unknown capability",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{"kernel.write"}}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{"kernel.write"}}},
 			wantCode:  ErrorCodeUnknownCapability,
 			wantField: ".capabilities",
 		},
 		{
 			name:      "duplicate capability",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{CapabilityWebSearch, CapabilityWebSearch}}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", Capabilities: []string{CapabilityWebSearch, CapabilityWebSearch}}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".capabilities",
 		},
 		{
 			name:      "unknown model route",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", ModelRoute: "tertiary"}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", ModelRoute: "tertiary"}},
 			wantCode:  ErrorCodeUnknownModelRoute,
 			wantField: ".model_route",
 		},
 		{
 			name:      "unknown judge route",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{JudgeRoute: "tertiary"}}}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", Evals: PersonaEvals{Behavior: &PersonaEvalBehavior{JudgeRoute: "tertiary"}}}},
 			wantCode:  ErrorCodeUnknownModelRoute,
 			wantField: ".evals.behavior.judge_route",
 		},
 		{
 			name:      "default judge route not configured",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{}}}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", Evals: PersonaEvals{Behavior: &PersonaEvalBehavior{}}}},
 			wantCode:  ErrorCodeUnknownModelRoute,
 			wantField: `"auxiliary"`,
 			routes:    []string{"primary"},
 		},
 		{
 			name:      "empty instructions on a new definition",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d"}},
+			overrides: []Persona{{ID: "ops", Description: "d"}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".instructions",
 		},
 		{
 			name:      "negative turn timeout",
-			overrides: []config.AgentDefinition{{ID: "ops", Description: "d", Instructions: "x", Limits: config.AgentLimits{TurnTimeout: -1}}},
+			overrides: []Persona{{ID: "ops", Description: "d", Instructions: "x", Limits: PersonaLimits{TurnTimeout: -1}}},
 			wantCode:  ErrorCodeDefinitionInvalid,
 			wantField: ".limits.turn_timeout",
 		},
 		{
 			name: "duplicate id",
-			overrides: []config.AgentDefinition{
+			overrides: []Persona{
 				{ID: "ops", Description: "first", Instructions: "a"},
 				{ID: "ops", Description: "second", Instructions: "b"},
 			},
@@ -246,14 +245,14 @@ func TestResolveFailsClosedWithoutEligibleDefinition(t *testing.T) {
 }
 
 func TestOverrideReplacesBuiltinWithoutDuplicates(t *testing.T) {
-	override := config.AgentDefinition{
+	override := Persona{
 		ID:           "engineer",
 		Description:  "Custom engineer",
 		Instructions: "Custom instructions",
 		Capabilities: []string{CapabilityRepositoryRead},
 		ModelRoute:   "auxiliary",
 	}
-	registry, err := Build([]config.AgentDefinition{override}, validTools, []string{"primary", "auxiliary"})
+	registry, err := Build([]Persona{override}, validTools, []string{"primary", "auxiliary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -288,8 +287,8 @@ func TestBuiltinOverrideKeepsDefaultInstructionsWhenOmitted(t *testing.T) {
 	if !ok || engineerDefault.Instructions == "" {
 		t.Fatal("engineer builtin lacks default instructions")
 	}
-	override := config.AgentDefinition{ID: "engineer", Description: "Engineer override", Capabilities: []string{CapabilityRepositoryRead}}
-	registry, err := Build([]config.AgentDefinition{override}, validTools, []string{"primary"})
+	override := Persona{ID: "engineer", Description: "Engineer override", Capabilities: []string{CapabilityRepositoryRead}}
+	registry, err := Build([]Persona{override}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -320,8 +319,8 @@ func TestDefaultMainKeepsPriorPromptSurface(t *testing.T) {
 }
 
 func TestMainOverrideWithoutInstructionsStaysUnset(t *testing.T) {
-	override := config.AgentDefinition{ID: DefaultID, Description: "Main override"}
-	registry, err := Build([]config.AgentDefinition{override}, validTools, []string{"primary"})
+	override := Persona{ID: DefaultID, Description: "Main override"}
+	registry, err := Build([]Persona{override}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -335,9 +334,9 @@ func TestMainOverrideWithoutInstructionsStaysUnset(t *testing.T) {
 }
 
 func TestResolveTiesBreakByRegistryOrder(t *testing.T) {
-	overrideA := config.AgentDefinition{ID: "a-first", Description: "d", Instructions: "x", Capabilities: []string{CapabilityRepositoryRead}}
-	overrideB := config.AgentDefinition{ID: "b-second", Description: "d", Instructions: "x", Capabilities: []string{CapabilityRepositoryRead}}
-	registry, err := Build([]config.AgentDefinition{overrideA, overrideB}, validTools, []string{"primary"})
+	overrideA := Persona{ID: "a-first", Description: "d", Instructions: "x", Capabilities: []string{CapabilityRepositoryRead}}
+	overrideB := Persona{ID: "b-second", Description: "d", Instructions: "x", Capabilities: []string{CapabilityRepositoryRead}}
+	registry, err := Build([]Persona{overrideA, overrideB}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -351,7 +350,7 @@ func TestResolveTiesBreakByRegistryOrder(t *testing.T) {
 }
 
 func TestSoulBecomesPersonaInstructions(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{
+	registry, err := Build([]Persona{
 		{ID: "kuma", Description: "Casual assistant", SoulFile: "personas/kuma.md", Soul: "You are Kuma."},
 		{ID: DefaultID, SoulFile: "personas/main.md", Soul: "You are the owner's main bot."},
 	}, validTools, []string{"primary"})
@@ -393,7 +392,7 @@ func TestFingerprintTracksSoulToolsAndRoute(t *testing.T) {
 }
 
 func TestRecallScopeFollowsMemoryScope(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{
+	registry, err := Build([]Persona{
 		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: MemoryScopeShared},
 		{ID: "nara", Description: "Formal", Instructions: "Be formal.", MemoryScope: MemoryScopeShared},
 		{ID: "solo", Description: "Private", Instructions: "Keep to yourself."},
@@ -425,7 +424,7 @@ func TestRecallScopeFollowsMemoryScope(t *testing.T) {
 }
 
 func TestBuildRejectsUnknownMemoryScope(t *testing.T) {
-	_, err := Build([]config.AgentDefinition{
+	_, err := Build([]Persona{
 		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: "global"},
 	}, validTools, []string{"primary"})
 	if !fault.HasCode(err, ErrorCodeDefinitionInvalid) {
@@ -434,7 +433,7 @@ func TestBuildRejectsUnknownMemoryScope(t *testing.T) {
 }
 
 func TestBuildResolvesPersonaNames(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{
+	registry, err := Build([]Persona{
 		{ID: "kuma", Description: "d", Instructions: "i"},
 		{ID: "engineer", Name: "Eng"},
 	}, validTools, []string{"primary", "auxiliary"})
@@ -447,14 +446,14 @@ func TestBuildResolvesPersonaNames(t *testing.T) {
 			t.Errorf("%s name = %q (registered %v), want %q", id, definition.Name, ok, want)
 		}
 	}
-	renamed, err := Build([]config.AgentDefinition{{ID: DefaultID, Name: "Mira"}}, validTools, []string{"primary"})
+	renamed, err := Build([]Persona{{ID: DefaultID, Name: "Mira"}}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build renamed main: %v", err)
 	}
 	if main, _ := renamed.Lookup(DefaultID); main.Name != "Mira" {
 		t.Fatalf("renamed main = %q, want Mira", main.Name)
 	}
-	unnamed, err := Build([]config.AgentDefinition{{ID: DefaultID, SoulFile: "soul.md", Soul: "You are Aura."}}, validTools, []string{"primary"})
+	unnamed, err := Build([]Persona{{ID: DefaultID, SoulFile: "soul.md", Soul: "You are Aura."}}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build main override: %v", err)
 	}
@@ -464,9 +463,9 @@ func TestBuildResolvesPersonaNames(t *testing.T) {
 }
 
 func TestEvalBehaviorDefaults(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{
-		{ID: "lobby", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{Required: true}}},
-		{ID: "desk", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{MinScore: 0.6, JudgeRoute: "primary", Schedule: "0 3 * * 1", EnforceOnRegression: true}}},
+	registry, err := Build([]Persona{
+		{ID: "lobby", Description: "d", Instructions: "x", Evals: PersonaEvals{Behavior: &PersonaEvalBehavior{Required: true}}},
+		{ID: "desk", Description: "d", Instructions: "x", Evals: PersonaEvals{Behavior: &PersonaEvalBehavior{MinScore: 0.6, JudgeRoute: "primary", Schedule: "0 3 * * 1", EnforceOnRegression: true}}},
 		{ID: "plain", Description: "d", Instructions: "x"},
 	}, validTools, []string{"primary", "auxiliary"})
 	if err != nil {
@@ -486,7 +485,7 @@ func TestEvalBehaviorDefaults(t *testing.T) {
 }
 
 func TestEvalDigestCoversTheWorkflowAllowlist(t *testing.T) {
-	base := Definition{ID: "lobby", Instructions: "You help visitors.", Audience: config.AudiencePublic, Tools: []string{"workflow_start"}}
+	base := Definition{ID: "lobby", Instructions: "You help visitors.", Audience: AudiencePublic, Tools: []string{"workflow_start"}}
 	empty := base
 	empty.Workflows = []string{}
 	if base.EvalDigest() != empty.EvalDigest() {
@@ -499,7 +498,7 @@ func TestEvalDigestCoversTheWorkflowAllowlist(t *testing.T) {
 	if allowed.EvalDigest() == base.EvalDigest() || allowed.EvalDigest() != reordered.EvalDigest() {
 		t.Fatal("the allowlist must re-gate the persona and its order must not")
 	}
-	registry, err := Build([]config.AgentDefinition{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"book_visit"}}}, validTools, nil)
+	registry, err := Build([]Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"book_visit"}}}, validTools, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -541,7 +540,7 @@ func TestKnowledgeForFollowsTheClassAndFailsClosed(t *testing.T) {
 }
 
 func TestKnowledgeListsReachTheRegistryCopyAndTheEvalDigestButNotTheFingerprint(t *testing.T) {
-	registry, err := Build([]config.AgentDefinition{{
+	registry, err := Build([]Persona{{
 		ID: "lobby", Description: "d", Instructions: "x",
 		Knowledge: []string{"support", "faq"}, PrincipalKnowledge: []string{"faq"}, PublicKnowledge: []string{"faq"},
 	}}, validTools, nil)
@@ -584,21 +583,21 @@ func TestKnowledgeListsReachTheRegistryCopyAndTheEvalDigestButNotTheFingerprint(
 
 func TestToolCeilingsTreatKBSearchAsAvailableWhenThePersonaHasKnowledge(t *testing.T) {
 	tools := append(slices.Clone(validTools), auratools.KBSearchToolName)
-	base := config.AgentDefinition{
-		ID: "lobby", Description: "d", Instructions: "x", Audience: config.AudiencePublic,
+	base := Persona{
+		ID: "lobby", Description: "d", Instructions: "x", Audience: AudiencePublic,
 		Tools: []string{"read_file"}, PrincipalTools: []string{"kb_search"}, PublicTools: []string{"kb_search"},
 	}
 	withKnowledge := base
 	withKnowledge.Knowledge, withKnowledge.PrincipalKnowledge, withKnowledge.PublicKnowledge = []string{"faq"}, []string{"faq"}, []string{"faq"}
-	if _, err := Build([]config.AgentDefinition{withKnowledge}, tools, nil); err != nil {
+	if _, err := Build([]Persona{withKnowledge}, tools, nil); err != nil {
 		t.Fatalf("persona with knowledge: %v", err)
 	}
-	if _, err := Build([]config.AgentDefinition{base}, tools, nil); err == nil {
+	if _, err := Build([]Persona{base}, tools, nil); err == nil {
 		t.Fatal("kb_search outside the tools list of a persona without knowledge accepted")
 	}
 	implicit := base
 	implicit.Tools = nil
-	if _, err := Build([]config.AgentDefinition{implicit}, tools, nil); err != nil {
+	if _, err := Build([]Persona{implicit}, tools, nil); err != nil {
 		t.Fatalf("implicit tool list: %v", err)
 	}
 }

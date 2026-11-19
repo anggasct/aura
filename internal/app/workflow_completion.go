@@ -109,14 +109,14 @@ func (n *workflowCompletionNotifier) notify(ctx context.Context, run *workflow.R
 }
 
 func completionMessage(definition *auraagent.Definition, run *workflow.RunSummary) string {
-	key := config.MessageWorkflowSucceeded
+	key := auraagent.MessageWorkflowSucceeded
 	switch run.Status {
 	case workflow.RunFailed:
-		key = config.MessageWorkflowFailed
+		key = auraagent.MessageWorkflowFailed
 	case workflow.RunCancelled:
-		key = config.MessageWorkflowCancelled
+		key = auraagent.MessageWorkflowCancelled
 	}
-	return strings.ReplaceAll(definition.Message(key), config.WorkflowGoalPlaceholder, run.Goal)
+	return strings.ReplaceAll(definition.Message(key), auraagent.WorkflowGoalPlaceholder, run.Goal)
 }
 
 func appendSessionText(ctx context.Context, db *sql.DB, sessionID, id, author, text string, at time.Time) error {

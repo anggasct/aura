@@ -248,12 +248,12 @@ func testAdapterAccount() config.DiscordAccount {
 	}
 }
 
-func trustedBuiltinPersonas() []config.AgentDefinition {
-	return []config.AgentDefinition{
-		{ID: auraagent.DefaultID, Audience: config.AudienceTrusted},
-		{ID: "engineer", Audience: config.AudienceTrusted},
-		{ID: "reviewer", Audience: config.AudienceTrusted},
-		{ID: "researcher", Audience: config.AudienceTrusted},
+func trustedBuiltinPersonas() []auraagent.Persona {
+	return []auraagent.Persona{
+		{ID: auraagent.DefaultID, Audience: auraagent.AudienceTrusted},
+		{ID: "engineer", Audience: auraagent.AudienceTrusted},
+		{ID: "reviewer", Audience: auraagent.AudienceTrusted},
+		{ID: "researcher", Audience: auraagent.AudienceTrusted},
 	}
 }
 
@@ -261,7 +261,7 @@ func discordChannelAccounts(cfg *config.Discord) []auraagent.ChannelAccount {
 	accounts := make([]auraagent.ChannelAccount, 0, len(cfg.Accounts))
 	for i := range cfg.Accounts {
 		accounts = append(accounts, auraagent.ChannelAccount{
-			Channel: config.BindingChannelDiscord,
+			Channel: auraagent.BindingChannelDiscord,
 			Name:    cfg.Accounts[i].Name,
 			Persona: cfg.Accounts[i].Persona,
 			Field:   fmt.Sprintf("channels.discord.accounts[%d]", i),
@@ -270,7 +270,7 @@ func discordChannelAccounts(cfg *config.Discord) []auraagent.ChannelAccount {
 	return accounts
 }
 
-func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []config.Binding) *auraagent.Router {
+func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []auraagent.Binding) *auraagent.Router {
 	t.Helper()
 	registry, err := auraagent.Build(trustedBuiltinPersonas(), []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, []string{"primary"})
 	if err != nil {

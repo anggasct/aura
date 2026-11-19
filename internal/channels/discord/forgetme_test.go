@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 )
 
@@ -66,13 +66,13 @@ func lastReply(t *testing.T, stub *approvalStub, channel string) string {
 }
 
 func TestForgetMeAsksThenErases(t *testing.T) {
-	defaults := config.PersonaMessageDefaults()
+	defaults := auraagent.PersonaMessageDefaults()
 	eraser := &fakeEraser{}
 	adapter, sink, stub := newForgetAdapter(t, eraser)
 	if handled, err := adapter.admit(t.Context(), textMessage("9801", "4400", "", "601", "/forgetme", nil)); err != nil || !handled {
 		t.Fatalf("admit(/forgetme) = %v, %v", handled, err)
 	}
-	if got := lastReply(t, stub, "4400"); got != defaults[config.MessageForgetmeConfirm] {
+	if got := lastReply(t, stub, "4400"); got != defaults[auraagent.MessageForgetmeConfirm] {
 		t.Fatalf("first reply = %q, want the confirmation prompt", got)
 	}
 	if len(eraser.erased) != 0 {
@@ -84,7 +84,7 @@ func TestForgetMeAsksThenErases(t *testing.T) {
 	if len(eraser.erased) != 1 || eraser.erased[0] != "discord:601" {
 		t.Fatalf("erased = %v, want discord:601", eraser.erased)
 	}
-	if got := lastReply(t, stub, "4400"); got != defaults[config.MessageForgetmeDone] {
+	if got := lastReply(t, stub, "4400"); got != defaults[auraagent.MessageForgetmeDone] {
 		t.Fatalf("second reply = %q, want the done message", got)
 	}
 	if sink.calls["message:9801"]+sink.calls["message:9802"] != 0 {
@@ -93,13 +93,13 @@ func TestForgetMeAsksThenErases(t *testing.T) {
 }
 
 func TestForgetMeRefusesTheOwnerAndReportsNothingOnFailure(t *testing.T) {
-	defaults := config.PersonaMessageDefaults()
+	defaults := auraagent.PersonaMessageDefaults()
 	eraser := &fakeEraser{}
 	adapter, _, stub := newForgetAdapter(t, eraser)
 	if _, err := adapter.admit(t.Context(), textMessage("9811", "4401", "", "777", "/forgetme confirm", nil)); err != nil {
 		t.Fatalf("owner admit: %v", err)
 	}
-	if got := lastReply(t, stub, "4401"); got != defaults[config.MessageNotPermitted] || len(eraser.erased) != 0 {
+	if got := lastReply(t, stub, "4401"); got != defaults[auraagent.MessageNotPermitted] || len(eraser.erased) != 0 {
 		t.Fatalf("owner reply = %q, erased = %v; want not_permitted and no erasure", got, eraser.erased)
 	}
 	eraser.err = errors.New("db down")
@@ -112,13 +112,13 @@ func TestForgetMeRefusesTheOwnerAndReportsNothingOnFailure(t *testing.T) {
 }
 
 func TestForgetMeAsksToRepeatWhileWorkflowRunsStop(t *testing.T) {
-	defaults := config.PersonaMessageDefaults()
+	defaults := auraagent.PersonaMessageDefaults()
 	eraser := &fakeEraser{err: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}
 	adapter, _, stub := newForgetAdapter(t, eraser)
 	if _, err := adapter.admit(t.Context(), textMessage("9821", "4403", "", "601", "/forgetme confirm", nil)); err != nil {
 		t.Fatalf("admit: %v", err)
 	}
-	if got := lastReply(t, stub, "4403"); got != defaults[config.MessageForgetmeStopping] {
+	if got := lastReply(t, stub, "4403"); got != defaults[auraagent.MessageForgetmeStopping] {
 		t.Fatalf("reply = %q, want the runs-stopping message", got)
 	}
 }

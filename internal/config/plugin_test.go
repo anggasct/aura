@@ -3,17 +3,19 @@ package config
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/agent"
 )
 
 func TestPluginIdentifiersRejectPathShapes(t *testing.T) {
 	for _, id := range []string{"", "a", "Weather", "we\tather", "../x", "a/b", "a\\b", "weather\n", strings.Repeat("a", 49), "-weather", "1weather", "we_x"} {
-		if ValidPluginID(id) {
-			t.Errorf("ValidPluginID(%q) = true", id)
+		if agent.ValidPluginID(id) {
+			t.Errorf("agent.ValidPluginID(%q) = true", id)
 		}
 	}
 	for _, id := range []string{"ab", "weather", "mail-reader", strings.Repeat("a", 48)} {
-		if !ValidPluginID(id) {
-			t.Errorf("ValidPluginID(%q) = false", id)
+		if !agent.ValidPluginID(id) {
+			t.Errorf("agent.ValidPluginID(%q) = false", id)
 		}
 	}
 	for _, version := range []string{"", "1", "1.0", "01.0.0", "1.0.0.0", "../1.0.0", "1.0.0/x", "v1.0.0", "1.0.0-", "1.0.0 ", strings.Repeat("1", 65)} {

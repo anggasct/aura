@@ -14,6 +14,7 @@ import (
 	"time"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -27,6 +28,10 @@ const (
 	invalidCode    = legacyconfig.ErrorCode(configkit.ErrorCodeInvalid)
 	unknownKeyCode = legacyconfig.ErrorCode(configkit.ErrorCodeUnknownKey)
 	malformedCode  = legacyconfig.ErrorCode(configkit.ErrorCodeMalformed)
+
+	personaInvalidCode = legacyconfig.ErrorCode(auraagent.ErrorCodePersonaInvalid)
+	personaSecretCode  = legacyconfig.ErrorCode(auraagent.ErrorCodePersonaSecret)
+	bindingInvalidCode = legacyconfig.ErrorCode(auraagent.ErrorCodeBindingInvalid)
 
 	modelProtocolInvalidCode       = legacyconfig.ErrorCode(model.ErrorCodeProtocolInvalid)
 	modelCapabilityUnsupportedCode = legacyconfig.ErrorCode(model.ErrorCodeCapabilityUnsupported)
@@ -66,6 +71,9 @@ func codeOf(err error) (legacyconfig.ErrorCode, bool) {
 		return legacyconfig.ErrorCode(code), true
 	}
 	if code, ok := fault.CodeOf[model.ErrorCode](err); ok {
+		return legacyconfig.ErrorCode(code), true
+	}
+	if code, ok := fault.CodeOf[auraagent.ErrorCode](err); ok {
 		return legacyconfig.ErrorCode(code), true
 	}
 	return "", false

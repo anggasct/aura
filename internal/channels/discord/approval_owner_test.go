@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -28,7 +28,7 @@ func httpPrompt(expiresAt time.Time) *ApprovalPrompt {
 	return prompt
 }
 
-func newHTTPOwnerAdapter(t *testing.T, stub *approvalStub, owners []string, personas []config.AgentDefinition) (*Adapter, *accessObserver) {
+func newHTTPOwnerAdapter(t *testing.T, stub *approvalStub, owners []string, personas []auraagent.Persona) (*Adapter, *accessObserver) {
 	t.Helper()
 	adapter, _, observer := newAccessAdapter(t, "team", owners, personas)
 	adapter.restBase = stub.srv.URL

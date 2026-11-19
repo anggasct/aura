@@ -77,7 +77,7 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 		},
 	}
 	flags := cmd.Flags()
-	flags.StringVar(&scope.channel, "channel", config.BindingChannelDiscord, "channel the message arrives on")
+	flags.StringVar(&scope.channel, "channel", auraagent.BindingChannelDiscord, "channel the message arrives on")
 	flags.StringVar(&scope.account, "account", "", "channel account name")
 	flags.StringVar(&scope.guildID, "guild", "", "guild id")
 	flags.StringVar(&scope.channelID, "channel-id", "", "channel id (the parent channel for thread messages)")
@@ -91,15 +91,15 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 func (s *bindingScopeFlags) validate(cmd *cobra.Command) error {
 	var foreign []string
 	switch s.channel {
-	case config.BindingChannelDiscord:
+	case auraagent.BindingChannelDiscord:
 		foreign = changedFlags(cmd, "chat", "topic")
-	case config.BindingChannelTelegram:
+	case auraagent.BindingChannelTelegram:
 		foreign = changedFlags(cmd, "guild", "channel-id", "thread")
 		if s.topicID != "" && s.chatID == "" {
 			return &usageError{fmt.Errorf("%s: --topic requires --chat", cmd.CommandPath())}
 		}
 	default:
-		return &usageError{fmt.Errorf("%s: --channel %q is not supported; use %q or %q", cmd.CommandPath(), s.channel, config.BindingChannelDiscord, config.BindingChannelTelegram)}
+		return &usageError{fmt.Errorf("%s: --channel %q is not supported; use %q or %q", cmd.CommandPath(), s.channel, auraagent.BindingChannelDiscord, auraagent.BindingChannelTelegram)}
 	}
 	if len(foreign) > 0 {
 		return &usageError{fmt.Errorf("%s: --%s does not apply to --channel %s", cmd.CommandPath(), strings.Join(foreign, ", --"), s.channel)}
@@ -118,7 +118,7 @@ func changedFlags(cmd *cobra.Command, names ...string) []string {
 }
 
 func (s *bindingScopeFlags) routeScope() *auraagent.RouteScope {
-	if s.channel == config.BindingChannelTelegram {
+	if s.channel == auraagent.BindingChannelTelegram {
 		return &auraagent.RouteScope{
 			Channel:  s.channel,
 			Account:  s.account,
@@ -137,7 +137,7 @@ func (s *bindingScopeFlags) routeScope() *auraagent.RouteScope {
 	}
 }
 
-func bindingLabel(scope *bindingScopeFlags, bindings []config.Binding, index int) string {
+func bindingLabel(scope *bindingScopeFlags, bindings []auraagent.Binding, index int) string {
 	if index == auraagent.AccountDefaultBinding || index < 0 || index >= len(bindings) {
 		return fmt.Sprintf("account default (%s:%s)", scope.channel, scope.account)
 	}
@@ -162,7 +162,7 @@ func channelAccounts(channels *config.Channels) []auraagent.ChannelAccount {
 	for i := range channels.Discord.Accounts {
 		account := &channels.Discord.Accounts[i]
 		accounts = append(accounts, auraagent.ChannelAccount{
-			Channel: config.BindingChannelDiscord,
+			Channel: auraagent.BindingChannelDiscord,
 			Name:    account.Name,
 			Persona: account.Persona,
 			Field:   fmt.Sprintf("channels.discord.accounts[%d]", i),
@@ -171,7 +171,7 @@ func channelAccounts(channels *config.Channels) []auraagent.ChannelAccount {
 	for i := range channels.Telegram.Accounts {
 		account := &channels.Telegram.Accounts[i]
 		accounts = append(accounts, auraagent.ChannelAccount{
-			Channel: config.BindingChannelTelegram,
+			Channel: auraagent.BindingChannelTelegram,
 			Name:    account.Name,
 			Persona: account.Persona,
 			Field:   fmt.Sprintf("channels.telegram.accounts[%d]", i),
@@ -180,7 +180,7 @@ func channelAccounts(channels *config.Channels) []auraagent.ChannelAccount {
 	for i := range channels.Email.Accounts {
 		account := &channels.Email.Accounts[i]
 		accounts = append(accounts, auraagent.ChannelAccount{
-			Channel: config.BindingChannelEmail,
+			Channel: auraagent.BindingChannelEmail,
 			Name:    account.Name,
 			Persona: account.Persona,
 			Field:   fmt.Sprintf("channels.email.accounts[%d]", i),

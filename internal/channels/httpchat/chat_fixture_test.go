@@ -15,7 +15,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -243,7 +242,7 @@ func newChatFixture(t *testing.T, opts chatFixtureOptions) *chatFixture {
 	logs := &bytes.Buffer{}
 	audience := opts.audience
 	if audience == "" {
-		audience = config.AudiencePublic
+		audience = agent.AudiencePublic
 	}
 	fixture := &chatFixture{
 		keys:     &memoryKeys{},

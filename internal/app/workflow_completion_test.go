@@ -42,9 +42,9 @@ func completionFixture(t *testing.T) *completionHarness {
 		t.Fatal(err)
 	}
 	controller.targets = []replyTargeter{fixedTarget{sessions: map[string]access.HandoffTarget{visitor.SessionID: {Channel: "discord", Account: "front", ChannelID: "333"}, "lobby/telegram:pocket/chat:5": {Channel: "telegram", Account: "pocket", ChannelID: "5"}}}}
-	registry, err := auraagent.Build([]config.AgentDefinition{{
-		ID: "lobby", Name: "Lobby", Description: "front desk", Instructions: "You help visitors.", Audience: config.AudiencePublic,
-		Workflows: []string{"book_visit"}, Messages: map[string]string{config.MessageWorkflowSucceeded: "Selesai: {goal}"},
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID: "lobby", Name: "Lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
+		Workflows: []string{"book_visit"}, Messages: map[string]string{auraagent.MessageWorkflowSucceeded: "Selesai: {goal}"},
 	}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {
 		t.Fatal(err)

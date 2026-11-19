@@ -113,3 +113,25 @@ func TestUnderKeepsTheKeyMarker(t *testing.T) {
 		t.Fatalf("text = %q, want %q", got, want)
 	}
 }
+
+func TestUnderPlacesIndexedPathsAfterThePrefix(t *testing.T) {
+	for name, test := range map[string]struct {
+		prefix, path, want string
+	}{
+		"an index path joins without a dot":  {"bindings", "[0].persona", "bindings[0].persona"},
+		"a lone index joins without a dot":   {"bindings", "[12]", "bindings[12]"},
+		"a field path joins with a dot":      {"agents", "definitions[0].name", "agents.definitions[0].name"},
+		"an index inside a name keeps a dot": {"agents", "a[0]", "agents.a[0]"},
+		"an empty path stays on the prefix":  {"bindings", "", "bindings"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var field *FieldError
+			if !errors.As(Under(test.prefix, Invalid(test.path, "x")), &field) {
+				t.Fatal("Under must return a FieldError")
+			}
+			if field.Path != test.want {
+				t.Fatalf("path = %q, want %q", field.Path, test.want)
+			}
+		})
+	}
+}

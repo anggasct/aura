@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -12,7 +11,7 @@ import (
 const kumaSoul = "You are Kuma: casual, brief, and warm."
 
 func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
-	registry, err := auraagent.Build([]config.AgentDefinition{
+	registry, err := auraagent.Build([]auraagent.Persona{
 		{ID: "kuma", Description: "Casual assistant", SoulFile: "personas/kuma.md", Soul: kumaSoul},
 	}, []string{"read_file"}, nil)
 	if err != nil {

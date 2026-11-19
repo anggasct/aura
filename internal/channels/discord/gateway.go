@@ -15,7 +15,6 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -457,7 +456,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 
 func (a *Adapter) routePersona(ctx context.Context, scope *auraagent.RouteScope) (string, bool) {
 	if a.router != nil {
-		scope.Channel = config.BindingChannelDiscord
+		scope.Channel = auraagent.BindingChannelDiscord
 		scope.Account = a.account.Name
 		if match, ok := a.router.Resolve(scope); ok {
 			return match.Persona, true

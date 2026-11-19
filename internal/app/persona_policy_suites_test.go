@@ -10,7 +10,6 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -31,7 +30,7 @@ func TestPersonaPolicySuites(t *testing.T) {
 		t.Fatal(err)
 	}
 	var file struct {
-		Definitions []config.AgentDefinition `json:"definitions"`
+		Definitions []auraagent.Persona `json:"definitions"`
 	}
 	if err := json.Unmarshal(encoded, &file); err != nil {
 		t.Fatal(err)
@@ -64,7 +63,7 @@ func TestPersonaPolicySuites(t *testing.T) {
 
 func TestPersonaCaptureSeedsOwnerDataOnlyForTheOwner(t *testing.T) {
 	definition := &auraagent.Definition{
-		ID: "lobby", Instructions: "You help visitors.", Audience: config.AudiencePublic,
+		ID: "lobby", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"web_search", "handoff_to_owner"}, PublicTools: []string{"web_search", "handoff_to_owner"},
 	}
 	owner, err := capturePersonaTurn(t.Context(), definition, principal.ClassOwner)

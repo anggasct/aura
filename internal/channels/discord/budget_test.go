@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -36,7 +36,7 @@ func newBudgetAdapter(t *testing.T, persona string, gate *fakeBudgetGate) (*Adap
 }
 
 func TestBudgetRefusalRepliesWithoutATurn(t *testing.T) {
-	defaults := config.PersonaMessageDefaults()
+	defaults := auraagent.PersonaMessageDefaults()
 	cases := map[string]struct {
 		persona string
 		author  string
@@ -44,10 +44,10 @@ func TestBudgetRefusalRepliesWithoutATurn(t *testing.T) {
 		reply   string
 		class   principal.Class
 	}{
-		"trusted rate limited":   {"team", "111", BudgetRefusalRateLimited, defaults[config.MessageRateLimited], principal.ClassTrusted},
-		"trusted out of tokens":  {"team", "111", BudgetRefusalExhausted, defaults[config.MessageBudgetExhausted], principal.ClassTrusted},
-		"public out of tokens":   {"lobby", "666", BudgetRefusalExhausted, defaults[config.MessageBudgetExhausted], principal.ClassPublic},
-		"public rate limited dm": {"lobby", "666", BudgetRefusalRateLimited, defaults[config.MessageRateLimited], principal.ClassPublic},
+		"trusted rate limited":   {"team", "111", BudgetRefusalRateLimited, defaults[auraagent.MessageRateLimited], principal.ClassTrusted},
+		"trusted out of tokens":  {"team", "111", BudgetRefusalExhausted, defaults[auraagent.MessageBudgetExhausted], principal.ClassTrusted},
+		"public out of tokens":   {"lobby", "666", BudgetRefusalExhausted, defaults[auraagent.MessageBudgetExhausted], principal.ClassPublic},
+		"public rate limited dm": {"lobby", "666", BudgetRefusalRateLimited, defaults[auraagent.MessageRateLimited], principal.ClassPublic},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -104,7 +104,7 @@ func TestBudgetGateFailureFailsClosedSilently(t *testing.T) {
 
 func TestBudgetRefusalUsesPersonaMessage(t *testing.T) {
 	personas := accessPersonas()
-	personas[1].Messages = map[string]string{config.MessageBudgetExhausted: "Kuota harian kamu sudah habis, coba lagi besok ya."}
+	personas[1].Messages = map[string]string{auraagent.MessageBudgetExhausted: "Kuota harian kamu sudah habis, coba lagi besok ya."}
 	stub := newApprovalStub(t)
 	adapter, _, observer := newAccessAdapter(t, "team", []string{"discord:777"}, personas)
 	settings := observer.settings()

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 
@@ -20,6 +21,11 @@ const (
 )
 
 const OwnerID = "local-owner"
+
+const (
+	MinApprovalTimeout = time.Minute
+	MaxApprovalTimeout = 24 * time.Hour
+)
 
 const HTTPKeyIDLength = 12
 
@@ -170,7 +176,11 @@ func isCanonicalInt64(id string, admitted func(int64) bool) bool {
 }
 
 func isSnowflake(id string) bool {
-	if id == "" || len(id) > 20 {
+	return len(id) <= 20 && IsDecimalSnowflake(id)
+}
+
+func IsDecimalSnowflake(id string) bool {
+	if id == "" {
 		return false
 	}
 	for i := range len(id) {

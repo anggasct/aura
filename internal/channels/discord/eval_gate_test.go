@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 type fakeEvalGate struct {
@@ -43,7 +43,7 @@ func TestUnevaluatedPersonaRefusesNonOwnersOnly(t *testing.T) {
 	if sink.calls["message:9951"] != 0 {
 		t.Fatal("refused message reached the ingress sink")
 	}
-	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != config.PersonaMessageDefaults()[config.MessageUnavailable] {
+	if got := postContents(stub, "4400"); len(got) != 1 || got[0] != auraagent.PersonaMessageDefaults()[auraagent.MessageUnavailable] {
 		t.Fatalf("replies = %q, want the unavailable message", got)
 	}
 	if observer.count(observer.denied, DeniedReasonEvalMissing) != 1 {

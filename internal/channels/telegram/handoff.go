@@ -8,6 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -21,7 +22,7 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 		return access.HandoffTarget{}, err
 	}
 	definition, _ := a.personaDefinition(requester.binding.Persona)
-	a.postNotice(ctx, requester.dest, definition.Message(config.MessageHandoffOpen))
+	a.postNotice(ctx, requester.dest, definition.Message(auraagent.MessageHandoffOpen))
 	return a.handoffTarget(&requester), nil
 }
 

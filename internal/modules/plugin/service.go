@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -70,7 +71,7 @@ func (s *Service) openPlugins() (*os.Root, error) {
 }
 
 func bundleRel(id, version string) (string, error) {
-	if !config.ValidPluginID(id) || !config.ValidPluginVersion(version) {
+	if !auraagent.ValidPluginID(id) || !config.ValidPluginVersion(version) {
 		return "", Errorf(ErrPathInvalid, "a plugin id or version is not valid")
 	}
 	return id + "/" + version, nil
@@ -342,7 +343,7 @@ func (s *Service) Review(ctx context.Context, id string) (*Review, error) {
 }
 
 func (s *Service) load(ctx context.Context, id string) (Record, VersionRecord, *Manifest, error) {
-	if ctx == nil || !config.ValidPluginID(id) {
+	if ctx == nil || !auraagent.ValidPluginID(id) {
 		return Record{}, VersionRecord{}, nil, Errorf(ErrInvalidArgument, "a valid plugin id is required")
 	}
 	record, err := s.registry.Get(ctx, id)
@@ -418,14 +419,14 @@ func (s *Service) Approve(ctx context.Context, id, digestPrefix string) (*Approv
 }
 
 func (s *Service) Disable(ctx context.Context, id string) error {
-	if ctx == nil || !config.ValidPluginID(id) {
+	if ctx == nil || !auraagent.ValidPluginID(id) {
 		return Errorf(ErrInvalidArgument, "a valid plugin id is required")
 	}
 	return s.registry.SetState(ctx, id, StateDisabled, s.now().UTC())
 }
 
 func (s *Service) Login(ctx context.Context, id string, opts *auth.LoginOptions) error {
-	if ctx == nil || !config.ValidPluginID(id) || opts == nil {
+	if ctx == nil || !auraagent.ValidPluginID(id) || opts == nil {
 		return Errorf(ErrInvalidArgument, "a valid plugin id and login options are required")
 	}
 	record, err := s.registry.Get(ctx, id)
@@ -452,7 +453,7 @@ func (s *Service) Login(ctx context.Context, id string, opts *auth.LoginOptions)
 }
 
 func (s *Service) Logout(ctx context.Context, id string) error {
-	if ctx == nil || !config.ValidPluginID(id) {
+	if ctx == nil || !auraagent.ValidPluginID(id) {
 		return Errorf(ErrInvalidArgument, "a valid plugin id is required")
 	}
 	if _, err := s.registry.Get(ctx, id); err != nil {
@@ -473,7 +474,7 @@ type RemovePlan struct {
 }
 
 func (s *Service) Remove(ctx context.Context, id string, apply bool) (*RemovePlan, error) {
-	if ctx == nil || !config.ValidPluginID(id) {
+	if ctx == nil || !auraagent.ValidPluginID(id) {
 		return nil, Errorf(ErrInvalidArgument, "a valid plugin id is required")
 	}
 	record, err := s.registry.Get(ctx, id)

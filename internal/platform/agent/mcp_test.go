@@ -4,18 +4,17 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-func mcpPersona(tools ...string) config.AgentDefinition {
-	return config.AgentDefinition{ID: "ops", Description: "Ops assistant", Instructions: "Help.", Tools: tools}
+func mcpPersona(tools ...string) Persona {
+	return Persona{ID: "ops", Description: "Ops assistant", Instructions: "Help.", Tools: tools}
 }
 
 func TestBuildWithMCPAcceptsServerAndToolEntries(t *testing.T) {
 	override := mcpPersona("read_file", "mcp_docs", "mcp_files_read_text", "mcp_files_with_underscores_ls")
-	registry, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs", "files", "files_with_underscores"}, []string{"primary"})
+	registry, err := BuildWithMCP([]Persona{override}, validTools, []string{"docs", "files", "files_with_underscores"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)
 	}
@@ -37,7 +36,7 @@ func TestBuildWithMCPRejectsUnknownServers(t *testing.T) {
 	}
 	for name, tools := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := BuildWithMCP([]config.AgentDefinition{mcpPersona(tools...)}, validTools, servers, []string{"primary"})
+			_, err := BuildWithMCP([]Persona{mcpPersona(tools...)}, validTools, servers, []string{"primary"})
 			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
 				t.Fatalf("BuildWithMCP() error = %v, want persona_invalid", err)
 			}
@@ -46,13 +45,13 @@ func TestBuildWithMCPRejectsUnknownServers(t *testing.T) {
 }
 
 func TestBuildWithoutServersRejectsMCPEntries(t *testing.T) {
-	_, err := Build([]config.AgentDefinition{mcpPersona("mcp_docs")}, validTools, []string{"primary"})
+	_, err := Build([]Persona{mcpPersona("mcp_docs")}, validTools, []string{"primary"})
 	if !fault.HasCode(err, ErrorCodePersonaInvalid) {
 		t.Fatalf("Build() error = %v, want persona_invalid", err)
 	}
 }
 
-func mcpTierPersona(tools, principals []string) config.AgentDefinition {
+func mcpTierPersona(tools, principals []string) Persona {
 	override := kantorOverride()
 	override.Tools = append(override.Tools, tools...)
 	override.PrincipalTools = append(override.PrincipalTools, principals...)
@@ -60,14 +59,14 @@ func mcpTierPersona(tools, principals []string) config.AgentDefinition {
 }
 
 func TestBuildWithMCPAcceptsPrincipalEntriesCoveredByTools(t *testing.T) {
-	cases := map[string]config.AgentDefinition{
+	cases := map[string]Persona{
 		"server entry covered by server entry":   mcpTierPersona([]string{"mcp_docs"}, []string{"mcp_docs"}),
 		"tool entry covered by tool entry":       mcpTierPersona([]string{"mcp_docs_search"}, []string{"mcp_docs_search"}),
 		"tool entry covered by its server entry": mcpTierPersona([]string{"mcp_docs"}, []string{"mcp_docs_search"}),
 	}
 	for name, override := range cases {
 		t.Run(name, func(t *testing.T) {
-			registry, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs"}, []string{"primary"})
+			registry, err := BuildWithMCP([]Persona{override}, validTools, []string{"docs"}, []string{"primary"})
 			if err != nil {
 				t.Fatalf("BuildWithMCP: %v", err)
 			}
@@ -81,7 +80,7 @@ func TestBuildWithMCPAcceptsPrincipalEntriesCoveredByTools(t *testing.T) {
 }
 
 func TestBuildWithMCPRejectsPrincipalEntriesNotCoveredByTools(t *testing.T) {
-	cases := map[string]config.AgentDefinition{
+	cases := map[string]Persona{
 		"no mcp entry in tools":            mcpTierPersona(nil, []string{"mcp_docs_search"}),
 		"server entry over tool entry":     mcpTierPersona([]string{"mcp_docs_search"}, []string{"mcp_docs"}),
 		"sibling tool entry":               mcpTierPersona([]string{"mcp_docs_read"}, []string{"mcp_docs_search"}),
@@ -90,7 +89,7 @@ func TestBuildWithMCPRejectsPrincipalEntriesNotCoveredByTools(t *testing.T) {
 	}
 	for name, override := range cases {
 		t.Run(name, func(t *testing.T) {
-			_, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs", "files"}, []string{"primary"})
+			_, err := BuildWithMCP([]Persona{override}, validTools, []string{"docs", "files"}, []string{"primary"})
 			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
 				t.Fatalf("BuildWithMCP() error = %v, want persona_invalid", err)
 			}
@@ -104,7 +103,7 @@ func TestBuildWithMCPRejectsPublicEntries(t *testing.T) {
 			override := kantorOverride()
 			override.Tools = append(override.Tools, "mcp_docs", "mcp_docs_search")
 			override.PublicTools = []string{entry}
-			_, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs"}, []string{"primary"})
+			_, err := BuildWithMCP([]Persona{override}, validTools, []string{"docs"}, []string{"primary"})
 			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
 				t.Fatalf("BuildWithMCP() error = %v, want persona_invalid", err)
 			}
@@ -113,8 +112,8 @@ func TestBuildWithMCPRejectsPublicEntries(t *testing.T) {
 }
 
 func TestMCPEntriesChangeThePersonaFingerprintAndEvalDigest(t *testing.T) {
-	build := func(override config.AgentDefinition) Definition {
-		registry, err := BuildWithMCP([]config.AgentDefinition{override}, validTools, []string{"docs"}, []string{"primary"})
+	build := func(override Persona) Definition {
+		registry, err := BuildWithMCP([]Persona{override}, validTools, []string{"docs"}, []string{"primary"})
 		if err != nil {
 			t.Fatalf("BuildWithMCP: %v", err)
 		}
@@ -139,11 +138,11 @@ func TestMCPEntriesChangeThePersonaFingerprintAndEvalDigest(t *testing.T) {
 }
 
 func TestBuildWithMCPLeavesPersonasWithoutEntriesUntouched(t *testing.T) {
-	plain, err := Build([]config.AgentDefinition{kantorOverride()}, validTools, []string{"primary"})
+	plain, err := Build([]Persona{kantorOverride()}, validTools, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	withServers, err := BuildWithMCP([]config.AgentDefinition{kantorOverride()}, validTools, []string{"docs"}, []string{"primary"})
+	withServers, err := BuildWithMCP([]Persona{kantorOverride()}, validTools, []string{"docs"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)
 	}

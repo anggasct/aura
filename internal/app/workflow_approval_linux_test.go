@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -39,7 +40,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 		t.Fatal(err)
 	}
 	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
-	cfg.Agents = &config.Agents{Definitions: []config.AgentDefinition{{
+	cfg.Agents = &auraagent.Config{Definitions: []auraagent.Persona{{
 		ID: "ops", Description: "operator", Instructions: "You plan work.", Tools: []string{"github_comment", "workflow_propose"},
 	}}}
 	registry, err := buildAgentRegistry(&cfg)

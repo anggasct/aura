@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -119,7 +119,7 @@ func (a *Adapter) DecideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 }
 
 func (a *Adapter) ServesPersona(persona string) bool {
-	return a.router != nil && a.router.ServesPersona(config.BindingChannelDiscord, a.account.Name, persona)
+	return a.router != nil && a.router.ServesPersona(auraagent.BindingChannelDiscord, a.account.Name, persona)
 }
 
 type openedCard struct {
@@ -204,13 +204,13 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, Errorf(ErrorCodeApprovalUnavailable, "owner approval card delivery failed")
 	}
-	a.postNotice(ctx, token, requester.channelID, definition.Message(config.MessageWaitingForOwner))
+	a.postNotice(ctx, token, requester.channelID, definition.Message(auraagent.MessageWaitingForOwner))
 	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID})
 	notify := context.WithoutCancel(ctx)
 	switch {
 	case timedOut || errors.Is(err, context.DeadlineExceeded):
 		a.observeRouted(ctx, approval.RoutedTimeout)
-		a.postNotice(notify, token, requester.channelID, definition.Message(config.MessageApprovalTimeout))
+		a.postNotice(notify, token, requester.channelID, definition.Message(auraagent.MessageApprovalTimeout))
 		if err != nil {
 			return false, err
 		}
@@ -234,7 +234,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		return true, nil
 	default:
 		a.observeRouted(ctx, approval.RoutedRejected)
-		a.postNotice(notify, token, requester.channelID, definition.Message(config.MessageApprovalDenied))
+		a.postNotice(notify, token, requester.channelID, definition.Message(auraagent.MessageApprovalDenied))
 		return false, nil
 	}
 }

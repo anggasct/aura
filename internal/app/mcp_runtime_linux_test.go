@@ -412,9 +412,9 @@ func TestMCPToolsAreDeniedToNonOwnersAtTheBroker(t *testing.T) {
 }
 
 func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *testing.T) {
-	registry, err := auraagent.BuildWithMCP([]config.AgentDefinition{
-		{ID: "team", Description: "Team", Instructions: "Help.", Audience: config.AudienceTrusted, Tools: []string{"mcp_docs"}, PrincipalTools: []string{"mcp_docs_ping"}},
-		{ID: "plain", Description: "Plain", Instructions: "Help.", Audience: config.AudienceTrusted, Tools: []string{"mcp_docs"}},
+	registry, err := auraagent.BuildWithMCP([]auraagent.Persona{
+		{ID: "team", Description: "Team", Instructions: "Help.", Audience: auraagent.AudienceTrusted, Tools: []string{"mcp_docs"}, PrincipalTools: []string{"mcp_docs_ping"}},
+		{ID: "plain", Description: "Plain", Instructions: "Help.", Audience: auraagent.AudienceTrusted, Tools: []string{"mcp_docs"}},
 	}, []string{"read_file"}, []string{"docs"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)

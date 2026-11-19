@@ -293,27 +293,27 @@ func TestServerReportsQuarantinedWorkflowDefinitions(t *testing.T) {
 			_ = app.Close(t.Context())
 			t.Fatal("Build accepted a persona that lists an unknown workflow")
 		}
-		if !fault.HasCode(err, config.ErrorCodePersonaInvalid) {
-			t.Fatalf("Build error = %v, want %s", err, config.ErrorCodePersonaInvalid)
+		if !fault.HasCode(err, auraagent.ErrorCodePersonaInvalid) {
+			t.Fatalf("Build error = %v, want %s", err, auraagent.ErrorCodePersonaInvalid)
 		}
 	})
 }
 
-func hasConfigCode(err error, want config.ErrorCode) bool {
+func hasConfigCode(err error, want auraagent.ErrorCode) bool {
 	return fault.HasCode(err, want)
 }
 
 func TestQuarantinedRoutineIsHiddenFromTheControllerTools(t *testing.T) {
 	controller, _, _ := workflowToolFixture(t, "book_visit")
-	registry, err := auraagent.Build([]config.AgentDefinition{{
-		ID: "desk", Description: "desk", Instructions: "You help.", Audience: config.AudienceTrusted,
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID: "desk", Description: "desk", Instructions: "You help.", Audience: auraagent.AudienceTrusted,
 		Tools: []string{"workflow_start"}, PrincipalTools: []string{"workflow_start"}, Workflows: []string{"book_visit", "broken_routine"},
 	}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newWorkflowToolController(controller.interpreter, controller.runs, registry, nil); !hasConfigCode(err, config.ErrorCodePersonaInvalid) {
-		t.Fatalf("controller without the quarantine list = %v, want %s", err, config.ErrorCodePersonaInvalid)
+	if _, err := newWorkflowToolController(controller.interpreter, controller.runs, registry, nil); !hasConfigCode(err, auraagent.ErrorCodePersonaInvalid) {
+		t.Fatalf("controller without the quarantine list = %v, want %s", err, auraagent.ErrorCodePersonaInvalid)
 	}
 	quarantined, err := newWorkflowToolController(controller.interpreter, controller.runs, registry, []string{"broken_routine"})
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -33,12 +33,12 @@ func (f *fakePairing) Request(_ context.Context, principalID, account string) (P
 	return PairingResult{Outcome: f.outcome}, nil
 }
 
-func pairingPersonas() []config.AgentDefinition {
+func pairingPersonas() []auraagent.Persona {
 	personas := accessPersonas()
 	personas = append(personas,
-		config.AgentDefinition{
-			ID: "office", Description: "d", Instructions: "i", Audience: config.AudienceTrusted, Pairing: true,
-			Messages: map[string]string{config.MessagePairingCode: "Kirim kode {code} ke pemilik ya."},
+		auraagent.Persona{
+			ID: "office", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Pairing: true,
+			Messages: map[string]string{auraagent.MessagePairingCode: "Kirim kode {code} ke pemilik ya."},
 		},
 	)
 	return personas
@@ -61,8 +61,8 @@ func TestUnknownDMToAPairingPersonaGetsAReply(t *testing.T) {
 		reply   string
 	}{
 		"issued":  {PairingOutcomeIssued, "Kirim kode 7K3M9QXR ke pemilik ya."},
-		"pending": {PairingOutcomePending, config.PersonaMessageDefaults()[config.MessagePairingPending]},
-		"locked":  {PairingOutcomeLocked, config.PersonaMessageDefaults()[config.MessagePairingLocked]},
+		"pending": {PairingOutcomePending, auraagent.PersonaMessageDefaults()[auraagent.MessagePairingPending]},
+		"locked":  {PairingOutcomeLocked, auraagent.PersonaMessageDefaults()[auraagent.MessagePairingLocked]},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {

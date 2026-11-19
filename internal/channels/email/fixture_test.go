@@ -391,14 +391,14 @@ type fakeRouter struct {
 }
 
 func (r fakeRouter) Resolve(scope *auraagent.RouteScope) (auraagent.RouteMatch, bool) {
-	if scope.Channel != config.BindingChannelEmail || scope.Account != testAccount {
+	if scope.Channel != auraagent.BindingChannelEmail || scope.Account != testAccount {
 		return auraagent.RouteMatch{}, false
 	}
 	return auraagent.RouteMatch{Persona: r.definition.ID, Score: auraagent.ScoreAccountDefault, Binding: auraagent.AccountDefaultBinding}, true
 }
 
 func (r fakeRouter) ServesPublic(channel, account string) bool {
-	return channel == config.BindingChannelEmail && account == testAccount && r.definition.Audience == config.AudiencePublic
+	return channel == auraagent.BindingChannelEmail && account == testAccount && r.definition.Audience == auraagent.AudiencePublic
 }
 
 func (r fakeRouter) Persona(id string) (auraagent.Definition, bool) {
@@ -564,7 +564,7 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	}
 	audience := opts.audience
 	if audience == "" {
-		audience = config.AudienceTrusted
+		audience = auraagent.AudienceTrusted
 	}
 	adapter.SetPrincipalResolver(owners)
 	adapter.SetPersonaRouter(fakeRouter{definition: auraagent.Definition{ID: testPersona, Audience: audience}})

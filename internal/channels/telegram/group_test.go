@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -326,11 +325,11 @@ func TestGroupConversationKeysAreScopedPerPrincipalUnlessShared(t *testing.T) {
 		item       update
 		want       string
 	}{
-		{"owner shares the group", auraagent.Definition{ID: testPersona, Audience: config.AudiencePublic}, mentioning(10, ownerUserID, handle+" a", handle), "chat:-1001234567890"},
-		{"non-owner is per principal", auraagent.Definition{ID: testPersona, Audience: config.AudiencePublic}, mentioning(10, allowedUserID, handle+" a", handle), "chat:-1001234567890/principal:telegram:" + trusted},
-		{"non-owner in a topic is per principal", auraagent.Definition{ID: testPersona, Audience: config.AudiencePublic}, inTopic(mentioning(10, allowedUserID, handle+" a", handle), 7), "chat:-1001234567890/topic:7/principal:telegram:" + trusted},
-		{"shared group context", auraagent.Definition{ID: testPersona, Audience: config.AudiencePublic, GroupContext: config.GroupContextShared}, mentioning(10, allowedUserID, handle+" a", handle), "chat:-1001234567890"},
-		{"shared group context in a topic", auraagent.Definition{ID: testPersona, Audience: config.AudiencePublic, GroupContext: config.GroupContextShared}, inTopic(mentioning(10, allowedUserID, handle+" a", handle), 7), "chat:-1001234567890/topic:7"},
+		{"owner shares the group", auraagent.Definition{ID: testPersona, Audience: auraagent.AudiencePublic}, mentioning(10, ownerUserID, handle+" a", handle), "chat:-1001234567890"},
+		{"non-owner is per principal", auraagent.Definition{ID: testPersona, Audience: auraagent.AudiencePublic}, mentioning(10, allowedUserID, handle+" a", handle), "chat:-1001234567890/principal:telegram:" + trusted},
+		{"non-owner in a topic is per principal", auraagent.Definition{ID: testPersona, Audience: auraagent.AudiencePublic}, inTopic(mentioning(10, allowedUserID, handle+" a", handle), 7), "chat:-1001234567890/topic:7/principal:telegram:" + trusted},
+		{"shared group context", auraagent.Definition{ID: testPersona, Audience: auraagent.AudiencePublic, GroupContext: auraagent.GroupContextShared}, mentioning(10, allowedUserID, handle+" a", handle), "chat:-1001234567890"},
+		{"shared group context in a topic", auraagent.Definition{ID: testPersona, Audience: auraagent.AudiencePublic, GroupContext: auraagent.GroupContextShared}, inTopic(mentioning(10, allowedUserID, handle+" a", handle), 7), "chat:-1001234567890/topic:7"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -384,7 +383,7 @@ func TestGroupSendersResolveToTheSameClassesAsPrivateChats(t *testing.T) {
 func TestPairingNeverIssuesACodeInAGroup(t *testing.T) {
 	handle := "@" + testBotName
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD-2345"}}
-	trusted := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted, Pairing: true}
+	trusted := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	t.Run("unknown sender", func(t *testing.T) {
 		rig := newGroupRig(t, accessOpts{definition: trusted, settings: AccessSettings{Pairing: pairing}})
 		rig.runGroup(t, mentioning(10, strangerID, handle+" let me in", handle))
@@ -418,7 +417,7 @@ func TestGroupSendersPassThroughTheSharedGates(t *testing.T) {
 	})
 	t.Run("eval gate answers in the group", func(t *testing.T) {
 		evals := &fakeEvals{}
-		trusted := auraagent.Definition{ID: testPersona, Audience: config.AudienceTrusted}
+		trusted := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted}
 		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, definition: trusted, settings: AccessSettings{Evals: evals}})
 		rig.runGroup(t, mentioning(10, allowedUserID, handle+" hello", handle))
 		rig.assertQuiet(t, "persona_eval_missing")

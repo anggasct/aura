@@ -77,7 +77,10 @@ func placeUnder(prefix string, err error) []error {
 		return []error{Field(prefix, err)}
 	}
 	path := prefix
-	if node.Path != "" {
+	switch {
+	case strings.HasPrefix(node.Path, "["):
+		path = prefix + node.Path
+	case node.Path != "":
 		path = prefix + "." + node.Path
 	}
 	return []error{&FieldError{Path: path, Position: node.Position, AtKey: node.AtKey, Err: node.Err}}

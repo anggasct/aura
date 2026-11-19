@@ -4,6 +4,7 @@ import (
 	"slices"
 
 	"github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -86,7 +87,7 @@ func validatePluginServers(plugins []PluginServer, cfg *config.MCP) error {
 	seen := make(map[string]bool, len(plugins))
 	for i := range plugins {
 		plugin := &plugins[i]
-		if !config.ValidPluginID(plugin.ID) || seen[plugin.ID] {
+		if !auraagent.ValidPluginID(plugin.ID) || seen[plugin.ID] {
 			return Errorf(ErrConfigInvalid, "plugin ids must be valid and unique")
 		}
 		seen[plugin.ID] = true

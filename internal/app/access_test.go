@@ -8,7 +8,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -115,8 +114,8 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	registry, err := auraagent.Build([]config.AgentDefinition{{
-		ID: "kantor", Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID: "kantor", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted,
 		Tools: []string{"read_file", "write_file", "exec"}, PrincipalTools: []string{"write_file"},
 	}}, []string{"read_file", "write_file", "exec"}, nil)
 	if err != nil {

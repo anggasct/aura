@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -92,18 +91,18 @@ func (r *Registry) Resolve(required []string, preferID *string) (Definition, err
 	return r.definitions[best].clone(), nil
 }
 
-func Build(overrides []config.AgentDefinition, knownTools, modelRoutes []string) (*Registry, error) {
+func Build(overrides []Persona, knownTools, modelRoutes []string) (*Registry, error) {
 	return BuildWithMCP(overrides, knownTools, nil, modelRoutes)
 }
 
-func BuildWithMCP(overrides []config.AgentDefinition, knownTools, mcpServers, modelRoutes []string) (*Registry, error) {
+func BuildWithMCP(overrides []Persona, knownTools, mcpServers, modelRoutes []string) (*Registry, error) {
 	registry := newRegistry()
 	for index := range builtins {
 		definition := builtins[index].clone()
 		definition.MemoryScope = MemoryScopePersona
 		definition.Name = cmp.Or(definition.Name, definition.ID)
-		definition.Audience = config.AudienceOwner
-		definition.GroupContext = config.GroupContextPerPrincipal
+		definition.Audience = AudienceOwner
+		definition.GroupContext = GroupContextPerPrincipal
 		registry.upsert(&definition)
 	}
 	seen := make(map[string]struct{}, len(overrides))
@@ -121,7 +120,7 @@ func BuildWithMCP(overrides []config.AgentDefinition, knownTools, mcpServers, mo
 	return registry, nil
 }
 
-func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpServers, modelRoutes []string) (*Definition, error) {
+func buildOverride(override *Persona, index int, knownTools, mcpServers, modelRoutes []string) (*Definition, error) {
 	field := fmt.Sprintf("agents.definitions[%d]", index)
 	if strings.TrimSpace(override.ID) == "" {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must not be empty")
@@ -135,13 +134,13 @@ func buildOverride(override *config.AgentDefinition, index int, knownTools, mcpS
 		ModelRoute:      override.ModelRoute,
 		MemoryScope:     cmp.Or(override.MemoryScope, MemoryScopePersona),
 		Limits:          Limits{TurnTimeout: time.Duration(override.Limits.TurnTimeout)},
-		Audience:        cmp.Or(override.Audience, config.AudienceOwner),
+		Audience:        cmp.Or(override.Audience, AudienceOwner),
 		Pairing:         override.Pairing,
 		PrincipalTools:  slices.Clone(override.PrincipalTools),
 		PublicTools:     slices.Clone(override.PublicTools),
 		ApprovalTimeout: time.Duration(override.ApprovalTimeout),
 		Messages:        maps.Clone(override.Messages),
-		GroupContext:    cmp.Or(override.GroupContext, config.GroupContextPerPrincipal),
+		GroupContext:    cmp.Or(override.GroupContext, GroupContextPerPrincipal),
 		EvalDir:         override.Evals.Dir,
 		Workflows:       slices.Clone(override.Workflows),
 		Plugins:         slices.Clone(override.Plugins),

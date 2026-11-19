@@ -8,7 +8,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -134,7 +133,7 @@ func (a *Adapter) routePersona(sender string) (string, bool) {
 		return "", false
 	}
 	match, ok := a.router.Resolve(&auraagent.RouteScope{
-		Channel: config.BindingChannelEmail,
+		Channel: auraagent.BindingChannelEmail,
 		Account: a.account.Name,
 		UserID:  sender,
 	})
@@ -152,7 +151,7 @@ func (a *Adapter) personaDefinition(persona string) (auraagent.Definition, bool)
 }
 
 func (a *Adapter) evalDrop(ctx context.Context, definition *auraagent.Definition, persona string, class principal.Class) dropReason {
-	if class == principal.ClassOwner || a.access.Evals == nil || definition.Audience == config.AudienceOwner {
+	if class == principal.ClassOwner || a.access.Evals == nil || definition.Audience == auraagent.AudienceOwner {
 		return ""
 	}
 	evaluated, err := a.access.Evals.Evaluated(ctx, persona)

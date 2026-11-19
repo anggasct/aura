@@ -27,6 +27,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
@@ -52,12 +53,12 @@ func surfacePersonas(cfg *appconfig.Config) {
 	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
 	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions,
-		config.AgentDefinition{
-			ID: opsPersona, Description: "d", Instructions: "i", Audience: config.AudienceTrusted,
+		auraagent.Persona{
+			ID: opsPersona, Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted,
 			Tools: []string{"read_file", "write_file", github.ToolComment}, PrincipalTools: []string{"write_file", github.ToolComment},
 		},
-		config.AgentDefinition{
-			ID: lobbyPersona, Description: "d", Instructions: "i", Audience: config.AudiencePublic,
+		auraagent.Persona{
+			ID: lobbyPersona, Description: "d", Instructions: "i", Audience: auraagent.AudiencePublic,
 			Tools: []string{"read_file", "write_file", github.ToolComment}, PrincipalTools: []string{"read_file"}, PublicTools: []string{"read_file"},
 		},
 	)

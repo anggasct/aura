@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/schedule"
@@ -151,7 +150,7 @@ func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 	}
 	modelRoutes := slices.Collect(maps.Keys(routeSet))
 	slices.Sort(modelRoutes)
-	var overrides []config.AgentDefinition
+	var overrides []auraagent.Persona
 	if cfg.Agents != nil {
 		overrides = cfg.Agents.Definitions
 	}

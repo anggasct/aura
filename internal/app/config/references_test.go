@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -25,7 +26,7 @@ func TestReferencesAreValidatedOnceAndJoined(t *testing.T) {
 	cfg.Telemetry.CredentialRef = ref
 	cfg.Models.Definitions = map[string]model.Definition{"defined": {}}
 	cfg.ModelRoutes = map[string]model.ModelRoute{"fast": {Candidates: []string{"undefined-definition"}}}
-	cfg.Bindings = []legacyconfig.Binding{{Persona: "default", Channel: legacyconfig.BindingChannelDiscord, Account: "undefined-account", GuildID: "123"}}
+	cfg.Bindings = []auraagent.Binding{{Persona: "default", Channel: auraagent.BindingChannelDiscord, Account: "undefined-account", GuildID: "123"}}
 	cfg.Owner = &legacyconfig.Owner{Name: "owner " + canary}
 	doc, err := parseDocument([]byte("version: 1\n"))
 	if err != nil {
@@ -66,7 +67,7 @@ func TestReferenceHelpersGuardNilPointers(t *testing.T) {
 		{"telegram discord tokens nil discord", "channels.discord", func() error { return telegramDiscordTokenProblems(&legacyconfig.Telegram{}, nil)[0] }},
 		{"telegram owner nil telegram", "channels.telegram", func() error { return telegramOwnerProblem(nil, nil) }},
 		{"email owner nil email", "channels.email", func() error { return emailOwnerProblem(nil, nil) }},
-		{"bindings nil channels", "channels", func() error { return bindingProblems(nil, nil)[0] }},
+		{"bindings nil channels", "channels", func() error { return bindingAccountProblems(nil, nil)[0] }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.run()
