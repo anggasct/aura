@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -468,15 +469,15 @@ func validateAuthURL(found *problems, field, raw string) *url.URL {
 	case raw == "" || len(raw) > maxURLBytes || err != nil || parsed.Host == "" || parsed.User != nil || parsed.Fragment != "":
 		found.add("%s must be an https url without credentials or fragment", field)
 		return nil
-	case parsed.Scheme == "http" && !config.IsLoopbackBaseURL(raw), parsed.Scheme != "https" && parsed.Scheme != "http":
+	case parsed.Scheme == "http" && !egress.IsLoopbackBaseURL(raw), parsed.Scheme != "https" && parsed.Scheme != "http":
 		found.add("%s must use https, or http on a loopback address", field)
 		return nil
 	}
 	return parsed
 }
 
-func egressListed(egress []string, target *url.URL) bool {
-	return slices.Contains(egress, strings.ToLower(target.Host)) || slices.Contains(egress, strings.ToLower(target.Hostname()))
+func egressListed(allowed []string, target *url.URL) bool {
+	return slices.Contains(allowed, strings.ToLower(target.Host)) || slices.Contains(allowed, strings.ToLower(target.Hostname()))
 }
 
 func (m *Manifest) validateScopes(found *problems) {

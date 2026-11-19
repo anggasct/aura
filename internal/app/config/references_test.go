@@ -9,6 +9,7 @@ import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -22,8 +23,8 @@ func TestReferencesAreValidatedOnceAndJoined(t *testing.T) {
 	}
 	cfg := Default()
 	cfg.Telemetry.CredentialRef = ref
-	cfg.Models.Definitions = map[string]legacyconfig.ModelDefinition{"defined": {}}
-	cfg.ModelRoutes = map[string]legacyconfig.ModelRoute{"fast": {Candidates: []string{"undefined-definition"}}}
+	cfg.Models.Definitions = map[string]model.Definition{"defined": {}}
+	cfg.ModelRoutes = map[string]model.ModelRoute{"fast": {Candidates: []string{"undefined-definition"}}}
 	cfg.Bindings = []legacyconfig.Binding{{Persona: "default", Channel: legacyconfig.BindingChannelDiscord, Account: "undefined-account", GuildID: "123"}}
 	cfg.Owner = &legacyconfig.Owner{Name: "owner " + canary}
 	doc, err := parseDocument([]byte("version: 1\n"))

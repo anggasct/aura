@@ -12,7 +12,6 @@ import (
 	"google.golang.org/genai"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/approval"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -117,11 +116,11 @@ func (s *recordingSummary) Summarize(_ context.Context, prompt *memory.SummaryPr
 	return s.text, nil
 }
 
-func summaryDefinition(protocol, modelName string) config.ModelDefinition {
-	return config.ModelDefinition{
+func summaryDefinition(protocol, modelName string) auramodel.Definition {
+	return auramodel.Definition{
 		Protocol: protocol,
 		Model:    modelName,
-		Capabilities: config.ModelCapabilities{
+		Capabilities: auramodel.Capabilities{
 			Tokenizer:        "cl100k_base",
 			ContextTokens:    200000,
 			StructuredOutput: true,
@@ -177,11 +176,11 @@ func TestBuildMemorySummaryDefaultsToAuxiliaryRoute(t *testing.T) {
 	models := auramodel.Set{"auxiliary": &countingSummaryLLM{answer: "digest"}}
 	cfg := appconfig.Default()
 	cfg.Models.Routing = nil
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]auramodel.Definition{
 		"primary": summaryDefinition("primary-protocol", "primary-"+suffix),
 		"aux":     summaryDefinition("aux-protocol", auxModel),
 	}
-	cfg.ModelRoutes = map[string]config.ModelRoute{
+	cfg.ModelRoutes = map[string]auramodel.ModelRoute{
 		"auxiliary": {Candidates: []string{"aux"}},
 	}
 	model, summarizer := buildMemorySummary(ctx, &cfg, models, nil, nil)
@@ -222,11 +221,11 @@ func TestBuildMemorySummaryHonorsSummarizeOverride(t *testing.T) {
 	models := auramodel.Set{route: &countingSummaryLLM{answer: "digest"}}
 	cfg := appconfig.Default()
 	cfg.Models.Routing = map[string]string{"summarize": route}
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]auramodel.Definition{
 		"primary":  summaryDefinition("primary-protocol", "primary-"+suffix),
 		"override": summaryDefinition("override-protocol", overrideModel),
 	}
-	cfg.ModelRoutes = map[string]config.ModelRoute{
+	cfg.ModelRoutes = map[string]auramodel.ModelRoute{
 		route: {Candidates: []string{"override"}},
 	}
 	model, summarizer := buildMemorySummary(context.Background(), &cfg, models, nil, nil)
@@ -248,10 +247,10 @@ func TestMemoryRuntimeRecallStaysRaw(t *testing.T) {
 	cfg.Memory.RangeThreshold = 6
 	cfg.Memory.RangeLiveWindow = 2
 	cfg.Models.Routing = map[string]string{"summarize": route}
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]auramodel.Definition{
 		"aux": summaryDefinition("aux-protocol", "aux-"+suffix),
 	}
-	cfg.ModelRoutes = map[string]config.ModelRoute{
+	cfg.ModelRoutes = map[string]auramodel.ModelRoute{
 		route: {Candidates: []string{"aux"}},
 	}
 	db := newMemoryTestDB(t)

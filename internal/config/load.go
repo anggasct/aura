@@ -15,6 +15,7 @@ import (
 
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -177,7 +178,7 @@ func ValidateMCPServer(s *MCPServer, field string) error {
 		if s.Command != "" || len(s.Args) > 0 {
 			return configkit.Invalid(field+".command", "and args are not allowed for streamable_http transport")
 		}
-		if err := ValidateBaseURL(s.URL); err != nil {
+		if err := egress.ValidateBaseURL(s.URL); err != nil {
 			return configkit.Invalid(field+".url", "is invalid: "+err.Error())
 		}
 	case "legacy_sse":
@@ -187,7 +188,7 @@ func ValidateMCPServer(s *MCPServer, field string) error {
 		if s.URL == "" {
 			return configkit.Invalid(field+".url", "is required for legacy_sse transport")
 		}
-		if err := ValidateBaseURL(s.URL); err != nil {
+		if err := egress.ValidateBaseURL(s.URL); err != nil {
 			return configkit.Invalid(field+".url", "is invalid: "+err.Error())
 		}
 	default:
@@ -570,7 +571,7 @@ func validatePublicWebhookURL(raw string) error {
 	if u.Scheme != "https" {
 		return configkit.Invalid(telegramWebhookPublicBaseURLField, "must use https")
 	}
-	if err := ValidateBaseURL(raw); err != nil {
+	if err := egress.ValidateBaseURL(raw); err != nil {
 		return configkit.Invalid(telegramWebhookPublicBaseURLField, "is not valid: "+err.Error())
 	}
 	return nil

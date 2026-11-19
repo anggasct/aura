@@ -7,18 +7,17 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
-func validDefinition(protocol string, caps config.ModelCapabilities) config.ModelDefinition {
+func validDefinition(protocol string, caps Capabilities) Definition {
 	if caps.ContextTokens == 0 {
 		caps.ContextTokens = 128000
 	}
 	if caps.Tokenizer == "" {
 		caps.Tokenizer = "cl100k_base"
 	}
-	return config.ModelDefinition{
+	return Definition{
 		Protocol:     protocol,
 		Model:        "test-model",
 		Capabilities: caps,
@@ -26,11 +25,11 @@ func validDefinition(protocol string, caps config.ModelCapabilities) config.Mode
 }
 
 func TestValidateRoute_ValidChains(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true, Tools: true}),
-		"m2": validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{Streaming: true, Tools: true}),
-		"m3": validDefinition(config.ProtocolGeminiNative, config.ModelCapabilities{Streaming: true, Tools: true, Vision: true}),
-		"m4": validDefinition(config.ProtocolOpenAIResponses, config.ModelCapabilities{Streaming: true, Tools: true}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true, Tools: true}),
+		"m2": validDefinition(ProtocolAnthropicMessages, Capabilities{Streaming: true, Tools: true}),
+		"m3": validDefinition(ProtocolGeminiNative, Capabilities{Streaming: true, Tools: true, Vision: true}),
+		"m4": validDefinition(ProtocolOpenAIResponses, Capabilities{Streaming: true, Tools: true}),
 	}
 
 	tests := []struct {
@@ -45,7 +44,7 @@ func TestValidateRoute_ValidChains(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			route := config.ModelRoute{
+			route := ModelRoute{
 				Candidates:          tt.candidates,
 				MaxProviderAttempts: 4,
 				RetryDelayBudget:    configkit.Duration(20 * time.Second),
@@ -59,47 +58,47 @@ func TestValidateRoute_ValidChains(t *testing.T) {
 }
 
 func TestValidateRoute_RejectsInvalidRouteName(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
 	}
 	invalidNames := []string{"", "123-route", "RouteName", "route/name", "route:name"}
 	for _, name := range invalidNames {
-		route := config.ModelRoute{Candidates: []string{"m1"}}
+		route := ModelRoute{Candidates: []string{"m1"}}
 		err := ValidateRoute(name, route, defs, nil)
 		wantCode(t, err, ErrorCodeRouteInvalid)
 	}
 }
 
 func TestValidateRoute_RejectsInvalidChainDepth(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"m2": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"m3": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"m4": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"m5": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"m2": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"m3": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"m4": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"m5": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
 	}
 
-	err := ValidateRoute("primary", config.ModelRoute{Candidates: nil}, defs, nil)
+	err := ValidateRoute("primary", ModelRoute{Candidates: nil}, defs, nil)
 	wantCode(t, err, ErrorCodeRouteInvalid)
 
-	err = ValidateRoute("primary", config.ModelRoute{Candidates: []string{"m1", "m2", "m3", "m4", "m5"}}, defs, nil)
+	err = ValidateRoute("primary", ModelRoute{Candidates: []string{"m1", "m2", "m3", "m4", "m5"}}, defs, nil)
 	wantCode(t, err, ErrorCodeRouteInvalid)
 }
 
 func TestValidateRoute_RejectsDuplicateCandidates(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"m2": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"m2": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
 	}
 
-	route := config.ModelRoute{Candidates: []string{"m1", "m2", "m1"}}
+	route := ModelRoute{Candidates: []string{"m1", "m2", "m1"}}
 	err := ValidateRoute("primary", route, defs, nil)
 	wantCode(t, err, ErrorCodeRouteInvalid)
 }
 
 func TestValidateRoute_RejectsInlineEndpointsAndSecrets(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
 	}
 
 	badCandidates := []string{
@@ -111,65 +110,65 @@ func TestValidateRoute_RejectsInlineEndpointsAndSecrets(t *testing.T) {
 	}
 
 	for _, bad := range badCandidates {
-		route := config.ModelRoute{Candidates: []string{bad}}
+		route := ModelRoute{Candidates: []string{bad}}
 		err := ValidateRoute("primary", route, defs, nil)
 		wantCode(t, err, ErrorCodeRouteInvalid)
 	}
 }
 
 func TestValidateRoute_RejectsNegativeBounds(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
 	}
 
-	routeAttempts := config.ModelRoute{Candidates: []string{"m1"}, MaxProviderAttempts: -1}
+	routeAttempts := ModelRoute{Candidates: []string{"m1"}, MaxProviderAttempts: -1}
 	wantCode(t, ValidateRoute("primary", routeAttempts, defs, nil), ErrorCodeRouteInvalid)
 
-	routeDelay := config.ModelRoute{Candidates: []string{"m1"}, RetryDelayBudget: configkit.Duration(-time.Second)}
+	routeDelay := ModelRoute{Candidates: []string{"m1"}, RetryDelayBudget: configkit.Duration(-time.Second)}
 	wantCode(t, ValidateRoute("primary", routeDelay, defs, nil), ErrorCodeRouteInvalid)
 
-	routeCost := config.ModelRoute{Candidates: []string{"m1"}, CostBudgetUSD: -0.50}
+	routeCost := ModelRoute{Candidates: []string{"m1"}, CostBudgetUSD: -0.50}
 	wantCode(t, ValidateRoute("primary", routeCost, defs, nil), ErrorCodeRouteInvalid)
 }
 
 func TestValidateRoute_RejectsUnknownDefinition(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
 	}
 
-	route := config.ModelRoute{Candidates: []string{"unknown-model"}}
+	route := ModelRoute{Candidates: []string{"unknown-model"}}
 	err := ValidateRoute("primary", route, defs, nil)
 	wantCode(t, err, ErrorCodeNotFound)
 }
 
 func TestValidateRoute_RejectsInvalidCapabilityMetadata(t *testing.T) {
-	defsMissingContext := map[string]config.ModelDefinition{
+	defsMissingContext := map[string]Definition{
 		"m1": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "test",
-			Capabilities: config.ModelCapabilities{ContextTokens: 0, Tokenizer: "cl100k"},
+			Capabilities: Capabilities{ContextTokens: 0, Tokenizer: "cl100k"},
 		},
 	}
-	wantCode(t, ValidateRoute("primary", config.ModelRoute{Candidates: []string{"m1"}}, defsMissingContext, nil), ErrorCodeCapabilityUnsupported)
+	wantCode(t, ValidateRoute("primary", ModelRoute{Candidates: []string{"m1"}}, defsMissingContext, nil), ErrorCodeCapabilityUnsupported)
 
-	defsMissingTokenizer := map[string]config.ModelDefinition{
+	defsMissingTokenizer := map[string]Definition{
 		"m2": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "test",
-			Capabilities: config.ModelCapabilities{ContextTokens: 4096, Tokenizer: ""},
+			Capabilities: Capabilities{ContextTokens: 4096, Tokenizer: ""},
 		},
 	}
-	wantCode(t, ValidateRoute("primary", config.ModelRoute{Candidates: []string{"m2"}}, defsMissingTokenizer, nil), ErrorCodeCapabilityUnsupported)
+	wantCode(t, ValidateRoute("primary", ModelRoute{Candidates: []string{"m2"}}, defsMissingTokenizer, nil), ErrorCodeCapabilityUnsupported)
 }
 
 func TestValidateRoute_CapabilityPredicateEnforcement(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"vision-model": validDefinition(config.ProtocolGeminiNative, config.ModelCapabilities{
+	defs := map[string]Definition{
+		"vision-model": validDefinition(ProtocolGeminiNative, Capabilities{
 			Streaming: true,
 			Tools:     true,
 			Vision:    true,
 		}),
-		"text-only-model": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{
+		"text-only-model": validDefinition(ProtocolOpenAIChatCompat, Capabilities{
 			Streaming: true,
 			Tools:     true,
 			Vision:    false,
@@ -178,20 +177,20 @@ func TestValidateRoute_CapabilityPredicateEnforcement(t *testing.T) {
 
 	pred := &CapabilityPredicate{Vision: true}
 
-	err := ValidateRoute("vision-route", config.ModelRoute{Candidates: []string{"vision-model"}}, defs, pred)
+	err := ValidateRoute("vision-route", ModelRoute{Candidates: []string{"vision-model"}}, defs, pred)
 	if err != nil {
 		t.Fatalf("expected valid route, got %v", err)
 	}
 
-	err = ValidateRoute("vision-route", config.ModelRoute{Candidates: []string{"text-only-model"}}, defs, pred)
+	err = ValidateRoute("vision-route", ModelRoute{Candidates: []string{"text-only-model"}}, defs, pred)
 	wantCode(t, err, ErrorCodeCapabilityUnsupported)
 
-	err = ValidateRoute("vision-route", config.ModelRoute{Candidates: []string{"vision-model", "text-only-model"}}, defs, pred)
+	err = ValidateRoute("vision-route", ModelRoute{Candidates: []string{"vision-model", "text-only-model"}}, defs, pred)
 	wantCode(t, err, ErrorCodeCapabilityUnsupported)
 }
 
 func TestCapabilityPredicate_SatisfiedBy(t *testing.T) {
-	caps := config.ModelCapabilities{
+	caps := Capabilities{
 		Streaming:        true,
 		Tools:            true,
 		StructuredOutput: true,
@@ -206,19 +205,19 @@ func TestCapabilityPredicate_SatisfiedBy(t *testing.T) {
 	checks := []struct {
 		name      string
 		pred      CapabilityPredicate
-		caps      config.ModelCapabilities
+		caps      Capabilities
 		wantOk    bool
 		wantField string
 	}{
-		{"streaming-missing", CapabilityPredicate{Streaming: true}, config.ModelCapabilities{}, false, "streaming"},
-		{"tools-missing", CapabilityPredicate{Tools: true}, config.ModelCapabilities{}, false, "tools"},
-		{"structured-missing", CapabilityPredicate{StructuredOutput: true}, config.ModelCapabilities{}, false, "structured_output"},
-		{"vision-missing", CapabilityPredicate{Vision: true}, config.ModelCapabilities{}, false, "vision"},
-		{"audio-missing", CapabilityPredicate{Audio: true}, config.ModelCapabilities{}, false, "audio"},
-		{"reasoning-missing", CapabilityPredicate{Reasoning: true}, config.ModelCapabilities{}, false, "reasoning"},
+		{"streaming-missing", CapabilityPredicate{Streaming: true}, Capabilities{}, false, "streaming"},
+		{"tools-missing", CapabilityPredicate{Tools: true}, Capabilities{}, false, "tools"},
+		{"structured-missing", CapabilityPredicate{StructuredOutput: true}, Capabilities{}, false, "structured_output"},
+		{"vision-missing", CapabilityPredicate{Vision: true}, Capabilities{}, false, "vision"},
+		{"audio-missing", CapabilityPredicate{Audio: true}, Capabilities{}, false, "audio"},
+		{"reasoning-missing", CapabilityPredicate{Reasoning: true}, Capabilities{}, false, "reasoning"},
 		{"context-tokens-insufficient", CapabilityPredicate{MinContextTokens: 100000}, caps, false, "context_tokens"},
 		{"tokenizer-mismatch", CapabilityPredicate{Tokenizer: "sentencepiece"}, caps, false, "tokenizer"},
-		{"usage-reporting-missing", CapabilityPredicate{UsageReporting: true}, config.ModelCapabilities{}, false, "usage_reporting"},
+		{"usage-reporting-missing", CapabilityPredicate{UsageReporting: true}, Capabilities{}, false, "usage_reporting"},
 		{"all-satisfied", CapabilityPredicate{Streaming: true, Tools: true, Vision: true}, caps, true, ""},
 	}
 
@@ -312,19 +311,19 @@ func TestPredicateForRequest(t *testing.T) {
 }
 
 func TestValidateRoutes_MultiRouteAndTaskCapability(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"primary-model": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{
+	defs := map[string]Definition{
+		"primary-model": validDefinition(ProtocolOpenAIChatCompat, Capabilities{
 			Streaming: true,
 			Tools:     true,
 		}),
-		"aux-model": validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{
+		"aux-model": validDefinition(ProtocolAnthropicMessages, Capabilities{
 			Streaming: true,
 			Tools:     true,
 			Vision:    true,
 		}),
 	}
 
-	routes := map[string]config.ModelRoute{
+	routes := map[string]ModelRoute{
 		"primary":   {Candidates: []string{"primary-model"}},
 		"auxiliary": {Candidates: []string{"aux-model"}},
 	}
@@ -334,13 +333,13 @@ func TestValidateRoutes_MultiRouteAndTaskCapability(t *testing.T) {
 		"vision": "auxiliary",
 	}
 
-	if err := ValidateRoutes(defs, routes, routing); err != nil {
-		t.Fatalf("unexpected ValidateRoutes error: %v", err)
+	if err := ValidateRouteSet(defs, routes, routing); err != nil {
+		t.Fatalf("unexpected ValidateRouteSet error: %v", err)
 	}
 
 	badRouting := map[string]string{
 		"vision": "primary",
 	}
-	err := ValidateRoutes(defs, routes, badRouting)
+	err := ValidateRouteSet(defs, routes, badRouting)
 	wantCode(t, err, ErrorCodeCapabilityUnsupported)
 }

@@ -21,7 +21,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/vision"
@@ -425,17 +424,17 @@ func TestAdapterRejectsUnresolvedFileReference(t *testing.T) {
 	}
 }
 
-func visionCapableDefinitions() map[string]config.ModelDefinition {
-	return map[string]config.ModelDefinition{
-		"plain":  validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true}),
-		"sight":  validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true, Vision: true}),
-		"backup": validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{Streaming: true, Vision: true}),
+func visionCapableDefinitions() map[string]Definition {
+	return map[string]Definition{
+		"plain":  validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true}),
+		"sight":  validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true, Vision: true}),
+		"backup": validDefinition(ProtocolAnthropicMessages, Capabilities{Streaming: true, Vision: true}),
 	}
 }
 
 func TestFallbackRejectsVisionlessRoute(t *testing.T) {
-	defs := map[string]config.ModelDefinition{"plain": visionCapableDefinitions()["plain"]}
-	route := config.ModelRoute{Candidates: []string{"plain"}, MaxProviderAttempts: 1, RetryDelayBudget: configkit.Duration(time.Second)}
+	defs := map[string]Definition{"plain": visionCapableDefinitions()["plain"]}
+	route := ModelRoute{Candidates: []string{"plain"}, MaxProviderAttempts: 1, RetryDelayBudget: configkit.Duration(time.Second)}
 	fallback := NewFallbackAdapter("vision-route", route, defs, nil, MapAdapterResolver{}).WithVisionPolicy(NewVisionPolicy(testVisionConfig()))
 	data := []byte("sight-bytes")
 	req := visionRequest(visionFilePart("art-1", data, "image/png", 4, 4))
@@ -455,7 +454,7 @@ func TestFallbackRejectsVisionlessRoute(t *testing.T) {
 
 func TestFallbackRoutesAroundVisionlessCandidate(t *testing.T) {
 	defs := visionCapableDefinitions()
-	route := config.ModelRoute{Candidates: []string{"plain", "sight"}, MaxProviderAttempts: 2, RetryDelayBudget: configkit.Duration(time.Second)}
+	route := ModelRoute{Candidates: []string{"plain", "sight"}, MaxProviderAttempts: 2, RetryDelayBudget: configkit.Duration(time.Second)}
 	plainMock := &mockCandidateLLM{name: "plain"}
 	sightMock := &mockCandidateLLM{
 		name:      "sight",
@@ -491,8 +490,8 @@ func TestFallbackVisionEndToEnd(t *testing.T) {
 	blobs := &fakeBlobReader{blobs: map[string][]byte{"art-1": data}}
 	policy := NewVisionPolicy(testVisionConfig())
 	sight := newOpenAIAdapter(nil, "sight", srv.URL, "", 0, 0, visionWiring{policy: policy, blobs: blobs})
-	defs := map[string]config.ModelDefinition{"sight": visionCapableDefinitions()["sight"]}
-	route := config.ModelRoute{Candidates: []string{"sight"}, MaxProviderAttempts: 1, RetryDelayBudget: configkit.Duration(time.Second)}
+	defs := map[string]Definition{"sight": visionCapableDefinitions()["sight"]}
+	route := ModelRoute{Candidates: []string{"sight"}, MaxProviderAttempts: 1, RetryDelayBudget: configkit.Duration(time.Second)}
 	fallback := NewFallbackAdapter("vision-route", route, defs, nil, MapAdapterResolver{"sight": sight}).WithVisionPolicy(policy)
 	req := visionRequest(&genai.Part{Text: "describe"}, visionFilePart("art-1", data, "image/png", 4, 4))
 	for _, err := range fallback.GenerateContent(context.Background(), req, false) {

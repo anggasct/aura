@@ -11,8 +11,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 type CircuitState string
@@ -59,7 +57,7 @@ func FormatCircuitKey(definitionID, endpoint string) string {
 	return definitionID + "|" + cleaned
 }
 
-func ComputeConfigDigest(def *config.ModelDefinition, resolved config.ResolvedDefinition) string {
+func ComputeConfigDigest(def *Definition, resolved ResolvedDefinition) string {
 	if def == nil {
 		return ""
 	}

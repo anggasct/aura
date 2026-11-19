@@ -17,8 +17,6 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 var errStopYield = errors.New("model: stream iterator stopped")
@@ -92,7 +90,7 @@ func (c *coreClient) withVision(w visionWiring) *coreClient {
 	return c
 }
 
-func (c *coreClient) withProvider(resolved config.ResolvedDefinition) {
+func (c *coreClient) withProvider(resolved ResolvedDefinition) {
 	c.extraHeaders = resolved.Headers
 	c.sessionBehavior = resolved.SessionBehavior
 	c.providerName = resolved.ProviderName
@@ -214,12 +212,12 @@ func (c *coreClient) do(ctx context.Context, req *adkmodel.LLMRequest, stream bo
 		for name, value := range c.extraHeaders {
 			httpReq.Header.Set(name, value)
 		}
-		if c.sessionBehavior == config.ProviderSessionOpencode {
+		if c.sessionBehavior == ProviderSessionOpencode {
 			sessionID := SessionIDFromContext(ctx)
 			if sessionID == "" {
 				return nil, newError(ErrorCodeProtocolInvalid, c.name, "", "model: session-routed request is missing its conversation identity")
 			}
-			httpReq.Header.Set(config.SessionHeaderName, sessionID)
+			httpReq.Header.Set(SessionHeaderName, sessionID)
 			httpReq.Header.Set("User-Agent", auraUserAgent)
 		}
 		resp, err := client.Do(httpReq)

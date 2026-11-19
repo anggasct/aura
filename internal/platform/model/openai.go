@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
-
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/platform/egress"
 )
 
 const openaiDefaultBaseURL = "https://api.openai.com"
@@ -85,7 +85,7 @@ type OpenAIAdapter struct {
 
 func NewOpenAIAdapter(name, baseURL, apiKey string, timeout time.Duration) (*OpenAIAdapter, error) {
 	if baseURL != "" {
-		if err := config.ValidateBaseURL(baseURL); err != nil {
+		if err := egress.ValidateBaseURL(baseURL); err != nil {
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
@@ -105,7 +105,7 @@ func newOpenAIAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout
 
 func (a *OpenAIAdapter) Name() string { return a.core.name }
 
-func (a *OpenAIAdapter) withProvider(resolved config.ResolvedDefinition) *OpenAIAdapter {
+func (a *OpenAIAdapter) withProvider(resolved ResolvedDefinition) *OpenAIAdapter {
 	a.core.withProvider(resolved)
 	return a
 }

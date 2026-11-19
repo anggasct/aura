@@ -5,6 +5,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/logging"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/usage"
@@ -12,39 +13,39 @@ import (
 )
 
 type Config struct {
-	Version      int                                `json:"version"`
-	Runtime      legacyconfig.Runtime               `json:"runtime"`
-	Capabilities capability.Config                  `json:"capabilities"`
-	Tools        *legacyconfig.Tools                `json:"tools,omitempty"`
-	Agents       *legacyconfig.Agents               `json:"agents,omitempty"`
-	Workflows    *legacyconfig.Workflows            `json:"workflows,omitempty"`
-	MCP          *legacyconfig.MCP                  `json:"mcp,omitempty"`
-	Plugins      *legacyconfig.Plugins              `json:"plugins,omitempty"`
-	Server       server.Config                      `json:"server"`
-	Logging      logging.Config                     `json:"logging"`
-	Models       legacyconfig.Models                `json:"models"`
-	ModelRoutes  map[string]legacyconfig.ModelRoute `json:"model_routes,omitempty"`
-	Storage      legacyconfig.Storage               `json:"storage"`
-	Telemetry    telemetry.Config                   `json:"telemetry"`
-	Usage        usage.Config                       `json:"usage"`
-	Health       health.Config                      `json:"health"`
-	Terminal     legacyconfig.Terminal              `json:"terminal"`
-	Webhook      legacyconfig.Webhook               `json:"webhook"`
-	Broadcast    legacyconfig.Broadcast             `json:"broadcast"`
-	Scheduler    legacyconfig.Scheduler             `json:"scheduler"`
-	Memory       legacyconfig.Memory                `json:"memory"`
-	Skills       *legacyconfig.Skills               `json:"skills,omitempty"`
-	Context      *legacyconfig.Context              `json:"context,omitempty"`
-	Profile      *legacyconfig.Profile              `json:"profile,omitempty"`
-	Owner        *legacyconfig.Owner                `json:"owner,omitempty"`
-	Children     *legacyconfig.Children             `json:"children,omitempty"`
-	Access       *legacyconfig.Access               `json:"access,omitempty"`
-	Sync         *legacyconfig.Sync                 `json:"sync,omitempty"`
-	Vision       *vision.Config                     `json:"vision,omitempty"`
-	Knowledge    *legacyconfig.Knowledge            `json:"knowledge,omitempty"`
-	Interpreter  legacyconfig.Interpreter           `json:"interpreter"`
-	Channels     legacyconfig.Channels              `json:"channels"`
-	Bindings     []legacyconfig.Binding             `json:"bindings,omitempty"`
+	Version      int                         `json:"version"`
+	Runtime      legacyconfig.Runtime        `json:"runtime"`
+	Capabilities capability.Config           `json:"capabilities"`
+	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
+	Agents       *legacyconfig.Agents        `json:"agents,omitempty"`
+	Workflows    *legacyconfig.Workflows     `json:"workflows,omitempty"`
+	MCP          *legacyconfig.MCP           `json:"mcp,omitempty"`
+	Plugins      *legacyconfig.Plugins       `json:"plugins,omitempty"`
+	Server       server.Config               `json:"server"`
+	Logging      logging.Config              `json:"logging"`
+	Models       model.Config                `json:"models"`
+	ModelRoutes  map[string]model.ModelRoute `json:"model_routes,omitempty"`
+	Storage      legacyconfig.Storage        `json:"storage"`
+	Telemetry    telemetry.Config            `json:"telemetry"`
+	Usage        usage.Config                `json:"usage"`
+	Health       health.Config               `json:"health"`
+	Terminal     legacyconfig.Terminal       `json:"terminal"`
+	Webhook      legacyconfig.Webhook        `json:"webhook"`
+	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
+	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
+	Memory       legacyconfig.Memory         `json:"memory"`
+	Skills       *legacyconfig.Skills        `json:"skills,omitempty"`
+	Context      *legacyconfig.Context       `json:"context,omitempty"`
+	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
+	Owner        *legacyconfig.Owner         `json:"owner,omitempty"`
+	Children     *legacyconfig.Children      `json:"children,omitempty"`
+	Access       *legacyconfig.Access        `json:"access,omitempty"`
+	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
+	Vision       *vision.Config              `json:"vision,omitempty"`
+	Knowledge    *legacyconfig.Knowledge     `json:"knowledge,omitempty"`
+	Interpreter  legacyconfig.Interpreter    `json:"interpreter"`
+	Channels     legacyconfig.Channels       `json:"channels"`
+	Bindings     []legacyconfig.Binding      `json:"bindings,omitempty"`
 }
 
 func Default() Config {
@@ -58,7 +59,7 @@ func Default() Config {
 		Tools:        legacyconfig.DefaultTools(),
 		Server:       server.Default(),
 		Logging:      logging.Default(),
-		Models:       legacyconfig.DefaultModels(),
+		Models:       model.Default(),
 		Storage:      legacyconfig.DefaultStorage(),
 		Telemetry:    telemetry.Default(),
 		Usage:        usage.Default(),

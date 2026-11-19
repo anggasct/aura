@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
-
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/platform/egress"
 )
 
 const geminiDefaultBaseURL = "https://generativelanguage.googleapis.com"
@@ -98,7 +98,7 @@ type GeminiAdapter struct {
 
 func NewGeminiAdapter(name, baseURL, apiKey string, timeout time.Duration) (*GeminiAdapter, error) {
 	if baseURL != "" {
-		if err := config.ValidateBaseURL(baseURL); err != nil {
+		if err := egress.ValidateBaseURL(baseURL); err != nil {
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
@@ -118,7 +118,7 @@ func newGeminiAdapter(logger *slog.Logger, name, baseURL, apiKey string, timeout
 
 func (a *GeminiAdapter) Name() string { return a.core.name }
 
-func (a *GeminiAdapter) withProvider(resolved config.ResolvedDefinition) *GeminiAdapter {
+func (a *GeminiAdapter) withProvider(resolved ResolvedDefinition) *GeminiAdapter {
 	a.core.withProvider(resolved)
 	return a
 }

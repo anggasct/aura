@@ -10,12 +10,12 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
 	"github.com/anggasct/aura/internal/modules/plugin/connector"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -61,7 +61,7 @@ type loopbackAwareTransport struct {
 }
 
 func (t *loopbackAwareTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	if req != nil && req.URL != nil && config.IsLoopbackBaseURL(req.URL.String()) {
+	if req != nil && req.URL != nil && egress.IsLoopbackBaseURL(req.URL.String()) {
 		return t.loopback.RoundTrip(req)
 	}
 	return t.external.RoundTrip(req)

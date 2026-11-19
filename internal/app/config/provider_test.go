@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/model"
 )
 
 func TestLoad_ProviderReferenceFixture(t *testing.T) {
@@ -19,13 +20,13 @@ func TestLoad_ProviderReferenceFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveDefinition: %v", err)
 	}
-	if resolved.Protocol != legacyconfig.ProtocolOpenAIResponses {
-		t.Errorf("Protocol = %q, want %q", resolved.Protocol, legacyconfig.ProtocolOpenAIResponses)
+	if resolved.Protocol != model.ProtocolOpenAIResponses {
+		t.Errorf("Protocol = %q, want %q", resolved.Protocol, model.ProtocolOpenAIResponses)
 	}
 	if resolved.BaseURL != "https://opencode.ai/zen/go" {
 		t.Errorf("BaseURL = %q", resolved.BaseURL)
 	}
-	if resolved.SessionBehavior != legacyconfig.ProviderSessionOpencode {
+	if resolved.SessionBehavior != model.ProviderSessionOpencode {
 		t.Errorf("SessionBehavior = %q", resolved.SessionBehavior)
 	}
 	if resolved.ProviderName != "opencode-go" {
@@ -46,7 +47,7 @@ func TestLoad_CustomProviderFixture(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ResolveDefinition: %v", err)
 	}
-	if resolved.Protocol != legacyconfig.ProtocolOpenAIChatCompat {
+	if resolved.Protocol != model.ProtocolOpenAIChatCompat {
 		t.Errorf("Protocol = %q", resolved.Protocol)
 	}
 	if resolved.BaseURL != "https://models.example.com/v1" {
@@ -68,8 +69,8 @@ func TestLoad_ProviderNegativeFixtures(t *testing.T) {
 			continue
 		}
 		code, ok := codeOf(err)
-		if !ok || code != legacyconfig.ErrorCodeModelProviderInvalid {
-			t.Errorf("Load(%s): code = %q, %v; want %q", name, code, ok, legacyconfig.ErrorCodeModelProviderInvalid)
+		if !ok || code != modelProviderInvalidCode {
+			t.Errorf("Load(%s): code = %q, %v; want %q", name, code, ok, modelProviderInvalidCode)
 		}
 	}
 }
@@ -124,7 +125,7 @@ models:
         auth_scheme: bearer
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "custom missing protocol",
@@ -135,7 +136,7 @@ models:
         auth_scheme: bearer
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "custom missing base_url",
@@ -146,7 +147,7 @@ models:
         auth_scheme: bearer
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "custom with top-level protocol",
@@ -159,7 +160,7 @@ models:
         auth_scheme: bearer
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "custom invalid auth scheme",
@@ -171,7 +172,7 @@ models:
         auth_scheme: api-key
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "custom invalid session behavior",
@@ -183,7 +184,7 @@ models:
         auth_scheme: bearer
         session_behavior: sticky
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "file secret header",
@@ -197,7 +198,7 @@ models:
           x-tenant: file:///run/tenant
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "interpolation secret header",
@@ -211,7 +212,7 @@ models:
           x-tenant: ${TENANT_ID}
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "content-type collision case-insensitive",
@@ -225,7 +226,7 @@ models:
           Content-Type: application/json
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "session header collision case-insensitive",
@@ -239,7 +240,7 @@ models:
           X-OpenCode-Session: fixed
         session_behavior: none
 ` + providerTestCapabilities,
-			wantCode: legacyconfig.ErrorCodeModelProviderInvalid,
+			wantCode: modelProviderInvalidCode,
 		},
 		{
 			name: "unknown key in custom",
@@ -306,7 +307,7 @@ models:
 	if resolved.BaseURL != "https://proxy.example.com/openai" {
 		t.Errorf("BaseURL = %q, want override", resolved.BaseURL)
 	}
-	if resolved.Protocol != legacyconfig.ProtocolOpenAIResponses {
+	if resolved.Protocol != model.ProtocolOpenAIResponses {
 		t.Errorf("Protocol = %q, want preset protocol", resolved.Protocol)
 	}
 }
@@ -336,7 +337,7 @@ models:
 	if err != nil {
 		t.Fatalf("ResolveDefinition: %v", err)
 	}
-	if resolved.Protocol != legacyconfig.ProtocolOpenAIChatCompat {
+	if resolved.Protocol != model.ProtocolOpenAIChatCompat {
 		t.Errorf("Protocol = %q, want overridden preset protocol", resolved.Protocol)
 	}
 	if resolved.BaseURL != "https://proxy.example.com/compat" {

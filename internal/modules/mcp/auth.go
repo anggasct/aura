@@ -12,10 +12,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 	"golang.org/x/oauth2"
+
+	"github.com/anggasct/aura/internal/platform/egress"
 )
 
 const defaultAuthHeader = "Authorization"
@@ -236,14 +237,14 @@ func (p *OAuthProvider) newTokenSourceHook() func(context.Context, *oauth2.Confi
 }
 
 func validRedirectURL(rawURL string) error {
-	if err := config.ValidateBaseURL(rawURL); err != nil {
+	if err := egress.ValidateBaseURL(rawURL); err != nil {
 		return Errorf(ErrConfigInvalid, "redirect url is not valid")
 	}
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		return Errorf(ErrConfigInvalid, "redirect url is not valid")
 	}
-	if parsed.Scheme != "https" && !config.IsLoopbackBaseURL(rawURL) {
+	if parsed.Scheme != "https" && !egress.IsLoopbackBaseURL(rawURL) {
 		return Errorf(ErrConfigInvalid, "redirect url must use https outside loopback")
 	}
 	return nil

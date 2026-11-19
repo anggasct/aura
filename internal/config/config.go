@@ -1,18 +1,11 @@
 package config
 
 import (
-	"errors"
 	"fmt"
-	"maps"
-	"net"
-	"net/url"
 	"regexp"
-	"slices"
-	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -398,217 +391,6 @@ type Storage struct {
 	BackupRetention    int                `json:"backup_retention"`
 }
 
-type Models struct {
-	Definitions          map[string]ModelDefinition `json:"definitions"`
-	Providers            map[string]ProviderPreset  `json:"providers,omitempty"`
-	RequestTimeout       configkit.Duration         `json:"request_timeout"`
-	StreamingIdleTimeout configkit.Duration         `json:"streaming_idle_timeout"`
-	Routing              map[string]string          `json:"routing"`
-}
-
-type ModelDefinition struct {
-	Protocol     string            `json:"protocol,omitempty"`
-	Model        string            `json:"model"`
-	BaseURL      string            `json:"base_url,omitempty"`
-	Provider     string            `json:"provider,omitempty"`
-	Custom       *CustomProvider   `json:"custom,omitempty"`
-	APIKeyRef    secret.Ref        `json:"api_key_ref"`
-	Capabilities ModelCapabilities `json:"capabilities"`
-}
-
-const (
-	ProviderAuthBearer      = "bearer"
-	ProviderSessionNone     = "none"
-	ProviderSessionOpencode = "opencode-session"
-	SessionHeaderName       = "x-opencode-session"
-)
-
-type ProviderPreset struct {
-	Protocol        string            `json:"protocol"`
-	BaseURL         string            `json:"base_url"`
-	AuthScheme      string            `json:"auth_scheme"`
-	Headers         map[string]string `json:"headers,omitempty"`
-	SessionBehavior string            `json:"session_behavior"`
-}
-
-type CustomProvider = ProviderPreset
-
-type ResolvedDefinition struct {
-	Protocol        string
-	BaseURL         string
-	Headers         map[string]string
-	SessionBehavior string
-	ProviderName    string
-}
-
-func BuiltinProviders() map[string]ProviderPreset {
-	return map[string]ProviderPreset{
-		"openai": {
-			Protocol:        ProtocolOpenAIResponses,
-			BaseURL:         "https://api.openai.com/v1",
-			AuthScheme:      ProviderAuthBearer,
-			SessionBehavior: ProviderSessionNone,
-		},
-		"anthropic": {
-			Protocol:        ProtocolAnthropicMessages,
-			BaseURL:         "https://api.anthropic.com",
-			AuthScheme:      ProviderAuthBearer,
-			SessionBehavior: ProviderSessionNone,
-		},
-		"gemini": {
-			Protocol:        ProtocolGeminiNative,
-			BaseURL:         "https://generativelanguage.googleapis.com",
-			AuthScheme:      ProviderAuthBearer,
-			SessionBehavior: ProviderSessionNone,
-		},
-		"openrouter": {
-			Protocol:        ProtocolOpenAIChatCompat,
-			BaseURL:         "https://openrouter.ai/api/v1",
-			AuthScheme:      ProviderAuthBearer,
-			SessionBehavior: ProviderSessionNone,
-		},
-		"opencode-go": {
-			Protocol:        ProtocolOpenAIResponses,
-			BaseURL:         "https://opencode.ai/zen/go",
-			AuthScheme:      ProviderAuthBearer,
-			SessionBehavior: ProviderSessionOpencode,
-		},
-	}
-}
-
-func (m Models) ResolveDefinition(def *ModelDefinition) (ResolvedDefinition, error) {
-	registry := BuiltinProviders()
-	for name, preset := range m.Providers {
-		registry[name] = preset
-	}
-	if def.Provider != "" && def.Custom != nil {
-		return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry sets both provider and custom"))
-	}
-	if def.Custom != nil {
-		if strings.TrimSpace(def.Protocol) != "" || strings.TrimSpace(def.BaseURL) != "" {
-			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with custom must not set protocol or base_url"))
-		}
-		if err := ValidateProviderShape("custom", *def.Custom); err != nil {
-			return ResolvedDefinition{}, err
-		}
-		return ResolvedDefinition{
-			Protocol:        def.Custom.Protocol,
-			BaseURL:         strings.TrimRight(def.Custom.BaseURL, "/"),
-			Headers:         copyProviderHeaders(def.Custom.Headers),
-			SessionBehavior: def.Custom.SessionBehavior,
-			ProviderName:    "custom",
-		}, nil
-	}
-	if def.Provider != "" {
-		if strings.TrimSpace(def.Protocol) != "" {
-			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with provider must not set protocol"))
-		}
-		preset, ok := registry[def.Provider]
-		if !ok {
-			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry references unknown provider"))
-		}
-		if err := ValidateProviderShape("provider", preset); err != nil {
-			return ResolvedDefinition{}, err
-		}
-		baseURL := preset.BaseURL
-		if strings.TrimSpace(def.BaseURL) != "" {
-			baseURL = def.BaseURL
-		}
-		if err := ValidateBaseURL(baseURL); err != nil {
-			return ResolvedDefinition{}, configkit.Field("models.definitions", fault.New(ErrorCodeModelProviderInvalid, "entry with provider has invalid base_url: "+err.Error()))
-		}
-		return ResolvedDefinition{
-			Protocol:        preset.Protocol,
-			BaseURL:         strings.TrimRight(baseURL, "/"),
-			Headers:         copyProviderHeaders(preset.Headers),
-			SessionBehavior: preset.SessionBehavior,
-			ProviderName:    def.Provider,
-		}, nil
-	}
-	return ResolvedDefinition{
-		Protocol:        def.Protocol,
-		BaseURL:         strings.TrimRight(def.BaseURL, "/"),
-		SessionBehavior: ProviderSessionNone,
-	}, nil
-}
-
-func ValidateProviderShape(where string, preset ProviderPreset) error {
-	if !ValidProtocol(preset.Protocol) {
-		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported protocol (must be one of "+strings.Join(ProtocolNames(), ", ")+")"))
-	}
-	if strings.TrimSpace(preset.BaseURL) == "" {
-		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "requires a non-empty base_url"))
-	}
-	if err := ValidateBaseURL(preset.BaseURL); err != nil {
-		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "has invalid base_url: "+err.Error()))
-	}
-	if preset.AuthScheme != ProviderAuthBearer {
-		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported auth scheme (must be "+ProviderAuthBearer+")"))
-	}
-	if preset.SessionBehavior != ProviderSessionNone && preset.SessionBehavior != ProviderSessionOpencode {
-		return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "uses unsupported session behavior (must be "+ProviderSessionNone+" or "+ProviderSessionOpencode+")"))
-	}
-	return validateProviderHeaders(where, preset.Headers)
-}
-
-func validateProviderHeaders(where string, headers map[string]string) error {
-	for _, name := range slices.Sorted(maps.Keys(headers)) {
-		value := headers[name]
-		if strings.TrimSpace(name) == "" || strings.ContainsAny(name, " \t:") {
-			return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, "sets invalid header name"))
-		}
-		if strings.EqualFold(name, "authorization") || strings.EqualFold(name, "content-type") || strings.EqualFold(name, SessionHeaderName) {
-			return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, fmt.Sprintf("header %q collides with a managed header", name)))
-		}
-		trimmed := strings.TrimSpace(value)
-		if strings.HasPrefix(trimmed, "env://") || strings.HasPrefix(trimmed, "file://") || strings.Contains(trimmed, "${") {
-			return configkit.Field(where, fault.New(ErrorCodeModelProviderInvalid, fmt.Sprintf("header %q must not carry a secret reference", name)))
-		}
-	}
-	return nil
-}
-
-func copyProviderHeaders(headers map[string]string) map[string]string {
-	if len(headers) == 0 {
-		return nil
-	}
-	out := make(map[string]string, len(headers))
-	for name, value := range headers {
-		out[name] = value
-	}
-	return out
-}
-
-const (
-	DefaultModelRouteMaxProviderAttempts = 4
-	DefaultModelRouteRetryDelayBudget    = 20 * time.Second
-)
-
-type ModelRoute struct {
-	Candidates          []string           `json:"candidates"`
-	MaxProviderAttempts int                `json:"max_provider_attempts"`
-	RetryDelayBudget    configkit.Duration `json:"retry_delay_budget"`
-	CostBudgetUSD       float64            `json:"cost_budget_usd"`
-	Circuit             ModelRouteCircuit  `json:"circuit"`
-}
-
-func DefaultModelRoute() ModelRoute {
-	return ModelRoute{
-		MaxProviderAttempts: DefaultModelRouteMaxProviderAttempts,
-		RetryDelayBudget:    configkit.Duration(DefaultModelRouteRetryDelayBudget),
-	}
-}
-
-func (*ModelRoute) Default() any {
-	return DefaultModelRoute()
-}
-
-type ModelRouteCircuit struct {
-	FailureThreshold int                `json:"failure_threshold"`
-	OpenDuration     configkit.Duration `json:"open_duration"`
-	MaxOpenDuration  configkit.Duration `json:"max_open_duration"`
-}
-
 type AgentLimits struct {
 	TurnTimeout configkit.Duration `json:"turn_timeout"`
 }
@@ -719,40 +501,11 @@ type MCPStaticAuth struct {
 	CredentialRef string `json:"credential_ref"`
 }
 
-type ModelCapabilities struct {
-	Streaming            bool   `json:"streaming"`
-	Tools                bool   `json:"tools"`
-	StructuredOutput     bool   `json:"structured_output"`
-	Vision               bool   `json:"vision"`
-	Audio                bool   `json:"audio"`
-	Reasoning            bool   `json:"reasoning"`
-	ContextTokens        int    `json:"context_tokens"`
-	Tokenizer            string `json:"tokenizer"`
-	UsageReporting       bool   `json:"usage_reporting"`
-	MicrosPerInputToken  int64  `json:"micros_per_input_token"`
-	MicrosPerOutputToken int64  `json:"micros_per_output_token"`
-}
-
-const (
-	ProtocolOpenAIResponses   = "openai_responses"
-	ProtocolOpenAIChatCompat  = "openai_chat_compat"
-	ProtocolAnthropicMessages = "anthropic_messages"
-	ProtocolGeminiNative      = "gemini_native"
-)
-
 var (
 	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	mcpServerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	syncBranchPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
-
-func ProtocolNames() []string {
-	return []string{ProtocolOpenAIResponses, ProtocolOpenAIChatCompat, ProtocolAnthropicMessages, ProtocolGeminiNative}
-}
-
-func ValidProtocol(p string) bool {
-	return slices.Contains(ProtocolNames(), p)
-}
 
 func DefaultTools() *Tools {
 	return &Tools{
@@ -795,15 +548,6 @@ func DefaultWorkflows() *Workflows {
 		MaxConcurrentSteps: 4,
 		DefaultStepTimeout: configkit.Duration(15 * time.Minute),
 		Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
-	}
-}
-
-func DefaultModels() Models {
-	return Models{
-		Definitions:          map[string]ModelDefinition{},
-		RequestTimeout:       configkit.Duration(120 * time.Second),
-		StreamingIdleTimeout: configkit.Duration(60 * time.Second),
-		Routing:              defaultModelsRouting(),
 	}
 }
 
@@ -1002,58 +746,4 @@ func mustRef(text string) secret.Ref {
 		panic(err)
 	}
 	return ref
-}
-
-func defaultModelsRouting() map[string]string {
-	return map[string]string{
-		"agent":       "primary",
-		"summarize":   "auxiliary",
-		"title":       "auxiliary",
-		"curation":    "auxiliary",
-		"compression": "auxiliary",
-		"profiling":   "auxiliary",
-	}
-}
-
-func ValidateBaseURL(raw string) error {
-	if raw == "" {
-		return nil
-	}
-	u, err := url.Parse(raw)
-	if err != nil {
-		return errors.New("is not a valid URL")
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return errors.New("scheme must be http or https")
-	}
-	if u.Host == "" {
-		return errors.New("missing host")
-	}
-	if u.User != nil {
-		return errors.New("user info is not allowed")
-	}
-	if u.RawQuery != "" || u.Fragment != "" {
-		return errors.New("query and fragment are not allowed")
-	}
-	if u.Scheme == "http" && !isLoopbackURL(u) {
-		return errors.New("https is required for non-loopback endpoints")
-	}
-	return nil
-}
-
-func IsLoopbackBaseURL(raw string) bool {
-	if raw == "" {
-		return false
-	}
-	u, err := url.Parse(raw)
-	return err == nil && isLoopbackURL(u)
-}
-
-func isLoopbackURL(u *url.URL) bool {
-	host := strings.TrimSuffix(u.Hostname(), ".")
-	if host == "localhost" {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }

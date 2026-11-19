@@ -11,9 +11,9 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
@@ -49,7 +49,7 @@ func runStatusAgainst(t *testing.T, listen string, offline bool) (string, error)
 	cfg.Health.DiskWarningPercent = 1
 	cfg.Health.DiskCriticalPercent = 1
 	cfg.Health.DiskCriticalFloorBytes = 1
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
 	cmd := &cobra.Command{Use: "status"}

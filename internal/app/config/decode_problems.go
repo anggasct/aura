@@ -120,7 +120,12 @@ func positionProblems(doc *document, err error) error {
 			continue
 		}
 		positioned := *field
-		positioned.Position = doc.positionOf(field.Path)
+		if field.AtKey {
+			positioned.Position = doc.keyPositionOf(field.Path)
+		}
+		if positioned.Position == "" {
+			positioned.Position = doc.positionOf(field.Path)
+		}
 		problems[i] = &positioned
 	}
 	sortProblems(problems)

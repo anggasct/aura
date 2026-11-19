@@ -3,18 +3,21 @@ package config
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
 func validateReferences(cfg *Config, doc *document) error {
 	return errors.Join(
-		validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models),
+		modelRouteReferenceProblems(cfg.ModelRoutes, cfg.Models),
 		validateRouting(cfg.Models, doc),
 		webhookListenProblem(&cfg.Webhook, cfg.Health.Listen),
 		errors.Join(telegramDiscordTokenProblems(&cfg.Channels.Telegram, &cfg.Channels.Discord)...),
@@ -25,6 +28,21 @@ func validateReferences(cfg *Config, doc *document) error {
 		validatePersonaAccess(cfg),
 		screenOwnerSecrets(cfg.Owner, cfg),
 	)
+}
+
+func modelRouteReferenceProblems(routes model.Routes, models model.Config) error {
+	if len(models.Definitions) == 0 {
+		return nil
+	}
+	var problems []error
+	for _, name := range slices.Sorted(maps.Keys(routes)) {
+		for _, candidate := range routes[name].Candidates {
+			if _, ok := models.Definitions[candidate]; !ok {
+				problems = append(problems, configkit.Invalid("model_routes."+name, "references unknown model definition"))
+			}
+		}
+	}
+	return errors.Join(problems...)
 }
 
 func webhookListenProblem(webhook *legacyconfig.Webhook, healthListen string) error {

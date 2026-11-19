@@ -4,16 +4,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestRegistryResolvesDefinitionsAndRoutes(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary":   configuredDefinition(config.ProtocolAnthropicMessages, "claude-reg-test-1", "https://api.anthropic.com"),
-			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "gpt-reg-test-1", "https://api.openai.com"),
+	models := Config{
+		Definitions: map[string]Definition{
+			"primary":   configuredDefinition(ProtocolAnthropicMessages, "claude-reg-test-1", "https://api.anthropic.com"),
+			"auxiliary": configuredDefinition(ProtocolOpenAIChatCompat, "gpt-reg-test-1", "https://api.openai.com"),
 		},
 	}
 	registry, err := NewRegistry(t.Context(), &RegistryOptions{Models: models})
@@ -40,10 +39,10 @@ func TestRegistryResolvesDefinitionsAndRoutes(t *testing.T) {
 
 func TestRegistryRejectsDuplicateNames(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary":   configuredDefinition(config.ProtocolOpenAIChatCompat, "dup-reg-test-1", "https://api.openai.com"),
-			"auxiliary": configuredDefinition(config.ProtocolAnthropicMessages, "dup-reg-test-1", "https://api.anthropic.com"),
+	models := Config{
+		Definitions: map[string]Definition{
+			"primary":   configuredDefinition(ProtocolOpenAIChatCompat, "dup-reg-test-1", "https://api.openai.com"),
+			"auxiliary": configuredDefinition(ProtocolAnthropicMessages, "dup-reg-test-1", "https://api.anthropic.com"),
 		},
 	}
 	_, err := NewRegistry(t.Context(), &RegistryOptions{Models: models})
@@ -53,16 +52,16 @@ func TestRegistryRejectsDuplicateNames(t *testing.T) {
 }
 
 func TestRegistrySkipsUnconfiguredDefinitions(t *testing.T) {
-	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: config.Models{}}); err != nil {
+	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: Config{}}); err != nil {
 		t.Fatalf("NewRegistry(unconfigured): %v", err)
 	}
 }
 
 func TestRegistriesAreIndependent(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary": configuredDefinition(config.ProtocolOpenAIChatCompat, "indep-reg-test-1", "https://api.openai.com"),
+	models := Config{
+		Definitions: map[string]Definition{
+			"primary": configuredDefinition(ProtocolOpenAIChatCompat, "indep-reg-test-1", "https://api.openai.com"),
 		},
 	}
 	for range 2 {

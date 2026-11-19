@@ -13,7 +13,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -143,10 +142,10 @@ func TestGeminiStreamTruncatedBeforeTerminal(t *testing.T) {
 
 func TestModernProtocolBuildRouter(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "key")
-	router, err := BuildRouter(nil, config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary":   configuredDefinition(config.ProtocolOpenAIResponses, "gpt-5", "https://api.openai.com"),
-			"auxiliary": configuredDefinition(config.ProtocolGeminiNative, "gemini-2.5-pro", "https://generativelanguage.googleapis.com"),
+	router, err := BuildRouter(nil, Config{
+		Definitions: map[string]Definition{
+			"primary":   configuredDefinition(ProtocolOpenAIResponses, "gpt-5", "https://api.openai.com"),
+			"auxiliary": configuredDefinition(ProtocolGeminiNative, "gemini-2.5-pro", "https://generativelanguage.googleapis.com"),
 		},
 	})
 	if err != nil {
@@ -170,9 +169,9 @@ func TestModernProtocolBuildRouter(t *testing.T) {
 
 func TestBuildRouterRejectsTaskWithoutCapability(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "key")
-	_, err := BuildRouter(nil, config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary": configuredDefinition(config.ProtocolOpenAIResponses, "gpt-5", "https://api.openai.com"),
+	_, err := BuildRouter(nil, Config{
+		Definitions: map[string]Definition{
+			"primary": configuredDefinition(ProtocolOpenAIResponses, "gpt-5", "https://api.openai.com"),
 		},
 		Routing: map[string]string{"vision": "primary"},
 	})

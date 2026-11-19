@@ -13,7 +13,6 @@ import (
 	"google.golang.org/genai"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 )
@@ -22,23 +21,23 @@ func chatTestConfig(t *testing.T, suffix, failingURL, backupURL string) (cfg *ap
 	t.Helper()
 	routeName = "primary-" + suffix
 	return &appconfig.Config{
-		Models: config.Models{
-			Definitions: map[string]config.ModelDefinition{
+		Models: model.Config{
+			Definitions: map[string]model.Definition{
 				"failing": {
-					Protocol:     config.ProtocolOpenAIChatCompat,
+					Protocol:     model.ProtocolOpenAIChatCompat,
 					Model:        "failing-model-" + suffix,
 					BaseURL:      failingURL,
-					Capabilities: config.ModelCapabilities{ContextTokens: 128000, Tokenizer: "cl100k_base", Streaming: true, Tools: true},
+					Capabilities: model.Capabilities{ContextTokens: 128000, Tokenizer: "cl100k_base", Streaming: true, Tools: true},
 				},
 				"backup": {
-					Protocol:     config.ProtocolAnthropicMessages,
+					Protocol:     model.ProtocolAnthropicMessages,
 					Model:        "backup-model-" + suffix,
 					BaseURL:      backupURL,
-					Capabilities: config.ModelCapabilities{ContextTokens: 128000, Tokenizer: "cl100k_base", Streaming: true, Tools: true},
+					Capabilities: model.Capabilities{ContextTokens: 128000, Tokenizer: "cl100k_base", Streaming: true, Tools: true},
 				},
 			},
 		},
-		ModelRoutes: map[string]config.ModelRoute{
+		ModelRoutes: map[string]model.ModelRoute{
 			routeName: {Candidates: []string{"failing", "backup"}},
 		},
 	}, routeName
@@ -174,13 +173,13 @@ func TestChatWireCostBudget(t *testing.T) {
 
 			routeName := "priced-route-" + suffix
 			cfg := &appconfig.Config{
-				Models: config.Models{
-					Definitions: map[string]config.ModelDefinition{
+				Models: model.Config{
+					Definitions: map[string]model.Definition{
 						"priced": {
-							Protocol: config.ProtocolAnthropicMessages,
+							Protocol: model.ProtocolAnthropicMessages,
 							Model:    "priced-model-" + suffix,
 							BaseURL:  srv.URL,
-							Capabilities: config.ModelCapabilities{
+							Capabilities: model.Capabilities{
 								ContextTokens:        128000,
 								Tokenizer:            "cl100k_base",
 								Streaming:            true,
@@ -191,7 +190,7 @@ func TestChatWireCostBudget(t *testing.T) {
 						},
 					},
 				},
-				ModelRoutes: map[string]config.ModelRoute{
+				ModelRoutes: map[string]model.ModelRoute{
 					routeName: {
 						Candidates:    []string{"priced"},
 						CostBudgetUSD: tc.costBudgetUSD,

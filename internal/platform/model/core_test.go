@@ -11,10 +11,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/platform/fault"
-
 	adkmodel "google.golang.org/adk/v2/model"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestStreamStopSentinelIsDistinctFromEOF(t *testing.T) {
@@ -145,14 +144,14 @@ func TestIsTransientError(t *testing.T) {
 
 func TestRegistryValidatesEveryDefinition(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	valid := configuredDefinition(config.ProtocolOpenAIChatCompat, "atomic-reg-test-1", "https://api.openai.com")
-	invalid := config.ModelDefinition{Protocol: config.ProtocolAnthropicMessages, Model: "atomic-reg-test-1", BaseURL: "https://api.anthropic.com"}
-	models := config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid, "auxiliary": invalid}}
+	valid := configuredDefinition(ProtocolOpenAIChatCompat, "atomic-reg-test-1", "https://api.openai.com")
+	invalid := Definition{Protocol: ProtocolAnthropicMessages, Model: "atomic-reg-test-1", BaseURL: "https://api.anthropic.com"}
+	models := Config{Definitions: map[string]Definition{"primary": valid, "auxiliary": invalid}}
 
 	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: models}); err == nil {
 		t.Fatal("expected registry failure for invalid auxiliary")
 	}
-	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: config.Models{Definitions: map[string]config.ModelDefinition{"primary": valid}}}); err != nil {
+	if _, err := NewRegistry(t.Context(), &RegistryOptions{Models: Config{Definitions: map[string]Definition{"primary": valid}}}); err != nil {
 		t.Fatalf("build after a failed registry: %v", err)
 	}
 	if _, err := NewRegistry(t.Context(), nil); err == nil {

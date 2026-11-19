@@ -11,14 +11,13 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 type RegistryOptions struct {
 	Logger     *slog.Logger
-	Models     config.Models
-	Routes     map[string]config.ModelRoute
+	Models     Config
+	Routes     map[string]ModelRoute
 	Checkpoint CircuitCheckpointStore
 	Prices     *usage.PriceRegistry
 	Vision     VisionWiring
@@ -133,7 +132,7 @@ func (s Set) LLM(_ context.Context, name string) (adkmodel.LLM, error) {
 	return llm, nil
 }
 
-func RouteModelName(models config.Models, routes map[string]config.ModelRoute, defaultModel string) (func(route string) (string, error), error) {
+func RouteModelName(models Config, routes map[string]ModelRoute, defaultModel string) (func(route string) (string, error), error) {
 	resolver := func(route string) (string, error) {
 		if r, ok := routes[route]; ok && len(r.Candidates) > 0 {
 			return route, nil
