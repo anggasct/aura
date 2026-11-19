@@ -7,6 +7,8 @@ import (
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func appendTextEvent(t *testing.T, db *sql.DB, sessionID, id, text string, at time.Time) {
@@ -94,6 +96,6 @@ func TestHandoffReplyStoreRejectsInvalidBounds(t *testing.T) {
 }
 
 func hasCode(err error, want ErrorCode) bool {
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	return ok && code == want
 }

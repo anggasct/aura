@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -68,7 +69,7 @@ func TestBroadcastStore_InsertLoadRoundTrip(t *testing.T) {
 	}
 	if _, err := s.Item(ctx, "missing"); err == nil {
 		t.Error("Item(missing) accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastNotFound {
 		t.Errorf("Item(missing) code = %v, %v; want broadcast_not_found", code, ok)
 	}
 }
@@ -106,7 +107,7 @@ func TestBroadcastStore_MismatchedReuseConflicts(t *testing.T) {
 	changed.ContentDigest = "digest-changed"
 	if _, _, err := s.InsertItem(ctx, changed); err == nil {
 		t.Fatal("mismatched reuse accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastConflict {
 		t.Errorf("mismatch code = %v, %v; want broadcast_conflict", code, ok)
 	}
 }
@@ -188,7 +189,7 @@ func TestBroadcastStore_RejectsCorruptRow(t *testing.T) {
 	}
 	if _, err := s.Item(ctx, "bcst-1"); err == nil {
 		t.Error("corrupt timestamp accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastInvalid {
 		t.Errorf("corrupt row code = %v, %v; want broadcast_invalid", code, ok)
 	}
 }
@@ -260,12 +261,12 @@ func TestBroadcastStore_CreateDigestRejectsUnheld(t *testing.T) {
 	}
 	if _, _, err := s.CreateDigest(ctx, digestParentFixture("bcst-dg-1"), []string{"bcst-1"}); err == nil {
 		t.Fatal("non-held child linked")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastConflict {
 		t.Errorf("code = %v, %v; want broadcast_conflict", code, ok)
 	}
 	if _, err := s.Item(ctx, "bcst-dg-1"); err == nil {
 		t.Error("parent persisted despite child failure")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastNotFound {
 		t.Errorf("parent lookup = %v, %v; want not found", code, ok)
 	}
 	if _, _, err := s.CreateDigest(ctx, digestParentFixture("bcst-dg-2"), nil); err == nil {
@@ -503,12 +504,12 @@ func TestBroadcastStore_SettleAndAttempt(t *testing.T) {
 	}
 	if err := s.Settle(ctx, "bcst-1", BroadcastStateFailed, "", now); err == nil {
 		t.Error("double settle accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastConflict {
 		t.Errorf("double settle code = %v, %v; want broadcast_conflict", code, ok)
 	}
 	if err := s.Settle(ctx, "missing", BroadcastStateFailed, "", now); err == nil {
 		t.Error("missing settle accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBroadcastNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastNotFound {
 		t.Errorf("missing settle code = %v, %v; want broadcast_not_found", code, ok)
 	}
 	if err := s.Settle(ctx, "bcst-1", "flying", "", now); err == nil {

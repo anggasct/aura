@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -144,5 +145,5 @@ func executeNoErr(t *testing.T, args ...string) error {
 }
 
 func storeCodeOf(err error) (store.ErrorCode, bool) {
-	return store.CodeOf(err)
+	return fault.CodeOf[store.ErrorCode](err)
 }

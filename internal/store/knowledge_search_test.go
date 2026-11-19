@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func kbSeed(t *testing.T, kb KBStore, collection, uri string, texts ...string) {
@@ -220,7 +222,7 @@ func TestKBIndexRejectsInvalidInput(t *testing.T) {
 	for name, call := range tests {
 		t.Run(name, func(t *testing.T) {
 			err := call()
-			code, ok := CodeOf(err)
+			code, ok := fault.CodeOf[ErrorCode](err)
 			if !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("error = %v, want invalid_argument", err)
 			}

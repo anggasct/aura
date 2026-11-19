@@ -58,7 +58,7 @@ func (s *scheduleStore) Job(ctx context.Context, id string) (schedule.Job, bool,
 	}
 	job, err := s.store.Job(ctx, id)
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeScheduleNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeScheduleNotFound {
 			return schedule.Job{}, false, nil
 		}
 		return schedule.Job{}, false, mapScheduleStoreError(err)
@@ -195,7 +195,7 @@ func mapScheduleStoreError(err error) error {
 	if err == nil {
 		return nil
 	}
-	code, ok := store.CodeOf(err)
+	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
 		return schedule.Errorf(schedule.ErrorCodeUnavailable, "schedule store is unavailable")
 	}
@@ -316,7 +316,7 @@ func ensureCronSession(ctx context.Context, sessions store.SessionService, sessi
 	if _, err := sessions.Get(ctx, sessionID); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
 			return err
 		}
 	}
@@ -325,7 +325,7 @@ func ensureCronSession(ctx context.Context, sessions store.SessionService, sessi
 		ID: sessionID, OwnerID: principal.OwnerID,
 		Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	})
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err

@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestChannelResumeStore_SaveLoadDelete(t *testing.T) {
@@ -96,7 +98,7 @@ func TestChannelResumeStore_RejectsInvalid(t *testing.T) {
 			candidate := base
 			mutate(&candidate)
 			err := s.Save(ctx, &candidate)
-			code, ok := CodeOf(err)
+			code, ok := fault.CodeOf[ErrorCode](err)
 			if !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("Save() code = %v, %v; want invalid_argument", code, ok)
 			}
@@ -125,7 +127,7 @@ func TestChannelResumeStore_RejectsCorruptTimestamp(t *testing.T) {
 		t.Fatalf("corrupt fixture: %v", err)
 	}
 	_, _, err := s.Load(ctx, "discord", "owner")
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeChannelResumeInvalid {
 		t.Errorf("Load() code = %v, %v; want channel_resume_invalid", code, ok)
 	}

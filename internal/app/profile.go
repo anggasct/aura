@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -86,7 +87,7 @@ func (r *profileRegistry) InsertCandidate(ctx context.Context, fact *profile.Fac
 		stored.Status = profile.StatusActive
 	}
 	if err := insertProfileFactTx(ctx, tx, profileFactToStore(&stored)); err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeProfileConflict {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeProfileConflict {
 			return profile.Fact{}, profile.Errorf(profile.ErrorCodeProfileConflict, "profile fact already exists")
 		}
 		return profile.Fact{}, err
@@ -449,7 +450,7 @@ func ensureOwnerActionSession(ctx context.Context, db *sql.DB, ownerID string) (
 		if err := sessions.Create(ctx, &store.Session{
 			ID: sessionID, OwnerID: ownerID, CreatedAt: now, UpdatedAt: now, Metadata: json.RawMessage(`{}`),
 		}); err != nil {
-			if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionIDConflict {
+			if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionIDConflict {
 				return "", err
 			}
 		}

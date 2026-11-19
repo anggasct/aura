@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const HandoffReplyEventPrefix = "handoff-reply-"
@@ -35,7 +37,7 @@ func NewHandoffReplyStore(db *sql.DB) HandoffReplyStore {
 
 func (s *sqliteHandoffReplyStore) List(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]HandoffReply, error) {
 	if limit < 1 {
-		return nil, &Error{Code: ErrorCodeInvalidArgument, Detail: "list handoff replies: limit must be positive"}
+		return nil, fault.New(ErrorCodeInvalidArgument, "list handoff replies: limit must be positive")
 	}
 	after, err := sequenceToDB(afterSequence)
 	if err != nil {

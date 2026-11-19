@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -94,7 +95,7 @@ func TestForgetStopsLiveRunsBeforeErasing(t *testing.T) {
 		runs.set(canceller)
 
 		cancelled, _, err := forgetPrincipal(t.Context(), db, runs, forgottenPrincipal, true, store.ErasureOptions{})
-		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeErasureBlocked || !strings.Contains(err.Error(), "run-stuck") {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeErasureBlocked || !strings.Contains(err.Error(), "run-stuck") {
 			t.Fatalf("forget = %v, want %s naming the run", err, store.ErrorCodeErasureBlocked)
 		}
 		if len(cancelled) != 1 || len(canceller.cancelled()) != 1 || canceller.cancelled()[0] != "run-stuck" {

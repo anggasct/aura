@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -35,7 +36,7 @@ func TestWebhookExecutionStore_InsertAndRead(t *testing.T) {
 
 	withoutSession := webhookFixture(now)
 	withoutSession.SessionID = ""
-	if code, ok := CodeOf(s.InsertExecution(ctx, withoutSession)); !ok || code != ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[ErrorCode](s.InsertExecution(ctx, withoutSession)); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("insert without a session = %v (ok=%v), want %s", code, ok, ErrorCodeInvalidArgument)
 	}
 
@@ -88,7 +89,7 @@ func TestWebhookExecutionStore_Conflicts(t *testing.T) {
 	duplicateNonce.TurnID = "turn_2"
 	if err := s.InsertExecution(ctx, duplicateNonce); err == nil {
 		t.Fatal("expected conflict on duplicate nonce, got nil")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeWebhookExecutionConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionConflict {
 		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionConflict)
 	}
 
@@ -98,13 +99,13 @@ func TestWebhookExecutionStore_Conflicts(t *testing.T) {
 	duplicateEvent.TurnID = "turn_3"
 	if err := s.InsertExecution(ctx, duplicateEvent); err == nil {
 		t.Fatal("expected conflict on duplicate event, got nil")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeWebhookExecutionConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionConflict {
 		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionConflict)
 	}
 
 	if _, err := s.Execution(ctx, "whex-missing"); err == nil {
 		t.Fatal("expected not found, got nil")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeWebhookExecutionNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionNotFound {
 		t.Fatalf("not-found code = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionNotFound)
 	}
 }
@@ -216,7 +217,7 @@ func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
 	}
 	if _, err := s.ListUnfinished(ctx, &UnfinishedExecutionQuery{Now: now}); err == nil {
 		t.Fatal("a list without a limit succeeded")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("list without a limit = %v (ok=%v), want %s", code, ok, ErrorCodeInvalidArgument)
 	}
 }
@@ -274,7 +275,7 @@ func TestWebhookExecutionSessionMigration(t *testing.T) {
 	}
 	if _, err := s.Execution(ctx, "whex_never_admitted"); err == nil {
 		t.Error("an unfinished execution without an admitted turn survived the migration")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeWebhookExecutionNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionNotFound {
 		t.Errorf("never admitted execution = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionNotFound)
 	}
 	var index string

@@ -448,7 +448,7 @@ func (s storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, ag
 	}
 	now := time.Now().UTC()
 	err := s.sessions.Create(ctx, &store.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err

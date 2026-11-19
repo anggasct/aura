@@ -492,7 +492,7 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 	}
 	t.Run("unknown session", func(t *testing.T) {
 		_, err := f.sessions.Admit(t.Context(), admitRequest(turnSpec{turnID: "turn-1", key: "key-1", sessionID: "session-missing"}))
-		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
 			t.Fatalf("err = %v, want store code %s", err, store.ErrorCodeSessionNotFound)
 		}
 		requireUnchanged(t, f.db, before)

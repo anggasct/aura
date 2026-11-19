@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -100,10 +101,10 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 	}
 	if size > s.quotaBytes {
 		_ = tmp.Close()
-		return ArtifactRef{}, &Error{
-			Code:   ErrorCodeArtifactQuotaExceeded,
-			Detail: fmt.Sprintf("artifact exceeds quota of %d bytes", s.quotaBytes),
-		}
+		return ArtifactRef{}, fault.New(
+			ErrorCodeArtifactQuotaExceeded,
+			fmt.Sprintf("artifact exceeds quota of %d bytes", s.quotaBytes),
+		)
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
@@ -155,10 +156,10 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		}
 		if total.Valid && size > s.quotaBytes-total.Int64 {
 			_ = os.Remove(absPath)
-			return ArtifactRef{}, &Error{
-				Code:   ErrorCodeArtifactQuotaExceeded,
-				Detail: fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
-			}
+			return ArtifactRef{}, fault.New(
+				ErrorCodeArtifactQuotaExceeded,
+				fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
+			)
 		}
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
@@ -193,10 +194,10 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 			if classified := classifyFKReference(ctx, tx, refs...); classified != nil {
 				return ArtifactRef{}, classified
 			}
-			return ArtifactRef{}, &Error{
-				Code:   ErrorCodeInvalidArgument,
-				Detail: fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
-			}
+			return ArtifactRef{}, fault.New(
+				ErrorCodeInvalidArgument,
+				fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
+			)
 		}
 		return ArtifactRef{}, classifyBusy(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
 	}
@@ -235,10 +236,10 @@ func (s *sqliteArtifactStore) Open(ctx context.Context, refID string) (io.ReadCl
 	f, err := os.Open(absPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, ArtifactMetadata{}, &Error{
-				Code:   ErrorCodeArtifactBlobMissing,
-				Detail: fmt.Sprintf("blob %s file missing at %s", digest, relPath),
-			}
+			return nil, ArtifactMetadata{}, fault.New(
+				ErrorCodeArtifactBlobMissing,
+				fmt.Sprintf("blob %s file missing at %s", digest, relPath),
+			)
 		}
 		return nil, ArtifactMetadata{}, fmt.Errorf("open blob file for artifact %s: %w", refID, err)
 	}
@@ -267,10 +268,10 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 			if classified := classifyFKReference(ctx, s.db, refs...); classified != nil {
 				return classified
 			}
-			return &Error{
-				Code:   ErrorCodeInvalidArgument,
-				Detail: fmt.Sprintf("link %s violates a foreign key constraint", link.ID),
-			}
+			return fault.New(
+				ErrorCodeInvalidArgument,
+				fmt.Sprintf("link %s violates a foreign key constraint", link.ID),
+			)
 		}
 		return classifyBusy(fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err))
 	}
@@ -291,18 +292,18 @@ func blobRelativePath(digest string) string {
 func resolveRootedPath(root, rel string) (string, error) {
 	clean := filepath.Clean(filepath.FromSlash(rel))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return "", &Error{
-			Code:   ErrorCodeInvalidArgument,
-			Detail: fmt.Sprintf("relative path %q escapes the storage root", rel),
-		}
+		return "", fault.New(
+			ErrorCodeInvalidArgument,
+			fmt.Sprintf("relative path %q escapes the storage root", rel),
+		)
 	}
 	rootClean := filepath.Clean(root)
 	abs := filepath.Join(rootClean, clean)
 	if abs != rootClean && !strings.HasPrefix(abs, rootClean+string(filepath.Separator)) {
-		return "", &Error{
-			Code:   ErrorCodeInvalidArgument,
-			Detail: fmt.Sprintf("relative path %q escapes the storage root", rel),
-		}
+		return "", fault.New(
+			ErrorCodeInvalidArgument,
+			fmt.Sprintf("relative path %q escapes the storage root", rel),
+		)
 	}
 	return abs, nil
 }

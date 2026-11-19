@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -49,7 +50,7 @@ func TestTerminalSessionIDFailureIsReturned(t *testing.T) {
 func TestTerminalSessionGetReportsMissingSessions(t *testing.T) {
 	for _, missing := range []error{
 		fmt.Errorf("get session x: %w", sql.ErrNoRows),
-		&store.Error{Code: store.ErrorCodeSessionNotFound, Detail: "session does not exist"},
+		fault.New(store.ErrorCodeSessionNotFound, "session does not exist"),
 	} {
 		sessions := &terminalSessions{sessions: &fakeTerminalSessionService{getErr: missing}}
 		if _, err := sessions.Get(t.Context(), "x"); !errors.Is(err, terminal.ErrSessionNotFound) {

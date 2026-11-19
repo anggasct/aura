@@ -33,7 +33,7 @@ func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetada
 		Metadata:  meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
 			return ArtifactRef{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted", err)
 		}
 		return ArtifactRef{}, err

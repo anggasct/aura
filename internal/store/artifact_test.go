@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func newArtifactStore(t *testing.T, db *sql.DB, quotaBytes int64) ArtifactStore {
@@ -134,7 +136,7 @@ func TestArtifactPutQuotaExceeded(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected artifact_quota_exceeded, got nil")
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeArtifactQuotaExceeded {
 		t.Fatalf("CodeOf(err) = %v, %v; want %s", code, ok, ErrorCodeArtifactQuotaExceeded)
 	}
@@ -163,7 +165,7 @@ func TestArtifactOpenMissingBlobFile(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected artifact_blob_missing, got nil")
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeArtifactBlobMissing {
 		t.Fatalf("CodeOf(err) = %v, %v; want %s", code, ok, ErrorCodeArtifactBlobMissing)
 	}

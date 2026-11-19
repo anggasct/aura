@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
@@ -104,7 +106,7 @@ func TestRekeyOwners_RejectsInvalidMoves(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := RekeyOwners(t.Context(), db, moves, false)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("code = %q, %v; want invalid_argument", code, ok)
 			}
 		})

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -105,7 +106,7 @@ func TestMemoryStore_SearchRankingAndBounds(t *testing.T) {
 	}
 	if _, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "(((", Limit: 10}); err == nil {
 		t.Error("term-less query accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Errorf("term-less query code = %v, %v", code, ok)
 	}
 }

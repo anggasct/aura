@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -37,7 +38,7 @@ func TestScheduleStore_JobLifecycle(t *testing.T) {
 	}
 	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err == nil {
 		t.Fatal("duplicate job accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeScheduleConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleConflict {
 		t.Errorf("duplicate code = %v, %v", code, ok)
 	}
 	job, err := s.Job(ctx, "job-1")
@@ -49,7 +50,7 @@ func TestScheduleStore_JobLifecycle(t *testing.T) {
 	}
 	if _, err := s.Job(ctx, "missing"); err == nil {
 		t.Error("missing job accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeScheduleNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleNotFound {
 		t.Errorf("missing code = %v, %v", code, ok)
 	}
 
@@ -109,7 +110,7 @@ func TestScheduleStore_OccurrenceFireAndSettle(t *testing.T) {
 	}
 	if err := s.RecordFire(ctx, occurrence); err == nil {
 		t.Fatal("duplicate fire accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeScheduleConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleConflict {
 		t.Errorf("duplicate code = %v, %v", code, ok)
 	}
 	found, ok, err := s.OccurrenceByFire(ctx, "job-1", fire)
@@ -296,7 +297,7 @@ func TestScheduleStore_RecordFireMissingJob(t *testing.T) {
 	if err == nil {
 		t.Fatal("fire for missing job accepted")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeScheduleNotFound {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleNotFound {
 		t.Errorf("missing-job code = %v, %v; want %v", code, ok, ErrorCodeScheduleNotFound)
 	}
 }

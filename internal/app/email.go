@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -50,7 +51,7 @@ func (s *emailSessions) SessionOwner(ctx context.Context, sessionID string) (own
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionNotFound {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
 		return "", false, nil
 	}
 	return "", false, err

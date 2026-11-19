@@ -12,6 +12,7 @@ import (
 
 	"modernc.org/sqlite"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -208,7 +209,7 @@ func (s *Store) createRun(ctx context.Context, create *runCreate) (*RunSummary, 
 		ID: RunSessionID(summary.ID), OwnerID: origin.PrincipalID, AgentID: origin.AgentID,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 			return nil, codedError(ErrorCodeSessionInvalid, "session "+RunSessionID(summary.ID)+" already exists")
 		}
 		return nil, fmt.Errorf("create run session: %w", err)

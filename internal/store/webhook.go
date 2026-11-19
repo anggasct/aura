@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -90,10 +91,10 @@ func (s *sqliteWebhookExecutionStore) InsertExecution(ctx context.Context, execu
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
-			return &Error{
-				Code:   ErrorCodeWebhookExecutionConflict,
-				Detail: fmt.Sprintf("execution identity for key %q is already claimed", execution.KeyID),
-			}
+			return fault.New(
+				ErrorCodeWebhookExecutionConflict,
+				fmt.Sprintf("execution identity for key %q is already claimed", execution.KeyID),
+			)
 		}
 		return classifyBusy(fmt.Errorf("insert webhook execution: %w", err))
 	}
@@ -110,10 +111,10 @@ func (s *sqliteWebhookExecutionStore) Execution(ctx context.Context, id string) 
 		return WebhookExecution{}, err
 	}
 	if !found {
-		return WebhookExecution{}, &Error{
-			Code:   ErrorCodeWebhookExecutionNotFound,
-			Detail: "webhook execution not found",
-		}
+		return WebhookExecution{}, fault.New(
+			ErrorCodeWebhookExecutionNotFound,
+			"webhook execution not found",
+		)
 	}
 	return execution, nil
 }
@@ -270,22 +271,22 @@ func scanWebhookExecution(row rowScanner) (WebhookExecution, error) {
 	}
 	var parseErr error
 	if execution.CreatedAt, parseErr = sqlite.ParseTime(createdAtRaw); parseErr != nil {
-		return WebhookExecution{}, &Error{
-			Code:   ErrorCodeWebhookExecutionInvalid,
-			Detail: "stored creation timestamp is not a valid time",
-		}
+		return WebhookExecution{}, fault.New(
+			ErrorCodeWebhookExecutionInvalid,
+			"stored creation timestamp is not a valid time",
+		)
 	}
 	if execution.UpdatedAt, parseErr = sqlite.ParseTime(updatedAtRaw); parseErr != nil {
-		return WebhookExecution{}, &Error{
-			Code:   ErrorCodeWebhookExecutionInvalid,
-			Detail: "stored update timestamp is not a valid time",
-		}
+		return WebhookExecution{}, fault.New(
+			ErrorCodeWebhookExecutionInvalid,
+			"stored update timestamp is not a valid time",
+		)
 	}
 	if execution.ExpiresAt, parseErr = sqlite.ParseTime(expiresAtRaw); parseErr != nil {
-		return WebhookExecution{}, &Error{
-			Code:   ErrorCodeWebhookExecutionInvalid,
-			Detail: "stored expiry timestamp is not a valid time",
-		}
+		return WebhookExecution{}, fault.New(
+			ErrorCodeWebhookExecutionInvalid,
+			"stored expiry timestamp is not a valid time",
+		)
 	}
 	return execution, nil
 }

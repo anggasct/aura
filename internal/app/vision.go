@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/vision"
@@ -89,7 +90,7 @@ func (a *visionStoreAdapter) Put(ctx context.Context, r io.Reader, meta *vision.
 		Metadata:  meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
 			return vision.ArtifactRef{}, fmt.Errorf("%w: %w", vision.Errorf(vision.ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted"), err)
 		}
 		return vision.ArtifactRef{}, err

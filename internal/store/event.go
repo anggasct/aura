@@ -11,6 +11,7 @@ import (
 
 	sqlitedriver "modernc.org/sqlite"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -156,10 +157,10 @@ func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 	next := int64(1)
 	if highest.Valid {
 		if highest.Int64 == math.MaxInt64 {
-			return 0, &Error{
-				Code:   ErrorCodeEventSequenceInvalid,
-				Detail: fmt.Sprintf("stored sequence for session %s is exhausted", sessionID),
-			}
+			return 0, fault.New(
+				ErrorCodeEventSequenceInvalid,
+				fmt.Sprintf("stored sequence for session %s is exhausted", sessionID),
+			)
 		}
 		next = highest.Int64 + 1
 	}
@@ -171,10 +172,10 @@ func AllocateSequenceTx(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 		return 0, errNilArgument("tx")
 	}
 	if sessionID == "" {
-		return 0, &Error{Code: ErrorCodeInvalidArgument, Detail: "session id must not be empty"}
+		return 0, fault.New(ErrorCodeInvalidArgument, "session id must not be empty")
 	}
 	if !rowExists(ctx, tx, `SELECT 1 FROM session WHERE id = ?`, sessionID) {
-		return 0, &Error{Code: ErrorCodeSessionNotFound, Detail: "session does not exist"}
+		return 0, fault.New(ErrorCodeSessionNotFound, "session does not exist")
 	}
 	sequence, err := assignNextSequence(ctx, tx, sessionID)
 	if err != nil {
@@ -230,10 +231,10 @@ func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeE
 			existingSchemaVersion == event.SchemaVersion && payload == string(event.Payload) {
 			return nil
 		}
-		return &Error{
-			Code:   ErrorCodeEventSequenceConflict,
-			Detail: fmt.Sprintf("event %s is already bound to different checkpoint state", event.ID),
-		}
+		return fault.New(
+			ErrorCodeEventSequenceConflict,
+			fmt.Sprintf("event %s is already bound to different checkpoint state", event.ID),
+		)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
 		return classifyBusy(fmt.Errorf("lookup checkpoint event %s: %w", event.ID, err))
@@ -249,40 +250,40 @@ func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeE
 
 func sequenceToDB(sequence uint64) (int64, error) {
 	if sequence > math.MaxInt64 {
-		return 0, &Error{
-			Code:   ErrorCodeEventSequenceInvalid,
-			Detail: fmt.Sprintf("sequence %d exceeds the maximum storable value", sequence),
-		}
+		return 0, fault.New(
+			ErrorCodeEventSequenceInvalid,
+			fmt.Sprintf("sequence %d exceeds the maximum storable value", sequence),
+		)
 	}
 	return int64(sequence), nil
 }
 
 func sequenceFromDB(stored int64) (uint64, error) {
 	if stored < 0 {
-		return 0, &Error{
-			Code:   ErrorCodeEventSequenceInvalid,
-			Detail: fmt.Sprintf("stored sequence %d is negative", stored),
-		}
+		return 0, fault.New(
+			ErrorCodeEventSequenceInvalid,
+			fmt.Sprintf("stored sequence %d is negative", stored),
+		)
 	}
 	return uint64(stored), nil
 }
 
 func schemaVersionFromDB(stored int64) (uint16, error) {
 	if stored < 0 || stored > math.MaxUint16 {
-		return 0, &Error{
-			Code:   ErrorCodeEventSchemaVersionInvalid,
-			Detail: fmt.Sprintf("stored schema version %d is out of range", stored),
-		}
+		return 0, fault.New(
+			ErrorCodeEventSchemaVersionInvalid,
+			fmt.Sprintf("stored schema version %d is out of range", stored),
+		)
 	}
 	return uint16(stored), nil
 }
 
 func schemaVersionToDB(version uint16) (int64, error) {
 	if version == 0 {
-		return 0, &Error{
-			Code:   ErrorCodeEventSchemaVersionInvalid,
-			Detail: "schema version must be positive",
-		}
+		return 0, fault.New(
+			ErrorCodeEventSchemaVersionInvalid,
+			"schema version must be positive",
+		)
 	}
 	return int64(version), nil
 }
@@ -309,22 +310,22 @@ func appendEvent(ctx context.Context, x EventWriter, e *RuntimeEvent) error {
 
 func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sql.Result, error), e *RuntimeEvent) error {
 	if !json.Valid(e.Payload) {
-		return &Error{
-			Code:   ErrorCodeEventPayloadInvalid,
-			Detail: fmt.Sprintf("event %s payload is not valid JSON", e.ID),
-		}
+		return fault.New(
+			ErrorCodeEventPayloadInvalid,
+			fmt.Sprintf("event %s payload is not valid JSON", e.ID),
+		)
 	}
 	if e.Sequence == 0 {
-		return &Error{
-			Code:   ErrorCodeEventSequenceInvalid,
-			Detail: fmt.Sprintf("event %s sequence must be positive", e.ID),
-		}
+		return fault.New(
+			ErrorCodeEventSequenceInvalid,
+			fmt.Sprintf("event %s sequence must be positive", e.ID),
+		)
 	}
 	if e.SchemaVersion == 0 {
-		return &Error{
-			Code:   ErrorCodeEventSchemaVersionInvalid,
-			Detail: fmt.Sprintf("event %s schema version must be positive", e.ID),
-		}
+		return fault.New(
+			ErrorCodeEventSchemaVersionInvalid,
+			fmt.Sprintf("event %s schema version must be positive", e.ID),
+		)
 	}
 	sequence, err := sequenceToDB(e.Sequence)
 	if err != nil {
@@ -340,22 +341,22 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
-			return &Error{
-				Code:   ErrorCodeEventSequenceConflict,
-				Detail: fmt.Sprintf("session %s sequence %d already used by a different event", e.SessionID, e.Sequence),
-			}
+			return fault.New(
+				ErrorCodeEventSequenceConflict,
+				fmt.Sprintf("session %s sequence %d already used by a different event", e.SessionID, e.Sequence),
+			)
 		}
 		if isConstraintForeignKey(err) {
-			return &Error{
-				Code:   ErrorCodeSessionNotFound,
-				Detail: fmt.Sprintf("session %s does not exist", e.SessionID),
-			}
+			return fault.New(
+				ErrorCodeSessionNotFound,
+				fmt.Sprintf("session %s does not exist", e.SessionID),
+			)
 		}
 		if isConstraintCheck(err) {
-			return &Error{
-				Code:   ErrorCodeEventPayloadInvalid,
-				Detail: fmt.Sprintf("event %s violates a storage constraint", e.ID),
-			}
+			return fault.New(
+				ErrorCodeEventPayloadInvalid,
+				fmt.Sprintf("event %s violates a storage constraint", e.ID),
+			)
 		}
 		return classifyBusy(fmt.Errorf("append event %s: %w", e.ID, err))
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -124,12 +125,12 @@ func TestHandoffOpenRejectsInvalidInput(t *testing.T) {
 			handoff := valid
 			tt.mutate(&handoff)
 			err := handoffs.Open(t.Context(), &handoff)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("Open err = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})
 	}
-	if code, ok := CodeOf(handoffs.Open(t.Context(), nil)); !ok || code != ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[ErrorCode](handoffs.Open(t.Context(), nil)); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("Open(nil) code = %q, %v", code, ok)
 	}
 	if list, err := handoffs.ListOpen(t.Context()); err != nil || len(list) != 0 {

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func FuzzEventPayload(f *testing.F) {
@@ -30,7 +32,7 @@ func FuzzEventPayload(f *testing.F) {
 		exec := func(context.Context, ...any) (sql.Result, error) { return driver.RowsAffected(1), nil }
 		err := appendEventCore(context.Background(), exec, e)
 		if err != nil {
-			var storeErr *Error
+			var storeErr *fault.Error[ErrorCode]
 			if !errors.As(err, &storeErr) {
 				t.Errorf("appendEventCore returned a non-typed error: %v", err)
 			}

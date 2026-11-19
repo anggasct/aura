@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestEmailCursorStore_AdvancesMonotonicallyWithinOneValidity(t *testing.T) {
@@ -56,7 +58,7 @@ func TestEmailCursorStore_ValidityChangeReplacesTheCursor(t *testing.T) {
 func TestEmailCursorStore_RejectsEmptySource(t *testing.T) {
 	cursors := NewEmailCursorStore(newTestDB(t))
 	err := cursors.Save(t.Context(), "", EmailCursor{UIDValidity: 1, LastUID: 1}, time.Now())
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("code = %q, want %q", code, ErrorCodeInvalidArgument)
 	}
 }

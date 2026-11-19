@@ -24,5 +24,4 @@ internal/modules/profile  # until this module's errors move to platform/fault wi
 internal/modules/schedule  # until this module's errors move to platform/fault with the module
 internal/modules/skills  # until this module's errors move to platform/fault with the module
 internal/modules/workflow  # until this module's errors move to platform/fault with the module
-internal/store  # legacy store; its errors move with each owner's tables
 plugins/gmail/connector  # plugin protocol errors; plugins import only the wire contract

@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -27,7 +28,7 @@ type apiKeyDirectory struct {
 
 func (d *apiKeyDirectory) GetByID(ctx context.Context, id string) (httpchat.Key, bool, error) {
 	key, err := d.keys.GetByID(ctx, id)
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeAPIKeyNotFound {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeAPIKeyNotFound {
 		return httpchat.Key{}, false, nil
 	}
 	if err != nil {
@@ -52,7 +53,7 @@ func (s *httpSessionStore) Get(ctx context.Context, id string) (httpchat.Session
 	if errors.Is(err, sql.ErrNoRows) {
 		return httpchat.Session{}, false, nil
 	}
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionNotFound {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
 		return httpchat.Session{}, false, nil
 	}
 	if err != nil {

@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const erasureWorkflowStamp = "2026-11-12T09:00:00Z"
@@ -86,7 +88,7 @@ func workflowDataRows(t *testing.T, db *sql.DB) map[string]int {
 
 func requireStoreErasureCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	if code, ok := CodeOf(err); !ok || code != want {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -219,7 +220,7 @@ func TestEventAppendSequenceConflict(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected event_sequence_conflict, got nil")
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != ErrorCodeEventSequenceConflict {
 		t.Fatalf("CodeOf(err) = %v, %v; want %s", code, ok, ErrorCodeEventSequenceConflict)
 	}
@@ -319,7 +320,7 @@ func TestEventAppendConcurrentSequenceCollision(t *testing.T) {
 		case nil:
 			successes++
 		default:
-			if code, ok := CodeOf(err); ok && code == ErrorCodeEventSequenceConflict {
+			if code, ok := fault.CodeOf[ErrorCode](err); ok && code == ErrorCodeEventSequenceConflict {
 				conflicts++
 			} else {
 				t.Fatalf("unexpected error: %v", err)

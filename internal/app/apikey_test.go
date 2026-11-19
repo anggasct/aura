@@ -272,7 +272,7 @@ func TestAPIKeyRevokeIsIdempotentAndAudited(t *testing.T) {
 func TestAPIKeyRevokeUnknownKeyFailsWithStableCode(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	_, _, err := runAPIKey(t, cfg, "revoke", "zzzzzzzzzzzz")
-	if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeAPIKeyNotFound {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeAPIKeyNotFound {
 		t.Fatalf("error = %v, want apikey_not_found", err)
 	}
 	if got := accessEventCount(t, cfg, accessActionAPIKeyRevoke); got != 0 {

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -156,10 +157,10 @@ func (s *sqliteBroadcastStore) InsertItem(ctx context.Context, item *BroadcastIt
 		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("insert broadcast item: %w", err))
 	}
 	if existing.ContentDigest != item.ContentDigest {
-		return BroadcastItem{}, false, &Error{
-			Code:   ErrorCodeBroadcastConflict,
-			Detail: fmt.Sprintf("idempotency key %q is already claimed with different content", item.IdempotencyKey),
-		}
+		return BroadcastItem{}, false, fault.New(
+			ErrorCodeBroadcastConflict,
+			fmt.Sprintf("idempotency key %q is already claimed with different content", item.IdempotencyKey),
+		)
 	}
 	return existing, true, nil
 }
@@ -174,7 +175,7 @@ func (s *sqliteBroadcastStore) Item(ctx context.Context, id string) (BroadcastIt
 		return BroadcastItem{}, err
 	}
 	if !found {
-		return BroadcastItem{}, &Error{Code: ErrorCodeBroadcastNotFound, Detail: "broadcast item not found"}
+		return BroadcastItem{}, fault.New(ErrorCodeBroadcastNotFound, "broadcast item not found")
 	}
 	return item, nil
 }
@@ -586,7 +587,7 @@ func (s *sqliteBroadcastStore) Settle(ctx context.Context, id, state, effectID s
 		if findErr != nil {
 			return findErr
 		}
-		return &Error{Code: ErrorCodeBroadcastConflict, Detail: "broadcast item is already terminal"}
+		return fault.New(ErrorCodeBroadcastConflict, "broadcast item is already terminal")
 	}
 	return nil
 }

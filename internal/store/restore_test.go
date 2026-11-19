@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -98,7 +99,7 @@ func TestRestoreRefusesExistingLiveDBWithoutForce(t *testing.T) {
 	}
 	_, err := Restore(ctx, backupDir, t.TempDir(), liveDB, RestoreOptions{})
 	wantCode(t, err, ErrorCodeRestoreLocked)
-	if _, ok := CodeOf(err); !ok {
+	if _, ok := fault.CodeOf[ErrorCode](err); !ok {
 		t.Fatalf("restore_locked must be a typed error, got %v", err)
 	}
 
