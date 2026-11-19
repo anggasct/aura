@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
@@ -58,7 +58,7 @@ func TestOwnerContextOptionNilOwner(t *testing.T) {
 func TestOwnerContextOptionEmptyBlock(t *testing.T) {
 	h := &captureHandler{level: slog.LevelDebug}
 	logger := newTestLogger(h)
-	owner := &config.Owner{}
+	owner := &principal.Owner{}
 	opt := ownerContextOption(context.Background(), owner, logger)
 	got := applyOption(t, opt)
 	if got != "" {
@@ -72,7 +72,7 @@ func TestOwnerContextOptionEmptyBlock(t *testing.T) {
 func TestOwnerContextOptionPopulatedOwner(t *testing.T) {
 	h := &captureHandler{level: slog.LevelDebug}
 	logger := newTestLogger(h)
-	owner := &config.Owner{
+	owner := &principal.Owner{
 		Name:        "Angga",
 		Language:    "Indonesian",
 		Timezone:    "Asia/Jakarta",
@@ -111,7 +111,7 @@ func TestOwnerContextOptionOversizedBlock(t *testing.T) {
 	h := &captureHandler{level: slog.LevelDebug}
 	logger := newTestLogger(h)
 	big := strings.Repeat("x", ownerContextWarnBytes+100)
-	owner := &config.Owner{
+	owner := &principal.Owner{
 		Name:        "Angga",
 		Preferences: map[string]string{"bio": big},
 	}

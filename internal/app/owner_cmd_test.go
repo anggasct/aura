@@ -190,7 +190,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 
 func TestOwnerRekeyMoves(t *testing.T) {
 	cfg := appconfig.Default()
-	cfg.Owner = &config.Owner{Identities: []string{"discord:" + testOwnerDiscordID}}
+	cfg.Owner = &principal.Owner{Identities: []string{"discord:" + testOwnerDiscordID}}
 	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
 		{Name: "owner", AllowedUserIDs: []string{testOwnerDiscordID}},
 		{Name: "kuma", AllowedUserIDs: []string{testTrustedDiscordID, testOwnerDiscordID}},

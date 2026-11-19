@@ -3,12 +3,10 @@ package config
 import (
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -16,7 +14,6 @@ import (
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -116,7 +113,7 @@ func ValidateRuntime(runtime Runtime) error {
 	if runtime.ShutdownTimeout <= 0 {
 		return configkit.Invalid("runtime.shutdown_timeout", "must be positive")
 	}
-	if time.Duration(runtime.RunRetention) < MinRetention {
+	if time.Duration(runtime.RunRetention) < principal.MinRetention {
 		return configkit.Invalid("runtime.run_retention", "must be at least 24h")
 	}
 	return nil
@@ -841,94 +838,6 @@ func ValidateProfile(profileConfig *Profile) error {
 		problems = append(problems, configkit.Invalid("profile.prompt_version", "must not be empty"))
 	}
 	return errors.Join(problems...)
-}
-
-var ownerFixedKeys = []string{"name", "language", "timezone"}
-
-func ValidateOwner(owner *Owner) error {
-	if owner == nil {
-		return nil
-	}
-	var problems []error
-	for _, field := range []struct {
-		path  string
-		value string
-	}{
-		{"owner.name", owner.Name},
-		{"owner.language", owner.Language},
-		{"owner.timezone", owner.Timezone},
-	} {
-		if err := validateOwnerValue(field.path, field.value); err != nil {
-			problems = append(problems, err)
-		}
-	}
-	if owner.Timezone != "" {
-		if _, err := time.LoadLocation(owner.Timezone); err != nil {
-			problems = append(problems, configkit.Invalid("owner.timezone", "is not a valid IANA timezone"))
-		}
-	}
-	for _, key := range slices.Sorted(maps.Keys(owner.Preferences)) {
-		switch {
-		case key == "":
-			problems = append(problems, configkit.Invalid("owner.preferences", "keys must not be empty"))
-			continue
-		case key != strings.TrimSpace(key):
-			problems = append(problems, configkit.Invalid("owner.preferences", fmt.Sprintf("key %q must not carry surrounding whitespace", key)))
-			continue
-		case strings.Contains(key, ":"):
-			problems = append(problems, configkit.Invalid("owner.preferences", fmt.Sprintf("key %q must not contain a colon", key)))
-			continue
-		case slices.Contains(ownerFixedKeys, key):
-			problems = append(problems, configkit.Invalid("owner.preferences", fmt.Sprintf("key %q collides with owner.%s", key, key)))
-			continue
-		}
-		if err := validateOwnerValue("owner.preferences."+key, owner.Preferences[key]); err != nil {
-			problems = append(problems, err)
-		}
-	}
-	return errors.Join(problems...)
-}
-
-func ValidateOwnerIdentities(owner *Owner) error {
-	if owner == nil || len(owner.Identities) == 0 {
-		return nil
-	}
-	if _, err := principal.NewResolver(owner.Identities); err != nil {
-		return configkit.Field("owner.identities", fault.New(ErrorCodeOwnerIdentityInvalid, identityProblemDetail(err)))
-	}
-	return nil
-}
-
-// identityProblemDetail renders resolver problems without the machine code the
-// enclosing config error already carries, so every failing index appears once.
-func identityProblemDetail(err error) string {
-	problems := []error{err}
-	if joined, ok := err.(interface{ Unwrap() []error }); ok {
-		problems = joined.Unwrap()
-	}
-	lines := make([]string, 0, len(problems))
-	for _, problem := range problems {
-		var typed *fault.Error[principal.ErrorCode]
-		if errors.As(problem, &typed) {
-			lines = append(lines, strings.Replace(problem.Error(), typed.Error(), typed.Detail, 1))
-			continue
-		}
-		lines = append(lines, problem.Error())
-	}
-	return strings.Join(lines, "\n")
-}
-
-func validateOwnerValue(path, value string) error {
-	if value == "" {
-		return nil
-	}
-	if strings.ContainsAny(value, "\r\n") {
-		return configkit.Invalid(path, "must be a single line")
-	}
-	if value != strings.TrimSpace(value) {
-		return configkit.Invalid(path, "must not carry surrounding whitespace")
-	}
-	return nil
 }
 
 func validBroadcastAlias(alias string) bool {

@@ -8,7 +8,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
@@ -25,7 +24,7 @@ func (f *fakeTokenReader) PrincipalTokensToday(_ context.Context, principalID st
 func testBudgetGate(tokens *fakeTokenReader, now *time.Time) *principalBudgetGate {
 	return &principalBudgetGate{
 		tokens: tokens,
-		limits: map[principal.Class]config.PrincipalBudget{
+		limits: map[principal.Class]principal.Budget{
 			principal.ClassTrusted: {MaxTokensPerDay: 1000, MaxTurnsPerMinute: 2},
 			principal.ClassPublic:  {MaxTokensPerDay: 100, MaxTurnsPerMinute: 1},
 		},

@@ -7,6 +7,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/usage"
@@ -38,9 +39,9 @@ type Config struct {
 	Skills       *legacyconfig.Skills        `json:"skills,omitempty"`
 	Context      *legacyconfig.Context       `json:"context,omitempty"`
 	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
-	Owner        *legacyconfig.Owner         `json:"owner,omitempty"`
+	Owner        *principal.Owner            `json:"owner,omitempty"`
 	Children     *legacyconfig.Children      `json:"children,omitempty"`
-	Access       *legacyconfig.Access        `json:"access,omitempty"`
+	Access       *principal.Config           `json:"access,omitempty"`
 	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *legacyconfig.Knowledge     `json:"knowledge,omitempty"`
@@ -51,6 +52,7 @@ type Config struct {
 
 func Default() Config {
 	defaultAgents := auraagent.Default()
+	defaultAccess := principal.Default()
 	defaultVision := vision.Default()
 	return Config{
 		Version:      1,
@@ -79,6 +81,6 @@ func Default() Config {
 		Context:      legacyconfig.DefaultContext(),
 		Profile:      legacyconfig.DefaultProfile(),
 		Children:     legacyconfig.DefaultChildren(),
-		Access:       legacyconfig.DefaultAccess(),
+		Access:       &defaultAccess,
 	}
 }

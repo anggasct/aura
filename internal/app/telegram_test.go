@@ -8,13 +8,14 @@ import (
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 func enabledTelegramConfig() appconfig.Config {
 	defaults := appconfig.Default()
-	defaults.Owner = &config.Owner{Identities: []string{"telegram:424242"}}
+	defaults.Owner = &principal.Owner{Identities: []string{"telegram:424242"}}
 	defaults.Channels.Telegram.Enabled = true
 	defaults.Channels.Telegram.Accounts = []config.TelegramAccount{{
 		Name:        "pocket",

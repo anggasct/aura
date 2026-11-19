@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -27,7 +28,7 @@ func TestReferencesAreValidatedOnceAndJoined(t *testing.T) {
 	cfg.Models.Definitions = map[string]model.Definition{"defined": {}}
 	cfg.ModelRoutes = map[string]model.ModelRoute{"fast": {Candidates: []string{"undefined-definition"}}}
 	cfg.Bindings = []auraagent.Binding{{Persona: "default", Channel: auraagent.BindingChannelDiscord, Account: "undefined-account", GuildID: "123"}}
-	cfg.Owner = &legacyconfig.Owner{Name: "owner " + canary}
+	cfg.Owner = &principal.Owner{Name: "owner " + canary}
 	doc, err := parseDocument([]byte("version: 1\n"))
 	if err != nil {
 		t.Fatalf("parseDocument: %v", err)

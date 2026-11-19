@@ -4,13 +4,13 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 const ownerContextWarnBytes = 4096
 
-func ownerContextOption(ctx context.Context, owner *config.Owner, logger *slog.Logger) runtimeadk.ExecutorOption {
+func ownerContextOption(ctx context.Context, owner *principal.Owner, logger *slog.Logger) runtimeadk.ExecutorOption {
 	if logger == nil {
 		logger = slog.Default()
 	}

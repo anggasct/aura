@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -126,7 +127,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateContext(cfg.Context),
 		legacyconfig.ValidateProfile(cfg.Profile),
 		legacyconfig.ValidateChildren(cfg.Children),
-		legacyconfig.ValidateAccess(cfg.Access),
+		validateAccess(cfg.Access),
 		legacyconfig.ValidateSync(cfg.Sync),
 		validateVision(cfg.Vision),
 		legacyconfig.ValidateKnowledge(cfg.Knowledge),
@@ -150,8 +151,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
 		legacyconfig.ValidateScheduler(&cfg.Scheduler),
 		legacyconfig.ValidateMemory(&cfg.Memory),
-		legacyconfig.ValidateOwner(cfg.Owner),
-		legacyconfig.ValidateOwnerIdentities(cfg.Owner),
+		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),
 		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),
 		validateAgainstBuild(cfg, profile),
@@ -301,7 +301,7 @@ func decodeInput(input map[string]any, cfg *Config) error {
 	return decoder.Decode(input)
 }
 
-func screenOwnerSecrets(owner *legacyconfig.Owner, cfg *Config) error {
+func screenOwnerSecrets(owner *principal.Owner, cfg *Config) error {
 	if owner == nil {
 		return nil
 	}

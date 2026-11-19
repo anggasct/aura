@@ -14,7 +14,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/profile"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -461,7 +460,7 @@ func TestComposePostTurnHooks(t *testing.T) {
 }
 
 func TestStatedOwnerKeys(t *testing.T) {
-	got := statedOwnerKeys(&config.Owner{Name: "Angga", Timezone: " ", Preferences: map[string]string{"style": "concise", "blank": " "}})
+	got := statedOwnerKeys(&principal.Owner{Name: "Angga", Timezone: " ", Preferences: map[string]string{"style": "concise", "blank": " "}})
 	if strings.Join(got, ",") != "name,style" {
 		t.Errorf("stated keys = %v, want name,style", got)
 	}

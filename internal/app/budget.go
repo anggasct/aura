@@ -9,7 +9,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/usage"
@@ -50,17 +49,17 @@ type principalTokenReader interface {
 
 type principalBudgetGate struct {
 	tokens   principalTokenReader
-	limits   map[principal.Class]config.PrincipalBudget
+	limits   map[principal.Class]principal.Budget
 	recorder *telemetry.AccessRecorder
 	now      func() time.Time
 	mu       sync.Mutex
 	turns    map[string][]time.Time
 }
 
-func newPrincipalBudgetGate(access *config.Access, tokens principalTokenReader, recorder *telemetry.AccessRecorder) *principalBudgetGate {
+func newPrincipalBudgetGate(access *principal.Config, tokens principalTokenReader, recorder *telemetry.AccessRecorder) *principalBudgetGate {
 	return &principalBudgetGate{
 		tokens: tokens,
-		limits: map[principal.Class]config.PrincipalBudget{
+		limits: map[principal.Class]principal.Budget{
 			principal.ClassTrusted: access.Budgets.Trusted,
 			principal.ClassPublic:  access.Budgets.Public,
 		},

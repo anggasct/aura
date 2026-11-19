@@ -7,7 +7,10 @@ import (
 	"testing"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
+
+const identityInvalidCode = legacyconfig.ErrorCode(principal.ErrorCodeIdentityInvalid)
 
 func writeOwnerConfig(t *testing.T, content string) string {
 	t.Helper()
@@ -272,8 +275,8 @@ func TestLoad_OwnerIdentitiesRejected(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			path := writeOwnerConfig(t, "version: 1\nowner:\n  identities:\n"+tc.body)
 			_, err := Load(path)
-			if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeOwnerIdentityInvalid {
-				t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, legacyconfig.ErrorCodeOwnerIdentityInvalid, err)
+			if code, ok := codeOf(err); !ok || code != identityInvalidCode {
+				t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, identityInvalidCode, err)
 			}
 			if !strings.Contains(err.Error(), tc.index) {
 				t.Errorf("error %q does not name %s", err, tc.index)
@@ -291,13 +294,13 @@ func TestLoad_OwnerIdentitiesRenderSingleCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("invalid identities accepted")
 	}
-	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeOwnerIdentityInvalid {
-		t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, legacyconfig.ErrorCodeOwnerIdentityInvalid, err)
+	if code, ok := codeOf(err); !ok || code != identityInvalidCode {
+		t.Fatalf("code = %q, %v; want %q (err %v)", code, ok, identityInvalidCode, err)
 	}
-	if got := strings.Count(err.Error(), string(legacyconfig.ErrorCodeOwnerIdentityInvalid)+":"); got != 1 {
+	if got := strings.Count(err.Error(), string(identityInvalidCode)+":"); got != 1 {
 		t.Errorf("error %q carries %d code prefixes; want 1", err, got)
 	}
-	if !strings.Contains(err.Error(), string(legacyconfig.ErrorCodeOwnerIdentityInvalid)+": owner.identities[0]:") {
+	if !strings.Contains(err.Error(), string(identityInvalidCode)+": owner.identities[0]:") {
 		t.Errorf("error %q does not render the code once before the first index", err)
 	}
 	for _, index := range []string{"owner.identities[0]", "owner.identities[1]"} {
