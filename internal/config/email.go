@@ -34,7 +34,7 @@ func (*EmailAccount) Default() any {
 	}
 }
 
-func ValidateEmail(email *Email, owner *Owner) error {
+func ValidateEmail(email *Email) error {
 	if email == nil {
 		return configkit.Invalid("channels.email", "must not be nil")
 	}
@@ -55,14 +55,6 @@ func ValidateEmail(email *Email, owner *Owner) error {
 	}
 	if email.Enabled && len(email.Accounts) == 0 {
 		problems = append(problems, configkit.Invalid("channels.email.enabled", "requires at least one channels.email.accounts entry"))
-	}
-	if email.Enabled && !hasEmailOwner(owner) {
-		for i := range email.Accounts {
-			if len(email.Accounts[i].AllowedSenders) == 0 {
-				problems = append(problems, configkit.Invalid("channels.email.enabled", "requires an email:<address> entry in owner.identities or an allowed_senders entry on every account"))
-				break
-			}
-		}
 	}
 	if email.MaxAttachmentBytes < 1 || email.MaxAttachmentBytes > EmailMaxAttachmentBytes {
 		problems = append(problems, configkit.Invalid("channels.email.max_attachment_bytes", fmt.Sprintf("must be between 1 and %d", EmailMaxAttachmentBytes)))
@@ -141,16 +133,4 @@ func emailPlainText(value string, maxBytes int) bool {
 		return false
 	}
 	return strings.IndexFunc(value, unicode.IsControl) < 0
-}
-
-func hasEmailOwner(owner *Owner) bool {
-	if owner == nil {
-		return false
-	}
-	for _, identity := range owner.Identities {
-		if channel, _, found := strings.Cut(identity, ":"); found && channel == principal.ChannelEmail {
-			return true
-		}
-	}
-	return false
 }

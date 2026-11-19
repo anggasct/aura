@@ -14,7 +14,6 @@ import (
 	"time"
 
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
-	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
@@ -431,7 +430,7 @@ func listenAddressProblem(field, address string) error {
 	return nil
 }
 
-func ValidateWebhook(w *Webhook, healthListen string) error {
+func ValidateWebhook(w *Webhook) error {
 	if err := listenAddressProblem("webhook.listen_address", w.Listen); err != nil {
 		return err
 	}
@@ -494,9 +493,6 @@ func ValidateWebhook(w *Webhook, healthListen string) error {
 	if !active {
 		return configkit.Invalid("webhook.enabled", "requires at least one key whose accept_until has not passed")
 	}
-	if w.Listen == healthListen {
-		return configkit.Invalid("webhook.listen_address", "must differ from health.listen")
-	}
 	return nil
 }
 
@@ -557,16 +553,13 @@ const (
 	telegramMinEditCeiling = time.Minute
 )
 
-func ValidateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error {
+func ValidateTelegram(telegram *Telegram) error {
 	if telegram == nil {
 		return configkit.Invalid("channels.telegram", "must not be nil")
 	}
 	var problems []error
 	names := make(map[string]bool, len(telegram.Accounts))
-	tokenRefs := make(map[secret.Ref]bool, len(telegram.Accounts)+len(discord.Accounts))
-	for i := range discord.Accounts {
-		tokenRefs[discord.Accounts[i].BotTokenRef] = true
-	}
+	tokenRefs := make(map[secret.Ref]bool, len(telegram.Accounts))
 	for i := range telegram.Accounts {
 		account := &telegram.Accounts[i]
 		field := fmt.Sprintf("channels.telegram.accounts[%d]", i)
@@ -595,14 +588,6 @@ func ValidateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	problems = append(problems, telegramWebhookProblems(telegram)...)
 	if telegram.Enabled && len(telegram.Accounts) == 0 {
 		problems = append(problems, configkit.Invalid("channels.telegram.enabled", "requires at least one channels.telegram.accounts entry"))
-	}
-	if telegram.Enabled && !hasTelegramOwner(owner) {
-		for i := range telegram.Accounts {
-			if len(telegram.Accounts[i].AllowedUserIDs) == 0 {
-				problems = append(problems, configkit.Invalid("channels.telegram.enabled", "requires a telegram:<user_id> entry in owner.identities or an allowed_user_ids entry on every account"))
-				break
-			}
-		}
 	}
 	timeout := time.Duration(telegram.Polling.Timeout)
 	if timeout < time.Second || timeout > telegramMaxPollTimeout || timeout%time.Second != 0 {
@@ -747,18 +732,6 @@ func telegramChatListProblems(field string, ids []string) []error {
 	return problems
 }
 
-func hasTelegramOwner(owner *Owner) bool {
-	if owner == nil {
-		return false
-	}
-	for _, identity := range owner.Identities {
-		if channel, _, found := strings.Cut(identity, ":"); found && channel == principal.ChannelTelegram {
-			return true
-		}
-	}
-	return false
-}
-
 func snowflakeListProblems(field string, ids []string) []error {
 	var problems []error
 	seen := make(map[string]bool, len(ids))
@@ -766,106 +739,13 @@ func snowflakeListProblems(field string, ids []string) []error {
 		switch {
 		case id == "":
 			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
-		case !isSnowflake(id):
+		case !IsSnowflake(id):
 			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a decimal snowflake", id)))
 		case seen[id]:
 			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
 		default:
 			seen[id] = true
 		}
-	}
-	return problems
-}
-
-func ValidateBindings(bindings []Binding, channels *Channels) error {
-	if channels == nil {
-		return configkit.Invalid("channels", "must not be nil")
-	}
-	accounts := map[string]map[string]bool{
-		BindingChannelDiscord:  make(map[string]bool, len(channels.Discord.Accounts)),
-		BindingChannelTelegram: make(map[string]bool, len(channels.Telegram.Accounts)),
-	}
-	for i := range channels.Discord.Accounts {
-		accounts[BindingChannelDiscord][channels.Discord.Accounts[i].Name] = true
-	}
-	for i := range channels.Telegram.Accounts {
-		accounts[BindingChannelTelegram][channels.Telegram.Accounts[i].Name] = true
-	}
-	var problems []error
-	seen := make(map[Binding]int, len(bindings))
-	for i := range bindings {
-		binding := bindings[i]
-		field := fmt.Sprintf("bindings[%d]", i)
-		if strings.TrimSpace(binding.Persona) == "" {
-			problems = append(problems, configkit.Field(field+".persona", fault.New(ErrorCodeBindingInvalid, "must not be empty")))
-		}
-		switch binding.Channel {
-		case BindingChannelDiscord:
-			problems = append(problems, discordBindingProblems(field, &binding, accounts[BindingChannelDiscord])...)
-		case BindingChannelTelegram:
-			problems = append(problems, telegramBindingProblems(field, &binding, accounts[BindingChannelTelegram])...)
-		default:
-			problems = append(problems, configkit.Field(field+".channel", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not supported; use %q or %q", binding.Channel, BindingChannelDiscord, BindingChannelTelegram))))
-		}
-		key := binding
-		key.Persona = ""
-		if first, ok := seen[key]; ok {
-			problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("has the same match fields as bindings[%d]", first))))
-			continue
-		}
-		seen[key] = i
-	}
-	return errors.Join(problems...)
-}
-
-func discordBindingProblems(field string, binding *Binding, accounts map[string]bool) []error {
-	var problems []error
-	if !accounts[binding.Account] {
-		problems = append(problems, configkit.Field(field+".account", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.discord.accounts name", binding.Account))))
-	}
-	if binding.ChatID != "" {
-		problems = append(problems, configkit.Field(field+".chat_id", fault.New(ErrorCodeBindingInvalid, "is only valid on telegram bindings")))
-	}
-	if binding.GuildID == "" && binding.ChannelID == "" && binding.ThreadID == "" && binding.UserID == "" {
-		problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, "must set at least one of guild_id, channel_id, thread_id, user_id")))
-	}
-	for _, match := range []struct{ name, id string }{
-		{"guild_id", binding.GuildID},
-		{"channel_id", binding.ChannelID},
-		{"thread_id", binding.ThreadID},
-		{"user_id", binding.UserID},
-	} {
-		if match.id != "" && !isSnowflake(match.id) {
-			problems = append(problems, configkit.Field(field+"."+match.name, fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a decimal snowflake", match.id))))
-		}
-	}
-	return problems
-}
-
-func telegramBindingProblems(field string, binding *Binding, accounts map[string]bool) []error {
-	var problems []error
-	if !accounts[binding.Account] {
-		problems = append(problems, configkit.Field(field+".account", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a configured channels.telegram.accounts name", binding.Account))))
-	}
-	if binding.GuildID != "" || binding.ChannelID != "" {
-		problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, "matches telegram chats by chat_id, thread_id and user_id only")))
-	}
-	if binding.ChatID == "" && binding.UserID == "" {
-		problems = append(problems, configkit.Field(field, fault.New(ErrorCodeBindingInvalid, "must set chat_id or user_id")))
-	}
-	if binding.ChatID != "" && !principal.IsTelegramGroupChatID(binding.ChatID) {
-		problems = append(problems, configkit.Field(field+".chat_id", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a negative decimal telegram group chat id", binding.ChatID))))
-	}
-	if binding.ThreadID != "" {
-		switch {
-		case binding.ChatID == "":
-			problems = append(problems, configkit.Field(field+".thread_id", fault.New(ErrorCodeBindingInvalid, "requires chat_id")))
-		case !principal.IsTelegramTopicID(binding.ThreadID):
-			problems = append(problems, configkit.Field(field+".thread_id", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a positive decimal telegram topic id", binding.ThreadID))))
-		}
-	}
-	if binding.UserID != "" && !principal.IsTelegramUserID(binding.UserID) {
-		problems = append(problems, configkit.Field(field+".user_id", fault.New(ErrorCodeBindingInvalid, fmt.Sprintf("%q is not a positive decimal telegram user id", binding.UserID))))
 	}
 	return problems
 }
@@ -968,11 +848,8 @@ func ValidateMemory(memory *Memory) error {
 	return errors.Join(problems...)
 }
 
-func ValidateSkills(skillsConfig *Skills, profile capability.Profile) error {
+func ValidateSkills(skillsConfig *Skills) error {
 	if skillsConfig == nil {
-		if profile != capability.ProfileCore {
-			return configkit.Invalid("skills", fmt.Sprintf("section is required for build profile %q", profile))
-		}
 		return nil
 	}
 	var problems []error
@@ -1009,11 +886,8 @@ func ValidateSkills(skillsConfig *Skills, profile capability.Profile) error {
 	return errors.Join(problems...)
 }
 
-func ValidateContext(contextConfig *Context, profile capability.Profile) error {
+func ValidateContext(contextConfig *Context) error {
 	if contextConfig == nil {
-		if profile != capability.ProfileCore {
-			return configkit.Invalid("context", fmt.Sprintf("section is required for build profile %q", profile))
-		}
 		return nil
 	}
 	var problems []error
@@ -1065,11 +939,8 @@ func validHourMinute(value string) bool {
 	return hour >= 0 && hour < 24 && minute >= 0 && minute < 60
 }
 
-func ValidateProfile(profileConfig *Profile, buildProfile capability.Profile) error {
+func ValidateProfile(profileConfig *Profile) error {
 	if profileConfig == nil {
-		if buildProfile != capability.ProfileCore {
-			return configkit.Invalid("profile", fmt.Sprintf("section is required for build profile %q", buildProfile))
-		}
 		return nil
 	}
 	var problems []error
@@ -1188,7 +1059,7 @@ func ValidBroadcastRoute(route string) bool {
 	return err == nil
 }
 
-func isSnowflake(id string) bool {
+func IsSnowflake(id string) bool {
 	if id == "" {
 		return false
 	}
@@ -1200,11 +1071,8 @@ func isSnowflake(id string) bool {
 	return true
 }
 
-func ValidateVision(vision *Vision, buildProfile capability.Profile) error {
+func ValidateVision(vision *Vision) error {
 	if vision == nil {
-		if buildProfile != capability.ProfileCore {
-			return configkit.Invalid("vision", fmt.Sprintf("section is required for build profile %q", buildProfile))
-		}
 		return nil
 	}
 	var problems []error
@@ -1268,11 +1136,8 @@ func validProtocolName(name string) bool {
 	return name == ProtocolOpenAIResponses || name == ProtocolOpenAIChatCompat || name == ProtocolAnthropicMessages || name == ProtocolGeminiNative
 }
 
-func ValidateTools(toolsConfig *Tools, profile capability.Profile) error {
+func ValidateTools(toolsConfig *Tools) error {
 	if toolsConfig == nil {
-		if profile != capability.ProfileCore {
-			return configkit.Invalid("tools", fmt.Sprintf("section is required for build profile %q", profile))
-		}
 		return nil
 	}
 	if strings.TrimSpace(toolsConfig.Workspace) == "" {
@@ -1305,11 +1170,8 @@ func ValidateTools(toolsConfig *Tools, profile capability.Profile) error {
 	return validateWebSearch(&toolsConfig.WebSearch)
 }
 
-func ValidateChildren(childrenConfig *Children, buildProfile capability.Profile) error {
+func ValidateChildren(childrenConfig *Children) error {
 	if childrenConfig == nil {
-		if buildProfile != capability.ProfileCore {
-			return configkit.Invalid("children", fmt.Sprintf("section is required for build profile %q", buildProfile))
-		}
 		return nil
 	}
 	var problems []error
