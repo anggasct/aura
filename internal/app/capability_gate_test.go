@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -32,7 +32,7 @@ func TestChatCapabilityGate(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewTextHandler(&logs, nil))
-			result := &config.LoadResult{CapabilityStateError: tc.state}
+			result := &appconfig.LoadResult{CapabilityStateError: tc.state}
 			err := chatCapabilityGate(t.Context(), logger, result)
 			if tc.wantErr != (err != nil) {
 				t.Fatalf("chatCapabilityGate error = %v, want error %v", err, tc.wantErr)

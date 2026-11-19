@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/config"
@@ -65,7 +66,7 @@ func (adapters emailAdapters) Check(ctx context.Context) []health.Finding {
 	return findings
 }
 
-func newEmailAdapter(cfg *config.Config, account *config.EmailAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*email.Adapter, error) {
+func newEmailAdapter(cfg *appconfig.Config, account *config.EmailAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*email.Adapter, error) {
 	connector, err := email.NewIMAPConnector(account)
 	if err != nil {
 		return nil, err
@@ -156,7 +157,7 @@ func (o *emailOutbox) Send(ctx context.Context, message *toolsbuiltin.EmailMessa
 	}
 }
 
-func recoverEmailEffects(ctx context.Context, cfg *config.Config, db *sql.DB, logger *slog.Logger) error {
+func recoverEmailEffects(ctx context.Context, cfg *appconfig.Config, db *sql.DB, logger *slog.Logger) error {
 	if !cfg.Channels.Email.Enabled {
 		return nil
 	}

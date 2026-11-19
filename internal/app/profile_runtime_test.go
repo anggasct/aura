@@ -13,6 +13,7 @@ import (
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/profile"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -65,9 +66,9 @@ profile:
 
 func openRoutedProfile(t *testing.T, extra string, llm *fakeContextLLM, mp *sdkmetric.MeterProvider) (*profileRuntime, *sql.DB) {
 	t.Helper()
-	loaded, err := config.Load(writeRoutedProfileConfig(t, extra))
+	loaded, err := appconfig.Load(writeRoutedProfileConfig(t, extra))
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -407,9 +408,9 @@ func TestProfileHealthFindings(t *testing.T) {
 }
 
 func TestBuildProfileRuntimeDegradesWithoutRoute(t *testing.T) {
-	loaded, err := config.Load(writeProfileCLIConfig(t))
+	loaded, err := appconfig.Load(writeProfileCLIConfig(t))
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {

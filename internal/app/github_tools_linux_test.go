@@ -22,6 +22,7 @@ import (
 	"github.com/spf13/cobra"
 	adkmodel "google.golang.org/adk/v2/model"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
@@ -53,7 +54,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "note.txt"), []byte("the token is "+token), 0o600); err != nil {
 		t.Fatalf("write note: %v", err)
 	}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
@@ -88,7 +89,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	comment := func(credential string) json.RawMessage {
 		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`)
 	}
-	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *config.Config) {
+	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *appconfig.Config) {
 		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		cfg.Agents.Definitions = append(cfg.Agents.Definitions, config.AgentDefinition{
 			ID: "reviewer", Description: "d", Instructions: "i", Tools: []string{github.ToolComment},
@@ -125,7 +126,7 @@ type gitHubToolRig struct {
 func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbuiltin.Executor, *sql.DB) {
 	t.Helper()
 	dir := t.TempDir()
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Tools.Workspace = filepath.Join(dir, "workspace")
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = r.credentials
@@ -144,7 +145,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 		wiring.access = r.access(db)
 	}
 	executor, err := newToolExecutor(&toolExecutorInput{
-		result: &config.LoadResult{Config: &cfg, CapabilityReport: report}, db: db, artifactRoot: filepath.Join(dir, "artifacts"),
+		result: &appconfig.LoadResult{Config: &cfg, CapabilityReport: report}, db: db, artifactRoot: filepath.Join(dir, "artifacts"),
 		logger: slog.New(slog.DiscardHandler), wiring: &wiring, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
@@ -227,7 +228,7 @@ func TestToolExecutorRegistersTheGitHubTools(t *testing.T) {
 		t.Errorf("no credentials err = %v, want policy_denied unknown tool", err)
 	}
 
-	noTools := config.Default()
+	noTools := appconfig.Default()
 	noTools.Tools = nil
 	if githubCredentials(&noTools) != nil {
 		t.Errorf("githubCredentials without a tools section = %v, want nil", githubCredentials(&noTools))
@@ -291,7 +292,7 @@ func TestGitHubToolsNeedTheGitHubProviderCapability(t *testing.T) {
 func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 	var prompts []*toolbroker.ApprovalPrompt
 	verdict := false
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Tools.GitHub.Credentials = oneCredential()
 	registry, err := auraagent.Build([]config.AgentDefinition{
 		{ID: "ops", Description: "d", Instructions: "i", Audience: config.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}},
@@ -388,7 +389,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	if err != nil {
 		t.Fatalf("BuiltinRegistry: %v", err)
 	}
-	loaded, err := config.LoadWithOptions(path, config.LoadOptions{Build: build, Registry: capabilities})
+	loaded, err := appconfig.LoadWithOptions(path, appconfig.LoadOptions{Build: build, Registry: capabilities})
 	if err != nil {
 		t.Fatalf("LoadWithOptions: %v", err)
 	}

@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -13,7 +14,7 @@ func TestLoad_HTTPDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, MaxHistoryMessages: 20, MaxHistoryBytes: 32768, KeepaliveInterval: configkit.Duration(15 * time.Second)}
+	want := legacyconfig.HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, MaxHistoryMessages: 20, MaxHistoryBytes: 32768, KeepaliveInterval: configkit.Duration(15 * time.Second)}
 	if got := res.Config.Channels.HTTP; got != want {
 		t.Errorf("channels.http = %+v, want %+v", got, want)
 	}
@@ -22,23 +23,23 @@ func TestLoad_HTTPDefaults(t *testing.T) {
 func TestLoad_HTTPValid(t *testing.T) {
 	cases := map[string]struct {
 		block string
-		want  HTTP
+		want  legacyconfig.HTTP
 	}{
 		"enabled with overrides": {
 			block: "    enabled: true\n    listen_address: 0.0.0.0:9000\n    max_body_bytes: 2048\n    requests_per_minute: 120\n    max_concurrent_per_key: 8\n    max_history_messages: 5\n    max_history_bytes: 4096\n    keepalive_interval: 30s\n",
-			want:  HTTP{Enabled: true, ListenAddress: "0.0.0.0:9000", MaxBodyBytes: 2048, RequestsPerMinute: 120, MaxConcurrentPerKey: 8, MaxHistoryMessages: 5, MaxHistoryBytes: 4096, KeepaliveInterval: configkit.Duration(30 * time.Second)},
+			want:  legacyconfig.HTTP{Enabled: true, ListenAddress: "0.0.0.0:9000", MaxBodyBytes: 2048, RequestsPerMinute: 120, MaxConcurrentPerKey: 8, MaxHistoryMessages: 5, MaxHistoryBytes: 4096, KeepaliveInterval: configkit.Duration(30 * time.Second)},
 		},
 		"lower bounds": {
 			block: "    max_body_bytes: 1\n    requests_per_minute: 1\n    max_concurrent_per_key: 1\n    keepalive_interval: 1s\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1, RequestsPerMinute: 1, MaxConcurrentPerKey: 1, MaxHistoryMessages: 20, MaxHistoryBytes: 32768, KeepaliveInterval: configkit.Duration(time.Second)},
+			want:  legacyconfig.HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1, RequestsPerMinute: 1, MaxConcurrentPerKey: 1, MaxHistoryMessages: 20, MaxHistoryBytes: 32768, KeepaliveInterval: configkit.Duration(time.Second)},
 		},
 		"history disabled": {
 			block: "    max_history_messages: 0\n    max_history_bytes: 0\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, KeepaliveInterval: configkit.Duration(15 * time.Second)},
+			want:  legacyconfig.HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 1048576, RequestsPerMinute: 60, MaxConcurrentPerKey: 4, KeepaliveInterval: configkit.Duration(15 * time.Second)},
 		},
 		"upper bounds": {
 			block: "    max_body_bytes: 10485760\n    requests_per_minute: 6000\n    max_concurrent_per_key: 64\n    max_history_messages: 100\n    max_history_bytes: 262144\n    keepalive_interval: 60s\n",
-			want:  HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 10485760, RequestsPerMinute: 6000, MaxConcurrentPerKey: 64, MaxHistoryMessages: 100, MaxHistoryBytes: 262144, KeepaliveInterval: configkit.Duration(time.Minute)},
+			want:  legacyconfig.HTTP{ListenAddress: "127.0.0.1:8284", MaxBodyBytes: 10485760, RequestsPerMinute: 6000, MaxConcurrentPerKey: 64, MaxHistoryMessages: 100, MaxHistoryBytes: 262144, KeepaliveInterval: configkit.Duration(time.Minute)},
 		},
 	}
 	for name, tc := range cases {

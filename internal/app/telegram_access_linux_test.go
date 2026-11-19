@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -37,7 +37,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 	both.Owner = telegramCfg.Owner
 	both.Channels.Telegram = telegramCfg.Channels.Telegram
 	cases := map[string]struct {
-		cfg        config.Config
+		cfg        appconfig.Config
 		wantDecide bool
 	}{
 		"telegram only":        {cfg: telegramCfg, wantDecide: true},

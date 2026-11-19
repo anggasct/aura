@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -111,7 +112,7 @@ bindings:
 	if telegram.Polling.MaxBackoff != configkit.Duration(time.Minute) {
 		t.Errorf("max_backoff default not applied: %v", telegram.Polling.MaxBackoff)
 	}
-	if len(res.Config.Bindings) != 1 || res.Config.Bindings[0].Channel != BindingChannelTelegram {
+	if len(res.Config.Bindings) != 1 || res.Config.Bindings[0].Channel != legacyconfig.BindingChannelTelegram {
 		t.Errorf("bindings = %+v", res.Config.Bindings)
 	}
 }
@@ -296,7 +297,7 @@ func TestLoad_TelegramBindingsInvalid(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Load(writeDiscordConfig(t, tc.yaml))
-			if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid && code != invalidCode {
+			if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeBindingInvalid && code != invalidCode {
 				t.Fatalf("Load error = %v, want a binding or config error", err)
 			}
 			if !strings.Contains(stripPositions(err.Error()), tc.want) {
@@ -420,8 +421,8 @@ func TestLoad_ChatIDBindingIsTelegramOnly(t *testing.T) {
     chat_id: "-100"
 `)
 	_, err := Load(path)
-	if code, ok := codeOf(err); !ok || code != ErrorCodeBindingInvalid || !strings.Contains(stripPositions(err.Error()), "bindings[0].chat_id: binding_invalid: is only valid on telegram bindings") {
-		t.Fatalf("Load error = %v, want %s naming chat_id", err, ErrorCodeBindingInvalid)
+	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeBindingInvalid || !strings.Contains(stripPositions(err.Error()), "bindings[0].chat_id: binding_invalid: is only valid on telegram bindings") {
+		t.Fatalf("Load error = %v, want %s naming chat_id", err, legacyconfig.ErrorCodeBindingInvalid)
 	}
 }
 
@@ -436,7 +437,7 @@ func TestLoad_TelegramWebhookDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	webhook := res.Config.Channels.Telegram.Webhook
-	want := TelegramWebhook{ListenAddress: "127.0.0.1:8283", MaxBodyBytes: 1048576, MaxConnections: 4}
+	want := legacyconfig.TelegramWebhook{ListenAddress: "127.0.0.1:8283", MaxBodyBytes: 1048576, MaxConnections: 4}
 	if webhook != want {
 		t.Errorf("webhook = %+v, want %+v", webhook, want)
 	}
@@ -454,7 +455,7 @@ func TestLoad_TelegramAccountModeDefaultsToPolling(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	account := res.Config.Channels.Telegram.Accounts[0]
-	if account.Mode != TelegramModePolling || account.WebhookMode() || res.Config.Channels.Telegram.UsesWebhook() {
+	if account.Mode != legacyconfig.TelegramModePolling || account.WebhookMode() || res.Config.Channels.Telegram.UsesWebhook() {
 		t.Errorf("account = %+v, want polling", account)
 	}
 }
@@ -486,7 +487,7 @@ func TestLoad_TelegramWebhookValid(t *testing.T) {
 	if telegram.Accounts[0].WebhookSecretRef.String() != "file:///run/secrets/telegram-hook" {
 		t.Errorf("webhook_secret_ref = %q", telegram.Accounts[0].WebhookSecretRef)
 	}
-	want := TelegramWebhook{ListenAddress: "0.0.0.0:9000", PublicBaseURL: "https://aura.example.com/edge", MaxBodyBytes: 2048, MaxConnections: 10}
+	want := legacyconfig.TelegramWebhook{ListenAddress: "0.0.0.0:9000", PublicBaseURL: "https://aura.example.com/edge", MaxBodyBytes: 2048, MaxConnections: 10}
 	if telegram.Webhook != want {
 		t.Errorf("webhook = %+v, want %+v", telegram.Webhook, want)
 	}

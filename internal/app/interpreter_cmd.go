@@ -8,14 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 )
 
-type configLoader func(path string) (config.LoadResult, error)
+type configLoader func(path string) (appconfig.LoadResult, error)
 
 type interpreterDeps struct {
 	load              configLoader

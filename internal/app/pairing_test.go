@@ -11,8 +11,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -30,9 +30,9 @@ func runAccessCommand(t *testing.T, build func(*globalFlags) *cobra.Command, cfg
 
 func openAccessDB(t *testing.T, cfg string) *sql.DB {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {

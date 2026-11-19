@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
@@ -151,7 +152,7 @@ func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
 	}
 }
 
-func newProductionToolRunner(t *testing.T, life *runLife, cfg *config.Config, registry *auraagent.Registry) *workflowToolRunner {
+func newProductionToolRunner(t *testing.T, life *runLife, cfg *appconfig.Config, registry *auraagent.Registry) *workflowToolRunner {
 	t.Helper()
 	cfg.Storage.Path = filepath.Dir(life.plan.Database)
 	cfg.Tools.Workspace = filepath.Join(cfg.Storage.Path, "workspace")
@@ -176,7 +177,7 @@ func (w *workflowShape) registerStubs(t *testing.T, life *runLife, runner *workf
 func (w *workflowShape) host(t *testing.T, life *runLife) {
 	t.Helper()
 	registry := w.registry(t)
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	runner := newProductionToolRunner(t, life, &cfg, registry)
 	w.registerStubs(t, life, runner)
 	var tools workflow.ToolRunner = runner

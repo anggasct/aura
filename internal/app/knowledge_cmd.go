@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 )
 
@@ -40,7 +40,7 @@ func newKBCmd(gf *globalFlags) *cobra.Command {
 }
 
 func withKnowledge(cmd *cobra.Command, gf *globalFlags, fn func(context.Context, *slog.Logger, *knowledge.Service) error) error {
-	return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, opened *sql.DB) error {
+	return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
 		service, err := newKnowledgeService(cfg, opened, nil)
 		if err != nil {
 			return err

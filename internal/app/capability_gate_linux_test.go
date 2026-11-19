@@ -8,14 +8,14 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability"
 )
 
 const allCapabilities = "exec-linux,workspace-read,workspace-write,public-web,provider-search"
 
-func loadForBuild(t *testing.T, profile, compiled string, enabled []string) config.LoadResult {
+func loadForBuild(t *testing.T, profile, compiled string, enabled []string) appconfig.LoadResult {
 	t.Helper()
 	registry, err := capability.BuiltinRegistry()
 	if err != nil {
@@ -25,7 +25,7 @@ func loadForBuild(t *testing.T, profile, compiled string, enabled []string) conf
 	if err != nil {
 		t.Fatalf("ParseBuild: %v", err)
 	}
-	return loadCapabilityConfig(t, enabled, config.LoadOptions{
+	return loadCapabilityConfig(t, enabled, appconfig.LoadOptions{
 		Build:    build,
 		Registry: registry,
 		Dependencies: capability.Dependencies{

@@ -11,7 +11,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -228,7 +228,7 @@ func (s *memoryDocumentStore) DeleteOtherSummaries(ctx context.Context, ownerID,
 	return s.store.DeleteOtherSummaries(ctx, ownerID, sessionID, keepID)
 }
 
-func buildMemoryService(cfg *config.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
+func buildMemoryService(cfg *appconfig.Config, db *sql.DB, observer memory.Observer) (*memory.Service, error) {
 	return memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, secret.New(), &memory.Config{
 		MaxDocuments:         cfg.Memory.MaxDocuments,
 		TokenBudget:          cfg.Memory.RecallTokenBudget,
@@ -252,7 +252,7 @@ type memoryRuntime struct {
 	summarizer memory.Summarizer
 }
 
-func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, scopes memory.RecallScopes, models runtimeadk.ModelSource, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
+func buildMemoryRuntime(ctx context.Context, cfg *appconfig.Config, db *sql.DB, scopes memory.RecallScopes, models runtimeadk.ModelSource, logger *slog.Logger, observer memory.Observer) (*memoryRuntime, error) {
 	service, err := buildMemoryService(cfg, db, observer)
 	if err != nil {
 		return nil, err
@@ -265,7 +265,7 @@ func buildMemoryRuntime(ctx context.Context, cfg *config.Config, db *sql.DB, sco
 	return &memoryRuntime{provider: provider, service: service, model: model, summarizer: summarizer}, nil
 }
 
-func buildMemorySummary(ctx context.Context, cfg *config.Config, models runtimeadk.ModelSource, logger *slog.Logger, observer memory.Observer) (*memory.SummaryModel, memory.Summarizer) {
+func buildMemorySummary(ctx context.Context, cfg *appconfig.Config, models runtimeadk.ModelSource, logger *slog.Logger, observer memory.Observer) (*memory.SummaryModel, memory.Summarizer) {
 	if cfg == nil {
 		return nil, nil
 	}

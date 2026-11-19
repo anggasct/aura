@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
@@ -34,8 +34,8 @@ func newUsageCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(context.Context, *slog.Logger, *config.Config, *usage.Ledger, *usage.PriceRegistry) error) error {
-	result, err := config.Load(gf.configPath)
+func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(context.Context, *slog.Logger, *appconfig.Config, *usage.Ledger, *usage.PriceRegistry) error) error {
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return err
 	}
@@ -65,7 +65,7 @@ func withUsage(cmd *cobra.Command, gf *globalFlags, pricesPath string, fn func(c
 	return fn(cmd.Context(), logger, cfg, ledger, reg)
 }
 
-func openPriceRegistry(ctx context.Context, logger *slog.Logger, cfg *config.Config, configPath, explicitPricesPath string) (*usage.PriceRegistry, error) {
+func openPriceRegistry(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, configPath, explicitPricesPath string) (*usage.PriceRegistry, error) {
 	reg := usage.NewPriceRegistry()
 	if cfg != nil {
 		for name := range cfg.Models.Definitions {
@@ -155,7 +155,7 @@ func newUsageStatusCmd(gf *globalFlags) *cobra.Command {
 			if by != "" && by != usageGroupPersona {
 				return &usageError{fmt.Errorf("%s: --by %q is not supported; use %q", cmd.CommandPath(), by, usageGroupPersona)}
 			}
-			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
+			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
 				if by == usageGroupPersona {
 					return printUsageByPersona(ctx, cmd.OutOrStdout(), ledger)
 				}
@@ -220,7 +220,7 @@ func newUsageEntriesCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
+			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
 				entries, err := ledger.Entries(ctx, limit)
 				if err != nil {
 					return err
@@ -253,7 +253,7 @@ func newUsagePricesCmd(gf *globalFlags) *cobra.Command {
 		Short: "List versioned price records from the operator price file",
 		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withUsage(cmd, gf, pricesPath, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, _ *usage.Ledger, reg *usage.PriceRegistry) error {
+			return withUsage(cmd, gf, pricesPath, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, _ *usage.Ledger, reg *usage.PriceRegistry) error {
 				prices := reg.All()
 				if len(prices) == 0 {
 					_, err := fmt.Fprintln(cmd.OutOrStdout(), "no price records")
@@ -288,7 +288,7 @@ func newUsageReconcileCmd(gf *globalFlags) *cobra.Command {
 		Short: "Expire stale reservations and release expired ones; never deletes rows",
 		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *config.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
+			return withUsage(cmd, gf, "", func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, ledger *usage.Ledger, _ *usage.PriceRegistry) error {
 				expired, err := ledger.ExpireStale(ctx)
 				if err != nil {
 					return err

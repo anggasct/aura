@@ -11,7 +11,7 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -31,7 +31,7 @@ type behaviorModels struct {
 	models       runtimeadk.ModelSource
 }
 
-func routedBehaviorModels(cfg *config.Config, models runtimeadk.ModelSource) (behaviorModels, error) {
+func routedBehaviorModels(cfg *appconfig.Config, models runtimeadk.ModelSource) (behaviorModels, error) {
 	defaultModel := cfg.Models.Definitions["primary"].Model
 	route, err := model.RouteModelName(cfg.Models, cfg.ModelRoutes, defaultModel)
 	if err != nil {

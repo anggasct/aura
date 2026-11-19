@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -19,7 +20,7 @@ import (
 type proposalHarness struct {
 	controller *workflowToolController
 	runs       *workflow.Store
-	cfg        *config.Config
+	cfg        *appconfig.Config
 	owner      *toolsbuiltin.WorkflowCaller
 	db         *sql.DB
 }
@@ -27,7 +28,7 @@ type proposalHarness struct {
 func proposalFixture(t *testing.T) *proposalHarness {
 	t.Helper()
 	controller, runs, db := workflowToolFixture(t, "book_visit")
-	cfg := &config.Config{Agents: &config.Agents{Definitions: []config.AgentDefinition{{
+	cfg := &appconfig.Config{Agents: &config.Agents{Definitions: []config.AgentDefinition{{
 		ID: "ops", Description: "operator", Instructions: "You plan work.", Tools: []string{"read_file", "write_file", "workflow_propose"},
 	}}}}
 	registry, err := buildAgentRegistry(cfg)

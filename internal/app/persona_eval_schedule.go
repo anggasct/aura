@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -26,7 +26,7 @@ type personaEvalHealth struct {
 	results  store.PersonaEvalStore
 }
 
-func personaEvalCheck(cfg *config.Config, registry *auraagent.Registry, db *sql.DB) health.RegisteredCheck {
+func personaEvalCheck(cfg *appconfig.Config, registry *auraagent.Registry, db *sql.DB) health.RegisteredCheck {
 	return health.RegisteredCheck{
 		ID:          personaEvalComponent,
 		Checker:     &personaEvalHealth{registry: registry, results: store.NewPersonaEvalStore(db)},

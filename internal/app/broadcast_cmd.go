@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/effect"
@@ -43,7 +43,7 @@ func newBroadcastStatusCmd(gf *globalFlags) *cobra.Command {
 			if strings.TrimSpace(state) != "" {
 				states = strings.Split(state, ",")
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				items, err := store.NewBroadcastStore(db).ListItems(ctx, states, limit)
 				if err != nil {
 					return err
@@ -104,7 +104,7 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 		Short: "Settle an unknown broadcast or restart a stalled run",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -141,7 +141,7 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, db *sql.DB, logger *slog.Logger, cfg *config.Config, adapter *broadcastItemStore, item *broadcast.FullItem) error {
+func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, db *sql.DB, logger *slog.Logger, cfg *appconfig.Config, adapter *broadcastItemStore, item *broadcast.FullItem) error {
 	if item.EffectID == "" {
 		_, err := fmt.Fprintf(out, "id: %s\nresult: unchanged (no linked effect)\n", item.ID)
 		return err

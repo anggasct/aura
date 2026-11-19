@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 )
 
@@ -33,7 +33,7 @@ func newSkillsCmd(gf *globalFlags) *cobra.Command {
 }
 
 func openSkillsEngine(cmd *cobra.Command, gf *globalFlags) (*skills.Engine, *sql.DB, error) {
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -182,7 +182,7 @@ func newSkillsCreateCmd(gf *globalFlags) *cobra.Command {
 			if strings.TrimSpace(name) == "" || strings.TrimSpace(description) == "" {
 				return &usageError{fmt.Errorf("%s requires --name and --description", cmd.CommandPath())}
 			}
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

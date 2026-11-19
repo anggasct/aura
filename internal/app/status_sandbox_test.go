@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -42,7 +43,7 @@ func runStatusAgainst(t *testing.T, listen string, offline bool) (string, error)
 	t.Helper()
 	dataRoot := t.TempDir()
 	seedHealthyStorage(t, dataRoot)
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	cfg.Health.Listen = listen
 	cfg.Health.DiskWarningPercent = 1

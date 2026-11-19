@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
@@ -24,7 +25,7 @@ func (adapters telegramAdapters) Check(ctx context.Context) []health.Finding {
 	return findings
 }
 
-func newTelegramAdapter(cfg *config.Config, account *config.TelegramAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*telegram.Adapter, error) {
+func newTelegramAdapter(cfg *appconfig.Config, account *config.TelegramAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*telegram.Adapter, error) {
 	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
 	if err != nil {
 		return nil, err
@@ -45,7 +46,7 @@ func newTelegramAdapter(cfg *config.Config, account *config.TelegramAccount, db 
 
 const telegramWebhookDrainDivisor = 2
 
-func buildTelegramWebhookServer(cfg *config.Config, ports []runtimechannelhost.ChannelPort) (*telegram.WebhookServer, error) {
+func buildTelegramWebhookServer(cfg *appconfig.Config, ports []runtimechannelhost.ChannelPort) (*telegram.WebhookServer, error) {
 	adapters := make([]*telegram.Adapter, 0, len(ports))
 	for _, port := range ports {
 		if adapter, ok := port.(*telegram.Adapter); ok {

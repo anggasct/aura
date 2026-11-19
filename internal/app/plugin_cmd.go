@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
 )
@@ -37,7 +37,7 @@ func newPluginCmd(gf *globalFlags) *cobra.Command {
 }
 
 func openPluginService(cmd *cobra.Command, gf *globalFlags) (*plugin.Service, *sql.DB, error) {
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, err
 	}

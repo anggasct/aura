@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -332,8 +333,8 @@ func TestLoad_BindingsInvalid(t *testing.T) {
 			path := writeDiscordConfig(t, bindingAccounts+content)
 			_, err := Load(path)
 			code, ok := codeOf(err)
-			if !ok || code != ErrorCodeBindingInvalid {
-				t.Fatalf("Load error = %v, want %s", err, ErrorCodeBindingInvalid)
+			if !ok || code != legacyconfig.ErrorCodeBindingInvalid {
+				t.Fatalf("Load error = %v, want %s", err, legacyconfig.ErrorCodeBindingInvalid)
 			}
 		})
 	}

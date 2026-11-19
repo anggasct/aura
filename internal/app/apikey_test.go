@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/httpchat"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -444,11 +444,11 @@ func TestHTTPChatBindFailureSurfacesAsHealthFinding(t *testing.T) {
 	}
 }
 
-func mustLoadConfig(t *testing.T, path string) *config.Config {
+func mustLoadConfig(t *testing.T, path string) *appconfig.Config {
 	t.Helper()
-	loaded, err := config.Load(path)
+	loaded, err := appconfig.Load(path)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	return loaded.Config
 }

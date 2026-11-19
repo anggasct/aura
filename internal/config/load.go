@@ -3,11 +3,9 @@ package config
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"maps"
 	"net"
 	"net/url"
-	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -15,246 +13,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-viper/mapstructure/v2"
-
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
-	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-const (
-	envPrefix        = "AURA_"
-	envConfigVar     = "AURA_CONFIG"
-	supportedVersion = 1
-
-	githubCapability = "provider-github"
-)
-
-type LoadResult struct {
-	Config               *Config
-	Path                 string
-	DefaultGenerated     bool
-	CapabilityReport     capability.Report
-	CapabilityStateError error
-	Warnings             []string
-}
-
-type LoadOptions struct {
-	Build        capability.Build
-	Registry     capability.Registry
-	Dependencies capability.Dependencies
-}
-
-func Load(path string) (LoadResult, error) {
-	build, err := capability.CurrentBuild()
-	if err != nil {
-		return LoadResult{}, fmt.Errorf("config: %w", err)
-	}
-	registry, err := capability.BuiltinRegistry()
-	if err != nil {
-		return LoadResult{}, fmt.Errorf("config: %w", err)
-	}
-	return LoadWithOptions(path, LoadOptions{Build: build, Registry: registry, Dependencies: interpreter.HostDependencies(sandbox.CapabilityDependencies())})
-}
-
-func LoadWithOptions(path string, options LoadOptions) (LoadResult, error) {
-	res, err := load(path, options)
-	if err != nil {
-		return LoadResult{}, fmt.Errorf("config: %w", err)
-	}
-	return res, nil
-}
-
-func load(path string, options LoadOptions) (LoadResult, error) {
-	resolved, explicit, err := resolvePath(path)
-	if err != nil {
-		return LoadResult{}, err
-	}
-	data, generated, err := loadBytes(resolved, explicit)
-	if err != nil {
-		return LoadResult{}, err
-	}
-	doc, err := parseDocument(data)
-	if err != nil {
-		return LoadResult{}, err
-	}
-	version, err := doc.version()
-	if err != nil {
-		return LoadResult{}, err
-	}
-	if err := checkVersion(version); err != nil {
-		return LoadResult{}, positionProblems(doc, err)
-	}
-	cfg, err := decode(doc)
-	if err != nil {
-		return LoadResult{}, err
-	}
-	if err := checkVersion(cfg.Version); err != nil {
-		return LoadResult{}, positionProblems(doc, err)
-	}
-	deriveDefaults(cfg)
-	if err := validateLoaded(cfg, doc, options.Build.Profile()); err != nil {
-		return LoadResult{}, positionProblems(doc, err)
-	}
-	if err := loadPersonaSouls(cfg, resolved); err != nil {
-		return LoadResult{}, positionProblems(doc, err)
-	}
-	report, resolveErr := options.Registry.Resolve(options.Build, cfg.Capabilities.Enabled, options.Dependencies)
-	if resolveErr != nil && !capability.IsHealthState(resolveErr) {
-		return LoadResult{}, resolveErr
-	}
-	if cfg.Tools != nil && len(cfg.Tools.GitHub.Credentials) > 0 && !slices.Contains(report.Active(), githubCapability) {
-		return LoadResult{}, positionProblems(doc, configkit.Invalid("tools.github.credentials", "needs the "+githubCapability+" capability: compile it into the build and list it in capabilities.enabled"))
-	}
-	return LoadResult{
-		Config:               cfg,
-		Path:                 resolved,
-		DefaultGenerated:     generated,
-		CapabilityReport:     report,
-		CapabilityStateError: resolveErr,
-		Warnings:             envWarnings(cfg),
-	}, nil
-}
-
-func validateLoaded(cfg *Config, doc *document, profile capability.Profile) error {
-	return errors.Join(
-		validateCapabilities(cfg.Capabilities),
-		validateLoadedModels(cfg.Models, doc),
-		validateLoadedModelRoutes(cfg.ModelRoutes, cfg.Models),
-		validateTools(cfg.Tools, profile),
-		validateSkills(cfg.Skills, profile),
-		validateContext(cfg.Context, profile),
-		validateProfile(cfg.Profile, profile),
-		validateChildren(cfg.Children, profile),
-		validateAccess(cfg.Access),
-		validateSync(cfg.Sync),
-		validateVision(cfg.Vision, profile),
-		validateKnowledge(cfg.Knowledge),
-		validateInterpreter(&cfg.Interpreter),
-		validateRuntime(cfg.Runtime),
-		validateServer(cfg.Server),
-		validateLogging(cfg.Logging),
-		validateStorage(cfg.Storage),
-		validateTelemetry(cfg.Telemetry),
-		validateUsage(cfg.Usage),
-		validateHealth(cfg.Health),
-		validateTerminal(cfg.Terminal),
-		validateWorkflows(cfg.Workflows),
-		validateMCP(cfg.MCP),
-		validatePlugins(cfg.Plugins),
-		validateWebhook(&cfg.Webhook, cfg.Health.Listen),
-		validateDiscord(&cfg.Channels.Discord),
-		validateTelegram(&cfg.Channels.Telegram, &cfg.Channels.Discord, cfg.Owner),
-		validateEmail(&cfg.Channels.Email, cfg.Owner),
-		validateHTTP(&cfg.Channels.HTTP),
-		validateBindings(cfg.Bindings, &cfg.Channels),
-		validateBroadcast(&cfg.Broadcast),
-		validateScheduler(&cfg.Scheduler),
-		validateMemory(&cfg.Memory),
-		validateOwner(cfg.Owner),
-		validateOwnerIdentities(cfg.Owner),
-		screenOwnerSecrets(cfg.Owner, cfg),
-		validatePersonaNames(cfg),
-		validatePersonaAccess(cfg),
-	)
-}
-
-func resolvePath(flagPath string) (path string, explicit bool, err error) {
-	if flagPath != "" {
-		return flagPath, true, nil
-	}
-	if fromEnv := os.Getenv(envConfigVar); fromEnv != "" {
-		return fromEnv, true, nil
-	}
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", false, fmt.Errorf("cannot resolve config directory: set HOME or XDG_CONFIG_HOME: %w", err)
-	}
-	return filepath.Join(base, "aura", "config.yaml"), false, nil
-}
-
-func loadBytes(path string, explicit bool) (data []byte, generated bool, err error) {
-	info, err := os.Stat(path)
-	if err != nil {
-		if os.IsNotExist(err) {
-			if explicit {
-				return nil, false, fmt.Errorf("file not found: %s", path)
-			}
-			data, err := writeDefault(path)
-			return data, true, err
-		}
-		if errors.Is(err, fs.ErrPermission) {
-			return nil, false, fmt.Errorf("cannot read %s: permission denied", path)
-		}
-		return nil, false, fmt.Errorf("cannot read %s: %w", path, err)
-	}
-	if info.IsDir() {
-		return nil, false, fmt.Errorf("%s is a directory, not a file", path)
-	}
-	data, err = os.ReadFile(path)
-	if err != nil {
-		if errors.Is(err, fs.ErrPermission) {
-			return nil, false, fmt.Errorf("cannot read %s: permission denied", path)
-		}
-		return nil, false, fmt.Errorf("cannot read %s: %w", path, err)
-	}
-	return data, false, nil
-}
-
-func writeDefault(path string) ([]byte, error) {
-	defaults := Default()
-	data, err := Marshal(&defaults)
-	if err != nil {
-		return nil, fmt.Errorf("failed to marshal default config: %w", err)
-	}
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return nil, fmt.Errorf("cannot create config directory: %w", err)
-	}
-	// Atomic write: the config only becomes visible at its final path once
-	// fully written and fsynced, so a crash cannot leave a truncated file.
-	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
-	if err != nil {
-		return nil, fmt.Errorf("cannot create temporary config: %w", err)
-	}
-	tmpPath := tmp.Name()
-	defer func() { _ = os.Remove(tmpPath) }()
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return nil, fmt.Errorf("cannot write default config: %w", err)
-	}
-	if err := tmp.Sync(); err != nil {
-		_ = tmp.Close()
-		return nil, fmt.Errorf("cannot fsync default config: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return nil, fmt.Errorf("cannot close default config: %w", err)
-	}
-	if err := os.Rename(tmpPath, path); err != nil {
-		return nil, fmt.Errorf("cannot move default config into place: %w", err)
-	}
-	if err := syncDir(dir); err != nil {
-		return nil, fmt.Errorf("cannot fsync config directory: %w", err)
-	}
-	return data, nil
-}
-
-func syncDir(p string) error {
-	f, err := os.Open(p)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = f.Close() }()
-	return f.Sync()
-}
-
-func validateCapabilities(capabilities Capabilities) error {
+func ValidateCapabilities(capabilities Capabilities) error {
 	var problems []error
 	seen := make(map[string]bool, len(capabilities.Enabled))
 	for i, name := range capabilities.Enabled {
@@ -266,190 +34,7 @@ func validateCapabilities(capabilities Capabilities) error {
 	return errors.Join(problems...)
 }
 
-func validateLoadedModels(models Models, doc *document) error {
-	problems := make([]error, 0, len(models.Definitions)+len(models.Providers)+1)
-	for _, name := range slices.Sorted(maps.Keys(models.Providers)) {
-		preset := models.Providers[name]
-		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, configkit.Field("models.providers", fault.New(ErrorCodeModelProviderInvalid, fmt.Sprintf("invalid name %q", name))))
-			continue
-		}
-		if err := validateProviderShape("models.providers."+name, preset); err != nil {
-			problems = append(problems, err)
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(models.Definitions)) {
-		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, &configkit.FieldError{
-				Path:     "models.definitions[" + name + "]",
-				Position: doc.keyPositionOf("models.definitions[" + name + "]"),
-				Err:      fault.New(configkit.ErrorCodeInvalid, "has an invalid name (must match "+modelDefinitionNamePattern.String()+")"),
-			})
-			continue
-		}
-		definition := models.Definitions[name]
-		problems = append(problems, modelDefinitionProblems(models, name, &definition)...)
-	}
-	problems = append(problems, validateRouting(models, doc))
-	return errors.Join(problems...)
-}
-
-func modelDefinitionProblems(models Models, name string, definition *ModelDefinition) []error {
-	var problems []error
-	if definition.Provider != "" || definition.Custom != nil {
-		return append(problems, providerDefinitionProblems(models, name, definition)...)
-	}
-	switch {
-	case strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "":
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelProtocolInvalid, "requires non-empty protocol and model")))
-	case !validProtocol(definition.Protocol):
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelProtocolInvalid, "uses unsupported protocol (must be one of "+strings.Join(protocolNames(), ", ")+")")))
-	}
-	if err := ValidateBaseURL(definition.BaseURL); err != nil {
-		problems = append(problems, configkit.Field("models.definitions."+name+".base_url", fault.New(ErrorCodeModelProtocolInvalid, err.Error())))
-	}
-	problems = append(problems, modelSecretProblems(name, definition, definition.BaseURL)...)
-	problems = append(problems, modelCapabilityProblems(name, definition)...)
-	return problems
-}
-
-func providerDefinitionProblems(models Models, name string, definition *ModelDefinition) []error {
-	var problems []error
-	if strings.TrimSpace(definition.Model) == "" {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelProviderInvalid, "requires non-empty model")))
-	}
-	resolved, err := models.ResolveDefinition(definition)
-	if err != nil {
-		problems = append(problems, err)
-		return append(problems, modelCapabilityProblems(name, definition)...)
-	}
-	problems = append(problems, modelSecretProblems(name, definition, resolved.BaseURL)...)
-	problems = append(problems, modelCapabilityProblems(name, definition)...)
-	return problems
-}
-
-func modelSecretProblems(name string, definition *ModelDefinition, baseURL string) []error {
-	var problems []error
-	if definition.APIKeyRef.IsZero() && !IsLoopbackBaseURL(baseURL) {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelSecretInvalid, "requires api_key_ref for a non-loopback endpoint")))
-	}
-	return problems
-}
-
-func modelCapabilityProblems(name string, definition *ModelDefinition) []error {
-	var problems []error
-	if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(ErrorCodeModelCapabilityUnsupported, "requires positive context_tokens and a tokenizer")))
-	}
-	if definition.Capabilities.MicrosPerInputToken < 0 || definition.Capabilities.MicrosPerOutputToken < 0 {
-		problems = append(problems, configkit.Field("models.definitions."+name+".capabilities", fault.New(ErrorCodeModelCapabilityUnsupported, "cost rates must not be negative")))
-	}
-	return problems
-}
-
-func validateRouting(models Models, doc *document) error {
-	for task, role := range models.Routing {
-		if role != "primary" && role != "auxiliary" {
-			return configkit.Invalid("models.routing."+task, "role is not supported (must be primary or auxiliary)")
-		}
-		if doc.setByFileOrEnvironment(joinPath("models.routing", task)) && len(models.Definitions) > 0 {
-			if _, ok := models.Definitions[role]; !ok {
-				return configkit.Invalid("models.routing."+task, "references an undefined model")
-			}
-		}
-	}
-	return nil
-}
-
-func validateLoadedModelRoutes(routes map[string]ModelRoute, models Models) error {
-	if len(routes) == 0 {
-		return nil
-	}
-	var problems []error
-	for _, name := range slices.Sorted(maps.Keys(routes)) {
-		route := routes[name]
-		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, configkit.Invalid("model_routes", fmt.Sprintf("invalid route name %q", name)))
-		}
-		if len(route.Candidates) < 1 {
-			problems = append(problems, configkit.Invalid("model_routes."+name, "requires at least one candidate"))
-		} else if len(route.Candidates) > 4 {
-			problems = append(problems, configkit.Invalid("model_routes."+name, "exceeds maximum chain depth of 4 candidates"))
-		}
-		seen := make(map[string]bool, len(route.Candidates))
-		for _, candidate := range route.Candidates {
-			if seen[candidate] {
-				problems = append(problems, configkit.Invalid("model_routes."+name, "contains a duplicate candidate"))
-			}
-			seen[candidate] = true
-			if len(models.Definitions) > 0 {
-				if _, ok := models.Definitions[candidate]; !ok {
-					problems = append(problems, configkit.Invalid("model_routes."+name, "references unknown model definition"))
-				}
-			}
-		}
-		if route.MaxProviderAttempts < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".max_provider_attempts", "must not be negative"))
-		}
-		if route.RetryDelayBudget < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".retry_delay_budget", "must not be negative"))
-		}
-		if route.CostBudgetUSD < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".cost_budget_usd", "must not be negative"))
-		}
-		if route.Circuit.FailureThreshold < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.failure_threshold", "must not be negative"))
-		}
-		if route.Circuit.OpenDuration < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.open_duration", "must not be negative"))
-		}
-		if route.Circuit.MaxOpenDuration < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.max_open_duration", "must not be negative"))
-		}
-	}
-	return errors.Join(problems...)
-}
-
-func decode(doc *document) (*Config, error) {
-	if duplicates := duplicateKeys(doc.root, ""); len(duplicates) > 0 {
-		sortProblems(duplicates)
-		return nil, errors.Join(duplicates...)
-	}
-	var collector envCollector
-	input, err := loadLayers(doc, &collector)
-	if err != nil {
-		return nil, err
-	}
-	documentProblems := doc.valueProblems()
-	problems := slices.Concat(documentProblems, collector.errors(), reportUnknownKeys(doc, input))
-	var cfg Config
-	problems = append(problems, withoutReportedPaths(decodeProblems(doc, decodeInput(input, &cfg)), documentProblems)...)
-	if len(problems) > 0 {
-		sortProblems(problems)
-		return nil, errors.Join(problems...)
-	}
-	return &cfg, nil
-}
-
-func decodeInput(input map[string]any, cfg *Config) error {
-	decoder, err := mapstructure.NewDecoder(&mapstructure.DecoderConfig{
-		Result:           cfg,
-		TagName:          "json",
-		WeaklyTypedInput: false,
-		ErrorUnused:      true,
-		MatchName:        func(mapKey, fieldName string) bool { return mapKey == fieldName },
-		DecodeHook: mapstructure.ComposeDecodeHookFunc(
-			textValue(),
-			integerValue(),
-		),
-	})
-	if err != nil {
-		return err
-	}
-	return decoder.Decode(input)
-}
-
-func validateSync(syncConfig *Sync) error {
+func ValidateSync(syncConfig *Sync) error {
 	if syncConfig == nil {
 		return nil
 	}
@@ -531,7 +116,7 @@ func validateSyncRemote(raw string) error {
 	return nil
 }
 
-func validateRuntime(runtime Runtime) error {
+func ValidateRuntime(runtime Runtime) error {
 	if runtime.MaxActiveTurns <= 0 {
 		return configkit.Invalid("runtime.max_active_turns", "must be positive")
 	}
@@ -550,14 +135,14 @@ func validateRuntime(runtime Runtime) error {
 	return nil
 }
 
-func validateServer(server Server) error {
+func ValidateServer(server Server) error {
 	if server.Port < 1 || server.Port > 65535 {
 		return configkit.Invalid("server.port", fmt.Sprintf("%d is out of range (1-65535)", server.Port))
 	}
 	return nil
 }
 
-func validateWorkflows(workflows *Workflows) error {
+func ValidateWorkflows(workflows *Workflows) error {
 	if workflows == nil {
 		return nil
 	}
@@ -570,7 +155,7 @@ func validateWorkflows(workflows *Workflows) error {
 	return nil
 }
 
-func validateMCP(m *MCP) error {
+func ValidateMCP(m *MCP) error {
 	if m == nil {
 		return nil
 	}
@@ -691,7 +276,7 @@ func ApplyMCPServerDefaults(s *MCPServer) {
 	}
 }
 
-func validateLogging(loggingConfig Logging) error {
+func ValidateLogging(loggingConfig Logging) error {
 	var problems []error
 	if _, err := logging.ParseLevel(loggingConfig.Level); err != nil {
 		problems = append(problems, configkit.Invalid("logging.level", "must be one of debug, info, warn, error"))
@@ -702,7 +287,7 @@ func validateLogging(loggingConfig Logging) error {
 	return errors.Join(problems...)
 }
 
-func validateStorage(storage Storage) error {
+func ValidateStorage(storage Storage) error {
 	if storage.MaxOpenConnections < 1 || storage.MaxOpenConnections > 16 {
 		return configkit.Invalid("storage.max_open_connections", fmt.Sprintf("%d is out of range (1-16)", storage.MaxOpenConnections))
 	}
@@ -721,7 +306,7 @@ func validateStorage(storage Storage) error {
 	return nil
 }
 
-func validateTelemetry(t Telemetry) error {
+func ValidateTelemetry(t Telemetry) error {
 	switch t.Exporter {
 	case "", "none", "stdout", "otlp_grpc", "otlp_http":
 	default:
@@ -742,7 +327,7 @@ func validateTelemetry(t Telemetry) error {
 	return nil
 }
 
-func validateUsage(u Usage) error {
+func ValidateUsage(u Usage) error {
 	if u.Currency == "" {
 		return configkit.Invalid("usage.currency", "must not be empty")
 	}
@@ -758,7 +343,7 @@ func validateUsage(u Usage) error {
 	return nil
 }
 
-func validateHealth(h Health) error {
+func ValidateHealth(h Health) error {
 	if err := validateLoopbackListen(h.Listen, "health.listen"); err != nil {
 		return err
 	}
@@ -792,7 +377,7 @@ func validateHealth(h Health) error {
 	return nil
 }
 
-func validateTerminal(t Terminal) error {
+func ValidateTerminal(t Terminal) error {
 	if t.RenderHz <= 0 {
 		return configkit.Invalid("terminal.render_hz", "must be positive")
 	}
@@ -846,7 +431,7 @@ func listenAddressProblem(field, address string) error {
 	return nil
 }
 
-func validateWebhook(w *Webhook, healthListen string) error {
+func ValidateWebhook(w *Webhook, healthListen string) error {
 	if err := listenAddressProblem("webhook.listen_address", w.Listen); err != nil {
 		return err
 	}
@@ -917,7 +502,7 @@ func validateWebhook(w *Webhook, healthListen string) error {
 
 var discordAccountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
-func validateDiscord(discord *Discord) error {
+func ValidateDiscord(discord *Discord) error {
 	if discord == nil {
 		return configkit.Invalid("channels.discord", "must not be nil")
 	}
@@ -972,7 +557,7 @@ const (
 	telegramMinEditCeiling = time.Minute
 )
 
-func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error {
+func ValidateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error {
 	if telegram == nil {
 		return configkit.Invalid("channels.telegram", "must not be nil")
 	}
@@ -1037,7 +622,7 @@ func validateTelegram(telegram *Telegram, discord *Discord, owner *Owner) error 
 	return errors.Join(problems...)
 }
 
-func validateHTTP(http *HTTP) error {
+func ValidateHTTP(http *HTTP) error {
 	var problems []error
 	if err := listenAddressProblem("channels.http.listen_address", http.ListenAddress); err != nil {
 		problems = append(problems, err)
@@ -1192,7 +777,7 @@ func snowflakeListProblems(field string, ids []string) []error {
 	return problems
 }
 
-func validateBindings(bindings []Binding, channels *Channels) error {
+func ValidateBindings(bindings []Binding, channels *Channels) error {
 	if channels == nil {
 		return configkit.Invalid("channels", "must not be nil")
 	}
@@ -1285,7 +870,7 @@ func telegramBindingProblems(field string, binding *Binding, accounts map[string
 	return problems
 }
 
-func validateBroadcast(broadcast *Broadcast) error {
+func ValidateBroadcast(broadcast *Broadcast) error {
 	if broadcast == nil {
 		return configkit.Invalid("broadcast", "must not be nil")
 	}
@@ -1320,7 +905,7 @@ func validateBroadcast(broadcast *Broadcast) error {
 		if !validBroadcastAlias(alias) {
 			problems = append(problems, configkit.Invalid("broadcast.destinations", fmt.Sprintf("alias %q is not valid", alias)))
 		}
-		if !validBroadcastRoute(route) {
+		if !ValidBroadcastRoute(route) {
 			problems = append(problems, configkit.Invalid("broadcast.destinations["+alias+"]", "route is not a channel destination"))
 		}
 	}
@@ -1331,14 +916,14 @@ func validateBroadcast(broadcast *Broadcast) error {
 		if route == "" {
 			continue
 		}
-		if !validBroadcastRoute(route) {
+		if !ValidBroadcastRoute(route) {
 			problems = append(problems, configkit.Invalid("broadcast.fallback["+alias+"]", "route is not a channel destination"))
 		}
 	}
 	return errors.Join(problems...)
 }
 
-func validateScheduler(scheduler *Scheduler) error {
+func ValidateScheduler(scheduler *Scheduler) error {
 	if scheduler == nil {
 		return configkit.Invalid("scheduler", "must not be nil")
 	}
@@ -1357,7 +942,7 @@ func validateScheduler(scheduler *Scheduler) error {
 	return errors.Join(problems...)
 }
 
-func validateMemory(memory *Memory) error {
+func ValidateMemory(memory *Memory) error {
 	if memory == nil {
 		return configkit.Invalid("memory", "must not be nil")
 	}
@@ -1383,7 +968,7 @@ func validateMemory(memory *Memory) error {
 	return errors.Join(problems...)
 }
 
-func validateSkills(skillsConfig *Skills, profile capability.Profile) error {
+func ValidateSkills(skillsConfig *Skills, profile capability.Profile) error {
 	if skillsConfig == nil {
 		if profile != capability.ProfileCore {
 			return configkit.Invalid("skills", fmt.Sprintf("section is required for build profile %q", profile))
@@ -1424,7 +1009,7 @@ func validateSkills(skillsConfig *Skills, profile capability.Profile) error {
 	return errors.Join(problems...)
 }
 
-func validateContext(contextConfig *Context, profile capability.Profile) error {
+func ValidateContext(contextConfig *Context, profile capability.Profile) error {
 	if contextConfig == nil {
 		if profile != capability.ProfileCore {
 			return configkit.Invalid("context", fmt.Sprintf("section is required for build profile %q", profile))
@@ -1480,7 +1065,7 @@ func validHourMinute(value string) bool {
 	return hour >= 0 && hour < 24 && minute >= 0 && minute < 60
 }
 
-func validateProfile(profileConfig *Profile, buildProfile capability.Profile) error {
+func ValidateProfile(profileConfig *Profile, buildProfile capability.Profile) error {
 	if profileConfig == nil {
 		if buildProfile != capability.ProfileCore {
 			return configkit.Invalid("profile", fmt.Sprintf("section is required for build profile %q", buildProfile))
@@ -1508,7 +1093,7 @@ func validateProfile(profileConfig *Profile, buildProfile capability.Profile) er
 
 var ownerFixedKeys = []string{"name", "language", "timezone"}
 
-func validateOwner(owner *Owner) error {
+func ValidateOwner(owner *Owner) error {
 	if owner == nil {
 		return nil
 	}
@@ -1552,7 +1137,7 @@ func validateOwner(owner *Owner) error {
 	return errors.Join(problems...)
 }
 
-func validateOwnerIdentities(owner *Owner) error {
+func ValidateOwnerIdentities(owner *Owner) error {
 	if owner == nil || len(owner.Identities) == 0 {
 		return nil
 	}
@@ -1594,118 +1179,11 @@ func validateOwnerValue(path, value string) error {
 	return nil
 }
 
-func screenOwnerSecrets(owner *Owner, cfg *Config) error {
-	if owner == nil {
-		return nil
-	}
-	vault := configuredSecretVault(cfg)
-	var problems []error
-	for _, field := range []struct {
-		path  string
-		value string
-	}{
-		{"owner.name", owner.Name},
-		{"owner.language", owner.Language},
-		{"owner.timezone", owner.Timezone},
-	} {
-		if field.value != "" && vault.Contains(field.value) {
-			problems = append(problems, configkit.Field(field.path, fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
-		}
-	}
-	for key, value := range owner.Preferences {
-		if (key != "" && vault.Contains(key)) || (value != "" && vault.Contains(value)) {
-			problems = append(problems, configkit.Field("owner.preferences", fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
-			break
-		}
-	}
-	return errors.Join(problems...)
-}
-
-func configuredSecretVault(cfg *Config) *secret.Vault {
-	vault := secret.New()
-	for i, value := range configuredSecretValues(cfg) {
-		vault.Set(fmt.Sprintf("configured-secret-%d", i), value)
-	}
-	return vault
-}
-
-func configuredSecretValues(cfg *Config) []string {
-	var values []string
-	add := func(value string) {
-		if value = strings.TrimRight(value, "\r\n"); value != "" {
-			values = append(values, value)
-		}
-	}
-	for name := range cfg.Models.Definitions {
-		definition := cfg.Models.Definitions[name]
-		source := definition.APIKeyRef.Reference()
-		if source.Env != "" {
-			add(os.Getenv(source.Env))
-		}
-		if source.File != "" {
-			if data, err := os.ReadFile(source.File); err == nil {
-				add(string(data))
-			}
-		}
-	}
-	if cfg.Tools != nil {
-		add(resolveSecretRef(cfg.Tools.WebSearch.CredentialRef))
-		for i := range cfg.Tools.GitHub.Credentials {
-			add(resolveSecretRef(cfg.Tools.GitHub.Credentials[i].Ref))
-		}
-	}
-	for i := range cfg.Channels.Discord.Accounts {
-		add(resolveSecretRef(cfg.Channels.Discord.Accounts[i].BotTokenRef))
-	}
-	for _, key := range cfg.Webhook.Keys {
-		if key.SecretEnv != "" {
-			add(os.Getenv(key.SecretEnv))
-		}
-	}
-	add(resolveSecretRef(cfg.Telemetry.CredentialRef))
-	if cfg.Sync != nil {
-		add(resolveSecretRef(cfg.Sync.TransportSecretRef))
-	}
-	if cfg.MCP != nil {
-		for i := range cfg.MCP.Servers {
-			auth := cfg.MCP.Servers[i].Auth
-			if auth == nil {
-				continue
-			}
-			if oauth := auth.OAuth; oauth != nil {
-				if oauth.ClientIDEnv != "" {
-					add(os.Getenv(oauth.ClientIDEnv))
-				}
-				if oauth.ClientSecretEnv != "" {
-					add(os.Getenv(oauth.ClientSecretEnv))
-				}
-			}
-			if static := auth.Static; static != nil {
-				add(resolveStaticCredential(static.CredentialRef))
-			}
-		}
-	}
-	return values
-}
-
-func resolveSecretRef(ref secret.Ref) string {
-	value, _ := ref.Reference().Resolve()
-	return value
-}
-
-func resolveStaticCredential(raw string) string {
-	ref, err := secret.ParseRef(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
-	}
-	return resolveSecretRef(ref)
-}
-
 func validBroadcastAlias(alias string) bool {
 	return broadcastpkg.ValidAlias(alias)
 }
 
-func validBroadcastRoute(route string) bool {
+func ValidBroadcastRoute(route string) bool {
 	_, _, err := broadcastpkg.ParseRoute(route)
 	return err == nil
 }
@@ -1722,7 +1200,7 @@ func isSnowflake(id string) bool {
 	return true
 }
 
-func validateVision(vision *Vision, buildProfile capability.Profile) error {
+func ValidateVision(vision *Vision, buildProfile capability.Profile) error {
 	if vision == nil {
 		if buildProfile != capability.ProfileCore {
 			return configkit.Invalid("vision", fmt.Sprintf("section is required for build profile %q", buildProfile))
@@ -1790,7 +1268,7 @@ func validProtocolName(name string) bool {
 	return name == ProtocolOpenAIResponses || name == ProtocolOpenAIChatCompat || name == ProtocolAnthropicMessages || name == ProtocolGeminiNative
 }
 
-func validateTools(toolsConfig *Tools, profile capability.Profile) error {
+func ValidateTools(toolsConfig *Tools, profile capability.Profile) error {
 	if toolsConfig == nil {
 		if profile != capability.ProfileCore {
 			return configkit.Invalid("tools", fmt.Sprintf("section is required for build profile %q", profile))
@@ -1827,14 +1305,7 @@ func validateTools(toolsConfig *Tools, profile capability.Profile) error {
 	return validateWebSearch(&toolsConfig.WebSearch)
 }
 
-func checkVersion(v int) error {
-	if v != supportedVersion {
-		return configkit.Field("version", fault.New(ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
-	}
-	return nil
-}
-
-func validateChildren(childrenConfig *Children, buildProfile capability.Profile) error {
+func ValidateChildren(childrenConfig *Children, buildProfile capability.Profile) error {
 	if childrenConfig == nil {
 		if buildProfile != capability.ProfileCore {
 			return configkit.Invalid("children", fmt.Sprintf("section is required for build profile %q", buildProfile))

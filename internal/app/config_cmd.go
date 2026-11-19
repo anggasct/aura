@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/logging"
 )
 
@@ -25,7 +25,7 @@ func newConfigSchemaCmd() *cobra.Command {
 		Short: "Print the JSON Schema of the configuration file",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			schema, err := config.Schema()
+			schema, err := appconfig.Schema()
 			if err != nil {
 				return err
 			}
@@ -41,7 +41,7 @@ func newConfigCheckCmd(gf *globalFlags) *cobra.Command {
 		Short: "Load and validate the configuration without starting anything",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

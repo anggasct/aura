@@ -10,21 +10,22 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
+
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/store"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -203,9 +204,9 @@ func retrieveProfileValues(t *testing.T, service *profile.Service, query string,
 
 func TestProfileFTSRebuild(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -253,9 +254,9 @@ func TestProfileFTSRebuild(t *testing.T) {
 
 func TestProfilingProducerResolves(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	if _, err := profilingProducer(nil); err == nil {
 		t.Errorf("expected nil config rejection")
@@ -298,9 +299,9 @@ children:
 	if err := os.WriteFile(routed, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loadedRouted, err := config.Load(routed)
+	loadedRouted, err := appconfig.Load(routed)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	producer, err := profilingProducer(loadedRouted.Config)
 	if err != nil {
@@ -346,9 +347,9 @@ func (profileTestScanner) Contains(string) bool { return false }
 
 func TestNewProfileRuntimeWiresTelemetry(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -409,9 +410,9 @@ children:
 	if err := os.WriteFile(routed, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	loadedRouted, err := config.Load(routed)
+	loadedRouted, err := appconfig.Load(routed)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	routedDB, err := openStorage(t.Context(), loadedRouted.Config)
 	if err != nil {

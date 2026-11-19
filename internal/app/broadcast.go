@@ -8,8 +8,8 @@ import (
 	"log/slog"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
@@ -291,7 +291,7 @@ func buildBroadcastSenders(adapters []runtimechannelhost.ChannelPort, effects *e
 	return out
 }
 
-func buildBroadcastRunner(cfg *config.Config, db *sql.DB, logger *slog.Logger, channels *broadcastChannels, observer broadcast.Observer) (*broadcast.Runner, error) {
+func buildBroadcastRunner(cfg *appconfig.Config, db *sql.DB, logger *slog.Logger, channels *broadcastChannels, observer broadcast.Observer) (*broadcast.Runner, error) {
 	if cfg == nil {
 		return nil, errors.New("broadcast config must not be nil")
 	}
@@ -346,7 +346,7 @@ func (s *broadcastResumeStore) ListActive(ctx context.Context, limit int) ([]bro
 	return mapBroadcastFull(items), nil
 }
 
-func broadcastEffectProviders(cfg *config.Config, db *sql.DB, logger *slog.Logger) (map[string]effect.Provider, error) {
+func broadcastEffectProviders(cfg *appconfig.Config, db *sql.DB, logger *slog.Logger) (map[string]effect.Provider, error) {
 	providers := map[string]effect.Provider{}
 	if cfg == nil || !cfg.Channels.Discord.Enabled || len(cfg.Channels.Discord.Accounts) == 0 {
 		return providers, nil

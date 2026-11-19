@@ -11,9 +11,9 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/telegram"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -135,7 +135,7 @@ func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, s
 	return err
 }
 
-func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
+func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
 	settings := discord.AccessSettings{
 		Grants:         newStandingGrantRecorder(db),
 		Pairing:        newPairingService(db, recorder),
@@ -164,7 +164,7 @@ func discordAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.A
 	return settings
 }
 
-func telegramAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) telegram.AccessSettings {
+func telegramAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) telegram.AccessSettings {
 	shared := discordAccessSettings(cfg, db, recorder, runs)
 	return telegram.AccessSettings{
 		ApprovalTimeout:  shared.ApprovalTimeout,
@@ -180,7 +180,7 @@ func telegramAccessSettings(cfg *config.Config, db *sql.DB, recorder *telemetry.
 }
 
 func openStandingGrants(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.StandingGrantStore, error) {
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -103,7 +104,7 @@ func TestPrincipalBudgetGateSweepsIdlePrincipals(t *testing.T) {
 func TestPrincipalBudgetGateReadsTheTurnLedger(t *testing.T) {
 	cfg := writeChildrenCLIConfig(t)
 	db := openAccessDB(t, cfg)
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

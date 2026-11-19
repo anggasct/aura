@@ -12,15 +12,16 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 )
 
-func chatTestConfig(t *testing.T, suffix, failingURL, backupURL string) (cfg *config.Config, routeName string) {
+func chatTestConfig(t *testing.T, suffix, failingURL, backupURL string) (cfg *appconfig.Config, routeName string) {
 	t.Helper()
 	routeName = "primary-" + suffix
-	return &config.Config{
+	return &appconfig.Config{
 		Models: config.Models{
 			Definitions: map[string]config.ModelDefinition{
 				"failing": {
@@ -172,7 +173,7 @@ func TestChatWireCostBudget(t *testing.T) {
 			defer srv.Close()
 
 			routeName := "priced-route-" + suffix
-			cfg := &config.Config{
+			cfg := &appconfig.Config{
 				Models: config.Models{
 					Definitions: map[string]config.ModelDefinition{
 						"priced": {

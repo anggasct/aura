@@ -5,7 +5,7 @@ import (
 	"database/sql"
 	"errors"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -72,7 +72,7 @@ type knowledgeVectorRuntime struct {
 	done     chan struct{}
 }
 
-func startKnowledgeVectors(ctx context.Context, cfg *config.Config, pool *sql.DB, dbPath string) (*knowledgeVectorRuntime, bool, error) {
+func startKnowledgeVectors(ctx context.Context, cfg *appconfig.Config, pool *sql.DB, dbPath string) (*knowledgeVectorRuntime, bool, error) {
 	wiring, err := newKnowledgeEmbedding(cfg, nil)
 	if err != nil {
 		return nil, false, err

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -67,7 +67,7 @@ func TestPrincipalForgetDryRunThenApply(t *testing.T) {
 func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	db := openAccessDB(t, cfg)
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}

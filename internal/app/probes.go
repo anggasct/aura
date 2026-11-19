@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/store"
@@ -23,7 +23,7 @@ type probeListener struct {
 	interval  time.Duration
 }
 
-func buildProbeListener(cfg *config.Config, capabilities []health.CapabilityStatus, events store.EventStore, sessions store.SessionService, extra ...health.RegisteredCheck) (*probeListener, error) {
+func buildProbeListener(cfg *appconfig.Config, capabilities []health.CapabilityStatus, events store.EventStore, sessions store.SessionService, extra ...health.RegisteredCheck) (*probeListener, error) {
 	if cfg == nil {
 		return nil, errors.New("probe listener requires configuration")
 	}

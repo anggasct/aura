@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/terminal"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -40,9 +40,9 @@ agents:
 
 func personaRegistry(t *testing.T, configPath string) *auraagent.Registry {
 	t.Helper()
-	result, err := config.Load(configPath)
+	result, err := appconfig.Load(configPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	registry, err := buildAgentRegistry(result.Config)
 	if err != nil {
@@ -159,9 +159,9 @@ func TestChatRejectsUnknownPersona(t *testing.T) {
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	path := writePersonaCLIConfig(t, "You are Kuma.")
-	result, err := config.Load(path)
+	result, err := appconfig.Load(path)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	opts := chatCompositionOptions(&result, io.Discard)
 	opts.Chat.Persona = "ghost"

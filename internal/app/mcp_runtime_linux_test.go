@@ -15,8 +15,9 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/modules/builtin"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -27,7 +28,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -178,7 +179,7 @@ func (s *fixtureStarter) openSessions() int {
 }
 
 type mcpHarness struct {
-	cfg      config.Config
+	cfg      appconfig.Config
 	db       *sql.DB
 	executor *toolsbuiltin.Executor
 	report   capability.Report
@@ -207,7 +208,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	harness := &mcpHarness{cfg: config.Default(), db: db, report: capabilitytest.All(t), approve: true}
+	harness := &mcpHarness{cfg: appconfig.Default(), db: db, report: capabilitytest.All(t), approve: true}
 	harness.cfg.Tools.Workspace = t.TempDir()
 	harness.cfg.Storage.Path = dataRoot
 	harness.cfg.MCP = &config.MCP{Servers: servers}
@@ -615,16 +616,16 @@ func TestMCPCapabilityCheckerRejectsCapabilitiesOutsideTheRegistry(t *testing.T)
 	}
 }
 
-func mcpPersonaConfig(t *testing.T, tools string) *config.Config {
+func mcpPersonaConfig(t *testing.T, tools string) *appconfig.Config {
 	t.Helper()
 	path := writeAgentsConfig(t, "storage:\n  path: "+t.TempDir()+"\n"+mcpServersYAML("--x")+`agents:
   definitions:
     - id: main
       tools: `+tools+`
 `)
-	result, err := config.Load(path)
+	result, err := appconfig.Load(path)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	return result.Config
 }
@@ -669,7 +670,7 @@ func TestUnknownMCPServerInPersonaFailsBootWithPersonaInvalid(t *testing.T) {
 	}
 }
 
-func mcpTierConfig(t *testing.T, section string) *config.Config {
+func mcpTierConfig(t *testing.T, section string) *appconfig.Config {
 	t.Helper()
 	path := writeAgentsConfig(t, "storage:\n  path: "+t.TempDir()+"\n"+mcpServersYAML("--x")+`agents:
   definitions:
@@ -680,9 +681,9 @@ func mcpTierConfig(t *testing.T, section string) *config.Config {
       tools: [read_file, mcp_docs]
       `+section+`
 `)
-	result, err := config.Load(path)
+	result, err := appconfig.Load(path)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	return result.Config
 }
@@ -761,9 +762,9 @@ func TestConfigsWithoutMCPServersAreUnchanged(t *testing.T) {
 	for name, section := range map[string]string{"no section": "", "empty servers": "mcp:\n  servers: []\n"} {
 		t.Run(name, func(t *testing.T) {
 			path := writeAgentsConfig(t, "storage:\n  path: "+t.TempDir()+"\n"+section)
-			result, err := config.Load(path)
+			result, err := appconfig.Load(path)
 			if err != nil {
-				t.Fatalf("config.Load: %v", err)
+				t.Fatalf("appconfig.Load: %v", err)
 			}
 			cfg := result.Config
 

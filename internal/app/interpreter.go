@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
@@ -49,7 +49,7 @@ func interpreterEnabled(report capability.Report) bool {
 	return ok && status.Enabled && status.Available
 }
 
-func newInterpreterStore(cfg *config.Config, manifest *interpreter.Manifest) (*interpreter.Store, error) {
+func newInterpreterStore(cfg *appconfig.Config, manifest *interpreter.Manifest) (*interpreter.Store, error) {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return nil, err
@@ -57,7 +57,7 @@ func newInterpreterStore(cfg *config.Config, manifest *interpreter.Manifest) (*i
 	return interpreter.NewStore(dataRoot, manifest)
 }
 
-func newInterpreterRuntime(cfg *config.Config, manifest *interpreter.Manifest) (*interpreterRuntime, error) {
+func newInterpreterRuntime(cfg *appconfig.Config, manifest *interpreter.Manifest) (*interpreterRuntime, error) {
 	runtimeStore, err := newInterpreterStore(cfg, manifest)
 	if err != nil {
 		return nil, err
@@ -73,7 +73,7 @@ func newInterpreterRuntime(cfg *config.Config, manifest *interpreter.Manifest) (
 	return &interpreterRuntime{store: runtimeStore, set: set, verifier: verifier}, nil
 }
 
-func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *config.Config, artifacts store.ArtifactStore, observer toolsbuiltin.CodeObserver, logger *slog.Logger) error {
+func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *appconfig.Config, artifacts store.ArtifactStore, observer toolsbuiltin.CodeObserver, logger *slog.Logger) error {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return err
@@ -123,7 +123,7 @@ func (r *interpreterRuntime) run(ctx context.Context, logger *slog.Logger) {
 	}
 }
 
-func (r *interpreterRuntime) check(cfg *config.Config) health.RegisteredCheck {
+func (r *interpreterRuntime) check(cfg *appconfig.Config) health.RegisteredCheck {
 	return health.RegisteredCheck{
 		ID: health.ComponentInterpreter,
 		Checker: health.InterpreterChecker{Runtimes: func(context.Context) ([]health.InterpreterRuntime, error) {
@@ -134,7 +134,7 @@ func (r *interpreterRuntime) check(cfg *config.Config) health.RegisteredCheck {
 	}
 }
 
-func interpreterStatusChecks(cfg *config.Config, report capability.Report) ([]health.RegisteredCheck, error) {
+func interpreterStatusChecks(cfg *appconfig.Config, report capability.Report) ([]health.RegisteredCheck, error) {
 	if !interpreterEnabled(report) {
 		return nil, nil
 	}
@@ -145,7 +145,7 @@ func interpreterStatusChecks(cfg *config.Config, report capability.Report) ([]he
 	return interpreterManifestChecks(cfg, manifest)
 }
 
-func interpreterManifestChecks(cfg *config.Config, manifest *interpreter.Manifest) ([]health.RegisteredCheck, error) {
+func interpreterManifestChecks(cfg *appconfig.Config, manifest *interpreter.Manifest) ([]health.RegisteredCheck, error) {
 	runtimeStore, err := newInterpreterStore(cfg, manifest)
 	if err != nil {
 		return nil, err

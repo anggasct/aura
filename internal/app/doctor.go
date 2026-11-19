@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
@@ -21,7 +21,7 @@ func newDoctorCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			ctx := cmd.Context()
-			loaded, err := config.Load(gf.configPath)
+			loaded, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}

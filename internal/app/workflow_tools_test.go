@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -194,7 +195,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 		"handoff_to_owner", "workflow_list", "workflow_start", "workflow_status",
 		"workflow_cancel", "workflow_propose", "workflow_save_routine",
 	}
-	configured := config.Default()
+	configured := appconfig.Default()
 	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	deps, err := workflowValidationDeps(&configured)
 	if err != nil {
@@ -222,7 +223,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 		t.Errorf("Validate with github_comment behind an approval step: %v", err)
 	}
 
-	bare := config.Default()
+	bare := appconfig.Default()
 	bareDeps, err := workflowValidationDeps(&bare)
 	if err != nil {
 		t.Fatalf("workflowValidationDeps without credentials: %v", err)

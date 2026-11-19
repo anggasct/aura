@@ -11,6 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/store"
@@ -82,7 +83,7 @@ func newModelsRoutesCmd(gf *globalFlags) *cobra.Command {
 		Short: "List configured model routes",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -127,7 +128,7 @@ func newModelsCircuitsCmd(gf *globalFlags) *cobra.Command {
 		Short: "Inspect model circuit states",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -194,7 +195,7 @@ func newModelsCircuitResetCmd(gf *globalFlags) *cobra.Command {
 		Short: "Reset circuit breaker state for a model definition",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

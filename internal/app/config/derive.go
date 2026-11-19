@@ -1,28 +1,32 @@
 package config
 
+import (
+	legacyconfig "github.com/anggasct/aura/internal/config"
+)
+
 func deriveDefaults(cfg *Config) {
 	deriveEmptyCollections(cfg)
 	deriveModelRoutes(cfg)
 	deriveWebSearchCredential(cfg.Tools)
 	if cfg.MCP != nil {
 		for i := range cfg.MCP.Servers {
-			ApplyMCPServerDefaults(&cfg.MCP.Servers[i])
+			legacyconfig.ApplyMCPServerDefaults(&cfg.MCP.Servers[i])
 		}
 	}
 }
 
 func deriveEmptyCollections(cfg *Config) {
 	if cfg.Models.Providers == nil {
-		cfg.Models.Providers = map[string]ProviderPreset{}
+		cfg.Models.Providers = map[string]legacyconfig.ProviderPreset{}
 	}
 	if cfg.Vision != nil && cfg.Vision.Providers == nil {
-		cfg.Vision.Providers = map[string]VisionProviderLimits{}
+		cfg.Vision.Providers = map[string]legacyconfig.VisionProviderLimits{}
 	}
 }
 
 func deriveModelRoutes(cfg *Config) {
 	if cfg.ModelRoutes == nil && len(cfg.Models.Definitions) > 0 {
-		cfg.ModelRoutes = make(map[string]ModelRoute)
+		cfg.ModelRoutes = make(map[string]legacyconfig.ModelRoute)
 	}
 	for _, name := range []string{"primary", "auxiliary"} {
 		if _, defined := cfg.Models.Definitions[name]; !defined {
@@ -30,7 +34,7 @@ func deriveModelRoutes(cfg *Config) {
 		}
 		route, exists := cfg.ModelRoutes[name]
 		if !exists {
-			route = defaultModelRoute()
+			route = legacyconfig.DefaultModelRoute()
 		}
 		if len(route.Candidates) == 0 {
 			route.Candidates = []string{name}
@@ -39,9 +43,9 @@ func deriveModelRoutes(cfg *Config) {
 	}
 }
 
-func deriveWebSearchCredential(tools *Tools) {
+func deriveWebSearchCredential(tools *legacyconfig.Tools) {
 	if tools == nil || !tools.WebSearch.CredentialRef.IsZero() {
 		return
 	}
-	tools.WebSearch.CredentialRef = DefaultWebSearchCredentialRef(tools.WebSearch.Provider)
+	tools.WebSearch.CredentialRef = legacyconfig.DefaultWebSearchCredentialRef(tools.WebSearch.Provider)
 }

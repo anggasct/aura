@@ -13,8 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/store"
@@ -160,7 +160,7 @@ func parsePrincipalArg(channel, raw string) (string, error) {
 }
 
 func openPairingStores(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.PairingStore, store.PrincipalGrantStore, error) {
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, nil, err
 	}

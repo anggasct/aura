@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
@@ -29,7 +30,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	if err := mkdirBackup(t, dataRoot); err != nil {
 		t.Fatalf("seed backup: %v", err)
 	}
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	cfg.Models.Definitions = map[string]config.ModelDefinition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},

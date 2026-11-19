@@ -1,6 +1,8 @@
 package config
 
-import "testing"
+import (
+	"testing"
+)
 
 const positionFixture = "a:\n" +
 	"  b: 1\n" +

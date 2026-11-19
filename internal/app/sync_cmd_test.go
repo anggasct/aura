@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/gitsync"
 )
 
@@ -185,7 +185,7 @@ func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
 	sshBin := writeSyncExecutable(t)
 	cfg, _ := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
 	previous := syncRunPassFunc
-	syncRunPassFunc = func(_ context.Context, _ *config.Config, _ *gitsync.StateStore) (gitsync.PassOutcome, error) {
+	syncRunPassFunc = func(_ context.Context, _ *appconfig.Config, _ *gitsync.StateStore) (gitsync.PassOutcome, error) {
 		return gitsync.PassOutcome{
 			State:     gitsync.WorkerIdle,
 			LocalRef:  "local-abc123",

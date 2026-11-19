@@ -1,6 +1,8 @@
 package config
 
-import "testing"
+import (
+	"testing"
+)
 
 func FuzzConfigDecode(f *testing.F) {
 	f.Add([]byte("version: 1\n"))

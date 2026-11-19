@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -84,7 +85,7 @@ func TestBuildWebhookListener(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	runtime := durabletest.NewFake()
 	t.Cleanup(runtime.Close)
-	cfg := &config.Config{
+	cfg := &appconfig.Config{
 		Webhook: config.Webhook{
 			Enabled:            true,
 			Listen:             "127.0.0.1:0",

@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -37,7 +38,7 @@ func newOwnerWhoamiCmd(gf *globalFlags) *cobra.Command {
 		Use:   "whoami",
 		Short: "Show the canonical owner id and how many channel identities map to it",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, false, func(_ context.Context, _ *slog.Logger, cfg *config.Config, _ *sql.DB) error {
+			return withStorage(cmd, gf, false, func(_ context.Context, _ *slog.Logger, cfg *appconfig.Config, _ *sql.DB) error {
 				owners, err := ownerResolver(cfg)
 				if err != nil {
 					return err
@@ -68,7 +69,7 @@ func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 		Use:   "rekey",
 		Short: "Preview or apply moving historical owner rows to canonical principal ids",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 				osUser := ""
 				if current, err := user.Current(); err == nil {
 					osUser = current.Username
@@ -104,7 +105,7 @@ func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func ownerRekeyMoves(cfg *config.Config, osUser string) ([]store.OwnerMove, error) {
+func ownerRekeyMoves(cfg *appconfig.Config, osUser string) ([]store.OwnerMove, error) {
 	owners, err := ownerResolver(cfg)
 	if err != nil {
 		return nil, err

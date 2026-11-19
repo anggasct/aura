@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -34,7 +34,7 @@ func quarantinedIDs(quarantined []workflow.Quarantined) []string {
 	return slices.Compact(ids)
 }
 
-func workflowDefinitionsCheck(cfg *config.Config, registry *auraagent.Registry, quarantined []workflow.Quarantined) health.RegisteredCheck {
+func workflowDefinitionsCheck(cfg *appconfig.Config, registry *auraagent.Registry, quarantined []workflow.Quarantined) health.RegisteredCheck {
 	ids := quarantinedIDs(quarantined)
 	personas := make(map[string][]string)
 	if registry != nil {

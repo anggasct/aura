@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -31,7 +32,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	t.Helper()
 	h := &githubHarness{proposalHarness: proposalFixture(t)}
 	dir := t.TempDir()
-	cfg := config.Default()
+	cfg := appconfig.Default()
 	cfg.Storage.Path = dir
 	cfg.Tools.Workspace = filepath.Join(dir, "workspace")
 	if err := os.MkdirAll(cfg.Tools.Workspace, 0o700); err != nil {

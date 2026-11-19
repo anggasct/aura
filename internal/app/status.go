@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
@@ -38,7 +38,7 @@ func newStatusCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			loaded, err := config.Load(gf.configPath)
+			loaded, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}
@@ -85,7 +85,7 @@ func runProcessProbe(cmd *cobra.Command, listen, probe string) error {
 	return err
 }
 
-func runStatus(cmd *cobra.Command, cfg *config.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool, processProbe func() (health.ProcessStatus, bool)) error {
+func runStatus(cmd *cobra.Command, cfg *appconfig.Config, report capability.Report, negotiate func() (sandbox.Primitives, error), offline, asJSON bool, processProbe func() (health.ProcessStatus, bool)) error {
 	ctx := cmd.Context()
 	live, liveReachable := liveReadiness(ctx, offline, cfg.Health.Listen)
 	daemon := daemonSandboxState(live, liveReachable)
@@ -127,7 +127,7 @@ func liveReadiness(ctx context.Context, offline bool, listen string) (live healt
 	return body, true
 }
 
-func buildHealthRegistry(cfg *config.Config, capabilities []health.CapabilityStatus, sandboxCheck func() (supported bool, detail string), processProbe func() (health.ProcessStatus, bool), extra ...health.RegisteredCheck) (*health.Registry, error) {
+func buildHealthRegistry(cfg *appconfig.Config, capabilities []health.CapabilityStatus, sandboxCheck func() (supported bool, detail string), processProbe func() (health.ProcessStatus, bool), extra ...health.RegisteredCheck) (*health.Registry, error) {
 	dbPath, artifactRoot, backupDir, err := storagePaths(cfg)
 	if err != nil {
 		return nil, err
@@ -386,7 +386,7 @@ func statusSandboxLine(have sandbox.Primitives, negotiateErr error, daemon daemo
 	return formatSandboxStatus(have, negotiateErr)
 }
 
-func providerConfigured(cfg *config.Config) error {
+func providerConfigured(cfg *appconfig.Config) error {
 	definition, ok := cfg.Models.Definitions["primary"]
 	if !ok || definition.Model == "" {
 		return errors.New("no primary model definition")

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 )
 
@@ -20,7 +20,7 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 			sessionID, _ := cmd.Flags().GetString("session")
 			persona, _ := cmd.Flags().GetString("persona")
 			ctx := cmd.Context()
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -54,7 +54,7 @@ func newChatCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func chatCapabilityGate(ctx context.Context, logger *slog.Logger, result *config.LoadResult) error {
+func chatCapabilityGate(ctx context.Context, logger *slog.Logger, result *appconfig.LoadResult) error {
 	if result.CapabilityStateError == nil {
 		return nil
 	}

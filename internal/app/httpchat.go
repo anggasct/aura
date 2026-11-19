@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -85,7 +85,7 @@ func (r *httpHandoffReplies) List(ctx context.Context, sessionID string, afterSe
 	return replies, nil
 }
 
-func buildHTTPChat(cfg *config.Config, db *sql.DB, backend turn.AgentRuntime, registry *auraagent.Registry, recorder *telemetry.AccessRecorder, approvals *approval.OwnerRoute, logger *slog.Logger) (*httpchat.Server, []health.RegisteredCheck, error) {
+func buildHTTPChat(cfg *appconfig.Config, db *sql.DB, backend turn.AgentRuntime, registry *auraagent.Registry, recorder *telemetry.AccessRecorder, approvals *approval.OwnerRoute, logger *slog.Logger) (*httpchat.Server, []health.RegisteredCheck, error) {
 	settings := &cfg.Channels.HTTP
 	if !settings.Enabled {
 		return nil, nil, nil

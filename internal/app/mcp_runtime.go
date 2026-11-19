@@ -6,6 +6,9 @@ import (
 	"log/slog"
 	"time"
 
+	"go.opentelemetry.io/otel/metric"
+
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -15,17 +18,16 @@ import (
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"go.opentelemetry.io/otel/metric"
 )
 
 const mcpHealthCheckID = "mcp"
 
-func mcpServersConfigured(cfg *config.Config) bool {
+func mcpServersConfigured(cfg *appconfig.Config) bool {
 	return len(configuredMCPServers(cfg)) > 0
 }
 
 type mcpRuntimeOptions struct {
-	Config         *config.Config
+	Config         *appconfig.Config
 	Broker         *toolbroker.Broker
 	Logger         *slog.Logger
 	Recorder       *telemetry.MCPRecorder
@@ -128,7 +130,7 @@ func (r *mcpRuntime) warnUnexposedPersonaTools(ctx context.Context, logger *slog
 	}
 }
 
-func startConfiguredMCP(ctx context.Context, cfg *config.Config, broker *toolbroker.Broker, logger *slog.Logger, meters metric.MeterProvider, capabilities capability.Report, personas []auraagent.Definition, plugins []mcp.PluginServer) (*mcpRuntime, error) {
+func startConfiguredMCP(ctx context.Context, cfg *appconfig.Config, broker *toolbroker.Broker, logger *slog.Logger, meters metric.MeterProvider, capabilities capability.Report, personas []auraagent.Definition, plugins []mcp.PluginServer) (*mcpRuntime, error) {
 	recorder, err := telemetry.NewMCPRecorder(meters)
 	if err != nil {
 		return nil, err

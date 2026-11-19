@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/store"
@@ -42,7 +42,7 @@ func runPersonaEval(ctx context.Context, db *sql.DB, configPath string, definiti
 	})
 }
 
-func loadPersona(cfg *config.Config, id string) (auraagent.Definition, error) {
+func loadPersona(cfg *appconfig.Config, id string) (auraagent.Definition, error) {
 	registry, err := buildAgentRegistry(cfg)
 	if err != nil {
 		return auraagent.Definition{}, err
@@ -61,7 +61,7 @@ func newPersonaEvalCmd(gf *globalFlags) *cobra.Command {
 		Short: "Run a persona's policy evaluation, and its behavior evaluation with --behavior, and record the results",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -123,7 +123,7 @@ func newPersonaEvalResultsCmd(gf *globalFlags) *cobra.Command {
 		Short: "List recorded evaluation results for a persona",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

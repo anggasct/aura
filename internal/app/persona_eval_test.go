@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -49,7 +49,7 @@ func writeEvalCases(t *testing.T, configPath, persona, content string) {
 
 func evalGateFor(t *testing.T, configPath string) *personaEvalGate {
 	t.Helper()
-	loaded, err := config.Load(configPath)
+	loaded, err := appconfig.Load(configPath)
 	if err != nil {
 		t.Fatal(err)
 	}

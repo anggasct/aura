@@ -10,13 +10,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -67,9 +67,9 @@ func newTestChildExec(t *testing.T, db *sql.DB, answer string) (exec *runtimeadk
 
 func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -153,9 +153,9 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 func openChildTestService(t *testing.T, sessions ...string) (*child.Service, time.Time) {
 	t.Helper()
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -344,9 +344,9 @@ func TestChildRegistryGrantsCanonicalAcrossReplay(t *testing.T) {
 
 func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -397,9 +397,9 @@ func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 
 func TestBuildChildHandlerRegisters(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -424,9 +424,9 @@ func TestBuildChildHandlerRegisters(t *testing.T) {
 
 func TestChildCancellerDrivesDurableCancel(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -491,9 +491,9 @@ func TestChildCancellerDrivesDurableCancel(t *testing.T) {
 
 func TestChildCancellerDurableFailureLeavesStateUnchanged(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -565,9 +565,9 @@ func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
 
 func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -635,9 +635,9 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 
 func TestProductionHandlerDurablePerStep(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -812,9 +812,9 @@ func (s *recordingChildSignaler) SignalChild(_ context.Context, durableKey, sign
 
 func TestProductionHandlerSignalsSettlement(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -878,9 +878,9 @@ func TestProductionHandlerSignalsSettlement(t *testing.T) {
 
 func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {
@@ -926,9 +926,9 @@ func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 
 func TestChildInheritsParentPersona(t *testing.T) {
 	cfgPath := writeProfileCLIConfig(t)
-	loaded, err := config.Load(cfgPath)
+	loaded, err := appconfig.Load(cfgPath)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {

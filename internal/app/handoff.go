@@ -14,6 +14,7 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/kit/access"
@@ -98,7 +99,7 @@ func handoffNotifiers(ports []runtimechannelhost.ChannelPort) []handoffNotifier 
 	return notifiers
 }
 
-func discordAccount(cfg *config.Config, name string) (*config.DiscordAccount, bool) {
+func discordAccount(cfg *appconfig.Config, name string) (*config.DiscordAccount, bool) {
 	for i := range cfg.Channels.Discord.Accounts {
 		if cfg.Channels.Discord.Accounts[i].Name == name {
 			return &cfg.Channels.Discord.Accounts[i], true
@@ -107,7 +108,7 @@ func discordAccount(cfg *config.Config, name string) (*config.DiscordAccount, bo
 	return nil, false
 }
 
-func telegramAccount(cfg *config.Config, name string) (*config.TelegramAccount, bool) {
+func telegramAccount(cfg *appconfig.Config, name string) (*config.TelegramAccount, bool) {
 	for i := range cfg.Channels.Telegram.Accounts {
 		if cfg.Channels.Telegram.Accounts[i].Name == name {
 			return &cfg.Channels.Telegram.Accounts[i], true
@@ -116,7 +117,7 @@ func telegramAccount(cfg *config.Config, name string) (*config.TelegramAccount, 
 	return nil, false
 }
 
-func emailAccount(cfg *config.Config, name string) (*config.EmailAccount, bool) {
+func emailAccount(cfg *appconfig.Config, name string) (*config.EmailAccount, bool) {
 	for i := range cfg.Channels.Email.Accounts {
 		if cfg.Channels.Email.Accounts[i].Name == name {
 			return &cfg.Channels.Email.Accounts[i], true
@@ -125,7 +126,7 @@ func emailAccount(cfg *config.Config, name string) (*config.EmailAccount, bool) 
 	return nil, false
 }
 
-func deliverToHandoff(ctx context.Context, cfg *config.Config, handoff *store.Handoff, text string) error {
+func deliverToHandoff(ctx context.Context, cfg *appconfig.Config, handoff *store.Handoff, text string) error {
 	switch handoff.Channel {
 	case store.HandoffChannelTelegram:
 		account, ok := telegramAccount(cfg, handoff.Account)
@@ -183,7 +184,7 @@ func newReplyCmd(gf *globalFlags) *cobra.Command {
 			if text == "" {
 				return &usageError{err: errors.New("reply text must not be empty")}
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 				handoff, err := openHandoff(ctx, db, args[0])
 				if err != nil {
 					return err
@@ -216,7 +217,7 @@ func newHandoffCmd(gf *globalFlags) *cobra.Command {
 		Short: "List open handoffs",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				open, err := store.NewHandoffStore(db).ListOpen(ctx)
 				if err != nil {
 					return err
@@ -236,7 +237,7 @@ func newHandoffCmd(gf *globalFlags) *cobra.Command {
 		Short: "Hand the conversation back to the persona",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 				if _, err := openHandoff(ctx, db, args[0]); err != nil {
 					return err
 				}

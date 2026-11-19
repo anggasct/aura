@@ -12,7 +12,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -47,7 +47,7 @@ func newScheduleAddCmd(gf *globalFlags) *cobra.Command {
 		Use:   "add",
 		Short: "Create a scheduled job and start its run",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -155,7 +155,7 @@ func newScheduleListCmd(gf *globalFlags) *cobra.Command {
 		Use:   "list",
 		Short: "List jobs with their next fire instant",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				service, err := scheduleService(db)
 				if err != nil {
 					return err
@@ -195,7 +195,7 @@ func newSchedulePauseCmd(gf *globalFlags) *cobra.Command {
 		Short: "Pause a job after its in-flight turn settles",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				service, err := scheduleService(db)
 				if err != nil {
 					return err
@@ -217,7 +217,7 @@ func newScheduleResumeCmd(gf *globalFlags) *cobra.Command {
 		Short: "Resume a paused job and restart its run",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -252,7 +252,7 @@ func newScheduleDeleteCmd(gf *globalFlags) *cobra.Command {
 		Short: "Soft-delete a job and retain its history",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				service, err := scheduleService(db)
 				if err != nil {
 					return err
@@ -278,7 +278,7 @@ func newScheduleRunsCmd(gf *globalFlags) *cobra.Command {
 			if limit <= 0 || limit > 1000 {
 				return &usageError{fmt.Errorf("%s: --limit must be between 1 and 1000", cmd.CommandPath())}
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				items, err := store.NewScheduleStore(db).Occurrences(ctx, args[0], limit)
 				if err != nil {
 					return err
@@ -310,7 +310,7 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 		Short: "Record a manual fire and start the job run",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -336,7 +336,7 @@ func newScheduleRunNowCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func checkScheduledWorkflow(ctx context.Context, cfg *config.Config, db *sql.DB, id, input string) error {
+func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.DB, id, input string) error {
 	if input != "" {
 		decoder := json.NewDecoder(strings.NewReader(input))
 		decoder.DisallowUnknownFields()

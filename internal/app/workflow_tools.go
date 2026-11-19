@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
@@ -36,7 +37,7 @@ type proposalOffer struct {
 }
 
 type proposalCards struct {
-	cfg      *config.Config
+	cfg      *appconfig.Config
 	offerers []proposalOfferer
 	logger   *slog.Logger
 	requests chan proposalOffer
@@ -61,7 +62,7 @@ func proposalOfferers(ports []runtimechannelhost.ChannelPort) []proposalOfferer 
 	return offerers
 }
 
-func (c *workflowToolController) enableProposalCards(cfg *config.Config, offerers []proposalOfferer, logger *slog.Logger) {
+func (c *workflowToolController) enableProposalCards(cfg *appconfig.Config, offerers []proposalOfferer, logger *slog.Logger) {
 	if len(offerers) == 0 {
 		return
 	}

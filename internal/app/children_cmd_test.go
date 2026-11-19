@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -77,9 +77,9 @@ func runChildrenCommand(t *testing.T, cfg string, args ...string) (string, error
 
 func seedChildRow(t *testing.T, cfg string) string {
 	t.Helper()
-	loaded, err := config.Load(cfg)
+	loaded, err := appconfig.Load(cfg)
 	if err != nil {
-		t.Fatalf("config.Load: %v", err)
+		t.Fatalf("appconfig.Load: %v", err)
 	}
 	db, err := openStorage(t.Context(), loaded.Config)
 	if err != nil {

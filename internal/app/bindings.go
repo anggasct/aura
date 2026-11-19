@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
@@ -46,7 +47,7 @@ func newBindingsExplainCmd(gf *globalFlags) *cobra.Command {
 			if scope.account == "" {
 				return &usageError{fmt.Errorf("%s requires --account", cmd.CommandPath())}
 			}
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}

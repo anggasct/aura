@@ -13,8 +13,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/httpchat"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -53,7 +53,7 @@ func newAPIKeyCreateCmd(gf *globalFlags) *cobra.Command {
 			if err := flags.validate(); err != nil {
 				return err
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 				return createAPIKey(ctx, cmd, cfg, db, flags)
 			})
 		},
@@ -88,7 +88,7 @@ func (f *apiKeyCreateFlags) validate() error {
 	return nil
 }
 
-func createAPIKey(ctx context.Context, cmd *cobra.Command, cfg *config.Config, db *sql.DB, flags *apiKeyCreateFlags) error {
+func createAPIKey(ctx context.Context, cmd *cobra.Command, cfg *appconfig.Config, db *sql.DB, flags *apiKeyCreateFlags) error {
 	registry, err := buildAgentRegistry(cfg)
 	if err != nil {
 		return err
@@ -132,7 +132,7 @@ func newAPIKeyListCmd(gf *globalFlags) *cobra.Command {
 		Short: "List API keys without their secrets",
 		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				keys, err := store.NewAPIKeyStore(db).List(ctx)
 				if err != nil {
 					return err
@@ -157,7 +157,7 @@ func newAPIKeyRevokeCmd(gf *globalFlags) *cobra.Command {
 		Short: "Revoke an API key",
 		Args:  exactlyOneKeyID,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *config.Config, db *sql.DB) error {
+			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
 				keys := store.NewAPIKeyStore(db)
 				now := time.Now().UTC()
 				changed, err := keys.Revoke(ctx, args[0], now)

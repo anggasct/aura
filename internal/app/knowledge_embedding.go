@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/egress"
@@ -72,7 +73,7 @@ func (v *knowledgeVectors) DisableEmbedding(ctx context.Context, collection stri
 	}, translateKnowledgeStoreError(err)
 }
 
-func configuredEmbedding(cfg *config.Config) *config.KnowledgeEmbedding {
+func configuredEmbedding(cfg *appconfig.Config) *config.KnowledgeEmbedding {
 	if cfg == nil || cfg.Knowledge == nil {
 		return nil
 	}
@@ -96,7 +97,7 @@ type knowledgeEmbeddingWiring struct {
 	embedder knowledge.Embedder
 }
 
-func newKnowledgeEmbedding(cfg *config.Config, resolver egress.Resolver) (knowledgeEmbeddingWiring, error) {
+func newKnowledgeEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (knowledgeEmbeddingWiring, error) {
 	embeddingConfig := configuredEmbedding(cfg)
 	if embeddingConfig == nil {
 		return knowledgeEmbeddingWiring{}, nil
@@ -126,7 +127,7 @@ func newKnowledgeEmbedding(cfg *config.Config, resolver egress.Resolver) (knowle
 	return wiring, nil
 }
 
-func knowledgeEmbeddingReader(cfg *config.Config, dbPath string) func(ctx context.Context) (health.KnowledgeEmbeddingState, error) {
+func knowledgeEmbeddingReader(cfg *appconfig.Config, dbPath string) func(ctx context.Context) (health.KnowledgeEmbeddingState, error) {
 	return func(ctx context.Context) (health.KnowledgeEmbeddingState, error) {
 		var state health.KnowledgeEmbeddingState
 		fingerprint := ""

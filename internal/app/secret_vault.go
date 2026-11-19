@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -43,7 +44,7 @@ func literalSecret(name, value string) configuredSecret {
 	return configuredSecret{name: name, resolve: func() (string, error) { return value, nil }}
 }
 
-func configuredSecrets(cfg *config.Config) []configuredSecret {
+func configuredSecrets(cfg *appconfig.Config) []configuredSecret {
 	var secrets []configuredSecret
 	for i := range cfg.Channels.Discord.Accounts {
 		account := &cfg.Channels.Discord.Accounts[i]
@@ -109,7 +110,7 @@ func configuredSecrets(cfg *config.Config) []configuredSecret {
 	return secrets
 }
 
-func additionalConfiguredSecrets(cfg *config.Config) []configuredSecret {
+func additionalConfiguredSecrets(cfg *appconfig.Config) []configuredSecret {
 	var secrets []configuredSecret
 	if cfg.Tools != nil {
 		if ref := cfg.Tools.WebSearch.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
@@ -147,11 +148,11 @@ func additionalConfiguredSecrets(cfg *config.Config) []configuredSecret {
 	return secrets
 }
 
-func builtinDefaults() config.Config {
-	return config.Default()
+func builtinDefaults() appconfig.Config {
+	return appconfig.Default()
 }
 
-func buildStrictSecretVault(cfg *config.Config) (*secret.Vault, error) {
+func buildStrictSecretVault(cfg *appconfig.Config) (*secret.Vault, error) {
 	vault := secret.New()
 	var unresolved []string
 	for _, entry := range append(configuredSecrets(cfg), additionalConfiguredSecrets(cfg)...) {

@@ -14,7 +14,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -230,7 +230,7 @@ func TestWorkflowValidateAcceptsOmittedTimeoutWithConfiguredDefault(t *testing.T
 func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -296,7 +296,7 @@ steps:
 func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	gf := writeWorkflowFixtures(t, outputWorkflowYAML)
 	ctx := t.Context()
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -421,7 +421,7 @@ func newWorkflowToolRunnerFixture(t *testing.T) (workflow.ToolRunner, *sql.DB, s
 	return newWorkflowToolRunnerFixtureWith(t, nil)
 }
 
-func newWorkflowToolRunnerFixtureWith(t *testing.T, configure func(*config.Config)) (workflow.ToolRunner, *sql.DB, string) {
+func newWorkflowToolRunnerFixtureWith(t *testing.T, configure func(*appconfig.Config)) (workflow.ToolRunner, *sql.DB, string) {
 	t.Helper()
 	rig := newSurfaceRig(t, &surfaceRigOptions{configure: configure})
 	return rig.runner, rig.db, rig.workspace
@@ -587,7 +587,7 @@ func (b *syncBuffer) String() string {
 func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -680,7 +680,7 @@ func TestWorkflowSignalUnknownRunFailsClosed(t *testing.T) {
 func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}

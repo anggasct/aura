@@ -12,8 +12,8 @@ import (
 
 	"github.com/spf13/cobra"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -150,11 +150,11 @@ func newPrincipalForgetCmd(gf *globalFlags) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if !apply {
-				return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *config.Config, db *sql.DB) error {
+				return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 					return forgetCommand(ctx, cmd, cfg, db, nil, args[0], false)
 				})
 			}
-			result, err := config.Load(gf.configPath)
+			result, err := appconfig.Load(gf.configPath)
 			if err != nil {
 				return err
 			}
@@ -171,7 +171,7 @@ func newPrincipalForgetCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func forgetCommand(ctx context.Context, cmd *cobra.Command, cfg *config.Config, db *sql.DB, runs *erasureRuns, principalID string, apply bool) error {
+func forgetCommand(ctx context.Context, cmd *cobra.Command, cfg *appconfig.Config, db *sql.DB, runs *erasureRuns, principalID string, apply bool) error {
 	channel, externalID, err := principal.ParseIdentity(principalID)
 	if err != nil {
 		return &usageError{err: errors.New("principal must be a channel identity such as discord:<user id>")}
@@ -204,7 +204,7 @@ func forgetCommand(ctx context.Context, cmd *cobra.Command, cfg *config.Config, 
 	return writeChildLines(cmd, append(lines, "erased "+principalID))
 }
 
-func sweepRetention(ctx context.Context, cfg *config.Config, db *sql.DB, artifactRoot string, now time.Time) (map[principal.Class]int, error) {
+func sweepRetention(ctx context.Context, cfg *appconfig.Config, db *sql.DB, artifactRoot string, now time.Time) (map[principal.Class]int, error) {
 	swept := map[principal.Class]int{}
 	if cfg.Access == nil {
 		return swept, nil
@@ -233,7 +233,7 @@ func sweepRetention(ctx context.Context, cfg *config.Config, db *sql.DB, artifac
 	return swept, nil
 }
 
-func runRetentionSweeps(ctx context.Context, cfg *config.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) {
+func runRetentionSweeps(ctx context.Context, cfg *appconfig.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) {
 	sweep := func() {
 		swept, err := sweepRetention(ctx, cfg, db, artifactRoot, time.Now().UTC())
 		if err != nil {

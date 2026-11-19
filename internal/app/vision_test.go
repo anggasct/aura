@@ -8,13 +8,15 @@ import (
 	"io"
 	"testing"
 
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/vision"
 	"github.com/anggasct/aura/internal/store"
-	"go.opentelemetry.io/otel/attribute"
-	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
-	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 )
 
 type fakeArtifactStore struct {
@@ -90,14 +92,14 @@ func TestVisionBlobReaderPreservesStoreCause(t *testing.T) {
 }
 
 func TestVisionWiringForConfig(t *testing.T) {
-	empty := &config.Config{Vision: nil}
+	empty := &appconfig.Config{Vision: nil}
 	if wiring := visionWiringForConfig(empty, &sql.DB{}, t.TempDir()); wiring.Policy != nil || wiring.Blobs != nil {
 		t.Fatal("nil vision section must yield empty wiring")
 	}
 	if wiring := visionWiringForConfig(nil, &sql.DB{}, t.TempDir()); wiring.Policy != nil || wiring.Blobs != nil {
 		t.Fatal("nil config must yield empty wiring")
 	}
-	enabled := &config.Config{Vision: &config.Vision{Enabled: true}}
+	enabled := &appconfig.Config{Vision: &config.Vision{Enabled: true}}
 	if wiring := visionWiringForConfig(enabled, nil, t.TempDir()); wiring.Policy != nil || wiring.Blobs != nil {
 		t.Fatal("nil database must yield empty wiring")
 	}
@@ -114,11 +116,11 @@ func TestNewVisionServiceDisabledYieldsNil(t *testing.T) {
 	if svc := newVisionService(nil, &sql.DB{}, t.TempDir()); svc != nil {
 		t.Fatal("nil config must yield nil service")
 	}
-	disabled := &config.Config{Vision: &config.Vision{Enabled: false}}
+	disabled := &appconfig.Config{Vision: &config.Vision{Enabled: false}}
 	if svc := newVisionService(disabled, &sql.DB{}, t.TempDir()); svc != nil {
 		t.Fatal("disabled vision must yield nil service")
 	}
-	enabled := &config.Config{Vision: &config.Vision{Enabled: true}}
+	enabled := &appconfig.Config{Vision: &config.Vision{Enabled: true}}
 	if svc := newVisionService(enabled, nil, t.TempDir()); svc != nil {
 		t.Fatal("nil database must yield nil service")
 	}

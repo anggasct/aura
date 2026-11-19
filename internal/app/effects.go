@@ -11,7 +11,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -55,7 +55,7 @@ func newEffectsApproveCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, journal *effect.Journal) error {
+			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, journal *effect.Journal) error {
 				approval, err := journal.Approve(ctx, &effect.ApprovalRequest{
 					IntentID:  args[0],
 					Action:    effectApprovalAction(action),
@@ -95,7 +95,7 @@ func newEffectsListCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, journal *effect.Journal) error {
+			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, journal *effect.Journal) error {
 				intents, err := journal.ListByState(ctx, effectState(state), limit)
 				if err != nil {
 					return err
@@ -133,7 +133,7 @@ func newEffectsReconcileCmd(gf *globalFlags) *cobra.Command {
 		Short: "Reconcile an unknown effect through its provider adapter",
 		Args:  exactOneArg,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withEffects(cmd, gf, func(context.Context, *slog.Logger, *config.Config, *effect.Journal) error {
+			return withEffects(cmd, gf, func(context.Context, *slog.Logger, *appconfig.Config, *effect.Journal) error {
 				return fault.New(effect.ErrorCodeReconciliationUnsupported, "provider reconciliation is unavailable for intent "+args[0])
 			})
 		},
@@ -162,7 +162,7 @@ func newEffectsMarkCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, journal *effect.Journal) error {
+			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, journal *effect.Journal) error {
 				intent, err := journal.MarkWithApproval(ctx, args[0], succeeded, reason, token)
 				if err != nil {
 					return err
@@ -194,7 +194,7 @@ func newEffectsRetryCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, journal *effect.Journal) error {
+			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, journal *effect.Journal) error {
 				intent, err := journal.RetryWithApproval(ctx, args[0], token)
 				if err != nil {
 					return err
@@ -225,7 +225,7 @@ func newEffectsPruneCmd(gf *globalFlags) *cobra.Command {
 			return nil
 		},
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, journal *effect.Journal) error {
+			return withEffects(cmd, gf, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, journal *effect.Journal) error {
 				cutoff := time.Now().UTC().Add(-effect.DefaultTerminalRetention)
 				if before != "" {
 					parsed, err := time.Parse(time.RFC3339Nano, before)
@@ -247,8 +247,8 @@ func newEffectsPruneCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func withEffects(cmd *cobra.Command, gf *globalFlags, fn func(context.Context, *slog.Logger, *config.Config, *effect.Journal) error) error {
-	return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *config.Config, db *sql.DB) error {
+func withEffects(cmd *cobra.Command, gf *globalFlags, fn func(context.Context, *slog.Logger, *appconfig.Config, *effect.Journal) error) error {
+	return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
 		journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
 		if err != nil {
 			return err

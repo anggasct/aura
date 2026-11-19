@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -30,7 +30,7 @@ func newProfileCmd(gf *globalFlags) *cobra.Command {
 }
 
 func openProfileService(cmd *cobra.Command, gf *globalFlags) (*profile.Service, func(), error) {
-	result, err := config.Load(gf.configPath)
+	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, err
 	}

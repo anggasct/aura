@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -97,7 +97,7 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 		t.Fatalf("initial circuits output missing expected content:\n%s", out)
 	}
 
-	loadRes, err := config.Load(gf.configPath)
+	loadRes, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestModelsCircuitsStorageFailure(t *testing.T) {
 	gf := &globalFlags{configPath: writeModelsConfig(t, "")}
 	ctx := t.Context()
 
-	loadRes, err := config.Load(gf.configPath)
+	loadRes, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}

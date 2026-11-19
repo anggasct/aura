@@ -57,7 +57,7 @@ func DefaultInterpreter() Interpreter {
 	}
 }
 
-func validateInterpreter(interpreter *Interpreter) error {
+func ValidateInterpreter(interpreter *Interpreter) error {
 	var problems []error
 	if time.Duration(interpreter.Timeout) < MinInterpreterTimeout || time.Duration(interpreter.Timeout) > MaxInterpreterTimeout {
 		problems = append(problems, configkit.Invalid("interpreter.timeout", fmt.Sprintf("must be between %s and %s", MinInterpreterTimeout, MaxInterpreterTimeout)))

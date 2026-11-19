@@ -15,8 +15,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
-	"github.com/anggasct/aura/internal/modules/builtin"
+	"go.opentelemetry.io/otel/metric"
+
+	appconfig "github.com/anggasct/aura/internal/app/config"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -29,12 +31,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
-	"go.opentelemetry.io/otel/metric"
 )
 
 type Surface string
@@ -55,7 +56,7 @@ const (
 
 type Options struct {
 	Surface   Surface
-	Config    *config.LoadResult
+	Config    *appconfig.LoadResult
 	LogLevel  string
 	LogFormat string
 	LogOutput io.Writer
@@ -100,7 +101,7 @@ type App struct {
 	serve       func(ctx context.Context) error
 	logger      *slog.Logger
 	db          *sql.DB
-	result      *config.LoadResult
+	result      *appconfig.LoadResult
 	runtime     durable.Runtime
 	interpreter *workflow.Interpreter
 	models      *model.Registry
@@ -179,7 +180,7 @@ func closeAfter(ctx context.Context, app *App, err error) error {
 }
 
 type commandInput struct {
-	result *config.LoadResult
+	result *appconfig.LoadResult
 	parts  []Part
 }
 
@@ -253,7 +254,7 @@ type toolWiring struct {
 }
 
 type toolExecutorInput struct {
-	result       *config.LoadResult
+	result       *appconfig.LoadResult
 	db           *sql.DB
 	artifactRoot string
 	logger       *slog.Logger
@@ -283,7 +284,7 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 	return executor, nil
 }
 
-func githubCredentialSecrets(cfg *config.Config) []string {
+func githubCredentialSecrets(cfg *appconfig.Config) []string {
 	var values []string
 	for _, credential := range githubCredentials(cfg) {
 		if value, err := credential.Ref.Reference().Resolve(); err == nil && strings.TrimSpace(value) != "" {
@@ -293,7 +294,7 @@ func githubCredentialSecrets(cfg *config.Config) []string {
 	return values
 }
 
-func githubCredentials(cfg *config.Config) []github.Credential {
+func githubCredentials(cfg *appconfig.Config) []github.Credential {
 	if cfg.Tools == nil {
 		return nil
 	}
@@ -328,8 +329,8 @@ func (s *lifecycleStage) Stop(ctx context.Context) error {
 
 type build struct {
 	opts   *Options
-	result *config.LoadResult
-	cfg    *config.Config
+	result *appconfig.LoadResult
+	cfg    *appconfig.Config
 	logger *slog.Logger
 	group  *server.LifecycleGroup
 
@@ -489,7 +490,7 @@ func (b *build) buildModelRegistry(ctx context.Context) error {
 	})
 }
 
-func evaluationModelOptions(cfg *config.Config, db *sql.DB) *model.RegistryOptions {
+func evaluationModelOptions(cfg *appconfig.Config, db *sql.DB) *model.RegistryOptions {
 	return &model.RegistryOptions{
 		Logger:     slog.New(slog.DiscardHandler),
 		Models:     cfg.Models,
