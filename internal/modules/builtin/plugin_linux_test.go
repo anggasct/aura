@@ -22,11 +22,10 @@ func TestDefinitionsCarryTheApprovedPluginDescription(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	cfg := config.Default()
-	cfg.Tools.Workspace = t.TempDir()
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = t.TempDir()
 	dataRoot := t.TempDir()
-	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

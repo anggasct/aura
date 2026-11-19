@@ -80,7 +80,7 @@ func newAccessAdapter(t *testing.T, persona string, owners []string, personas []
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
-	router, err := auraagent.NewRouter(registry, &config.Channels{Discord: cfg}, nil)
+	router, err := auraagent.NewRouter(registry, discordChannelAccounts(&cfg), nil)
 	if err != nil {
 		t.Fatalf("persona router: %v", err)
 	}

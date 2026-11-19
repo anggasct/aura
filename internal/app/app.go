@@ -266,7 +266,7 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 		return nil, invalidOptions("tool executor input must carry a config result, wiring and the live event bus")
 	}
 	wiring := in.wiring
-	executor, err := toolsbuiltin.New(in.result.Config, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
+	executor, err := toolsbuiltin.New(in.result.Config.Tools, in.result.Config.Storage.ArtifactQuota, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
 		wiring.observer, wiring.decider, wiring.access,
 		toolsbuiltin.WithApprovalReachable(wiring.reachable), toolsbuiltin.WithLiveEvents(in.events))
 	if err != nil {
@@ -540,7 +540,7 @@ func (b *build) buildKernel(ctx context.Context) error {
 			return err
 		}
 	}
-	routeModel, err := model.RouteModelName(b.cfg, b.primaryModel())
+	routeModel, err := model.RouteModelName(b.cfg.Models, b.cfg.ModelRoutes, b.primaryModel())
 	if err != nil {
 		return err
 	}

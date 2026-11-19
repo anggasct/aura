@@ -86,13 +86,6 @@ func BuildRouter(logger *slog.Logger, models config.Models) (*Router, error) {
 	return BuildRouterWithRoutes(logger, models, nil, nil)
 }
 
-func BuildRouterWithConfig(logger *slog.Logger, cfg *config.Config, store CircuitCheckpointStore) (*Router, error) {
-	if cfg == nil {
-		return BuildRouter(logger, config.Models{})
-	}
-	return BuildRouterWithRoutes(logger, cfg.Models, cfg.ModelRoutes, store)
-}
-
 type VisionWiring struct {
 	Policy *VisionPolicy
 	Blobs  VisionBlobReader

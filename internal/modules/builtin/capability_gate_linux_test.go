@@ -44,10 +44,9 @@ func newGateFixture(t *testing.T, report capability.Report, approve bool) *gateF
 	if err := store.NewSessionService(db).Create(context.Background(), &session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	cfg := config.Default()
-	cfg.Tools.Workspace = fixture.workspace
-	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, report, nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = fixture.workspace
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, report, nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		fixture.prompts++
 		return approve, nil
 	}, nil)

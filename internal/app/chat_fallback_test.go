@@ -73,7 +73,7 @@ func TestChatWireFailsOverThroughRoute(t *testing.T) {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 
-	routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["failing"].Model)
+	routeModel, err := model.RouteModelName(cfg.Models, cfg.ModelRoutes, cfg.Models.Definitions["failing"].Model)
 	if err != nil {
 		t.Fatalf("RouteModelName: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestChatWireFailsOverThroughRoute(t *testing.T) {
 
 func TestChatWireUnknownRouteFailsClosed(t *testing.T) {
 	cfg, _ := chatTestConfig(t, "failclosed", "http://127.0.0.1:1", "http://127.0.0.1:2")
-	routeModel, err := model.RouteModelName(cfg, "fallback-model")
+	routeModel, err := model.RouteModelName(cfg.Models, cfg.ModelRoutes, "fallback-model")
 	if err != nil {
 		t.Fatalf("RouteModelName: %v", err)
 	}
@@ -208,7 +208,7 @@ func TestChatWireCostBudget(t *testing.T) {
 				t.Fatalf("NewRegistry: %v", err)
 			}
 
-			routeModel, err := model.RouteModelName(cfg, cfg.Models.Definitions["priced"].Model)
+			routeModel, err := model.RouteModelName(cfg.Models, cfg.ModelRoutes, cfg.Models.Definitions["priced"].Model)
 			if err != nil {
 				t.Fatalf("RouteModelName: %v", err)
 			}

@@ -133,24 +133,24 @@ func (s Set) LLM(_ context.Context, name string) (adkmodel.LLM, error) {
 	return llm, nil
 }
 
-func RouteModelName(cfg *config.Config, defaultModel string) (func(route string) (string, error), error) {
+func RouteModelName(models config.Models, routes map[string]config.ModelRoute, defaultModel string) (func(route string) (string, error), error) {
 	resolver := func(route string) (string, error) {
-		if r, ok := cfg.ModelRoutes[route]; ok && len(r.Candidates) > 0 {
+		if r, ok := routes[route]; ok && len(r.Candidates) > 0 {
 			return route, nil
 		}
 		if route == "" {
-			if cfg.Models.Definitions["primary"].Model == "" {
+			if models.Definitions["primary"].Model == "" {
 				return "", errors.New("no default model is configured")
 			}
 			return defaultModel, nil
 		}
-		if definition, ok := cfg.Models.Definitions[route]; ok && definition.Model != "" {
+		if definition, ok := models.Definitions[route]; ok && definition.Model != "" {
 			return definition.Model, nil
 		}
 		return "", fmt.Errorf("unknown model route %q", route)
 	}
 	if defaultModel == "" {
-		defaultModel = cfg.Models.Definitions["primary"].Model
+		defaultModel = models.Definitions["primary"].Model
 		if defaultModel == "" {
 			return nil, errors.New("model: no primary model is configured")
 		}

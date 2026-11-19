@@ -215,7 +215,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	if access != nil {
 		policy = access(db)
 	}
-	executor, err := toolsbuiltin.New(&harness.cfg, db, dataRoot, harness.report, slog.New(slog.DiscardHandler), nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := toolsbuiltin.New(harness.cfg.Tools, harness.cfg.Storage.ArtifactQuota, db, dataRoot, harness.report, slog.New(slog.DiscardHandler), nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		harness.mu.Lock()
 		defer harness.mu.Unlock()
 		harness.prompts = append(harness.prompts, prompt.ToolName)

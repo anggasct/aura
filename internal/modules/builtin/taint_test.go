@@ -19,12 +19,12 @@ import (
 
 func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 	db := storetest.OpenMigrated(t)
-	cfg := config.Default()
-	cfg.Tools.WebSearch = config.ToolWebSearch{Provider: "brave", CredentialRef: secrettest.Ref("env://AURA_TEST_TAINT_SEARCH_UNSET"), MaxResults: 5}
-	cfg.Tools.Workspace = t.TempDir()
-	cfg.Storage.Path = t.TempDir()
+	toolsCfg := config.DefaultTools()
+	toolsCfg.WebSearch = config.ToolWebSearch{Provider: "brave", CredentialRef: secrettest.Ref("env://AURA_TEST_TAINT_SEARCH_UNSET"), MaxResults: 5}
+	toolsCfg.Workspace = t.TempDir()
+	dataRoot := t.TempDir()
 	decisions := 0
-	executor, err := New(&cfg, db, cfg.Storage.Path, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		decisions++
 		return false, nil
 	}, nil, WithApprovalReachable(func(sessionID string) bool { return sessionID == "reachable" }))

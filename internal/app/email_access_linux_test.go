@@ -227,7 +227,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	name := "email-access"
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
 	decider := channelApprovalDecider(approvalChannels(approvers, route))
-	builtin, err := toolsbuiltin.New(cfg, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil), toolsbuiltin.WithLiveEvents(liveEvents))
+	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil), toolsbuiltin.WithLiveEvents(liveEvents))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
@@ -242,7 +242,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 		t.Fatalf("email.New: %v", err)
 	}
 	h.adapter = adapter
-	router, err := auraagent.NewRouter(registry, &cfg.Channels, cfg.Bindings)
+	router, err := auraagent.NewRouter(registry, channelAccounts(&cfg.Channels), cfg.Bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

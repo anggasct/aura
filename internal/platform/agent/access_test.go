@@ -134,11 +134,12 @@ func TestRouterServesPersonaByAccountDefaultOrBinding(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	channels := &config.Channels{
-		Discord:  config.Discord{Accounts: []config.DiscordAccount{{Name: "home", Persona: DefaultID}, {Name: "office", Persona: "kantor"}}},
-		Telegram: config.Telegram{Accounts: []config.TelegramAccount{{Name: "pocket", Persona: DefaultID}}},
+	accounts := []ChannelAccount{
+		{Channel: config.BindingChannelDiscord, Name: "home", Persona: DefaultID, Field: "channels.discord.accounts[0]"},
+		{Channel: config.BindingChannelDiscord, Name: "office", Persona: "kantor", Field: "channels.discord.accounts[1]"},
+		{Channel: config.BindingChannelTelegram, Name: "pocket", Persona: DefaultID, Field: "channels.telegram.accounts[0]"},
 	}
-	router, err := NewRouter(registry, channels, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
+	router, err := NewRouter(registry, accounts, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}
@@ -179,12 +180,12 @@ func TestRouterServesPublicOnlyWhenAPublicPersonaIsReachable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	discord := &config.Discord{Accounts: []config.DiscordAccount{
-		{Name: "home", Persona: DefaultID},
-		{Name: "office", Persona: "kantor"},
-		{Name: "front", Persona: "lobby"},
-	}}
-	router, err := NewRouter(registry, &config.Channels{Discord: *discord}, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
+	accounts := []ChannelAccount{
+		{Channel: config.BindingChannelDiscord, Name: "home", Persona: DefaultID, Field: "channels.discord.accounts[0]"},
+		{Channel: config.BindingChannelDiscord, Name: "office", Persona: "kantor", Field: "channels.discord.accounts[1]"},
+		{Channel: config.BindingChannelDiscord, Name: "front", Persona: "lobby", Field: "channels.discord.accounts[2]"},
+	}
+	router, err := NewRouter(registry, accounts, []config.Binding{discordBinding("lobby", "home", config.Binding{ChannelID: "9"})})
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
 	}

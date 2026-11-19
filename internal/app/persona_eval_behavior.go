@@ -33,7 +33,7 @@ type behaviorModels struct {
 
 func routedBehaviorModels(cfg *config.Config, models runtimeadk.ModelSource) (behaviorModels, error) {
 	defaultModel := cfg.Models.Definitions["primary"].Model
-	route, err := model.RouteModelName(cfg, defaultModel)
+	route, err := model.RouteModelName(cfg.Models, cfg.ModelRoutes, defaultModel)
 	if err != nil {
 		return behaviorModels{}, err
 	}

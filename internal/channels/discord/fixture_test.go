@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -256,13 +257,26 @@ func trustedBuiltinPersonas() []config.AgentDefinition {
 	}
 }
 
+func discordChannelAccounts(cfg *config.Discord) []auraagent.ChannelAccount {
+	accounts := make([]auraagent.ChannelAccount, 0, len(cfg.Accounts))
+	for i := range cfg.Accounts {
+		accounts = append(accounts, auraagent.ChannelAccount{
+			Channel: config.BindingChannelDiscord,
+			Name:    cfg.Accounts[i].Name,
+			Persona: cfg.Accounts[i].Persona,
+			Field:   fmt.Sprintf("channels.discord.accounts[%d]", i),
+		})
+	}
+	return accounts
+}
+
 func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []config.Binding) *auraagent.Router {
 	t.Helper()
 	registry, err := auraagent.Build(trustedBuiltinPersonas(), []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
-	router, err := auraagent.NewRouter(registry, &config.Channels{Discord: *cfg}, bindings)
+	router, err := auraagent.NewRouter(registry, discordChannelAccounts(cfg), bindings)
 	if err != nil {
 		t.Fatalf("persona router: %v", err)
 	}

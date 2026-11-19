@@ -129,7 +129,7 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 		return toolWiring{}, err
 	}
 	s.personaRecorder = personaRecorder
-	personaRouter, err := auraagent.NewRouter(b.registry, &cfg.Channels, cfg.Bindings)
+	personaRouter, err := auraagent.NewRouter(b.registry, channelAccounts(&cfg.Channels), cfg.Bindings)
 	if err != nil {
 		return toolWiring{}, err
 	}

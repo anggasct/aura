@@ -33,12 +33,11 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	cfg := config.Default()
-	cfg.Tools.Workspace = workspace
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = workspace
 	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
-	cfg.Storage.Path = dataRoot
 	var observations []toolbroker.Observation
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, func(_ context.Context, observation toolbroker.Observation) {
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, func(_ context.Context, observation toolbroker.Observation) {
 		observations = append(observations, observation)
 	}, nil, nil)
 	if err != nil {
@@ -100,12 +99,11 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	cfg := config.Default()
-	cfg.Tools.Workspace = workspace
-	cfg.Tools.MaxInlineResultBytes = 256
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = workspace
+	toolsCfg.MaxInlineResultBytes = 256
 	dataRoot := filepath.Dir(filepath.Join(t.TempDir(), "aura.db"))
-	cfg.Storage.Path = dataRoot
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -169,14 +167,13 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	if err := store.NewSessionService(db).Create(context.Background(), &session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	cfg := config.Default()
-	cfg.Tools.Workspace = workspace
-	cfg.Tools.WebSearch.Provider = "brave"
-	cfg.Tools.WebSearch.CredentialRef = secrettest.Ref("env://AURA_TEST_TOOL_SECRET")
-	cfg.Tools.MaxInlineResultBytes = 512
-	cfg.Storage.Path = dataRoot
+	toolsCfg := config.DefaultTools()
+	toolsCfg.Workspace = workspace
+	toolsCfg.WebSearch.Provider = "brave"
+	toolsCfg.WebSearch.CredentialRef = secrettest.Ref("env://AURA_TEST_TOOL_SECRET")
+	toolsCfg.MaxInlineResultBytes = 512
 	var prompted *toolbroker.ApprovalPrompt
-	executor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+	executor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		prompted = prompt
 		return false, nil
 	}, nil)
@@ -206,7 +203,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		t.Fatalf("approval prompt leaked configured secret: %+v", prompted)
 	}
 
-	diagnosticExecutor, err := New(&cfg, db, dataRoot, capabilitytest.All(t), nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
+	diagnosticExecutor, err := New(toolsCfg, testArtifactQuota, db, dataRoot, capabilitytest.All(t), nil, nil, func(_ context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
 		return false, errors.New("approval surface failed: " + canary)
 	}, nil)
 	if err != nil {
@@ -255,7 +252,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	if envelope.ArtifactID == "" {
 		t.Fatalf("expected persisted output artifact, got %s", output)
 	}
-	artifact, _, err := store.NewArtifactStore(db, dataRoot, int64(cfg.Storage.ArtifactQuota)).Open(context.Background(), envelope.ArtifactID)
+	artifact, _, err := store.NewArtifactStore(db, dataRoot, int64(testArtifactQuota)).Open(context.Background(), envelope.ArtifactID)
 	if err != nil {
 		t.Fatalf("open persisted output: %v", err)
 	}
