@@ -12,6 +12,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func wantCode(t *testing.T, err error, want ErrorCode) {
@@ -19,7 +21,7 @@ func wantCode(t *testing.T, err error, want ErrorCode) {
 	if err == nil {
 		t.Fatalf("expected error with code %s, got nil", want)
 	}
-	got, ok := CodeOf(err)
+	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		t.Fatalf("error %v carries no store code, want %s", err, want)
 	}

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -166,7 +167,7 @@ func (s *sqliteScheduleStore) InsertJob(ctx context.Context, job *ScheduledJob) 
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
-			return &Error{Code: ErrorCodeScheduleConflict, Detail: fmt.Sprintf("schedule job %q already exists", job.ID)}
+			return fault.New(ErrorCodeScheduleConflict, fmt.Sprintf("schedule job %q already exists", job.ID))
 		}
 		return classifyBusy(fmt.Errorf("insert schedule job: %w", err))
 	}
@@ -186,7 +187,7 @@ func (s *sqliteScheduleStore) Job(ctx context.Context, id string) (ScheduledJob,
 		return ScheduledJob{}, err
 	}
 	if !found {
-		return ScheduledJob{}, &Error{Code: ErrorCodeScheduleNotFound, Detail: "schedule job not found"}
+		return ScheduledJob{}, fault.New(ErrorCodeScheduleNotFound, "schedule job not found")
 	}
 	return job, nil
 }
@@ -229,7 +230,7 @@ func (s *sqliteScheduleStore) EditJob(ctx context.Context, id string, edit *JobE
 		if _, findErr := s.Job(ctx, id); findErr != nil {
 			return ScheduledJob{}, findErr
 		}
-		return ScheduledJob{}, &Error{Code: ErrorCodeScheduleConflict, Detail: "schedule job changed underneath the edit"}
+		return ScheduledJob{}, fault.New(ErrorCodeScheduleConflict, "schedule job changed underneath the edit")
 	}
 	return s.Job(ctx, id)
 }
@@ -255,7 +256,7 @@ func (s *sqliteScheduleStore) SetJobState(ctx context.Context, id, state string,
 		if _, findErr := s.Job(ctx, id); findErr != nil {
 			return findErr
 		}
-		return &Error{Code: ErrorCodeScheduleConflict, Detail: "schedule job state transition is not allowed"}
+		return fault.New(ErrorCodeScheduleConflict, "schedule job state transition is not allowed")
 	}
 	return nil
 }
@@ -285,10 +286,10 @@ func (s *sqliteScheduleStore) RecordFire(ctx context.Context, occurrence *Schedu
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
-			return &Error{Code: ErrorCodeScheduleConflict, Detail: "occurrence already recorded for this fire"}
+			return fault.New(ErrorCodeScheduleConflict, "occurrence already recorded for this fire")
 		}
 		if isConstraintForeignKey(err) {
-			return &Error{Code: ErrorCodeScheduleNotFound, Detail: fmt.Sprintf("schedule job %q does not exist", occurrence.JobID)}
+			return fault.New(ErrorCodeScheduleNotFound, fmt.Sprintf("schedule job %q does not exist", occurrence.JobID))
 		}
 		return classifyBusy(fmt.Errorf("record occurrence fire: %w", err))
 	}
@@ -323,7 +324,7 @@ func (s *sqliteScheduleStore) SettleOccurrence(ctx context.Context, id, state, t
 		if err := s.requireOccurrence(ctx, id); err != nil {
 			return err
 		}
-		return &Error{Code: ErrorCodeScheduleConflict, Detail: "occurrence is already terminal"}
+		return fault.New(ErrorCodeScheduleConflict, "occurrence is already terminal")
 	}
 	return nil
 }
@@ -396,7 +397,7 @@ func (s *sqliteScheduleStore) requireOccurrence(ctx context.Context, id string) 
 	var present int
 	err := s.db.QueryRowContext(ctx, `SELECT 1 FROM scheduled_occurrence WHERE id = ?`, id).Scan(&present)
 	if errors.Is(err, sql.ErrNoRows) {
-		return &Error{Code: ErrorCodeScheduleNotFound, Detail: "occurrence not found"}
+		return fault.New(ErrorCodeScheduleNotFound, "occurrence not found")
 	}
 	if err != nil {
 		return classifyBusy(fmt.Errorf("load occurrence: %w", err))
@@ -487,7 +488,7 @@ func (s *sqliteScheduleStore) AttachTurn(ctx context.Context, id, turnID string,
 		if err := s.requireOccurrence(ctx, id); err != nil {
 			return err
 		}
-		return &Error{Code: ErrorCodeScheduleConflict, Detail: "occurrence is no longer fired"}
+		return fault.New(ErrorCodeScheduleConflict, "occurrence is no longer fired")
 	}
 	return nil
 }

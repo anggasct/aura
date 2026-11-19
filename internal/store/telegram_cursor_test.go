@@ -3,6 +3,8 @@ package store
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestTelegramCursorStore_AdvancesMonotonically(t *testing.T) {
@@ -40,7 +42,7 @@ func TestTelegramCursorStore_RejectsInvalidInput(t *testing.T) {
 		"empty source":   func() error { return cursors.Advance(t.Context(), "", 1, time.Now()) },
 		"negative value": func() error { return cursors.Advance(t.Context(), "telegram:pocket", -1, time.Now()) },
 	} {
-		if code, ok := CodeOf(call()); !ok || code != ErrorCodeInvalidArgument {
+		if code, ok := fault.CodeOf[ErrorCode](call()); !ok || code != ErrorCodeInvalidArgument {
 			t.Errorf("%s: code = %q, want %q", name, code, ErrorCodeInvalidArgument)
 		}
 	}

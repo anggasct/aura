@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -200,7 +201,7 @@ func checksumFile(path string) (string, error) {
 }
 
 func errBackupDestinationConflict() error {
-	return &Error{Code: ErrorCodeBackupDestinationConflict, Detail: "backup database already exists"}
+	return fault.New(ErrorCodeBackupDestinationConflict, "backup database already exists")
 }
 
 func backupFail(prefix string, cause error, paths ...string) error {

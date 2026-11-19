@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -83,7 +84,7 @@ func (s *discordSessionEnsurer) SessionExists(ctx context.Context, sessionID str
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionNotFound {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
 		return false, nil
 	}
 	return false, err
@@ -96,7 +97,7 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 	if _, err := s.sessions.Get(ctx, sessionID); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
 			return err
 		}
 	}
@@ -109,7 +110,7 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 		CreatedAt: now,
 		UpdatedAt: now,
 	})
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err

@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
@@ -118,7 +119,7 @@ func (s *broadcastItemStore) Load(ctx context.Context, id string) (broadcast.Ful
 	}
 	item, err := s.store.Item(ctx, id)
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeBroadcastNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeBroadcastNotFound {
 			return broadcast.FullItem{}, false, nil
 		}
 		return broadcast.FullItem{}, false, mapBroadcastStoreError(err)
@@ -174,7 +175,7 @@ func mapBroadcastStoreError(err error) error {
 	if err == nil {
 		return nil
 	}
-	code, ok := store.CodeOf(err)
+	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
 		return broadcast.Errorf(broadcast.ErrorCodeUnavailable, "broadcast store is unavailable")
 	}
@@ -259,7 +260,7 @@ func ensureBroadcastSession(ctx context.Context, sessions store.SessionService, 
 	if _, err := sessions.Get(ctx, sessionID); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
 			return err
 		}
 	}
@@ -271,7 +272,7 @@ func ensureBroadcastSession(ctx context.Context, sessions store.SessionService, 
 		CreatedAt: now,
 		UpdatedAt: now,
 	})
-	if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err

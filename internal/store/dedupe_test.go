@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestDedupeAcceptClaimsAndReplays(t *testing.T) {
@@ -229,7 +231,7 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 				target = nil
 			}
 			_, _, err = ClaimDedupeTx(t.Context(), target, tc.claim)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("err = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})
@@ -293,7 +295,7 @@ func TestListTurnEventsReadsOnlyTheNamedSession(t *testing.T) {
 	for _, m := range missing {
 		t.Run(m.name, func(t *testing.T) {
 			_, err := dedupe.ListTurnEvents(ctx, m.sessionID, m.turnID)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("ListTurnEvents err = %v, want invalid_argument", err)
 			}
 		})

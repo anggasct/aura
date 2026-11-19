@@ -10,6 +10,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -61,7 +62,7 @@ func TestForgetMeCancelsThroughTheLateBoundInterpreter(t *testing.T) {
 	if !errors.Is(err, access.ErrForgetRunsStopping) {
 		t.Fatalf("Forget with no interpreter = %v, want the runs-stopping refusal", err)
 	}
-	if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeErasureBlocked {
+	if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeErasureBlocked {
 		t.Fatalf("Forget with no interpreter = %v, want %s", err, store.ErrorCodeErasureBlocked)
 	}
 	if n := countRows(t, app.db, `SELECT COUNT(*) FROM workflow_run WHERE id = ?`, summary.ID); n != 1 {

@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -52,7 +53,7 @@ func TestConversationSessionPointerCascadesAndRejectsUnknownSessions(t *testing.
 	seedPersonaSession(t, db, key+"~cccc", "local-owner", "main")
 	if err := s.Point(ctx, key, key+"~missing"); err == nil {
 		t.Fatal("pointer to a missing session accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSessionNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSessionNotFound {
 		t.Fatalf("Point(missing) error = %v, want session_not_found", err)
 	}
 	if err := s.Point(ctx, key, key+"~cccc"); err != nil {

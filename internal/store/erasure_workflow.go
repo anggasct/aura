@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -220,10 +222,10 @@ func eraseWorkflowData(ctx context.Context, conn workflowErasureConn, principalI
 	}
 	counts.LiveWorkflowRuns = len(live)
 	if apply && len(live) > 0 {
-		return &Error{
-			Code:   ErrorCodeErasureBlocked,
-			Detail: fmt.Sprintf("runs %s are still running; run forget again", strings.Join(live, ", ")),
-		}
+		return fault.New(
+			ErrorCodeErasureBlocked,
+			fmt.Sprintf("runs %s are still running; run forget again", strings.Join(live, ", ")),
+		)
 	}
 	for _, count := range []struct {
 		field *int

@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
@@ -90,7 +91,7 @@ func (a codeArtifacts) Put(ctx context.Context, content io.Reader, meta *codeexe
 		ID: meta.ID, SessionID: meta.SessionID, Filename: meta.Filename, MediaType: meta.MediaType, Metadata: meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
 			return codeexec.ArtifactReceipt{}, codeexec.Errorf(codeexec.ErrorCodeArtifactQuota, "the artifact store quota is exhausted")
 		}
 		return codeexec.ArtifactReceipt{}, errors.New("the artifact store refused the artifact")

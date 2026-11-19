@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testAPIKey(id string) *APIKey {
@@ -36,7 +38,7 @@ func TestAPIKeyRoundTrip(t *testing.T) {
 func TestAPIKeyGetByIDUnknown(t *testing.T) {
 	keys := NewAPIKeyStore(newTestDB(t))
 	_, err := keys.GetByID(t.Context(), "zzzzzzzzzzzz")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeAPIKeyNotFound {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeAPIKeyNotFound {
 		t.Fatalf("GetByID error = %v, want %s", err, ErrorCodeAPIKeyNotFound)
 	}
 }
@@ -89,7 +91,7 @@ func TestAPIKeyRevokeIsIdempotent(t *testing.T) {
 func TestAPIKeyRevokeUnknown(t *testing.T) {
 	keys := NewAPIKeyStore(newTestDB(t))
 	_, err := keys.Revoke(t.Context(), "zzzzzzzzzzzz", time.Now())
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeAPIKeyNotFound {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeAPIKeyNotFound {
 		t.Fatalf("Revoke error = %v, want %s", err, ErrorCodeAPIKeyNotFound)
 	}
 }
@@ -125,7 +127,7 @@ func TestAPIKeyCreateRejects(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			err := keys.Create(ctx, tc.key)
-			if code, ok := CodeOf(err); !ok || code != tc.want {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != tc.want {
 				t.Fatalf("Create error = %v, want %s", err, tc.want)
 			}
 		})

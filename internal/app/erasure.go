@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -133,7 +134,7 @@ type principalEraser struct {
 
 func (e *principalEraser) Forget(ctx context.Context, principalID string) error {
 	if _, _, err := forgetPrincipal(ctx, e.db, e.runs, principalID, true, store.ErasureOptions{ArtifactRoot: e.artifactRoot}); err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeErasureBlocked {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeErasureBlocked {
 			return fmt.Errorf("%w: %w", access.ErrForgetRunsStopping, err)
 		}
 		return err
@@ -223,7 +224,7 @@ func sweepRetention(ctx context.Context, cfg *appconfig.Config, db *sql.DB, arti
 			continue
 		}
 		if _, err := store.ErasePrincipal(ctx, db, summary.id, true, store.ErasureOptions{KeepGrants: true, ArtifactRoot: artifactRoot}); err != nil {
-			if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeErasureBlocked {
+			if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeErasureBlocked {
 				continue
 			}
 			return swept, err

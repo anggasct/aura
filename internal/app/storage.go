@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
@@ -204,7 +205,7 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 				start := time.Now()
 				report, err := store.VerifyRestore(ctx, input, artifactRoot)
 				if err != nil {
-					if _, ok := store.CodeOf(err); ok {
+					if _, ok := fault.CodeOf[store.ErrorCode](err); ok {
 						return err
 					}
 					return store.Errorf(store.ErrorCodeBackupInvalid, "storage verification failed: %v", err)

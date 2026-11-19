@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -110,7 +111,7 @@ func (a *skillStoreRegistry) ListAll(ctx context.Context, limit int) ([]skills.R
 }
 
 func mapSkillStoreError(err error) error {
-	code, ok := store.CodeOf(err)
+	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
 		return skills.Errorf(skills.ErrorCodeSkillUnavailable, "skill registry failed")
 	}

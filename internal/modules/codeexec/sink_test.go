@@ -7,6 +7,7 @@ import (
 	"io"
 	"sync"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -60,7 +61,7 @@ func (s storeSink) Put(ctx context.Context, content io.Reader, meta *ArtifactMet
 		ID: meta.ID, SessionID: meta.SessionID, Filename: meta.Filename, MediaType: meta.MediaType, Metadata: meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
 			return ArtifactReceipt{}, Errorf(ErrorCodeArtifactQuota, "the artifact quota is exhausted")
 		}
 		return ArtifactReceipt{}, err

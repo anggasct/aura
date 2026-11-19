@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -29,10 +30,10 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 		return errNilArgument("session")
 	}
 	if strings.HasPrefix(sess.ID, workflowSessionPrefix) {
-		return &Error{
-			Code:   ErrorCodeInvalidArgument,
-			Detail: "session ids starting with " + workflowSessionPrefix + " are reserved for workflow runs",
-		}
+		return fault.New(
+			ErrorCodeInvalidArgument,
+			"session ids starting with "+workflowSessionPrefix+" are reserved for workflow runs",
+		)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -66,10 +67,10 @@ func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *Session) error {
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
-			return &Error{
-				Code:   ErrorCodeSessionIDConflict,
-				Detail: fmt.Sprintf("session %s already exists", sess.ID),
-			}
+			return fault.New(
+				ErrorCodeSessionIDConflict,
+				fmt.Sprintf("session %s already exists", sess.ID),
+			)
 		}
 		return classifyBusy(fmt.Errorf("create session %s: %w", sess.ID, err))
 	}
@@ -97,10 +98,10 @@ func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, err
 
 func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error) {
 	if limit < 0 {
-		return nil, &Error{
-			Code:   ErrorCodeInvalidArgument,
-			Detail: "limit must not be negative",
-		}
+		return nil, fault.New(
+			ErrorCodeInvalidArgument,
+			"limit must not be negative",
+		)
 	}
 	after, err := sequenceToDB(afterSequence)
 	if err != nil {

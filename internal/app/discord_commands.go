@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -133,7 +134,7 @@ func conversationSessionSuffix() (string, error) {
 }
 
 func missingSession(err error) bool {
-	code, ok := store.CodeOf(err)
+	code, ok := fault.CodeOf[store.ErrorCode](err)
 	return errors.Is(err, sql.ErrNoRows) || (ok && code == store.ErrorCodeSessionNotFound)
 }
 

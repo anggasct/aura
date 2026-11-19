@@ -7,6 +7,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -61,7 +63,7 @@ func vectorWrites(chunks []KBPendingChunk, dimensions int) []KBVectorWrite {
 
 func requireStoreCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	if code, ok := CodeOf(err); !ok || code != want {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}
 }

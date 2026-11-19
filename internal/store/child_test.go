@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -70,7 +71,7 @@ func TestChildStore_Conflicts(t *testing.T) {
 	duplicate := testChildRun("ch-1")
 	if err := s.InsertRun(ctx, duplicate); err == nil {
 		t.Fatal("duplicate id must conflict")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	sameSession := testChildRun("ch-2")
@@ -83,7 +84,7 @@ func TestChildStore_Conflicts(t *testing.T) {
 	altered.IdempotencyKey = "key-ch-1"
 	if err := s.InsertRun(ctx, altered); err == nil {
 		t.Fatal("duplicate invocation key must conflict")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if _, _, err := s.GetRun(ctx, "missing"); err != nil {
@@ -91,7 +92,7 @@ func TestChildStore_Conflicts(t *testing.T) {
 	}
 	if err := s.SetState(ctx, "missing", "failed", time.Now().UTC()); err == nil {
 		t.Fatal("SetState missing must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildNotFound {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if err := s.SetState(ctx, "ch-1", "bogus", time.Now().UTC()); err == nil {
@@ -113,7 +114,7 @@ func TestChildStore_Conflicts(t *testing.T) {
 	emptyDigest.ContextDigest = ""
 	if err := s.InsertRun(ctx, emptyDigest); err == nil {
 		t.Fatal("empty digest must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	blankDigest := testChildRun("ch-12")
@@ -122,7 +123,7 @@ func TestChildStore_Conflicts(t *testing.T) {
 	blankDigest.ContextDigest = "   "
 	if err := s.InsertRun(ctx, blankDigest); err == nil {
 		t.Fatal("whitespace digest must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }

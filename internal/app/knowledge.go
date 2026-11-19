@@ -129,7 +129,7 @@ type knowledgeStore struct {
 }
 
 func translateKnowledgeStoreError(err error) error {
-	code, ok := store.CodeOf(err)
+	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
 		return err
 	}

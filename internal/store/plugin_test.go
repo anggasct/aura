@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
@@ -73,7 +74,7 @@ func TestPluginInstallValidation(t *testing.T) {
 			in := pluginInstall("weather", "1.0.0", PluginStateQuarantined, "")
 			tc.mutate(in)
 			err := NewPluginStore(newTestDB(t)).Install(t.Context(), in)
-			if code, ok := CodeOf(err); !ok || code != tc.want {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != tc.want {
 				t.Fatalf("Install error = %v, want %s", err, tc.want)
 			}
 		})
@@ -91,7 +92,7 @@ func TestPluginInstallDuplicateVersionConflictsAndRollsBack(t *testing.T) {
 	}
 	again := pluginInstall("weather", "1.0.0", PluginStateActive, "1.0.0")
 	err := plugins.Install(ctx, again)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePluginConflict {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePluginConflict {
 		t.Fatalf("Install duplicate error = %v, want %s", err, ErrorCodePluginConflict)
 	}
 	got, err := plugins.Get(ctx, "weather")
@@ -145,7 +146,7 @@ func TestPluginApproveRejectsStaleOrUnknown(t *testing.T) {
 				t.Fatalf("Install: %v", err)
 			}
 			err := plugins.Approve(ctx, &tc.approval)
-			if code, ok := CodeOf(err); !ok || code != tc.want {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != tc.want {
 				t.Fatalf("Approve error = %v, want %s", err, tc.want)
 			}
 			got, getErr := plugins.Get(ctx, "weather")
@@ -198,7 +199,7 @@ func TestPluginSetState(t *testing.T) {
 	if err := plugins.SetState(ctx, "weather", "bogus", pluginTestTime); err == nil {
 		t.Fatal("SetState accepted an unknown state")
 	}
-	if code, ok := CodeOf(plugins.SetState(ctx, "missing", PluginStateDisabled, pluginTestTime)); !ok || code != ErrorCodePluginNotFound {
+	if code, ok := fault.CodeOf[ErrorCode](plugins.SetState(ctx, "missing", PluginStateDisabled, pluginTestTime)); !ok || code != ErrorCodePluginNotFound {
 		t.Fatalf("SetState unknown plugin code = %v, %v", code, ok)
 	}
 }
@@ -222,7 +223,7 @@ func TestPluginRemoveCascades(t *testing.T) {
 			t.Errorf("table %s rows = %d, %v; want 0", table, count, err)
 		}
 	}
-	if code, ok := CodeOf(plugins.Remove(ctx, "weather")); !ok || code != ErrorCodePluginNotFound {
+	if code, ok := fault.CodeOf[ErrorCode](plugins.Remove(ctx, "weather")); !ok || code != ErrorCodePluginNotFound {
 		t.Fatalf("second Remove code = %v, %v", code, ok)
 	}
 }
@@ -238,6 +239,6 @@ func TestPluginReadsReportNotFound(t *testing.T) {
 }
 
 func hasStoreCode(err error, want ErrorCode) bool {
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	return ok && code == want
 }

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testProfileFact(id string) *ProfileFact {
@@ -92,7 +94,7 @@ func TestProfileStore_Constraints(t *testing.T) {
 			mutate(fact)
 			if err := s.InsertFact(ctx, fact); err == nil {
 				t.Errorf("expected rejection")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileInvalid {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileInvalid {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})
@@ -102,12 +104,12 @@ func TestProfileStore_Constraints(t *testing.T) {
 	}
 	if err := s.InsertFact(ctx, testProfileFact("pf-dup")); err == nil {
 		t.Errorf("expected duplicate rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileConflict {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 	if err := s.UpdateFact(ctx, testProfileFact("pf-missing")); err == nil {
 		t.Errorf("expected not-found")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileNotFound {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 	if _, _, err := s.GetFact(ctx, "pf-missing"); err != nil {

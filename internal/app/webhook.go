@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -117,7 +118,7 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		ExpiresAt:  now.Add(d.retention),
 	}
 	if err := d.executions.InsertExecution(ctx, execution); err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeWebhookExecutionConflict {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeWebhookExecutionConflict {
 			return d.replayIdentical(ctx, event)
 		}
 		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
@@ -198,7 +199,7 @@ func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID 
 		UpdatedAt: now,
 	})
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 			return nil
 		}
 		return gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
@@ -336,7 +337,7 @@ type webhookStatusStore struct {
 func (s *webhookStatusStore) ExecutionStatus(ctx context.Context, id string) (gatewaywebhook.ExecutionStatus, error) {
 	execution, err := s.executions.Execution(ctx, id)
 	if err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeWebhookExecutionNotFound {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeWebhookExecutionNotFound {
 			return gatewaywebhook.ExecutionStatus{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeExecutionNotFound, "unknown execution")
 		}
 		return gatewaywebhook.ExecutionStatus{}, err

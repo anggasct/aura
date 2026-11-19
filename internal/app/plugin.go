@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/plugin/connector"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -99,7 +100,7 @@ func pluginStoreError(err error, conflict plugin.ErrorCode) error {
 	if err == nil {
 		return nil
 	}
-	code, ok := store.CodeOf(err)
+	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
 		return plugin.Wrap(plugin.ErrStorage, err, "the plugin registry is unavailable")
 	}

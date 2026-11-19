@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
@@ -73,12 +74,12 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 		return child.Spawn{}, false, err
 	}
 	if err := sessions.Create(ctx, &store.Session{ID: spec.ChildSessionID, OwnerID: spec.OwnerID, AgentID: parent.AgentID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
-		if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionIDConflict {
 			return child.Spawn{}, false, err
 		}
 	}
 	if err := children.InsertRun(ctx, run); err != nil {
-		if code, ok := store.CodeOf(err); ok && code == store.ErrorCodeChildConflict {
+		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeChildConflict {
 			existing, found, readErr := children.GetRunByInvocation(ctx, spec.ParentInvocation, spec.IdempotencyKey)
 			if readErr != nil {
 				return child.Spawn{}, false, readErr
