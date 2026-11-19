@@ -15,7 +15,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -233,7 +232,7 @@ func ownerInputText(payload json.RawMessage) string {
 	return strings.Join(texts, "\n")
 }
 
-func statedOwnerKeys(owner *config.Owner) []string {
+func statedOwnerKeys(owner *principal.Owner) []string {
 	if owner == nil {
 		return nil
 	}

@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -74,6 +75,9 @@ func codeOf(err error) (legacyconfig.ErrorCode, bool) {
 		return legacyconfig.ErrorCode(code), true
 	}
 	if code, ok := fault.CodeOf[auraagent.ErrorCode](err); ok {
+		return legacyconfig.ErrorCode(code), true
+	}
+	if code, ok := fault.CodeOf[principal.ErrorCode](err); ok {
 		return legacyconfig.ErrorCode(code), true
 	}
 	return "", false

@@ -11,6 +11,7 @@ import (
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func TestLoad_PersonaAccessValidation(t *testing.T) {
@@ -170,9 +171,9 @@ func TestLoad_AccessBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := legacyconfig.AccessBudgets{
-		Trusted: legacyconfig.PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
-		Public:  legacyconfig.PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
+	want := principal.Budgets{
+		Trusted: principal.Budget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
+		Public:  principal.Budget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
 	}
 	if res.Config.Access.Budgets != want {
 		t.Fatalf("budget defaults = %+v, want %+v", res.Config.Access.Budgets, want)
@@ -181,7 +182,7 @@ func TestLoad_AccessBudgets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got := res.Config.Access.Budgets; got.Public != (legacyconfig.PrincipalBudget{MaxTokensPerDay: 5000, MaxTurnsPerMinute: 3}) || got.Trusted != want.Trusted {
+	if got := res.Config.Access.Budgets; got.Public != (principal.Budget{MaxTokensPerDay: 5000, MaxTurnsPerMinute: 3}) || got.Trusted != want.Trusted {
 		t.Fatalf("partial budgets = %+v, want public tokens 5000 and other defaults", got)
 	}
 	for label, access := range map[string]string{

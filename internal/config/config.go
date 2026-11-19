@@ -120,37 +120,6 @@ type Profile struct {
 	PromptVersion           string  `json:"prompt_version"`
 }
 
-type Owner struct {
-	Name        string            `json:"name,omitempty"`
-	Language    string            `json:"language,omitempty"`
-	Timezone    string            `json:"timezone,omitempty"`
-	Preferences map[string]string `json:"preferences,omitempty"`
-	Identities  []string          `json:"identities,omitempty"`
-}
-
-type Access struct {
-	ApprovalTimeout  configkit.Duration `json:"approval_timeout"`
-	StandingGrantTTL configkit.Duration `json:"standing_grant_ttl"`
-	Budgets          AccessBudgets      `json:"budgets"`
-	Retention        AccessRetention    `json:"retention"`
-	HandoffTimeout   configkit.Duration `json:"handoff_timeout"`
-}
-
-type AccessRetention struct {
-	Trusted configkit.Duration `json:"trusted"`
-	Public  configkit.Duration `json:"public"`
-}
-
-type AccessBudgets struct {
-	Trusted PrincipalBudget `json:"trusted"`
-	Public  PrincipalBudget `json:"public"`
-}
-
-type PrincipalBudget struct {
-	MaxTokensPerDay   int64 `json:"max_tokens_per_day"`
-	MaxTurnsPerMinute int   `json:"max_turns_per_minute"`
-}
-
 type Children struct {
 	Enabled            bool               `json:"enabled"`
 	MaxDepth           int                `json:"max_depth"`
@@ -646,19 +615,6 @@ func DefaultChildren() *Children {
 		DefaultTimeout:     configkit.Duration(5 * time.Minute),
 		MaxTimeout:         configkit.Duration(30 * time.Minute),
 		Recovery:           "interrupt",
-	}
-}
-
-func DefaultAccess() *Access {
-	return &Access{
-		ApprovalTimeout:  configkit.Duration(30 * time.Minute),
-		StandingGrantTTL: configkit.Duration(168 * time.Hour),
-		Budgets: AccessBudgets{
-			Trusted: PrincipalBudget{MaxTokensPerDay: 200000, MaxTurnsPerMinute: 6},
-			Public:  PrincipalBudget{MaxTokensPerDay: 20000, MaxTurnsPerMinute: 3},
-		},
-		Retention:      AccessRetention{Trusted: configkit.Duration(4320 * time.Hour), Public: configkit.Duration(720 * time.Hour)},
-		HandoffTimeout: configkit.Duration(24 * time.Hour),
 	}
 }
 

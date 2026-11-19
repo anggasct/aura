@@ -12,6 +12,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/store"
@@ -94,7 +95,7 @@ func TestBuildChannelAdapters_ReportsUnmappedOwnerIdentity(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			db := discordTestDB(t)
 			cfg := enabledDiscordConfig()
-			cfg.Owner = &config.Owner{Identities: tc.identities}
+			cfg.Owner = &principal.Owner{Identities: tc.identities}
 			_, checks, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)

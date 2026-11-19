@@ -87,7 +87,7 @@ func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discord *lega
 	return problems
 }
 
-func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *legacyconfig.Owner) error {
+func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *principal.Owner) error {
 	if telegram == nil {
 		return configkit.Invalid("channels.telegram", "must not be nil")
 	}
@@ -102,7 +102,7 @@ func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *legacyconfig.O
 	return nil
 }
 
-func emailOwnerProblem(email *legacyconfig.Email, owner *legacyconfig.Owner) error {
+func emailOwnerProblem(email *legacyconfig.Email, owner *principal.Owner) error {
 	if email == nil {
 		return configkit.Invalid("channels.email", "must not be nil")
 	}
@@ -117,7 +117,7 @@ func emailOwnerProblem(email *legacyconfig.Email, owner *legacyconfig.Owner) err
 	return nil
 }
 
-func hasOwnerChannel(owner *legacyconfig.Owner, channel string) bool {
+func hasOwnerChannel(owner *principal.Owner, channel string) bool {
 	if owner == nil {
 		return false
 	}
