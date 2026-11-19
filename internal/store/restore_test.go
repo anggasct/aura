@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func mustPutArtifact(t *testing.T, db *sql.DB, root, id, sessionID string, content []byte) ArtifactRef {
@@ -50,12 +53,12 @@ func TestRestoreRoundTrip(t *testing.T) {
 		t.Errorf("restore report = %+v, want 1 session, 1 event, 1 verified blob", report)
 	}
 
-	restored, err := OpenDB(ctx, liveDB)
+	restored, err := sqlite.Open(ctx, liveDB, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open restored db: %v", err)
 	}
 	defer func() { _ = restored.Close() }()
-	if err := Migrate(ctx, restored); err != nil {
+	if err := sqlite.Migrate(ctx, restored, history.Migrations()); err != nil {
 		t.Fatalf("Migrate restored db: %v", err)
 	}
 	sessions := NewSessionService(restored)
@@ -125,12 +128,12 @@ func TestRestoreForceReplacesLiveDB(t *testing.T) {
 		t.Fatalf("Restore with force: %v", err)
 	}
 
-	restored, err := OpenDB(ctx, liveDB)
+	restored, err := sqlite.Open(ctx, liveDB, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open restored db: %v", err)
 	}
 	defer func() { _ = restored.Close() }()
-	if err := Migrate(ctx, restored); err != nil {
+	if err := sqlite.Migrate(ctx, restored, history.Migrations()); err != nil {
 		t.Fatalf("Migrate restored db: %v", err)
 	}
 	if _, err := NewSessionService(restored).Get(ctx, "session-1"); err != nil {
@@ -173,11 +176,11 @@ func TestCollectDeletesOnlyOldUnreferencedBlobs(t *testing.T) {
 	oldDigest := strings.Repeat("a", 64)
 	recentDigest := strings.Repeat("b", 64)
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
-		VALUES (?, ?, ?, ?, ?)`, oldDigest, 3, "text/plain", "blobs/aa/"+oldDigest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, oldDigest, 3, "text/plain", "blobs/aa/"+oldDigest, sqlite.FormatTime(time.Now().Add(-48*time.Hour))); err != nil {
 		t.Fatalf("insert old unreferenced blob: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
-		VALUES (?, ?, ?, ?, ?)`, recentDigest, 3, "text/plain", "blobs/bb/"+recentDigest, formatTime(time.Now().Add(-time.Hour))); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, recentDigest, 3, "text/plain", "blobs/bb/"+recentDigest, sqlite.FormatTime(time.Now().Add(-time.Hour))); err != nil {
 		t.Fatalf("insert recent unreferenced blob: %v", err)
 	}
 	for _, digest := range []string{oldDigest, recentDigest} {
@@ -239,7 +242,7 @@ func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
 
 	digest := strings.Repeat("a", 64)
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
-		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, sqlite.FormatTime(time.Now().Add(-48*time.Hour))); err != nil {
 		t.Fatalf("insert blob: %v", err)
 	}
 	abs := filepath.Join(root, "blobs", digest[:2], digest)
@@ -259,14 +262,14 @@ func TestCollectSkipsBlobReferencedAfterScan(t *testing.T) {
 	}
 
 	if _, err := db.ExecContext(ctx, `INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at)
-		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, formatTime(time.Now().Add(-48*time.Hour))); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, digest, 3, "text/plain", "blobs/aa/"+digest, sqlite.FormatTime(time.Now().Add(-48*time.Hour))); err != nil {
 		t.Fatalf("re-insert blob: %v", err)
 	}
 	if err := os.WriteFile(abs, []byte("xyz"), 0o600); err != nil {
 		t.Fatalf("rewrite blob file: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO artifact_ref (id, blob_digest, session_id, filename, created_at)
-		VALUES (?, ?, ?, ?, ?)`, "ref-1", digest, "session-1", "f.bin", formatTime(time.Now())); err != nil {
+		VALUES (?, ?, ?, ?, ?)`, "ref-1", digest, "session-1", "f.bin", sqlite.FormatTime(time.Now())); err != nil {
 		t.Fatalf("insert artifact_ref: %v", err)
 	}
 

@@ -9,10 +9,12 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 type Trajectory struct {
@@ -22,12 +24,12 @@ type Trajectory struct {
 }
 
 func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep) (turn.AgentRuntime, func(), error) {
-	db, err := store.OpenDB(ctx, filepath.Join(dir, "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		return nil, nil, fmt.Errorf("eval: open store: %w", err)
 	}
 	cleanup := func() { _ = db.Close() }
-	if err := store.Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: migrate: %w", err)
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -17,7 +17,7 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 	dsn := t.TempDir() + "/usage.db"
 
 	storetest.Seed(t, dsn)
-	seed, err := store.OpenDB(ctx, dsn)
+	seed, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 		t.Fatalf("close seed db: %v", err)
 	}
 
-	db, err := store.OpenDBWithOptions(ctx, dsn, store.OpenOptions{BusyTimeout: 50 * time.Millisecond})
+	db, err := sqlite.Open(ctx, dsn, sqlite.Options{BusyTimeout: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 		t.Fatalf("NewLedger: %v", err)
 	}
 
-	holder, err := store.OpenDBWithOptions(ctx, dsn, store.OpenOptions{BusyTimeout: 50 * time.Millisecond})
+	holder, err := sqlite.Open(ctx, dsn, sqlite.Options{BusyTimeout: 50 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("open holder: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	dsn := t.TempDir() + "/usage.db"
 
 	storetest.Seed(t, dsn)
-	seed, err := store.OpenDB(ctx, dsn)
+	seed, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -122,7 +122,7 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 		t.Fatalf("close seed db: %v", err)
 	}
 
-	holder, err := store.OpenDB(ctx, dsn)
+	holder, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open holder: %v", err)
 	}
@@ -133,7 +133,7 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	}
 	defer func() { _ = lockTx.Rollback() }()
 
-	prober, err := store.OpenDBWithOptions(ctx, dsn, store.OpenOptions{BusyTimeout: 20 * time.Millisecond})
+	prober, err := sqlite.Open(ctx, dsn, sqlite.Options{BusyTimeout: 20 * time.Millisecond})
 	if err != nil {
 		t.Fatalf("open prober: %v", err)
 	}

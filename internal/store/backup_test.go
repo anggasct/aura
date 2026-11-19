@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 func TestBackupAndVerifyRestore(t *testing.T) {
@@ -200,7 +202,7 @@ func TestBackupManifestMatchesSnapshot(t *testing.T) {
 		t.Fatalf("Backup: %v", err)
 	}
 
-	snap, err := openReadOnly(ctx, filepath.Join(destDir, backupDatabaseFilename))
+	snap, err := sqlite.OpenReadOnly(ctx, filepath.Join(destDir, backupDatabaseFilename))
 	if err != nil {
 		t.Fatalf("open snapshot: %v", err)
 	}

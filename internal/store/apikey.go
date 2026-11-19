@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -67,7 +69,7 @@ func (s *sqliteAPIKeyStore) Create(ctx context.Context, key *APIKey) error {
 	_, err := s.db.ExecContext(ctx, `
 INSERT INTO api_key (id, key_sha256, persona_id, class, label, created_at, revoked_at)
 VALUES (?, ?, ?, ?, ?, ?, NULL)`,
-		key.ID, key.KeySHA256, key.PersonaID, key.Class, key.Label, formatTime(key.CreatedAt))
+		key.ID, key.KeySHA256, key.PersonaID, key.Class, key.Label, sqlite.FormatTime(key.CreatedAt))
 	if err != nil {
 		switch {
 		case isConstraintUnique(err):
@@ -113,7 +115,7 @@ func (s *sqliteAPIKeyStore) List(ctx context.Context) ([]APIKey, error) {
 }
 
 func (s *sqliteAPIKeyStore) Revoke(ctx context.Context, id string, at time.Time) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, formatTime(at), id)
+	result, err := s.db.ExecContext(ctx, `UPDATE api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at), id)
 	if err != nil {
 		return false, classifyBusy(fmt.Errorf("revoke api key: %w", err))
 	}
@@ -137,11 +139,11 @@ func scanAPIKey(row rowScanner) (APIKey, error) {
 		return APIKey{}, err
 	}
 	var err error
-	if key.CreatedAt, err = parseTime(created); err != nil {
+	if key.CreatedAt, err = sqlite.ParseTime(created); err != nil {
 		return APIKey{}, fmt.Errorf("parse api key creation time: %w", err)
 	}
 	if revoked != "" {
-		if key.RevokedAt, err = parseTime(revoked); err != nil {
+		if key.RevokedAt, err = sqlite.ParseTime(revoked); err != nil {
 			return APIKey{}, fmt.Errorf("parse api key revocation time: %w", err)
 		}
 	}

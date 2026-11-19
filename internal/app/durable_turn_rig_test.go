@@ -29,10 +29,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -328,22 +329,22 @@ func (l *ledgerTools) Execute(ctx context.Context, request *runtimeadk.BuiltinTo
 type turnLife struct {
 	scenario turnScenario
 	db       *sql.DB
-	runtime  *sqlite.Runtime
-	sessions *sqlite.SessionStore
+	runtime  *durablesqlite.Runtime
+	sessions *durablesqlite.SessionStore
 	engine   *runtimeengine.Engine
 	ledger   *turnLedger
 }
 
-func newSuiteRuntime(t *testing.T, db *sql.DB) *sqlite.Runtime {
+func newSuiteRuntime(t *testing.T, db *sql.DB) *durablesqlite.Runtime {
 	t.Helper()
-	rt, err := sqlite.New(&sqlite.Options{DB: db, Logger: slog.New(slog.DiscardHandler), PollInterval: suiteTick, HostTTL: suiteHostTTL, StopGrace: 5 * time.Second})
+	rt, err := durablesqlite.New(&durablesqlite.Options{DB: db, Logger: slog.New(slog.DiscardHandler), PollInterval: suiteTick, HostTTL: suiteHostTTL, StopGrace: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
 	return rt
 }
 
-func serveRuntime(t *testing.T, rt *sqlite.Runtime) {
+func serveRuntime(t *testing.T, rt *durablesqlite.Runtime) {
 	t.Helper()
 	hostCtx, stopHost := context.WithCancel(context.WithoutCancel(t.Context()))
 	hosted := make(chan error, 1)
@@ -421,7 +422,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	if !ok {
 		t.Fatalf("unknown scenario %q", plan.Scenario)
 	}
-	db, err := store.OpenDB(t.Context(), plan.Database)
+	db, err := sqlite.Open(t.Context(), plan.Database, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open the database: %v", err)
 	}
@@ -429,7 +430,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	logger := slog.New(slog.DiscardHandler)
 	ledger := &turnLedger{dir: plan.Ledger, life: plan.Life}
 	rt := newSuiteRuntime(t, db)
-	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db})
+	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db})
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}
@@ -531,7 +532,7 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 		t.Fatalf("create the ledger directory: %v", err)
 	}
 	storetest.Seed(t, plan.Database)
-	db, err := store.OpenDB(t.Context(), plan.Database)
+	db, err := sqlite.Open(t.Context(), plan.Database, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open the database: %v", err)
 	}

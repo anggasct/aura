@@ -5,11 +5,9 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
-)
 
-func parseTime(s string) (time.Time, error) {
-	return time.Parse(time.RFC3339Nano, s)
-}
+	"github.com/anggasct/aura/internal/platform/sqlite"
+)
 
 type CircuitCheckpoint struct {
 	CircuitKey          string
@@ -44,10 +42,10 @@ func (s *sqliteCircuitStore) Save(ctx context.Context, cp *CircuitCheckpoint) er
 
 	var openUntilRaw *string
 	if cp.OpenUntil != nil && !cp.OpenUntil.IsZero() {
-		formatted := formatTime(cp.OpenUntil.UTC())
+		formatted := sqlite.FormatTime(cp.OpenUntil.UTC())
 		openUntilRaw = &formatted
 	}
-	updatedAtRaw := formatTime(cp.UpdatedAt.UTC())
+	updatedAtRaw := sqlite.FormatTime(cp.UpdatedAt.UTC())
 
 	query := `
 INSERT INTO model_circuit_checkpoint (
@@ -107,12 +105,12 @@ ORDER BY circuit_key ASC
 		}
 
 		if openUntilRaw.Valid && openUntilRaw.String != "" {
-			t, err := parseTime(openUntilRaw.String)
+			t, err := sqlite.ParseTime(openUntilRaw.String)
 			if err == nil {
 				cp.OpenUntil = &t
 			}
 		}
-		if t, err := parseTime(updatedAtRaw); err == nil {
+		if t, err := sqlite.ParseTime(updatedAtRaw); err == nil {
 			cp.UpdatedAt = t
 		}
 		results = append(results, cp)

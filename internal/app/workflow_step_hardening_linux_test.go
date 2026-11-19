@@ -21,8 +21,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type countingWorkflowController struct{ calls atomic.Int64 }
@@ -241,7 +241,7 @@ func serverConfigWithRoutinePersona(t *testing.T, listed string) *appconfig.Load
 	if err != nil {
 		t.Fatal(err)
 	}
-	db, err := store.OpenDB(t.Context(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatal(err)
 	}

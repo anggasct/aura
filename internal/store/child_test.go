@@ -5,6 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func testChildRun(id string) *ChildRun {
@@ -137,18 +140,13 @@ func TestChildMigrationHasTable(t *testing.T) {
 func TestChildDepthRemovalUpgrade(t *testing.T) {
 	ctx := t.Context()
 	dsn := filepath.Join(t.TempDir(), "legacy.db")
-	db, err := OpenDB(ctx, dsn)
+	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	for _, m := range migrations[:16] {
-		if err := applyMigration(ctx, db, m); err != nil {
-			t.Fatalf("apply v%d: %v", m.version, err)
-		}
+	if err := sqlite.Migrate(ctx, db, history.Migrations()[:16]); err != nil {
+		t.Fatalf("migrate to v%d: %v", 16, err)
 	}
 	var depthCol string
 	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err != nil {
@@ -164,10 +162,10 @@ func TestChildDepthRemovalUpgrade(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert legacy row: %v", err)
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate upgrade: %v", err)
 	}
-	applied, latest, err := SchemaVersions(ctx, db)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions: %v", err)
 	}
@@ -241,18 +239,13 @@ func TestChildStore_SetResultRoundTrip(t *testing.T) {
 func TestChildResultUpgradePreservesRows(t *testing.T) {
 	ctx := t.Context()
 	dsn := filepath.Join(t.TempDir(), "result-legacy.db")
-	db, err := OpenDB(ctx, dsn)
+	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	for _, m := range migrations[:17] {
-		if err := applyMigration(ctx, db, m); err != nil {
-			t.Fatalf("apply v%d: %v", m.version, err)
-		}
+	if err := sqlite.Migrate(ctx, db, history.Migrations()[:17]); err != nil {
+		t.Fatalf("migrate to v%d: %v", 17, err)
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	seedMemorySession(t, db, "sess-parent", "owner-1")
@@ -264,7 +257,7 @@ func TestChildResultUpgradePreservesRows(t *testing.T) {
 	); err != nil {
 		t.Fatalf("insert legacy row: %v", err)
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate upgrade: %v", err)
 	}
 	s := NewChildStore(db)

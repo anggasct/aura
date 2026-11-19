@@ -6,6 +6,9 @@ import (
 	"slices"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func webhookFixture(now time.Time) *WebhookExecution {
@@ -117,12 +120,12 @@ func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
 	}
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)`,
-		"sess_1", "webhook:primary", formatTime(now), formatTime(now)); err != nil {
+		"sess_1", "webhook:primary", sqlite.FormatTime(now), sqlite.FormatTime(now)); err != nil {
 		t.Fatalf("insert session fixture: %v", err)
 	}
 	if _, err := db.ExecContext(ctx,
 		`INSERT INTO runtime_event (id, session_id, sequence, turn_id, invocation_id, branch, author, kind, schema_version, payload_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"evt_r1", "sess_1", 1, "turn_1", "inv_1", "", "webhook:primary", "message.completed", 1, `{}`, formatTime(now)); err != nil {
+		"evt_r1", "sess_1", 1, "turn_1", "inv_1", "", "webhook:primary", "message.completed", 1, `{}`, sqlite.FormatTime(now)); err != nil {
 		t.Fatalf("insert event fixture: %v", err)
 	}
 
@@ -259,7 +262,7 @@ func TestWebhookExecutionSessionMigration(t *testing.T) {
 	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_never_admitted", state: WebhookExecutionStateAccepted})
 	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_events_gone", state: WebhookExecutionStateCompleted})
 
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	s := NewWebhookExecutionStore(db)

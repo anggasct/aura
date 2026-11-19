@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -52,7 +53,7 @@ func benchNoiseContent() string {
 func BenchmarkKnowledgeSearchLargeScope(b *testing.B) {
 	path := filepath.Join(b.TempDir(), "aura.db")
 	storetest.Seed(b, path)
-	db, err := store.OpenDB(b.Context(), path)
+	db, err := sqlite.Open(b.Context(), path, sqlite.Options{})
 	if err != nil {
 		b.Fatalf("OpenDB: %v", err)
 	}

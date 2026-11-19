@@ -22,9 +22,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 const (
@@ -293,12 +295,12 @@ func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.
 		return zero, err
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	db, err := store.OpenDB(ctx, filepath.Join(dir, "eval.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(dir, "eval.db"), sqlite.Options{})
 	if err != nil {
 		return zero, err
 	}
 	defer func() { _ = db.Close() }()
-	if err := store.Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		return zero, err
 	}
 	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: SessionID, OwnerID: principalID, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {

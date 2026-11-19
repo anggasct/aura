@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -31,7 +31,7 @@ func seedUsage(t *testing.T, dataRoot string) {
 	t.Helper()
 	ctx := context.Background()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(ctx, filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

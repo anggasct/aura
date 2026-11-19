@@ -12,8 +12,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
-	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -22,7 +23,7 @@ import (
 )
 
 type hookedSessionStore struct {
-	*sqlite.SessionStore
+	*durablesqlite.SessionStore
 
 	mu            sync.Mutex
 	afterAdmit    func(turnID string)
@@ -33,7 +34,7 @@ type hookedSessionStore struct {
 
 func newHookedSessionStore(t *testing.T, db *sql.DB) *hookedSessionStore {
 	t.Helper()
-	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db})
+	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}
@@ -112,7 +113,7 @@ type durableHostRig struct {
 	cfg      Deps
 	db       *sql.DB
 	sessions *hookedSessionStore
-	runtime  *sqlite.Runtime
+	runtime  *durablesqlite.Runtime
 	engine   *Engine
 	host     *runningHost
 	hostTTL  time.Duration
@@ -128,7 +129,7 @@ func openTestDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
 	storetest.Seed(t, dsn)
-	db, err := store.OpenDB(t.Context(), dsn)
+	db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -156,7 +157,7 @@ func newShortLeaseHostRig(t *testing.T, deps Deps, executor TurnExecutor) *durab
 
 func (r *durableHostRig) build(executor TurnExecutor) {
 	r.t.Helper()
-	rt, err := sqlite.New(&sqlite.Options{DB: r.db, Logger: slog.New(slog.DiscardHandler), PollInterval: hostRigPoll, StopGrace: 5 * time.Second, HostTTL: r.hostTTL})
+	rt, err := durablesqlite.New(&durablesqlite.Options{DB: r.db, Logger: slog.New(slog.DiscardHandler), PollInterval: hostRigPoll, StopGrace: 5 * time.Second, HostTTL: r.hostTTL})
 	if err != nil {
 		r.t.Fatalf("sqlite.New: %v", err)
 	}

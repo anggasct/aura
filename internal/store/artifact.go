@@ -15,6 +15,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const DefaultArtifactQuotaBytes int64 = 5 << 30
@@ -161,7 +163,7 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
 			 ON CONFLICT(digest) DO NOTHING`,
-			digest, size, meta.MediaType, relPath, formatTime(createdAt),
+			digest, size, meta.MediaType, relPath, sqlite.FormatTime(createdAt),
 		); err != nil {
 			return ArtifactRef{}, classifyBusy(fmt.Errorf("insert blob %s: %w", digest, err))
 		}
@@ -178,7 +180,7 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO NOTHING`,
-		meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), formatTime(createdAt),
+		meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), sqlite.FormatTime(createdAt),
 	); err != nil {
 		if isConstraintForeignKey(err) {
 			refs := []fkReference{
@@ -251,7 +253,7 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 		`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO NOTHING`,
-		link.ID, link.BlobDigest, link.SessionID, nullableString(link.EventID), link.Filename, jsonOrEmptyObject(link.Metadata), formatTime(time.Now()),
+		link.ID, link.BlobDigest, link.SessionID, nullableString(link.EventID), link.Filename, jsonOrEmptyObject(link.Metadata), sqlite.FormatTime(time.Now()),
 	)
 	if err != nil {
 		if isConstraintForeignKey(err) {

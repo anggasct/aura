@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
@@ -35,7 +36,7 @@ func newGateFixture(t *testing.T, report capability.Report, approve bool) *gateF
 	}
 	dataRoot := t.TempDir()
 	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
-	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

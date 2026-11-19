@@ -20,6 +20,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -183,7 +184,7 @@ func newSurfaceRig(t *testing.T, opts *surfaceRigOptions) *surfaceRig {
 		opts.configure(&cfg)
 	}
 	storetest.Seed(t, filepath.Join(dir, "aura.db"))
-	db, err := store.OpenDB(t.Context(), filepath.Join(dir, "aura.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

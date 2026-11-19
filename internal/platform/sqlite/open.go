@@ -1,4 +1,4 @@
-package store
+package sqlite
 
 import (
 	"context"
@@ -16,7 +16,9 @@ import (
 	"sync"
 	"time"
 
-	"modernc.org/sqlite"
+	sqlitedriver "modernc.org/sqlite"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -38,32 +40,36 @@ var staticPragmaSet = []struct {
 	{name: "synchronous", set: "PRAGMA synchronous = NORMAL", want: "1"},
 }
 
-type OpenOptions struct {
-	BusyTimeout time.Duration
+type Options struct {
+	BusyTimeout        time.Duration
+	MaxOpenConnections int
 }
 
-func OpenDB(ctx context.Context, dsn string) (*sql.DB, error) {
-	return OpenDBWithOptions(ctx, dsn, OpenOptions{})
-}
-
-func OpenDBWithOptions(ctx context.Context, dsn string, opts OpenOptions) (*sql.DB, error) {
+func Open(ctx context.Context, path string, opts Options) (*sql.DB, error) {
 	registerConnectionPolicyOnce.Do(func() {
-		sqlite.RegisterConnectionHook(verifyConnectionPolicy)
+		sqlitedriver.RegisterConnectionHook(verifyConnectionPolicy)
 	})
-	if dsn != "" && dsn != ":memory:" {
-		if err := ensureOwnerOnly(dsn); err != nil {
+	if path != "" && path != ":memory:" {
+		if err := ensureOwnerOnly(path); err != nil {
 			return nil, err
 		}
 	}
-	db, err := sql.Open(sqlDriverName, withConnectionOptions(dsn, opts))
+	db, err := sql.Open(sqlDriverName, withConnectionOptions(path, opts))
 	if err != nil {
-		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database", err)
+		return nil, unavailable("open sqlite database", err)
 	}
 	if err := db.PingContext(ctx); err != nil {
 		_ = db.Close()
-		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database", err)
+		return nil, unavailable("open sqlite database", err)
+	}
+	if opts.MaxOpenConnections > 0 {
+		db.SetMaxOpenConns(opts.MaxOpenConnections)
 	}
 	return db, nil
+}
+
+func unavailable(detail string, cause error) error {
+	return fault.Wrap(ErrorCodeUnavailable, detail, cause)
 }
 
 func ensureOwnerOnly(path string) error {
@@ -84,17 +90,17 @@ func ensureOwnerOnly(path string) error {
 
 func ensureOwnerOnlyDirectory(path string) error {
 	if err := os.MkdirAll(path, 0o700); err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "create storage directory", err)
+		return unavailable("create storage directory", err)
 	}
 	info, err := os.Lstat(path)
 	if err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "inspect storage directory", err)
+		return unavailable("inspect storage directory", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return codedError(ErrorCodeStorageUnavailable, "storage path is not a directory", errors.New("unsafe storage directory"))
+		return unavailable("storage path is not a directory", errors.New("unsafe storage directory"))
 	}
 	if err := os.Chmod(path, 0o700); err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "secure storage directory", err)
+		return unavailable("secure storage directory", err)
 	}
 	return nil
 }
@@ -104,10 +110,10 @@ func ensureOwnerOnlyFile(path string, create bool, label string) error {
 	if errors.Is(err, fs.ErrNotExist) && create {
 		f, createErr := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 		if createErr != nil {
-			return codedError(ErrorCodeStorageUnavailable, "create "+label, createErr)
+			return unavailable("create "+label, createErr)
 		}
 		if closeErr := f.Close(); closeErr != nil {
-			return codedError(ErrorCodeStorageUnavailable, "close "+label, closeErr)
+			return unavailable("close "+label, closeErr)
 		}
 		return nil
 	}
@@ -115,18 +121,18 @@ func ensureOwnerOnlyFile(path string, create bool, label string) error {
 		return nil
 	}
 	if err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "inspect "+label, err)
+		return unavailable("inspect "+label, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return codedError(ErrorCodeStorageUnavailable, label+" is not a regular file", errors.New("unsafe storage file"))
+		return unavailable(label+" is not a regular file", errors.New("unsafe storage file"))
 	}
 	if err := os.Chmod(path, 0o600); err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "secure "+label, err)
+		return unavailable("secure "+label, err)
 	}
 	return nil
 }
 
-func withConnectionOptions(path string, opts OpenOptions) string {
+func withConnectionOptions(path string, opts Options) string {
 	query := url.Values{immediateTxlockParam: {"immediate"}}
 	busyMS := defaultBusyTimeoutMS
 	if opts.BusyTimeout > 0 {
@@ -156,10 +162,10 @@ func validateReadOnlyPath(path string) error {
 	dir := filepath.Dir(path)
 	info, err := os.Lstat(dir)
 	if err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "inspect storage directory", err)
+		return unavailable("inspect storage directory", err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() || info.Mode().Perm()&0o077 != 0 {
-		return codedError(ErrorCodeStorageUnavailable, "storage directory permissions are unsafe", errors.New("owner-only storage directory required"))
+		return unavailable("storage directory permissions are unsafe", errors.New("owner-only storage directory required"))
 	}
 	if err := validateReadOnlyFile(path, "database", true); err != nil {
 		return err
@@ -178,13 +184,13 @@ func validateReadOnlyFile(path, label string, required bool) error {
 		if !required {
 			return nil
 		}
-		return codedError(ErrorCodeStorageUnavailable, "read-only database is missing", err)
+		return unavailable("read-only database is missing", err)
 	}
 	if err != nil {
-		return codedError(ErrorCodeStorageUnavailable, "inspect "+label, err)
+		return unavailable("inspect "+label, err)
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() || info.Mode().Perm()&0o077 != 0 {
-		return codedError(ErrorCodeStorageUnavailable, label+" permissions are unsafe", errors.New("owner-only storage file required"))
+		return unavailable(label+" permissions are unsafe", errors.New("owner-only storage file required"))
 	}
 	return nil
 }
@@ -192,19 +198,15 @@ func validateReadOnlyFile(path, label string, required bool) error {
 func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 	db, err := openReadOnly(ctx, path)
 	if err != nil {
-		return nil, codedError(ErrorCodeStorageUnavailable, "open sqlite database read-only", err)
+		return nil, unavailable("open sqlite database read-only", err)
 	}
 	return db, nil
 }
 
-func verifyConnectionPolicy(conn sqlite.ExecQuerierContext, dsn string) error {
+func verifyConnectionPolicy(conn sqlitedriver.ExecQuerierContext, dsn string) error {
 	ctx := context.Background()
 	readOnly := strings.Contains(dsn, "mode=ro")
 
-	// busy_timeout must be applied before journal_mode: switching to WAL
-	// briefly needs an exclusive lock, and without a timeout yet in place a
-	// concurrently-opened connection can fail with "database is locked"
-	// instead of waiting.
 	pragmas := make([]struct {
 		name string
 		set  string
@@ -253,7 +255,7 @@ func busyTimeoutFromDSN(dsn string) int {
 	return defaultBusyTimeoutMS
 }
 
-func execPragma(ctx context.Context, conn sqlite.ExecQuerierContext, stmt string) error {
+func execPragma(ctx context.Context, conn sqlitedriver.ExecQuerierContext, stmt string) error {
 	rows, err := conn.QueryContext(ctx, stmt, nil)
 	if err != nil {
 		return err
@@ -261,7 +263,7 @@ func execPragma(ctx context.Context, conn sqlite.ExecQuerierContext, stmt string
 	return drainRows(rows)
 }
 
-func queryPragma(ctx context.Context, conn sqlite.ExecQuerierContext, name string) (string, error) {
+func queryPragma(ctx context.Context, conn sqlitedriver.ExecQuerierContext, name string) (string, error) {
 	rows, err := conn.QueryContext(ctx, "PRAGMA "+name, nil)
 	if err != nil {
 		return "", err

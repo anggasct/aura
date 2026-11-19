@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID string) {
@@ -76,18 +78,13 @@ func TestMemoryStore_SearchFiltersByReadablePersonas(t *testing.T) {
 
 func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 	ctx := t.Context()
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "aura.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	for _, m := range migrations[:20] {
-		if err := applyMigration(ctx, db, m); err != nil {
-			t.Fatalf("apply v%d: %v", m.version, err)
-		}
+	if err := sqlite.Migrate(ctx, db, history.Migrations()[:20]); err != nil {
+		t.Fatalf("migrate to v%d: %v", 20, err)
 	}
 	seedPersonaSession(t, db, "engineer-session", "owner-1", "engineer")
 	seedPersonaSession(t, db, "main-session", "owner-1", "main")
@@ -97,7 +94,7 @@ func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 			t.Fatalf("seed legacy document: %v", err)
 		}
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	s := NewMemoryStore(db)
@@ -116,9 +113,11 @@ func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 	}
 }
 
+const memoryNonOwnerTrustMigrationVersion = 38
+
 func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
 	ctx := t.Context()
-	before := slices.IndexFunc(migrations, func(m migration) bool { return m.sql == memoryNonOwnerTrustSchemaSQL })
+	before := slices.IndexFunc(history.Migrations(), func(m sqlite.Migration) bool { return m.Version == memoryNonOwnerTrustMigrationVersion })
 	if before < 0 {
 		t.Fatal("non-owner trust migration not registered")
 	}
@@ -139,7 +138,7 @@ func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
 			t.Fatalf("seed %s: %v", row.id, err)
 		}
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
 	s := NewMemoryStore(db)

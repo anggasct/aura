@@ -5,22 +5,20 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func TestMigrationAddsRunTaintAndLineageWithoutDisturbingLegacyRows(t *testing.T) {
 	ctx := t.Context()
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "legacy.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "legacy.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	for _, m := range migrations[:45] {
-		if err := applyMigration(ctx, db, m); err != nil {
-			t.Fatalf("apply v%d: %v", m.version, err)
-		}
+	if err := sqlite.Migrate(ctx, db, history.Migrations()[:45]); err != nil {
+		t.Fatalf("migrate to v%d: %v", 45, err)
 	}
 	seedMemorySession(t, db, "sess-1", "owner-1")
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES ('flow', 1, 'g', 'defined', '{}', 'digest', '2026-11-13T10:00:00Z')`); err != nil {
@@ -42,10 +40,10 @@ VALUES (?, 'sess-1', 'main', 'owner-1', '{}', 'digest', 'proposed', '2026-11-13T
 	if err := insertProposal("prop-legacy", nil); err != nil {
 		t.Fatalf("seed proposal: %v", err)
 	}
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	applied, latest, err := SchemaVersions(ctx, db)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
 	if err != nil || applied != 48 || latest != 48 {
 		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
 	}

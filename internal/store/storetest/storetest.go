@@ -9,7 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 var migratedTemplate = sync.OnceValues(buildMigratedTemplate)
@@ -42,7 +43,7 @@ func OpenMigrated(t testing.TB) *sql.DB {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "aura.db")
 	Seed(t, dbPath)
-	db, err := store.OpenDB(t.Context(), dbPath)
+	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open seeded database: %v", err)
 	}
@@ -58,12 +59,12 @@ func buildMigratedTemplate() ([]byte, error) {
 	defer func() { _ = os.RemoveAll(dir) }()
 
 	ctx := context.Background()
-	source, err := store.OpenDB(ctx, filepath.Join(dir, "source.db"))
+	source, err := sqlite.Open(ctx, filepath.Join(dir, "source.db"), sqlite.Options{})
 	if err != nil {
 		return nil, fmt.Errorf("open source database: %w", err)
 	}
 	defer func() { _ = source.Close() }()
-	if err := store.Migrate(ctx, source); err != nil {
+	if err := sqlite.Migrate(ctx, source, history.Migrations()); err != nil {
 		return nil, fmt.Errorf("migrate source database: %w", err)
 	}
 	snapshot := filepath.Join(dir, "template.db")

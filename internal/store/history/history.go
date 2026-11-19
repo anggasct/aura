@@ -1,77 +1,65 @@
-package store
+package history
 
 import (
-	"context"
-	"crypto/sha256"
-	"database/sql"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"time"
+	"slices"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
-type migration struct {
-	version int
-	sql     string
+var migrations = []sqlite.Migration{
+	{Version: 1, SQL: foundationalSchemaSQL},
+	{Version: 2, SQL: usageLedgerSchemaSQL},
+	{Version: 3, SQL: effectIntentSchemaSQL},
+	{Version: 4, SQL: effectApprovalSchemaSQL},
+	{Version: 5, SQL: workflowSchemaSQL},
+	{Version: 6, SQL: modelCircuitCheckpointSchemaSQL},
+	{Version: 7, SQL: webhookExecutionSchemaSQL},
+	{Version: 8, SQL: workflowCorrelationSchemaSQL},
+	{Version: 9, SQL: channelResumeSchemaSQL},
+	{Version: 10, SQL: broadcastItemSchemaSQL},
+	{Version: 11, SQL: broadcastDestinationSchemaSQL},
+	{Version: 12, SQL: scheduleSchemaSQL},
+	{Version: 13, SQL: memoryDocumentSchemaSQL},
+	{Version: 14, SQL: skillPackageSchemaSQL},
+	{Version: 15, SQL: profileSchemaSQL},
+	{Version: 16, SQL: childRunSchemaSQL},
+	{Version: 17, SQL: childRunDepthRemovalSQL},
+	{Version: 18, SQL: childRunResultSchemaSQL},
+	{Version: 19, SQL: childRunTypedResultSchemaSQL},
+	{Version: 20, SQL: personaAttributionSchemaSQL},
+	{Version: 21, SQL: memoryPersonaSchemaSQL},
+	{Version: 22, SQL: conversationSessionSchemaSQL},
+	{Version: 23, SQL: accessSchemaSQL},
+	{Version: 24, SQL: reservationEstimateSchemaSQL},
+	{Version: 25, SQL: handoffTargetSchemaSQL},
+	{Version: 26, SQL: personaEvalSchemaSQL},
+	{Version: 27, SQL: workflowRunOriginSchemaSQL},
+	{Version: 28, SQL: workflowCompletionSchemaSQL},
+	{Version: 29, SQL: workflowProposalSchemaSQL},
+	{Version: 30, SQL: workflowRoutineSchemaSQL},
+	{Version: 31, SQL: telegramCursorSchemaSQL},
+	{Version: 32, SQL: handoffChannelSchemaSQL},
+	{Version: 33, SQL: channelKeySchemaSQL},
+	{Version: 34, SQL: handoffHTTPChannelSchemaSQL},
+	{Version: 35, SQL: emailCursorSchemaSQL},
+	{Version: 36, SQL: handoffEmailChannelSchemaSQL},
+	{Version: 37, SQL: pluginRegistrySchemaSQL},
+	{Version: 38, SQL: memoryNonOwnerTrustSchemaSQL},
+	{Version: 39, SQL: knowledgeBaseSchemaSQL},
+	{Version: 40, SQL: knowledgeEmbeddingSchemaSQL},
+	{Version: 41, SQL: durableRuntimeSchemaSQL},
+	{Version: 42, SQL: durableSessionSchemaSQL},
+	{Version: 43, SQL: webhookExecutionSessionSchemaSQL},
+	{Version: 44, SQL: runtimeEventTurnFirstIndexSQL},
+	{Version: 45, SQL: effectIntentResultSchemaSQL},
+	{Version: 46, SQL: workflowRunTaintSchemaSQL},
+	{Version: 47, SQL: workflowApprovalSchemaSQL},
+	{Version: 48, SQL: workflowProposalPlanTextSchemaSQL},
 }
 
-var migrations = []migration{
-	{version: 1, sql: foundationalSchemaSQL},
-	{version: 2, sql: usageLedgerSchemaSQL},
-	{version: 3, sql: effectIntentSchemaSQL},
-	{version: 4, sql: effectApprovalSchemaSQL},
-	{version: 5, sql: workflowSchemaSQL},
-	{version: 6, sql: modelCircuitCheckpointSchemaSQL},
-	{version: 7, sql: webhookExecutionSchemaSQL},
-	{version: 8, sql: workflowCorrelationSchemaSQL},
-	{version: 9, sql: channelResumeSchemaSQL},
-	{version: 10, sql: broadcastItemSchemaSQL},
-	{version: 11, sql: broadcastDestinationSchemaSQL},
-	{version: 12, sql: scheduleSchemaSQL},
-	{version: 13, sql: memoryDocumentSchemaSQL},
-	{version: 14, sql: skillPackageSchemaSQL},
-	{version: 15, sql: profileSchemaSQL},
-	{version: 16, sql: childRunSchemaSQL},
-	{version: 17, sql: childRunDepthRemovalSQL},
-	{version: 18, sql: childRunResultSchemaSQL},
-	{version: 19, sql: childRunTypedResultSchemaSQL},
-	{version: 20, sql: personaAttributionSchemaSQL},
-	{version: 21, sql: memoryPersonaSchemaSQL},
-	{version: 22, sql: conversationSessionSchemaSQL},
-	{version: 23, sql: accessSchemaSQL},
-	{version: 24, sql: reservationEstimateSchemaSQL},
-	{version: 25, sql: handoffTargetSchemaSQL},
-	{version: 26, sql: personaEvalSchemaSQL},
-	{version: 27, sql: workflowRunOriginSchemaSQL},
-	{version: 28, sql: workflowCompletionSchemaSQL},
-	{version: 29, sql: workflowProposalSchemaSQL},
-	{version: 30, sql: workflowRoutineSchemaSQL},
-	{version: 31, sql: telegramCursorSchemaSQL},
-	{version: 32, sql: handoffChannelSchemaSQL},
-	{version: 33, sql: channelKeySchemaSQL},
-	{version: 34, sql: handoffHTTPChannelSchemaSQL},
-	{version: 35, sql: emailCursorSchemaSQL},
-	{version: 36, sql: handoffEmailChannelSchemaSQL},
-	{version: 37, sql: pluginRegistrySchemaSQL},
-	{version: 38, sql: memoryNonOwnerTrustSchemaSQL},
-	{version: 39, sql: knowledgeBaseSchemaSQL},
-	{version: 40, sql: knowledgeEmbeddingSchemaSQL},
-	{version: 41, sql: durableRuntimeSchemaSQL},
-	{version: 42, sql: durableSessionSchemaSQL},
-	{version: 43, sql: webhookExecutionSessionSchemaSQL},
-	{version: 44, sql: runtimeEventTurnFirstIndexSQL},
-	{version: 45, sql: effectIntentResultSchemaSQL},
-	{version: 46, sql: workflowRunTaintSchemaSQL},
-	{version: 47, sql: workflowApprovalSchemaSQL},
-	{version: 48, sql: workflowProposalPlanTextSchemaSQL},
+func Migrations() []sqlite.Migration {
+	return slices.Clone(migrations)
 }
-
-const bootstrapSchemaMigrationTableSQL = `
-CREATE TABLE IF NOT EXISTS schema_migration (
-    version INTEGER PRIMARY KEY,
-    checksum TEXT NOT NULL,
-    applied_at TEXT NOT NULL
-);`
 
 const foundationalSchemaSQL = `
 CREATE TABLE session (
@@ -981,98 +969,6 @@ BEGIN
     SELECT RAISE(ABORT, 'workflow_proposal.plan_text is immutable');
 END;
 `
-
-func Migrate(ctx context.Context, db *sql.DB) error {
-	if err := validateMigrationOrder(migrations); err != nil {
-		return err
-	}
-	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		return fmt.Errorf("bootstrap schema_migration table: %w", err)
-	}
-	var appliedMax sql.NullInt64
-	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migration`).Scan(&appliedMax); err != nil {
-		return fmt.Errorf("read applied migration state: %w", err)
-	}
-	maxVersion := migrations[len(migrations)-1].version
-	if appliedMax.Valid && int(appliedMax.Int64) > maxVersion {
-		return &Error{
-			Code:   ErrorCodeMigrationSequenceInvalid,
-			Detail: fmt.Sprintf("database schema version %d is newer than this binary supports (%d)", appliedMax.Int64, maxVersion),
-		}
-	}
-	for _, m := range migrations {
-		if err := applyMigration(ctx, db, m); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func SchemaVersions(ctx context.Context, db *sql.DB) (applied, latest int, err error) {
-	latest = migrations[len(migrations)-1].version
-	var appliedMax sql.NullInt64
-	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migration`).Scan(&appliedMax); err != nil {
-		return 0, 0, fmt.Errorf("read applied migration state: %w", err)
-	}
-	if appliedMax.Valid {
-		applied = int(appliedMax.Int64)
-	}
-	return applied, latest, nil
-}
-
-func validateMigrationOrder(ms []migration) error {
-	for i := 1; i < len(ms); i++ {
-		if ms[i].version <= ms[i-1].version {
-			return &Error{
-				Code:   ErrorCodeMigrationSequenceInvalid,
-				Detail: fmt.Sprintf("migration %d follows %d, versions must be strictly increasing", ms[i].version, ms[i-1].version),
-			}
-		}
-	}
-	return nil
-}
-
-func applyMigration(ctx context.Context, db *sql.DB, m migration) error {
-	checksum := checksumOf(m.sql)
-
-	var stored string
-	err := db.QueryRowContext(ctx, `SELECT checksum FROM schema_migration WHERE version = ?`, m.version).Scan(&stored)
-	switch {
-	case err == nil:
-		if stored != checksum {
-			return &Error{
-				Code:   ErrorCodeMigrationChecksumMismatch,
-				Detail: fmt.Sprintf("migration %d: stored checksum %s does not match %s", m.version, stored, checksum),
-			}
-		}
-		return nil
-	case errors.Is(err, sql.ErrNoRows):
-	default:
-		return fmt.Errorf("read migration %d state: %w", m.version, err)
-	}
-
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin migration %d: %w", m.version, err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	if _, err := tx.ExecContext(ctx, m.sql); err != nil {
-		return fmt.Errorf("apply migration %d: %w", m.version, err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, ?, ?)`,
-		m.version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
-	); err != nil {
-		return fmt.Errorf("record migration %d: %w", m.version, err)
-	}
-	return tx.Commit()
-}
-
-func checksumOf(sqlText string) string {
-	sum := sha256.Sum256([]byte(sqlText))
-	return hex.EncodeToString(sum[:])
-}
 
 const pluginRegistrySchemaSQL = `
 CREATE TABLE plugin (

@@ -20,8 +20,6 @@ const (
 	ErrorCodeSessionIDConflict         ErrorCode = "session_id_conflict"
 	ErrorCodeSessionNotFound           ErrorCode = "session_not_found"
 	ErrorCodeEventNotFound             ErrorCode = "event_not_found"
-	ErrorCodeMigrationChecksumMismatch ErrorCode = "migration_checksum_mismatch"
-	ErrorCodeMigrationSequenceInvalid  ErrorCode = "migration_sequence_invalid"
 	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
 	ErrorCodeArtifactBlobMissing       ErrorCode = "artifact_blob_missing"
 	ErrorCodeBackupDestinationConflict ErrorCode = "backup_destination_conflict"

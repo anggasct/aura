@@ -13,8 +13,8 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -29,7 +29,7 @@ func newDatabaseFile(t *testing.T) string {
 
 func openDB(t *testing.T, path string) *sql.DB {
 	t.Helper()
-	db, err := store.OpenDBWithOptions(t.Context(), path, store.OpenOptions{})
+	db, err := dbsqlite.Open(t.Context(), path, dbsqlite.Options{})
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}

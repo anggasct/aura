@@ -11,13 +11,13 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestDefinitionsCarryTheApprovedPluginDescription(t *testing.T) {
-	db, err := store.OpenDB(t.Context(), filepath.Join(t.TempDir(), "aura.db"))
+	db, err := sqlite.Open(t.Context(), filepath.Join(t.TempDir(), "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

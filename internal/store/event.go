@@ -9,7 +9,9 @@ import (
 	"math"
 	"time"
 
-	"modernc.org/sqlite"
+	sqlitedriver "modernc.org/sqlite"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -334,7 +336,7 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 	}
 	_, err = exec(ctx,
 		e.ID, e.SessionID, sequence, e.TurnID, e.InvocationID, e.Branch, e.Author, e.Kind,
-		schemaVersion, string(e.Payload), nullableJSON(e.ProviderUsage), formatTime(e.CreatedAt),
+		schemaVersion, string(e.Payload), nullableJSON(e.ProviderUsage), sqlite.FormatTime(e.CreatedAt),
 	)
 	if err != nil {
 		if isConstraintUnique(err) {
@@ -373,7 +375,7 @@ func isConstraintCheck(err error) bool {
 }
 
 func isConstraintCode(err error, codes ...int) bool {
-	var sqliteErr *sqlite.Error
+	var sqliteErr *sqlitedriver.Error
 	if !errors.As(err, &sqliteErr) {
 		return false
 	}
@@ -390,10 +392,6 @@ func nullableJSON(raw json.RawMessage) any {
 		return nil
 	}
 	return string(raw)
-}
-
-func formatTime(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
 }
 
 const selectRuntimeEventColumns = `id, session_id, sequence, turn_id, invocation_id, branch, author, kind,

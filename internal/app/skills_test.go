@@ -8,6 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -16,7 +17,7 @@ func openSkillsTestDB(t *testing.T) (db store.SkillStore, cleanup func()) {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "aura.db")
 	storetest.Seed(t, dbPath)
-	handle, err := store.OpenDB(t.Context(), dbPath)
+	handle, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
@@ -54,7 +55,7 @@ func TestSkillStoreRegistryRoundTrip(t *testing.T) {
 func TestBuildSkillsEngine(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "chat.db")
 	storetest.Seed(t, dbPath)
-	chatDB, err := store.OpenDB(t.Context(), dbPath)
+	chatDB, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

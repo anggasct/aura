@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -74,7 +76,7 @@ func (s *sqlitePersonaEvalStore) Record(ctx context.Context, result *PersonaEval
 		passed = 1
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO persona_eval_result (`+personaEvalColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		recorded.ID, recorded.AgentID, recorded.Digest, recorded.Layer, passed, recorded.Score, recorded.CasesTotal, recorded.CasesFailed, string(detail), formatTime(recorded.CreatedAt)); err != nil {
+		recorded.ID, recorded.AgentID, recorded.Digest, recorded.Layer, passed, recorded.Score, recorded.CasesTotal, recorded.CasesFailed, string(detail), sqlite.FormatTime(recorded.CreatedAt)); err != nil {
 		return PersonaEvalResult{}, classifyBusy(fmt.Errorf("record persona eval: %w", err))
 	}
 	return recorded, nil
@@ -142,7 +144,7 @@ func scanPersonaEval(row rowScanner) (PersonaEvalResult, error) {
 	if err := json.Unmarshal([]byte(detail), &result.FailedCases); err != nil {
 		return PersonaEvalResult{}, fmt.Errorf("parse persona eval detail: %w", err)
 	}
-	created, err := parseTime(createdAt)
+	created, err := sqlite.ParseTime(createdAt)
 	if err != nil {
 		return PersonaEvalResult{}, fmt.Errorf("parse persona eval created_at: %w", err)
 	}

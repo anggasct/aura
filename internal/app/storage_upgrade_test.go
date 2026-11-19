@@ -8,12 +8,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func openLiveDB(t *testing.T, dataRoot string) *sql.DB {
 	t.Helper()
-	db, err := store.OpenDB(context.Background(), filepath.Join(dataRoot, "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open live db: %v", err)
 	}
@@ -37,7 +39,7 @@ func TestStorageUpgradeInitializesAFreshInstall(t *testing.T) {
 	}
 	db := openLiveDB(t, dataRoot)
 	defer func() { _ = db.Close() }()
-	if applied, latest, err := store.SchemaVersions(context.Background(), db); err != nil || applied != latest {
+	if applied, latest, err := sqlite.SchemaVersions(context.Background(), db, history.Migrations()); err != nil || applied != latest {
 		t.Fatalf("schema = %d/%d, %v", applied, latest, err)
 	}
 	if _, err := os.Stat(filepath.Join(dataRoot, "backups")); !os.IsNotExist(err) {
@@ -61,8 +63,8 @@ func TestFailedStorageUpgradeLeavesARestorableBackup(t *testing.T) {
 	_ = db.Close()
 
 	err := executeNoErr(t, "storage", "upgrade", "--config", cfg)
-	if code, ok := store.CodeOf(err); !ok || code != store.ErrorCodeMigrationChecksumMismatch {
-		t.Fatalf("upgrade err = %v, want %s", err, store.ErrorCodeMigrationChecksumMismatch)
+	if !fault.HasCode(err, sqlite.ErrorCodeMigrationChecksumMismatch) {
+		t.Fatalf("upgrade err = %v, want %s", err, sqlite.ErrorCodeMigrationChecksumMismatch)
 	}
 	if !strings.Contains(err.Error(), "restore the pre-upgrade backup pre-upgrade-v") {
 		t.Fatalf("upgrade err = %v, want it to name the backup", err)

@@ -6,6 +6,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func testBroadcastItem(id, producer, key string) *BroadcastItem {
@@ -305,12 +308,12 @@ func TestBroadcastStore_CursorSurvivesRestart(t *testing.T) {
 	dsn := dir + "/broadcast.db"
 	open := func(t *testing.T) *sql.DB {
 		t.Helper()
-		db, err := OpenDB(t.Context(), dsn)
+		db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 		if err != nil {
 			t.Fatalf("OpenDB: %v", err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
-		if err := Migrate(t.Context(), db); err != nil {
+		if err := sqlite.Migrate(t.Context(), db, history.Migrations()); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
 		return db
@@ -547,7 +550,7 @@ func TestBroadcastStore_ListHeldHonorsLimit(t *testing.T) {
 
 func TestBroadcastStore_SchemaVersion(t *testing.T) {
 	db := newTestDB(t)
-	applied, latest, err := SchemaVersions(t.Context(), db)
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}

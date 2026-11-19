@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type EmailCursor struct {
@@ -62,7 +64,7 @@ ON CONFLICT(source) DO UPDATE SET
     uid_validity = excluded.uid_validity,
     updated_at = excluded.updated_at
 `
-	if _, err := s.db.ExecContext(ctx, query, source, int64(cursor.UIDValidity), int64(cursor.LastUID), formatTime(at.UTC())); err != nil {
+	if _, err := s.db.ExecContext(ctx, query, source, int64(cursor.UIDValidity), int64(cursor.LastUID), sqlite.FormatTime(at.UTC())); err != nil {
 		return classifyBusy(fmt.Errorf("save email cursor: %w", err))
 	}
 	return nil

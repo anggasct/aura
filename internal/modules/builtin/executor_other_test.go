@@ -10,11 +10,11 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 func TestBuiltinToolExecutorFailsClosedWithoutLinux(t *testing.T) {
-	db, err := store.OpenDB(context.Background(), filepath.Join(t.TempDir(), "aura.db"))
+	db, err := sqlite.Open(context.Background(), filepath.Join(t.TempDir(), "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

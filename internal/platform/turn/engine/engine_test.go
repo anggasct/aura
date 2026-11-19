@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
@@ -41,7 +42,7 @@ func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *s
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
 	storetest.Seed(t, dsn)
-	db, err := store.OpenDB(ctx, dsn)
+	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}

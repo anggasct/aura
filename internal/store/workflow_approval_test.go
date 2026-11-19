@@ -3,19 +3,22 @@ package store
 import (
 	"path/filepath"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func TestMigrationAddsWorkflowApprovalWithItsConstraints(t *testing.T) {
 	ctx := t.Context()
-	db, err := OpenDB(ctx, filepath.Join(t.TempDir(), "approval.db"))
+	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "approval.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := Migrate(ctx, db); err != nil {
+	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	applied, latest, err := SchemaVersions(ctx, db)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
 	if err != nil || applied != 48 || latest != 48 {
 		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
 	}

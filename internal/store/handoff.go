@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -72,7 +74,7 @@ func (s *sqliteHandoffStore) Open(ctx context.Context, handoff *Handoff) error {
 			account = excluded.account, channel = excluded.channel, reply_channel_id = excluded.reply_channel_id,
 			reply_thread_id = excluded.reply_thread_id, opened_at = excluded.opened_at, released_at = NULL`,
 		handoff.SessionID, handoff.Reason, handoff.PrincipalID, handoff.AgentID, handoff.Account, handoff.Channel,
-		handoff.ReplyChannelID, handoff.ReplyThreadID, formatTime(handoff.OpenedAt))
+		handoff.ReplyChannelID, handoff.ReplyThreadID, sqlite.FormatTime(handoff.OpenedAt))
 	if err != nil {
 		if isConstraintCheck(err) {
 			return codedError(ErrorCodeInvalidArgument, "open handoff: a column value violates its constraint", err)
@@ -110,7 +112,7 @@ func (s *sqliteHandoffStore) Check(ctx context.Context, sessionID string, timeou
 }
 
 func (s *sqliteHandoffStore) Release(ctx context.Context, sessionID string, now time.Time) (Handoff, bool, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE session_handoff SET released_at = ? WHERE session_id = ? AND released_at IS NULL`, formatTime(now), sessionID)
+	result, err := s.db.ExecContext(ctx, `UPDATE session_handoff SET released_at = ? WHERE session_id = ? AND released_at IS NULL`, sqlite.FormatTime(now), sessionID)
 	if err != nil {
 		return Handoff{}, false, classifyBusy(fmt.Errorf("release handoff: %w", err))
 	}
@@ -146,13 +148,13 @@ func scanHandoff(row rowScanner) (Handoff, error) {
 	if err := row.Scan(&handoff.SessionID, &handoff.Reason, &handoff.PrincipalID, &handoff.AgentID, &handoff.Account, &handoff.Channel, &handoff.ReplyChannelID, &handoff.ReplyThreadID, &openedAt, &releasedAt); err != nil {
 		return Handoff{}, err
 	}
-	opened, err := parseTime(openedAt)
+	opened, err := sqlite.ParseTime(openedAt)
 	if err != nil {
 		return Handoff{}, fmt.Errorf("parse handoff opened_at: %w", err)
 	}
 	handoff.OpenedAt = opened
 	if releasedAt != "" {
-		released, err := parseTime(releasedAt)
+		released, err := sqlite.ParseTime(releasedAt)
 		if err != nil {
 			return Handoff{}, fmt.Errorf("parse handoff released_at: %w", err)
 		}

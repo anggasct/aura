@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -75,7 +77,7 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 		return BackupManifest{}, backupFail("fsync backup directory", err, destDir)
 	}
 
-	snap, err := openReadOnly(ctx, dbDest)
+	snap, err := sqlite.OpenReadOnly(ctx, dbDest)
 	if err != nil {
 		return BackupManifest{}, backupFail("open backup snapshot", err, dbDest)
 	}
@@ -141,7 +143,7 @@ func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (Restore
 		return RestoreReport{}, err
 	}
 
-	db, err := openReadOnly(ctx, filepath.Join(backupDir, backupDatabaseFilename))
+	db, err := sqlite.OpenReadOnly(ctx, filepath.Join(backupDir, backupDatabaseFilename))
 	if err != nil {
 		return RestoreReport{}, backupFail("open restored database", err, filepath.Join(backupDir, backupDatabaseFilename))
 	}

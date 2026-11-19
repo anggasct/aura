@@ -8,28 +8,28 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/history"
 )
 
 func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
 	t.Helper()
 	ctx := context.Background()
-	db, err := OpenDB(ctx, path)
+	db, err := sqlite.Open(ctx, path, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("OpenDB: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		t.Fatalf("bootstrap: %v", err)
-	}
-	for _, m := range migrations[:upTo] {
-		if err := applyMigration(ctx, db, m); err != nil {
-			t.Fatalf("apply v%d: %v", m.version, err)
-		}
+	if err := sqlite.Migrate(ctx, db, history.Migrations()[:upTo]); err != nil {
+		t.Fatalf("migrate to v%d: %v", upTo, err)
 	}
 	return db
 }
 
 func TestUpgradeBacksUpThePreviousSchemaBeforeMigrating(t *testing.T) {
+	migrations := history.Migrations()
 	ctx := context.Background()
 	root := t.TempDir()
 	db := openDatabaseAtVersion(t, filepath.Join(root, "aura.db"), len(migrations)-1)
@@ -39,27 +39,28 @@ func TestUpgradeBacksUpThePreviousSchemaBeforeMigrating(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpgradeWithBackup: %v", err)
 	}
-	previous, latest := migrations[len(migrations)-2].version, migrations[len(migrations)-1].version
+	previous, latest := migrations[len(migrations)-2].Version, migrations[len(migrations)-1].Version
 	if result.Applied != previous || result.Latest != latest || result.Report.Sessions != 1 {
 		t.Fatalf("result = %+v", result)
 	}
 	if want := fmt.Sprintf("pre-upgrade-v%d-v%d-20261102T143000Z", previous, latest); result.Backup != want {
 		t.Fatalf("backup = %q, want %q", result.Backup, want)
 	}
-	backup, err := openReadOnly(ctx, filepath.Join(root, "backups", result.Backup, backupDatabaseFilename))
+	backup, err := sqlite.OpenReadOnly(ctx, filepath.Join(root, "backups", result.Backup, backupDatabaseFilename))
 	if err != nil {
 		t.Fatalf("open backup: %v", err)
 	}
 	defer func() { _ = backup.Close() }()
-	if applied, _, err := SchemaVersions(ctx, backup); err != nil || applied != previous {
+	if applied, _, err := sqlite.SchemaVersions(ctx, backup, history.Migrations()); err != nil || applied != previous {
 		t.Fatalf("backup schema = %d, %v; want the pre-upgrade version %d", applied, err, previous)
 	}
-	if applied, _, err := SchemaVersions(ctx, db); err != nil || applied != latest {
+	if applied, _, err := sqlite.SchemaVersions(ctx, db, history.Migrations()); err != nil || applied != latest {
 		t.Fatalf("live schema = %d, %v; want %d", applied, err, latest)
 	}
 }
 
 func TestUpgradeOfACurrentSchemaWritesNoBackup(t *testing.T) {
+	migrations := history.Migrations()
 	root := t.TempDir()
 	db := openDatabaseAtVersion(t, filepath.Join(root, "aura.db"), len(migrations))
 	result, err := UpgradeWithBackup(context.Background(), db, filepath.Join(root, "backups"), root, time.Now())
@@ -72,15 +73,16 @@ func TestUpgradeOfACurrentSchemaWritesNoBackup(t *testing.T) {
 }
 
 func TestUpgradeRefusesASchemaNewerThanTheBinary(t *testing.T) {
+	migrations := history.Migrations()
 	ctx := context.Background()
 	root := t.TempDir()
 	db := openDatabaseAtVersion(t, filepath.Join(root, "aura.db"), len(migrations))
-	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, 'future', '2026-11-02T00:00:00Z')`, migrations[len(migrations)-1].version+1); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, 'future', '2026-11-02T00:00:00Z')`, migrations[len(migrations)-1].Version+1); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
 	_, err := UpgradeWithBackup(ctx, db, filepath.Join(root, "backups"), root, time.Now())
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeMigrationSequenceInvalid {
-		t.Fatalf("err = %v, want %s", err, ErrorCodeMigrationSequenceInvalid)
+	if !fault.HasCode(err, sqlite.ErrorCodeMigrationSequenceInvalid) {
+		t.Fatalf("err = %v, want %s", err, sqlite.ErrorCodeMigrationSequenceInvalid)
 	}
 	if _, err := os.Stat(filepath.Join(root, "backups")); !os.IsNotExist(err) {
 		t.Fatalf("backup directory stat = %v, want absent", err)
