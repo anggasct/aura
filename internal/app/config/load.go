@@ -4,10 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"maps"
 	"os"
 	"path/filepath"
-	"regexp"
 	"slices"
 	"strings"
 
@@ -18,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -28,10 +27,6 @@ const (
 	supportedVersion = 1
 
 	githubCapability = "provider-github"
-)
-
-var (
-	modelDefinitionNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 )
 
 type LoadResult struct {
@@ -123,7 +118,8 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 func validateLoaded(cfg *Config, doc *document, profile capability.Profile) error {
 	return errors.Join(
 		configkit.Under("capabilities", cfg.Capabilities.Validate()),
-		validateLoadedModels(cfg.Models, doc),
+		configkit.Under("models", cfg.Models.Validate()),
+		configkit.Under("model_routes", model.ValidateRoutes(cfg.ModelRoutes)),
 		legacyconfig.ValidateTools(cfg.Tools),
 		legacyconfig.ValidateSkills(cfg.Skills),
 		legacyconfig.ValidateContext(cfg.Context),
@@ -249,87 +245,7 @@ func syncDir(p string) error {
 	return f.Sync()
 }
 
-func validateLoadedModels(models legacyconfig.Models, doc *document) error {
-	problems := make([]error, 0, len(models.Definitions)+len(models.Providers)+1)
-	for _, name := range slices.Sorted(maps.Keys(models.Providers)) {
-		preset := models.Providers[name]
-		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, configkit.Field("models.providers", fault.New(legacyconfig.ErrorCodeModelProviderInvalid, fmt.Sprintf("invalid name %q", name))))
-			continue
-		}
-		if err := legacyconfig.ValidateProviderShape("models.providers."+name, preset); err != nil {
-			problems = append(problems, err)
-		}
-	}
-	for _, name := range slices.Sorted(maps.Keys(models.Definitions)) {
-		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, &configkit.FieldError{
-				Path:     "models.definitions[" + name + "]",
-				Position: doc.keyPositionOf("models.definitions[" + name + "]"),
-				Err:      fault.New(configkit.ErrorCodeInvalid, "has an invalid name (must match "+modelDefinitionNamePattern.String()+")"),
-			})
-			continue
-		}
-		definition := models.Definitions[name]
-		problems = append(problems, modelDefinitionProblems(models, name, &definition)...)
-	}
-	return errors.Join(problems...)
-}
-
-func modelDefinitionProblems(models legacyconfig.Models, name string, definition *legacyconfig.ModelDefinition) []error {
-	var problems []error
-	if definition.Provider != "" || definition.Custom != nil {
-		return append(problems, providerDefinitionProblems(models, name, definition)...)
-	}
-	switch {
-	case strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "":
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(legacyconfig.ErrorCodeModelProtocolInvalid, "requires non-empty protocol and model")))
-	case !legacyconfig.ValidProtocol(definition.Protocol):
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(legacyconfig.ErrorCodeModelProtocolInvalid, "uses unsupported protocol (must be one of "+strings.Join(legacyconfig.ProtocolNames(), ", ")+")")))
-	}
-	if err := legacyconfig.ValidateBaseURL(definition.BaseURL); err != nil {
-		problems = append(problems, configkit.Field("models.definitions."+name+".base_url", fault.New(legacyconfig.ErrorCodeModelProtocolInvalid, err.Error())))
-	}
-	problems = append(problems, modelSecretProblems(name, definition, definition.BaseURL)...)
-	problems = append(problems, modelCapabilityProblems(name, definition)...)
-	return problems
-}
-
-func providerDefinitionProblems(models legacyconfig.Models, name string, definition *legacyconfig.ModelDefinition) []error {
-	var problems []error
-	if strings.TrimSpace(definition.Model) == "" {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(legacyconfig.ErrorCodeModelProviderInvalid, "requires non-empty model")))
-	}
-	resolved, err := models.ResolveDefinition(definition)
-	if err != nil {
-		problems = append(problems, err)
-		return append(problems, modelCapabilityProblems(name, definition)...)
-	}
-	problems = append(problems, modelSecretProblems(name, definition, resolved.BaseURL)...)
-	problems = append(problems, modelCapabilityProblems(name, definition)...)
-	return problems
-}
-
-func modelSecretProblems(name string, definition *legacyconfig.ModelDefinition, baseURL string) []error {
-	var problems []error
-	if definition.APIKeyRef.IsZero() && !legacyconfig.IsLoopbackBaseURL(baseURL) {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(legacyconfig.ErrorCodeModelSecretInvalid, "requires api_key_ref for a non-loopback endpoint")))
-	}
-	return problems
-}
-
-func modelCapabilityProblems(name string, definition *legacyconfig.ModelDefinition) []error {
-	var problems []error
-	if definition.Capabilities.ContextTokens <= 0 || strings.TrimSpace(definition.Capabilities.Tokenizer) == "" {
-		problems = append(problems, configkit.Field("models.definitions."+name, fault.New(legacyconfig.ErrorCodeModelCapabilityUnsupported, "requires positive context_tokens and a tokenizer")))
-	}
-	if definition.Capabilities.MicrosPerInputToken < 0 || definition.Capabilities.MicrosPerOutputToken < 0 {
-		problems = append(problems, configkit.Field("models.definitions."+name+".capabilities", fault.New(legacyconfig.ErrorCodeModelCapabilityUnsupported, "cost rates must not be negative")))
-	}
-	return problems
-}
-
-func validateRouting(models legacyconfig.Models, doc *document) error {
+func validateRouting(models model.Config, doc *document) error {
 	for task, role := range models.Routing {
 		if role != "primary" && role != "auxiliary" {
 			return configkit.Invalid("models.routing."+task, "role is not supported (must be primary or auxiliary)")
@@ -341,55 +257,6 @@ func validateRouting(models legacyconfig.Models, doc *document) error {
 		}
 	}
 	return nil
-}
-
-func validateLoadedModelRoutes(routes map[string]legacyconfig.ModelRoute, models legacyconfig.Models) error {
-	if len(routes) == 0 {
-		return nil
-	}
-	var problems []error
-	for _, name := range slices.Sorted(maps.Keys(routes)) {
-		route := routes[name]
-		if !modelDefinitionNamePattern.MatchString(name) {
-			problems = append(problems, configkit.Invalid("model_routes", fmt.Sprintf("invalid route name %q", name)))
-		}
-		if len(route.Candidates) < 1 {
-			problems = append(problems, configkit.Invalid("model_routes."+name, "requires at least one candidate"))
-		} else if len(route.Candidates) > 4 {
-			problems = append(problems, configkit.Invalid("model_routes."+name, "exceeds maximum chain depth of 4 candidates"))
-		}
-		seen := make(map[string]bool, len(route.Candidates))
-		for _, candidate := range route.Candidates {
-			if seen[candidate] {
-				problems = append(problems, configkit.Invalid("model_routes."+name, "contains a duplicate candidate"))
-			}
-			seen[candidate] = true
-			if len(models.Definitions) > 0 {
-				if _, ok := models.Definitions[candidate]; !ok {
-					problems = append(problems, configkit.Invalid("model_routes."+name, "references unknown model definition"))
-				}
-			}
-		}
-		if route.MaxProviderAttempts < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".max_provider_attempts", "must not be negative"))
-		}
-		if route.RetryDelayBudget < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".retry_delay_budget", "must not be negative"))
-		}
-		if route.CostBudgetUSD < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".cost_budget_usd", "must not be negative"))
-		}
-		if route.Circuit.FailureThreshold < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.failure_threshold", "must not be negative"))
-		}
-		if route.Circuit.OpenDuration < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.open_duration", "must not be negative"))
-		}
-		if route.Circuit.MaxOpenDuration < 0 {
-			problems = append(problems, configkit.Invalid("model_routes."+name+".circuit.max_open_duration", "must not be negative"))
-		}
-	}
-	return errors.Join(problems...)
 }
 
 func decode(doc *document) (*Config, error) {

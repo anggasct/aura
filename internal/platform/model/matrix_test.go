@@ -16,7 +16,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -30,13 +29,13 @@ func standardProviderHandler(t *testing.T, protocol string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		switch protocol {
-		case config.ProtocolAnthropicMessages:
+		case ProtocolAnthropicMessages:
 			writeFixture(t, w, fixtureBytes(t, "anthropic_message.json"))
-		case config.ProtocolOpenAIChatCompat:
+		case ProtocolOpenAIChatCompat:
 			writeFixture(t, w, fixtureBytes(t, "openai_completion.json"))
-		case config.ProtocolOpenAIResponses:
+		case ProtocolOpenAIResponses:
 			writeFixture(t, w, fixtureBytes(t, "openai_responses.json"))
-		case config.ProtocolGeminiNative:
+		case ProtocolGeminiNative:
 			writeFixture(t, w, fixtureBytes(t, "gemini_response.json"))
 		default:
 			http.Error(w, "unsupported protocol", http.StatusBadRequest)
@@ -44,8 +43,8 @@ func standardProviderHandler(t *testing.T, protocol string) http.HandlerFunc {
 	}
 }
 
-func defaultCaps() config.ModelCapabilities {
-	return config.ModelCapabilities{
+func defaultCaps() Capabilities {
+	return Capabilities{
 		Streaming:        true,
 		Tools:            true,
 		StructuredOutput: true,
@@ -60,10 +59,10 @@ func TestCompatibilityMatrixAllProtocols(t *testing.T) {
 		protocol string
 		model    string
 	}{
-		{"anthropic", config.ProtocolAnthropicMessages, "claude-sonnet-4-20250514"},
-		{"openai-chat", config.ProtocolOpenAIChatCompat, "gpt-4o"},
-		{"openai-responses", config.ProtocolOpenAIResponses, "gpt-5"},
-		{"gemini", config.ProtocolGeminiNative, "gemini-2.5-pro"},
+		{"anthropic", ProtocolAnthropicMessages, "claude-sonnet-4-20250514"},
+		{"openai-chat", ProtocolOpenAIChatCompat, "gpt-4o"},
+		{"openai-responses", ProtocolOpenAIResponses, "gpt-5"},
+		{"gemini", ProtocolGeminiNative, "gemini-2.5-pro"},
 	}
 
 	for i := range protocols {
@@ -85,7 +84,7 @@ func TestCompatibilityMatrixAllProtocols(t *testing.T) {
 			})
 			defer s2.Close()
 
-			defs := map[string]config.ModelDefinition{
+			defs := map[string]Definition{
 				"cand-primary": {
 					Protocol:     p1.protocol,
 					Model:        p1.model,
@@ -100,12 +99,12 @@ func TestCompatibilityMatrixAllProtocols(t *testing.T) {
 				},
 			}
 
-			route := config.ModelRoute{
+			route := ModelRoute{
 				Candidates:          []string{"cand-primary", "cand-backup"},
 				MaxProviderAttempts: 8,
 			}
 
-			router, err := BuildRouterWithRoutes(nil, config.Models{Definitions: defs}, map[string]config.ModelRoute{"primary": route}, nil)
+			router, err := BuildRouterWithRoutes(nil, Config{Definitions: defs}, map[string]ModelRoute{"primary": route}, nil)
 			if err != nil {
 				t.Fatalf("BuildRouterWithRoutes: %v", err)
 			}
@@ -136,7 +135,7 @@ func TestCompatibilityMatrixAllProtocols(t *testing.T) {
 func TestObservableBoundaryStreaming(t *testing.T) {
 	var c1Calls, c2Calls atomic.Int32
 
-	s1 := mockProviderServer(t, config.ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
+	s1 := mockProviderServer(t, ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
 		c1Calls.Add(1)
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
@@ -152,33 +151,33 @@ func TestObservableBoundaryStreaming(t *testing.T) {
 	})
 	defer s1.Close()
 
-	s2 := mockProviderServer(t, config.ProtocolAnthropicMessages, func(w http.ResponseWriter, r *http.Request) {
+	s2 := mockProviderServer(t, ProtocolAnthropicMessages, func(w http.ResponseWriter, r *http.Request) {
 		c2Calls.Add(1)
-		standardProviderHandler(t, config.ProtocolAnthropicMessages)(w, r)
+		standardProviderHandler(t, ProtocolAnthropicMessages)(w, r)
 	})
 	defer s2.Close()
 
-	defs := map[string]config.ModelDefinition{
+	defs := map[string]Definition{
 		"cand-1": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "gpt-4o",
 			BaseURL:      s1.URL,
 			Capabilities: defaultCaps(),
 		},
 		"cand-2": {
-			Protocol:     config.ProtocolAnthropicMessages,
+			Protocol:     ProtocolAnthropicMessages,
 			Model:        "claude-sonnet-4-20250514",
 			BaseURL:      s2.URL,
 			Capabilities: defaultCaps(),
 		},
 	}
 
-	route := config.ModelRoute{
+	route := ModelRoute{
 		Candidates:          []string{"cand-1", "cand-2"},
 		MaxProviderAttempts: 6,
 	}
 
-	router, err := BuildRouterWithRoutes(nil, config.Models{Definitions: defs}, map[string]config.ModelRoute{"primary": route}, nil)
+	router, err := BuildRouterWithRoutes(nil, Config{Definitions: defs}, map[string]ModelRoute{"primary": route}, nil)
 	if err != nil {
 		t.Fatalf("BuildRouterWithRoutes: %v", err)
 	}
@@ -238,40 +237,40 @@ func TestNonFallbackClassesProvePolicyAndAuthNoBypass(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			var c1Calls, c2Calls atomic.Int32
 
-			s1 := mockProviderServer(t, config.ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
+			s1 := mockProviderServer(t, ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
 				c1Calls.Add(1)
 				w.WriteHeader(tt.statusCode)
 				_, _ = w.Write([]byte(tt.body))
 			})
 			defer s1.Close()
 
-			s2 := mockProviderServer(t, config.ProtocolAnthropicMessages, func(w http.ResponseWriter, r *http.Request) {
+			s2 := mockProviderServer(t, ProtocolAnthropicMessages, func(w http.ResponseWriter, r *http.Request) {
 				c2Calls.Add(1)
-				standardProviderHandler(t, config.ProtocolAnthropicMessages)(w, r)
+				standardProviderHandler(t, ProtocolAnthropicMessages)(w, r)
 			})
 			defer s2.Close()
 
-			defs := map[string]config.ModelDefinition{
+			defs := map[string]Definition{
 				"cand-1": {
-					Protocol:     config.ProtocolOpenAIChatCompat,
+					Protocol:     ProtocolOpenAIChatCompat,
 					Model:        "gpt-4o",
 					BaseURL:      s1.URL,
 					Capabilities: defaultCaps(),
 				},
 				"cand-2": {
-					Protocol:     config.ProtocolAnthropicMessages,
+					Protocol:     ProtocolAnthropicMessages,
 					Model:        "claude-sonnet-4-20250514",
 					BaseURL:      s2.URL,
 					Capabilities: defaultCaps(),
 				},
 			}
 
-			route := config.ModelRoute{
+			route := ModelRoute{
 				Candidates:          []string{"cand-1", "cand-2"},
 				MaxProviderAttempts: 6,
 			}
 
-			router, err := BuildRouterWithRoutes(nil, config.Models{Definitions: defs}, map[string]config.ModelRoute{"primary": route}, nil)
+			router, err := BuildRouterWithRoutes(nil, Config{Definitions: defs}, map[string]ModelRoute{"primary": route}, nil)
 			if err != nil {
 				t.Fatalf("BuildRouterWithRoutes: %v", err)
 			}
@@ -300,29 +299,29 @@ func TestNonFallbackClassesProvePolicyAndAuthNoBypass(t *testing.T) {
 func TestBudgetDeterministicBackoffAndCancellation(t *testing.T) {
 	var c1Calls atomic.Int32
 
-	s1 := mockProviderServer(t, config.ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
+	s1 := mockProviderServer(t, ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
 		c1Calls.Add(1)
 		time.Sleep(50 * time.Millisecond)
 		http.Error(w, "overloaded", http.StatusServiceUnavailable)
 	})
 	defer s1.Close()
 
-	defs := map[string]config.ModelDefinition{
+	defs := map[string]Definition{
 		"cand-1": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "gpt-4o",
 			BaseURL:      s1.URL,
 			Capabilities: defaultCaps(),
 		},
 	}
 
-	route := config.ModelRoute{
+	route := ModelRoute{
 		Candidates:          []string{"cand-1"},
 		MaxProviderAttempts: 2,
 		RetryDelayBudget:    configkit.Duration(20 * time.Millisecond),
 	}
 
-	router, err := BuildRouterWithRoutes(nil, config.Models{Definitions: defs}, map[string]config.ModelRoute{"primary": route}, nil)
+	router, err := BuildRouterWithRoutes(nil, Config{Definitions: defs}, map[string]ModelRoute{"primary": route}, nil)
 	if err != nil {
 		t.Fatalf("BuildRouterWithRoutes: %v", err)
 	}
@@ -350,27 +349,27 @@ func TestTelemetryAndExhaustionPrivacyRedaction(t *testing.T) {
 	var logBuf bytes.Buffer
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	s1 := mockProviderServer(t, config.ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
+	s1 := mockProviderServer(t, ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Custom-Secret-Header", "private-header-value")
 		http.Error(w, `{"error":"`+bodyCanary+`"}`, http.StatusServiceUnavailable)
 	})
 	defer s1.Close()
 
-	defs := map[string]config.ModelDefinition{
+	defs := map[string]Definition{
 		"safe-candidate-1": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "gpt-4o",
 			BaseURL:      s1.URL,
 			Capabilities: defaultCaps(),
 		},
 	}
 
-	route := config.ModelRoute{
+	route := ModelRoute{
 		Candidates:          []string{"safe-candidate-1"},
 		MaxProviderAttempts: 4,
 	}
 
-	router, err := BuildRouterWithRoutes(logger, config.Models{Definitions: defs}, map[string]config.ModelRoute{"safe-route": route}, nil)
+	router, err := BuildRouterWithRoutes(logger, Config{Definitions: defs}, map[string]ModelRoute{"safe-route": route}, nil)
 	if err != nil {
 		t.Fatalf("BuildRouterWithRoutes: %v", err)
 	}
@@ -413,32 +412,32 @@ func TestTelemetryAndExhaustionPrivacyRedaction(t *testing.T) {
 }
 
 func TestHighConcurrencyRaceSafety(t *testing.T) {
-	s := mockProviderServer(t, config.ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
+	s := mockProviderServer(t, ProtocolOpenAIChatCompat, func(w http.ResponseWriter, r *http.Request) {
 		writeFixture(t, w, fixtureBytes(t, "openai_completion.json"))
 	})
 	defer s.Close()
 
-	defs := map[string]config.ModelDefinition{
+	defs := map[string]Definition{
 		"cand-1": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "gpt-4o",
 			BaseURL:      s.URL,
 			Capabilities: defaultCaps(),
 		},
 		"cand-2": {
-			Protocol:     config.ProtocolOpenAIChatCompat,
+			Protocol:     ProtocolOpenAIChatCompat,
 			Model:        "gpt-4o-mini",
 			BaseURL:      s.URL,
 			Capabilities: defaultCaps(),
 		},
 	}
 
-	route := config.ModelRoute{
+	route := ModelRoute{
 		Candidates:          []string{"cand-1", "cand-2"},
 		MaxProviderAttempts: 4,
 	}
 
-	router, err := BuildRouterWithRoutes(nil, config.Models{Definitions: defs}, map[string]config.ModelRoute{"primary": route}, nil)
+	router, err := BuildRouterWithRoutes(nil, Config{Definitions: defs}, map[string]ModelRoute{"primary": route}, nil)
 	if err != nil {
 		t.Fatalf("BuildRouterWithRoutes: %v", err)
 	}

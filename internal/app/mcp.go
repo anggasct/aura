@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -22,8 +21,8 @@ func (p mcpEndpointPolicy) ValidateEndpoint(ctx context.Context, rawURL string) 
 	if ctx == nil {
 		return egress.Errorf(egress.ErrorCodeEgressDenied, "context must not be nil")
 	}
-	if config.IsLoopbackBaseURL(rawURL) {
-		if err := config.ValidateBaseURL(rawURL); err != nil {
+	if egress.IsLoopbackBaseURL(rawURL) {
+		if err := egress.ValidateBaseURL(rawURL); err != nil {
 			return egress.Errorf(egress.ErrorCodeEgressDenied, "loopback endpoint is not valid")
 		}
 		return nil

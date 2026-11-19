@@ -8,16 +8,15 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 func TestFallbackCostBudgetExceeded(t *testing.T) {
-	pricedDef := config.ModelDefinition{
-		Protocol: config.ProtocolOpenAIChatCompat,
+	pricedDef := Definition{
+		Protocol: ProtocolOpenAIChatCompat,
 		Model:    "test-model",
-		Capabilities: config.ModelCapabilities{
+		Capabilities: Capabilities{
 			ContextTokens:        128000,
 			Tokenizer:            "cl100k_base",
 			Streaming:            true,
@@ -26,9 +25,9 @@ func TestFallbackCostBudgetExceeded(t *testing.T) {
 			MicrosPerOutputToken: 500, // $0.0005 per output token
 		},
 	}
-	defs := map[string]config.ModelDefinition{"expensive": pricedDef}
+	defs := map[string]Definition{"expensive": pricedDef}
 
-	route := config.ModelRoute{
+	route := ModelRoute{
 		Candidates:          []string{"expensive"},
 		MaxProviderAttempts: 1,
 		CostBudgetUSD:       0.001, // 1,000 micros

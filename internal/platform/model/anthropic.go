@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
-
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/platform/egress"
 )
 
 const anthropicDefaultBaseURL = "https://api.anthropic.com"
@@ -94,7 +94,7 @@ type AnthropicAdapter struct {
 
 func NewAnthropicAdapter(name, baseURL, apiKey string, timeout time.Duration) (*AnthropicAdapter, error) {
 	if baseURL != "" {
-		if err := config.ValidateBaseURL(baseURL); err != nil {
+		if err := egress.ValidateBaseURL(baseURL); err != nil {
 			return nil, fmt.Errorf("model: invalid base_url: %w", err)
 		}
 	}
@@ -114,7 +114,7 @@ func newAnthropicAdapter(logger *slog.Logger, name, baseURL, apiKey string, time
 
 func (a *AnthropicAdapter) Name() string { return a.core.name }
 
-func (a *AnthropicAdapter) withProvider(resolved config.ResolvedDefinition) *AnthropicAdapter {
+func (a *AnthropicAdapter) withProvider(resolved ResolvedDefinition) *AnthropicAdapter {
 	a.core.withProvider(resolved)
 	return a
 }

@@ -10,7 +10,6 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
@@ -37,9 +36,9 @@ type candidateAttemptError struct {
 
 type FallbackAdapter struct {
 	name        string
-	route       config.ModelRoute
-	definitions map[string]config.ModelDefinition
-	providers   map[string]config.ProviderPreset
+	route       ModelRoute
+	definitions map[string]Definition
+	providers   map[string]ProviderPreset
 	circuits    *CircuitManager
 	resolver    AdapterResolver
 	logger      *slog.Logger
@@ -47,7 +46,7 @@ type FallbackAdapter struct {
 	vision      *VisionPolicy
 }
 
-func NewFallbackAdapter(name string, route config.ModelRoute, definitions map[string]config.ModelDefinition, circuits *CircuitManager, resolver AdapterResolver) *FallbackAdapter {
+func NewFallbackAdapter(name string, route ModelRoute, definitions map[string]Definition, circuits *CircuitManager, resolver AdapterResolver) *FallbackAdapter {
 	return &FallbackAdapter{
 		name:        name,
 		route:       route,
@@ -72,14 +71,14 @@ func (f *FallbackAdapter) WithVisionPolicy(policy *VisionPolicy) *FallbackAdapte
 	return f
 }
 
-func (f *FallbackAdapter) WithProviders(providers map[string]config.ProviderPreset) *FallbackAdapter {
+func (f *FallbackAdapter) WithProviders(providers map[string]ProviderPreset) *FallbackAdapter {
 	f.providers = providers
 	return f
 }
 
-func (f *FallbackAdapter) circuitKeyFor(candidate string, def *config.ModelDefinition) string {
+func (f *FallbackAdapter) circuitKeyFor(candidate string, def *Definition) string {
 	baseURL := def.BaseURL
-	models := config.Models{Providers: f.providers}
+	models := Config{Providers: f.providers}
 	if resolved, err := models.ResolveDefinition(def); err == nil {
 		baseURL = resolved.BaseURL
 	}
@@ -139,11 +138,11 @@ func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLM
 			var bErr error
 			maxAttempts := f.route.MaxProviderAttempts
 			if maxAttempts <= 0 {
-				maxAttempts = config.DefaultModelRouteMaxProviderAttempts
+				maxAttempts = DefaultModelRouteMaxProviderAttempts
 			}
 			delayBudget := time.Duration(f.route.RetryDelayBudget)
 			if delayBudget <= 0 {
-				delayBudget = config.DefaultModelRouteRetryDelayBudget
+				delayBudget = DefaultModelRouteRetryDelayBudget
 			}
 			budget, bErr = NewInvocationBudget(BudgetParams{
 				MaxAttempts:      maxAttempts,

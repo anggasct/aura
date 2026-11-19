@@ -11,7 +11,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -60,15 +59,15 @@ func (m *mockCandidateLLM) GenerateContent(_ context.Context, req *adkmodel.LLMR
 }
 
 func TestFallback_TransientAndRateLimitAdvances(t *testing.T) {
-	primaryDef := validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true, Tools: true})
-	backupDef := validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{Streaming: true, Tools: true})
+	primaryDef := validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true, Tools: true})
+	backupDef := validDefinition(ProtocolAnthropicMessages, Capabilities{Streaming: true, Tools: true})
 
-	defs := map[string]config.ModelDefinition{
+	defs := map[string]Definition{
 		"primary": primaryDef,
 		"backup":  backupDef,
 	}
 
-	route := config.ModelRoute{
+	route := ModelRoute{
 		Candidates:          []string{"primary", "backup"},
 		MaxProviderAttempts: 4,
 		RetryDelayBudget:    configkit.Duration(20 * time.Second),
@@ -126,15 +125,15 @@ func TestFallback_TransientAndRateLimitAdvances(t *testing.T) {
 }
 
 func TestFallback_PolicyRejectionDoesNotFallback(t *testing.T) {
-	primaryDef := validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true, Tools: true})
-	backupDef := validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{Streaming: true, Tools: true})
+	primaryDef := validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true, Tools: true})
+	backupDef := validDefinition(ProtocolAnthropicMessages, Capabilities{Streaming: true, Tools: true})
 
-	defs := map[string]config.ModelDefinition{
+	defs := map[string]Definition{
 		"primary": primaryDef,
 		"backup":  backupDef,
 	}
 
-	route := config.ModelRoute{Candidates: []string{"primary", "backup"}}
+	route := ModelRoute{Candidates: []string{"primary", "backup"}}
 
 	primaryMock := &mockCandidateLLM{
 		name:        "primary",
@@ -168,11 +167,11 @@ func TestFallback_PolicyRejectionDoesNotFallback(t *testing.T) {
 }
 
 func TestFallback_AuthFailureDoesNotFallback(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"primary": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"backup":  validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"primary": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"backup":  validDefinition(ProtocolAnthropicMessages, Capabilities{}),
 	}
-	route := config.ModelRoute{Candidates: []string{"primary", "backup"}}
+	route := ModelRoute{Candidates: []string{"primary", "backup"}}
 
 	primaryMock := &mockCandidateLLM{
 		name:        "primary",
@@ -198,11 +197,11 @@ func TestFallback_AuthFailureDoesNotFallback(t *testing.T) {
 }
 
 func TestFallback_ObservableBoundaryStreamPreventsRestart(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"primary": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true}),
-		"backup":  validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{Streaming: true}),
+	defs := map[string]Definition{
+		"primary": validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true}),
+		"backup":  validDefinition(ProtocolAnthropicMessages, Capabilities{Streaming: true}),
 	}
-	route := config.ModelRoute{Candidates: []string{"primary", "backup"}}
+	route := ModelRoute{Candidates: []string{"primary", "backup"}}
 
 	primaryMock := &mockCandidateLLM{
 		name: "primary",
@@ -240,11 +239,11 @@ func TestFallback_ObservableBoundaryStreamPreventsRestart(t *testing.T) {
 }
 
 func TestFallback_StreamErrorBeforeOutputFallsBack(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"primary": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Streaming: true}),
-		"backup":  validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{Streaming: true}),
+	defs := map[string]Definition{
+		"primary": validDefinition(ProtocolOpenAIChatCompat, Capabilities{Streaming: true}),
+		"backup":  validDefinition(ProtocolAnthropicMessages, Capabilities{Streaming: true}),
 	}
-	route := config.ModelRoute{Candidates: []string{"primary", "backup"}}
+	route := ModelRoute{Candidates: []string{"primary", "backup"}}
 
 	primaryMock := &mockCandidateLLM{
 		name:          "primary",
@@ -283,11 +282,11 @@ func TestFallback_StreamErrorBeforeOutputFallsBack(t *testing.T) {
 }
 
 func TestFallback_AllCandidatesExhaustedReturnsNormalizedError(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"m1": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{}),
-		"m2": validDefinition(config.ProtocolAnthropicMessages, config.ModelCapabilities{}),
+	defs := map[string]Definition{
+		"m1": validDefinition(ProtocolOpenAIChatCompat, Capabilities{}),
+		"m2": validDefinition(ProtocolAnthropicMessages, Capabilities{}),
 	}
-	route := config.ModelRoute{Candidates: []string{"m1", "m2"}}
+	route := ModelRoute{Candidates: []string{"m1", "m2"}}
 
 	m1 := &mockCandidateLLM{name: "m1", generateErr: codedError(ErrorCodeRateLimited, ErrRateLimited, "http 429")}
 	m2 := &mockCandidateLLM{name: "m2", generateErr: codedError(ErrorCodeOverloaded, ErrOverloaded, "http 503")}
@@ -312,10 +311,10 @@ func TestFallback_AllCandidatesExhaustedReturnsNormalizedError(t *testing.T) {
 }
 
 func TestFallback_CanonicalRequestIsolation(t *testing.T) {
-	defs := map[string]config.ModelDefinition{
-		"primary": validDefinition(config.ProtocolOpenAIChatCompat, config.ModelCapabilities{Tools: true}),
+	defs := map[string]Definition{
+		"primary": validDefinition(ProtocolOpenAIChatCompat, Capabilities{Tools: true}),
 	}
-	route := config.ModelRoute{Candidates: []string{"primary"}}
+	route := ModelRoute{Candidates: []string{"primary"}}
 
 	primaryMock := &mockCandidateLLM{
 		name: "primary",

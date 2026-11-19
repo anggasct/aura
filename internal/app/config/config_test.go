@@ -17,8 +17,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/secret"
-	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
 const testdataDir = "../../../testdata"
@@ -27,6 +27,10 @@ const (
 	invalidCode    = legacyconfig.ErrorCode(configkit.ErrorCodeInvalid)
 	unknownKeyCode = legacyconfig.ErrorCode(configkit.ErrorCodeUnknownKey)
 	malformedCode  = legacyconfig.ErrorCode(configkit.ErrorCodeMalformed)
+
+	modelProtocolInvalidCode       = legacyconfig.ErrorCode(model.ErrorCodeProtocolInvalid)
+	modelCapabilityUnsupportedCode = legacyconfig.ErrorCode(model.ErrorCodeCapabilityUnsupported)
+	modelProviderInvalidCode       = legacyconfig.ErrorCode(model.ErrorCodeProviderInvalid)
 )
 
 func unknownKeyText(path, position string) string {
@@ -59,6 +63,9 @@ func codeOf(err error) (legacyconfig.ErrorCode, bool) {
 		return code, true
 	}
 	if code, ok := fault.CodeOf[configkit.ErrorCode](err); ok {
+		return legacyconfig.ErrorCode(code), true
+	}
+	if code, ok := fault.CodeOf[model.ErrorCode](err); ok {
 		return legacyconfig.ErrorCode(code), true
 	}
 	return "", false
@@ -680,13 +687,13 @@ models:
 		{
 			name:    "unknown protocol",
 			content: strings.Replace(valid, "anthropic_messages", "unknown_protocol", 1),
-			code:    legacyconfig.ErrorCodeModelProtocolInvalid,
+			code:    modelProtocolInvalidCode,
 			want:    "unsupported protocol",
 		},
 		{
 			name:    "missing capabilities",
 			content: strings.Replace(valid, "      capabilities:\n        streaming: true\n        tools: true\n        structured_output: false\n        vision: true\n        audio: false\n        reasoning: true\n        context_tokens: 200000\n        tokenizer: anthropic\n        usage_reporting: true\n", "", 1),
-			code:    legacyconfig.ErrorCodeModelCapabilityUnsupported,
+			code:    modelCapabilityUnsupportedCode,
 			want:    "requires positive context_tokens and a tokenizer",
 		},
 	}
@@ -700,6 +707,29 @@ models:
 				t.Errorf("error %q does not contain %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestLoad_InvalidDefinitionNameReportsKeyPosition(t *testing.T) {
+	content := `version: 1
+models:
+  definitions:
+    Bad Name:
+      protocol: openai_chat_compat
+      model: m
+      base_url: https://x.example.com
+      api_key_ref: env://K
+      capabilities:
+        context_tokens: 1000
+        tokenizer: t
+`
+	_, err := Load(writeTempConfig(t, content))
+	if err == nil {
+		t.Fatal("expected the invalid definition name to be rejected")
+	}
+	want := "models.definitions[Bad Name] (line 4, column 5): config_invalid: has an invalid name"
+	if !strings.Contains(err.Error(), want) {
+		t.Fatalf("error %q does not contain %q", err, want)
 	}
 }
 
@@ -1031,7 +1061,7 @@ func TestLoad_EnvOnlyModelDefinitionValidated(t *testing.T) {
 	content := `version: 1
 `
 	_, err := Load(writeTempConfig(t, content))
-	wantCode(t, err, legacyconfig.ErrorCodeModelCapabilityUnsupported)
+	wantCode(t, err, modelCapabilityUnsupportedCode)
 }
 
 func TestDurationYAMLRoundTrip(t *testing.T) {
@@ -1198,30 +1228,6 @@ func TestResolvePath_XDGEmptyFallsBack(t *testing.T) {
 	want := filepath.Join(base, "aura", "config.yaml")
 	if path != want {
 		t.Errorf("path = %q, want %q", path, want)
-	}
-}
-
-func TestValidateLoadedModelsReportsEveryDefinition(t *testing.T) {
-	models := legacyconfig.Models{Definitions: map[string]legacyconfig.ModelDefinition{
-		"primary": {Protocol: "nope", Model: "m", APIKeyRef: secrettest.Ref("env://K"),
-			Capabilities: legacyconfig.ModelCapabilities{ContextTokens: 1, Tokenizer: "t"}},
-		"auxiliary": {Protocol: legacyconfig.ProtocolOpenAIChatCompat, Model: "",
-			Capabilities: legacyconfig.ModelCapabilities{ContextTokens: 1, Tokenizer: "t"}},
-		"third": {Protocol: legacyconfig.ProtocolOpenAIChatCompat, Model: "m", APIKeyRef: secrettest.Ref("env://K"),
-			Capabilities: legacyconfig.ModelCapabilities{ContextTokens: 0, Tokenizer: ""}},
-	}}
-	doc, err := parseDocument([]byte("version: 1\n"))
-	if err != nil {
-		t.Fatalf("parseDocument: %v", err)
-	}
-	err = validateLoadedModels(models, doc)
-	if err == nil {
-		t.Fatal("expected the invalid definitions to be rejected")
-	}
-	for _, name := range []string{"primary", "auxiliary", "third"} {
-		if !strings.Contains(err.Error(), "models.definitions."+name) {
-			t.Errorf("aggregate error omits %q: %v", name, err)
-		}
 	}
 }
 

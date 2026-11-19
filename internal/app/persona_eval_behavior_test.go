@@ -274,7 +274,7 @@ func TestScheduledBehaviorEvalRunsOnItsCronAndStopsWithServe(t *testing.T) {
 func TestRegistryRejectsAnInvalidBehaviorSchedule(t *testing.T) {
 	build := func(schedule string) error {
 		_, err := buildAgentRegistry(&appconfig.Config{
-			Models: config.Models{Definitions: map[string]config.ModelDefinition{auraagent.DefaultEvalJudgeRoute: {Model: "judge"}}},
+			Models: auramodel.Config{Definitions: map[string]auramodel.Definition{auraagent.DefaultEvalJudgeRoute: {Model: "judge"}}},
 			Agents: &config.Agents{Definitions: []config.AgentDefinition{{
 				ID: "lobby", Description: "d", Instructions: "x", Evals: config.AgentEvals{Behavior: &config.AgentEvalBehavior{Schedule: schedule}},
 			}}},

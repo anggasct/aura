@@ -11,7 +11,6 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
@@ -28,7 +27,7 @@ func providerCaptureServer(t *testing.T, mu *sync.Mutex, captured *[]capturedReq
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		*captured = append(*captured, capturedRequest{
-			session:   r.Header.Get(config.SessionHeaderName),
+			session:   r.Header.Get(SessionHeaderName),
 			userAgent: r.Header.Get("User-Agent"),
 			auth:      r.Header.Get("Authorization"),
 			tenant:    r.Header.Get("X-Tenant"),
@@ -38,7 +37,7 @@ func providerCaptureServer(t *testing.T, mu *sync.Mutex, captured *[]capturedReq
 	}))
 }
 
-func mustProviderAdapter(t *testing.T, name string, spec *config.ModelDefinition, logger *slog.Logger, providers map[string]config.ProviderPreset) adkmodel.LLM {
+func mustProviderAdapter(t *testing.T, name string, spec *Definition, logger *slog.Logger, providers map[string]ProviderPreset) adkmodel.LLM {
 	t.Helper()
 	t.Setenv("AURA_PROVIDER_TEST_KEY", "test-key")
 	spec.APIKeyRef = secrettest.Ref("env://AURA_PROVIDER_TEST_KEY")
@@ -72,7 +71,7 @@ func TestProviderSessionHeader_Stability(t *testing.T) {
 
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
-	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+	adapter := mustProviderAdapter(t, "primary", &Definition{
 		Provider: "opencode-go",
 		Model:    "muse-spark-1.3-contributor",
 		BaseURL:  srv.URL,
@@ -123,7 +122,7 @@ func TestProviderSessionHeader_MissingFails(t *testing.T) {
 	srv := providerCaptureServer(t, &mu, &captured, "openai_responses.json")
 	defer srv.Close()
 
-	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+	adapter := mustProviderAdapter(t, "primary", &Definition{
 		Provider: "opencode-go",
 		Model:    "muse-spark-1.3-contributor",
 		BaseURL:  srv.URL,
@@ -149,14 +148,14 @@ func TestProviderCustomHeaders_Sent(t *testing.T) {
 	srv := providerCaptureServer(t, &mu, &captured, "openai_completion.json")
 	defer srv.Close()
 
-	custom := config.ProviderPreset{
-		Protocol:        config.ProtocolOpenAIChatCompat,
+	custom := ProviderPreset{
+		Protocol:        ProtocolOpenAIChatCompat,
 		BaseURL:         srv.URL,
-		AuthScheme:      config.ProviderAuthBearer,
+		AuthScheme:      ProviderAuthBearer,
 		Headers:         map[string]string{"X-Tenant": "tenant-42"},
-		SessionBehavior: config.ProviderSessionNone,
+		SessionBehavior: ProviderSessionNone,
 	}
-	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+	adapter := mustProviderAdapter(t, "primary", &Definition{
 		Model:  "custom-model",
 		Custom: &custom,
 	}, nil, nil)
@@ -185,8 +184,8 @@ func TestProviderLegacyHeaders_Unchanged(t *testing.T) {
 	srv := providerCaptureServer(t, &mu, &captured, "openai_completion.json")
 	defer srv.Close()
 
-	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
-		Protocol: config.ProtocolOpenAIChatCompat,
+	adapter := mustProviderAdapter(t, "primary", &Definition{
+		Protocol: ProtocolOpenAIChatCompat,
 		Model:    "gpt-4o",
 		BaseURL:  srv.URL,
 	}, nil, nil)
@@ -204,7 +203,7 @@ func TestProviderLegacyHeaders_Unchanged(t *testing.T) {
 }
 
 func TestOpencodeGoPreset_EndpointSingleV1(t *testing.T) {
-	resolved, err := config.Models{}.ResolveDefinition(&config.ModelDefinition{
+	resolved, err := Config{}.ResolveDefinition(&Definition{
 		Provider: "opencode-go",
 		Model:    "muse-spark-1.3-contributor",
 	})
@@ -232,15 +231,15 @@ func TestOpencodeGoPreset_EndpointSingleV1(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	providers := map[string]config.ProviderPreset{
+	providers := map[string]ProviderPreset{
 		"opencode-go": {
-			Protocol:        config.ProtocolOpenAIResponses,
+			Protocol:        ProtocolOpenAIResponses,
 			BaseURL:         srv.URL,
-			AuthScheme:      config.ProviderAuthBearer,
-			SessionBehavior: config.ProviderSessionOpencode,
+			AuthScheme:      ProviderAuthBearer,
+			SessionBehavior: ProviderSessionOpencode,
 		},
 	}
-	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+	adapter := mustProviderAdapter(t, "primary", &Definition{
 		Provider: "opencode-go",
 		Model:    "muse-spark-1.3-contributor",
 	}, nil, providers)
@@ -268,7 +267,7 @@ func TestOpencodeGoPreset_BaseURLOverrideStillWins(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	adapter := mustProviderAdapter(t, "primary", &config.ModelDefinition{
+	adapter := mustProviderAdapter(t, "primary", &Definition{
 		Provider: "opencode-go",
 		Model:    "muse-spark-1.3-contributor",
 		BaseURL:  srv.URL,

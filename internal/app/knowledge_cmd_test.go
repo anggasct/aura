@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/store"
@@ -489,7 +490,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	ignoreHostDiskHeadroom(&cfg)
-	cfg.Models.Definitions = map[string]config.ModelDefinition{"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"}}
+	cfg.Models.Definitions = map[string]model.Definition{"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"}}
 	cmd := &cobra.Command{Use: "status"}
 	cmd.SetContext(t.Context())
 	cmd.RunE = func(c *cobra.Command, _ []string) error {

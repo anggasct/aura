@@ -85,3 +85,31 @@ func TestFieldErrorTextAndUnder(t *testing.T) {
 		}
 	})
 }
+
+func TestUnderKeepsTheKeyMarker(t *testing.T) {
+	placed := Under("models", errors.Join(InvalidKey("definitions[Bad]", "has an invalid name"), Invalid("definitions[ok]", "x")))
+	joined, isJoin := placed.(interface{ Unwrap() []error })
+	if !isJoin {
+		t.Fatalf("Under returned %T, want a join", placed)
+	}
+	var fields []*FieldError
+	for _, child := range joined.Unwrap() {
+		var field *FieldError
+		if !errors.As(child, &field) {
+			t.Fatalf("child %v is not a FieldError", child)
+		}
+		fields = append(fields, field)
+	}
+	if len(fields) != 2 {
+		t.Fatalf("placed %d problems, want 2", len(fields))
+	}
+	if fields[0].Path != "models.definitions[Bad]" || !fields[0].AtKey {
+		t.Fatalf("key problem = %q AtKey=%v, want models.definitions[Bad] with the marker", fields[0].Path, fields[0].AtKey)
+	}
+	if fields[1].Path != "models.definitions[ok]" || fields[1].AtKey {
+		t.Fatalf("plain problem = %q AtKey=%v, want models.definitions[ok] without the marker", fields[1].Path, fields[1].AtKey)
+	}
+	if got, want := fields[0].Error(), "models.definitions[Bad]: config_invalid: has an invalid name"; got != want {
+		t.Fatalf("text = %q, want %q", got, want)
+	}
+}

@@ -12,8 +12,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -32,7 +32,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	}
 	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
 	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))

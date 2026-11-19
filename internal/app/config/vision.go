@@ -5,8 +5,8 @@ import (
 	"maps"
 	"slices"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -27,7 +27,7 @@ func visionProviderProblems(section *vision.Config) error {
 	var problems []error
 	for _, name := range slices.Sorted(maps.Keys(section.Providers)) {
 		limits := section.Providers[name]
-		if !legacyconfig.ValidProtocol(name) {
+		if !model.ValidProtocol(name) {
 			problems = append(problems, configkit.Invalid("vision.providers."+name, "is not a known provider protocol"))
 			continue
 		}

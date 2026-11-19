@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -18,7 +19,7 @@ func deriveDefaults(cfg *Config) {
 
 func deriveEmptyCollections(cfg *Config) {
 	if cfg.Models.Providers == nil {
-		cfg.Models.Providers = map[string]legacyconfig.ProviderPreset{}
+		cfg.Models.Providers = map[string]model.ProviderPreset{}
 	}
 	if cfg.Vision != nil && cfg.Vision.Providers == nil {
 		cfg.Vision.Providers = map[string]vision.ProviderLimits{}
@@ -27,7 +28,7 @@ func deriveEmptyCollections(cfg *Config) {
 
 func deriveModelRoutes(cfg *Config) {
 	if cfg.ModelRoutes == nil && len(cfg.Models.Definitions) > 0 {
-		cfg.ModelRoutes = make(map[string]legacyconfig.ModelRoute)
+		cfg.ModelRoutes = make(map[string]model.ModelRoute)
 	}
 	for _, name := range []string{"primary", "auxiliary"} {
 		if _, defined := cfg.Models.Definitions[name]; !defined {
@@ -35,7 +36,7 @@ func deriveModelRoutes(cfg *Config) {
 		}
 		route, exists := cfg.ModelRoutes[name]
 		if !exists {
-			route = legacyconfig.DefaultModelRoute()
+			route = model.DefaultModelRoute()
 		}
 		if len(route.Candidates) == 0 {
 			route.Candidates = []string{name}

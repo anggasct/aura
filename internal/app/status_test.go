@@ -15,9 +15,9 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -93,7 +93,7 @@ func newStatusCmdForTest(t *testing.T, negotiate func() (sandbox.Primitives, err
 	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	ignoreHostDiskHeadroom(&cfg)
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
 	cmd := &cobra.Command{Use: "status"}
@@ -176,7 +176,7 @@ func TestStatusJSONEncodesContract(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
 	ignoreHostDiskHeadroom(&cfg)
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
 	cmd := &cobra.Command{Use: "status"}
@@ -221,7 +221,7 @@ func TestDoctorFiltersByCheck(t *testing.T) {
 	seedHealthyStorage(t, dataRoot)
 	cfg := appconfig.Default()
 	cfg.Storage.Path = dataRoot
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
 	negotiate := func() (sandbox.Primitives, error) {

@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/store"
@@ -118,7 +119,7 @@ func TestBuildSecretVaultSkipsEmptyValues(t *testing.T) {
 	t.Setenv("AURA_TEST_EMPTY_MODEL_KEY", "")
 	cfg := appconfig.Default()
 	cfg.Webhook.Keys = []config.WebhookKey{{ID: "probe", SecretEnv: "AURA_TEST_EMPTY_WEBHOOK_SECRET"}}
-	cfg.Models.Definitions = map[string]config.ModelDefinition{
+	cfg.Models.Definitions = map[string]model.Definition{
 		"probe": {Model: "probe", Provider: "probe", APIKeyRef: secrettest.Ref("env://AURA_TEST_EMPTY_MODEL_KEY")},
 	}
 	vault := buildSecretVault(&cfg)

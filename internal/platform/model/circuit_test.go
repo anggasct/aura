@@ -5,8 +5,6 @@ import (
 	"sync"
 	"testing"
 	"time"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 type memoryCheckpointStore struct {
@@ -240,11 +238,11 @@ func TestCircuitManager_ConcurrencyRaceFree(t *testing.T) {
 }
 
 func TestComputeConfigDigest(t *testing.T) {
-	def1 := config.ModelDefinition{
-		Protocol: config.ProtocolOpenAIChatCompat,
+	def1 := Definition{
+		Protocol: ProtocolOpenAIChatCompat,
 		Model:    "gpt-4o",
 		BaseURL:  "https://api.openai.com",
-		Capabilities: config.ModelCapabilities{
+		Capabilities: Capabilities{
 			ContextTokens: 128000,
 			Tokenizer:     "o200k",
 		},
@@ -252,8 +250,8 @@ func TestComputeConfigDigest(t *testing.T) {
 	def2 := def1
 	def2.Model = "gpt-4o-mini"
 
-	d1 := ComputeConfigDigest(&def1, config.ResolvedDefinition{Protocol: def1.Protocol, BaseURL: def1.BaseURL})
-	d2 := ComputeConfigDigest(&def2, config.ResolvedDefinition{Protocol: def2.Protocol, BaseURL: def2.BaseURL})
+	d1 := ComputeConfigDigest(&def1, ResolvedDefinition{Protocol: def1.Protocol, BaseURL: def1.BaseURL})
+	d2 := ComputeConfigDigest(&def2, ResolvedDefinition{Protocol: def2.Protocol, BaseURL: def2.BaseURL})
 	if d1 == "" || d2 == "" {
 		t.Fatalf("empty config digest")
 	}

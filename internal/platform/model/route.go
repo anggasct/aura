@@ -3,17 +3,12 @@ package model
 import (
 	"fmt"
 	"maps"
-	"regexp"
 	"slices"
 	"strings"
 	"time"
 
 	adkmodel "google.golang.org/adk/v2/model"
-
-	"github.com/anggasct/aura/internal/config"
 )
-
-var routeNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]*$`)
 
 type CapabilityPredicate struct {
 	Streaming        bool
@@ -27,7 +22,7 @@ type CapabilityPredicate struct {
 	UsageReporting   bool
 }
 
-func (p CapabilityPredicate) SatisfiedBy(caps config.ModelCapabilities) (satisfied bool, missingField string) {
+func (p CapabilityPredicate) SatisfiedBy(caps Capabilities) (satisfied bool, missingField string) {
 	if p.Streaming && !caps.Streaming {
 		return false, "streaming"
 	}
@@ -125,11 +120,11 @@ type Route struct {
 	MaxProviderAttempts int
 	RetryDelayBudget    time.Duration
 	CostBudgetUSD       float64
-	Circuit             config.ModelRouteCircuit
+	Circuit             RouteCircuit
 }
 
-func ValidateRoute(name string, route config.ModelRoute, definitions map[string]config.ModelDefinition, predicate *CapabilityPredicate) error {
-	if !routeNamePattern.MatchString(name) {
+func ValidateRoute(name string, route ModelRoute, definitions map[string]Definition, predicate *CapabilityPredicate) error {
+	if !namePattern.MatchString(name) {
 		return newError(ErrorCodeRouteInvalid, name, "", fmt.Sprintf("invalid model route name %q", name))
 	}
 	if len(route.Candidates) < 1 || len(route.Candidates) > 4 {
@@ -152,7 +147,7 @@ func ValidateRoute(name string, route config.ModelRoute, definitions map[string]
 		if strings.HasPrefix(candidate, "sk-") || strings.HasPrefix(candidate, "bearer") {
 			return newError(ErrorCodeRouteInvalid, name, "", fmt.Sprintf("route %q candidate %q must not contain inline secrets", name, candidate))
 		}
-		if !routeNamePattern.MatchString(candidate) {
+		if !namePattern.MatchString(candidate) {
 			return newError(ErrorCodeRouteInvalid, name, "", fmt.Sprintf("invalid candidate name %q in route %q", candidate, name))
 		}
 		if seen[candidate] {
@@ -171,7 +166,7 @@ func ValidateRoute(name string, route config.ModelRoute, definitions map[string]
 	return nil
 }
 
-func ValidateCandidate(candidate string, def *config.ModelDefinition, predicate *CapabilityPredicate) error {
+func ValidateCandidate(candidate string, def *Definition, predicate *CapabilityPredicate) error {
 	if def == nil || def.Capabilities.ContextTokens <= 0 || strings.TrimSpace(def.Capabilities.Tokenizer) == "" {
 		return newError(ErrorCodeCapabilityUnsupported, candidate, "", fmt.Sprintf("candidate %q has invalid or missing capability metadata", candidate))
 	}
@@ -183,7 +178,7 @@ func ValidateCandidate(candidate string, def *config.ModelDefinition, predicate 
 	return nil
 }
 
-func ValidateRoutes(definitions map[string]config.ModelDefinition, routes map[string]config.ModelRoute, routing map[string]string) error {
+func ValidateRouteSet(definitions map[string]Definition, routes map[string]ModelRoute, routing map[string]string) error {
 	for _, name := range slices.Sorted(maps.Keys(routes)) {
 		route := routes[name]
 		if err := ValidateRoute(name, route, definitions, nil); err != nil {

@@ -13,7 +13,6 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -23,8 +22,8 @@ type stubLLM struct {
 	name string
 }
 
-func configuredDefinition(protocol, name, baseURL string) config.ModelDefinition {
-	return config.ModelDefinition{
+func configuredDefinition(protocol, name, baseURL string) Definition {
+	return Definition{
 		Protocol:  protocol,
 		Model:     name,
 		BaseURL:   baseURL,
@@ -91,10 +90,10 @@ func TestBuildRouter_OpenRouterAndOllamaEndpoints(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary":   configuredDefinition(config.ProtocolOpenAIChatCompat, "deepseek-r1", srv.URL),
-			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "llama3", "http://localhost:11434"),
+	models := Config{
+		Definitions: map[string]Definition{
+			"primary":   configuredDefinition(ProtocolOpenAIChatCompat, "deepseek-r1", srv.URL),
+			"auxiliary": configuredDefinition(ProtocolOpenAIChatCompat, "llama3", "http://localhost:11434"),
 		},
 	}
 	r, err := BuildRouter(nil, models)
@@ -151,10 +150,10 @@ func TestRouter_InvalidRoleFails(t *testing.T) {
 
 func TestBuildRouter_ProviderMapping(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
-			"primary":   configuredDefinition(config.ProtocolAnthropicMessages, "claude", "https://api.anthropic.com"),
-			"auxiliary": configuredDefinition(config.ProtocolOpenAIChatCompat, "llama", "https://openrouter.ai/api"),
+	models := Config{
+		Definitions: map[string]Definition{
+			"primary":   configuredDefinition(ProtocolAnthropicMessages, "claude", "https://api.anthropic.com"),
+			"auxiliary": configuredDefinition(ProtocolOpenAIChatCompat, "llama", "https://openrouter.ai/api"),
 		},
 	}
 	r, err := BuildRouter(nil, models)
@@ -178,7 +177,7 @@ func TestBuildRouter_ProviderMapping(t *testing.T) {
 }
 
 func TestBuildRouter_UnconfiguredProviderFailsClosed(t *testing.T) {
-	r, err := BuildRouter(nil, config.Models{})
+	r, err := BuildRouter(nil, Config{})
 	if err != nil {
 		t.Fatalf("BuildRouter: %v", err)
 	}
@@ -192,14 +191,14 @@ func TestBuildRouter_UnconfiguredProviderFailsClosed(t *testing.T) {
 
 func TestBuildRouter_UnsupportedProviderFails(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	models := config.Models{Definitions: map[string]config.ModelDefinition{
+	models := Config{Definitions: map[string]Definition{
 		"primary": configuredDefinition("bogus", "x", "https://provider.example"),
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "unsupported protocol") {
 		t.Errorf("err = %v, want unsupported protocol error", err)
 	}
 
-	unknown := config.Models{Definitions: map[string]config.ModelDefinition{
+	unknown := Config{Definitions: map[string]Definition{
 		"primary": {Provider: "bogus", Model: "x"},
 	}}
 	if _, err := BuildRouter(nil, unknown); err == nil || !strings.Contains(err.Error(), "models.definitions entry references unknown provider") {
@@ -208,15 +207,15 @@ func TestBuildRouter_UnsupportedProviderFails(t *testing.T) {
 }
 
 func TestBuildRouter_MissingKeyValidation(t *testing.T) {
-	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolAnthropicMessages, Model: "claude", BaseURL: "https://api.anthropic.com"},
+	models := Config{Definitions: map[string]Definition{
+		"primary": {Protocol: ProtocolAnthropicMessages, Model: "claude", BaseURL: "https://api.anthropic.com"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "api_key_ref is required") {
 		t.Errorf("err = %v, want secret reference error", err)
 	}
 
-	localhost := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "llama3", BaseURL: "http://localhost:11434"},
+	localhost := Config{Definitions: map[string]Definition{
+		"primary": {Protocol: ProtocolOpenAIChatCompat, Model: "llama3", BaseURL: "http://localhost:11434"},
 	}}
 	if _, err := BuildRouter(nil, localhost); err != nil {
 		t.Errorf("localhost without key should be allowed: %v", err)
@@ -224,8 +223,8 @@ func TestBuildRouter_MissingKeyValidation(t *testing.T) {
 }
 
 func TestBuildRouter_InvalidBaseURLFails(t *testing.T) {
-	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "://bad"},
+	models := Config{Definitions: map[string]Definition{
+		"primary": {Protocol: ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "://bad"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "invalid base_url") {
 		t.Errorf("err = %v, want invalid base_url error", err)
@@ -233,8 +232,8 @@ func TestBuildRouter_InvalidBaseURLFails(t *testing.T) {
 }
 
 func TestBuildRouter_RemoteHTTPRequiresTLS(t *testing.T) {
-	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "http://provider.example"},
+	models := Config{Definitions: map[string]Definition{
+		"primary": {Protocol: ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "http://provider.example"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "https is required") {
 		t.Errorf("err = %v, want remote HTTP TLS error", err)
@@ -242,8 +241,8 @@ func TestBuildRouter_RemoteHTTPRequiresTLS(t *testing.T) {
 }
 
 func TestBuildRouter_BaseURLCredentialsRejected(t *testing.T) {
-	models := config.Models{Definitions: map[string]config.ModelDefinition{
-		"primary": {Protocol: config.ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "https://user:pass@provider.example"},
+	models := Config{Definitions: map[string]Definition{
+		"primary": {Protocol: ProtocolOpenAIChatCompat, Model: "gpt-4o", APIKeyRef: secrettest.Ref("env://TEST_MODEL_API_KEY"), BaseURL: "https://user:pass@provider.example"},
 	}}
 	if _, err := BuildRouter(nil, models); err == nil || !strings.Contains(err.Error(), "user info is not allowed") {
 		t.Errorf("err = %v, want URL credentials error", err)
@@ -252,10 +251,10 @@ func TestBuildRouter_BaseURLCredentialsRejected(t *testing.T) {
 
 func TestBuildRouter_PassesStreamingIdleTimeout(t *testing.T) {
 	t.Setenv("TEST_MODEL_API_KEY", "k")
-	models := config.Models{
+	models := Config{
 		StreamingIdleTimeout: configkit.Duration(17 * time.Second),
-		Definitions: map[string]config.ModelDefinition{
-			"primary": configuredDefinition(config.ProtocolOpenAIChatCompat, "gpt-4o", "https://api.example"),
+		Definitions: map[string]Definition{
+			"primary": configuredDefinition(ProtocolOpenAIChatCompat, "gpt-4o", "https://api.example"),
 		},
 	}
 	r, err := BuildRouter(nil, models)
@@ -289,7 +288,7 @@ func TestResolveSecretFromFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(" file-secret\n"), 0o600); err != nil {
 		t.Fatalf("write secret: %v", err)
 	}
-	got, err := resolveSecret("primary", &config.ModelDefinition{APIKeyRef: secrettest.Ref("file://" + path)})
+	got, err := resolveSecret("primary", &Definition{APIKeyRef: secrettest.Ref("file://" + path)})
 	if err != nil {
 		t.Fatalf("resolveSecret: %v", err)
 	}
@@ -320,9 +319,9 @@ func TestRejectCrossOriginRedirect(t *testing.T) {
 }
 
 func TestBuildRouterErrorOmitsBaseURLCredentials(t *testing.T) {
-	models := config.Models{Definitions: map[string]config.ModelDefinition{
+	models := Config{Definitions: map[string]Definition{
 		"primary": {
-			Protocol:  config.ProtocolOpenAIChatCompat,
+			Protocol:  ProtocolOpenAIChatCompat,
 			Model:     "gpt-4o",
 			BaseURL:   "https://alice:hunter2@provider.example",
 			APIKeyRef: secrettest.Ref("env://AURA_TEST_KEY"),
@@ -343,8 +342,8 @@ func TestBuildRouterErrorOmitsBaseURLCredentials(t *testing.T) {
 func TestResolveSecretErrorOmitsAbsolutePath(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "api-key.txt")
-	_, err := resolveSecret("primary", &config.ModelDefinition{
-		Protocol:  config.ProtocolOpenAIChatCompat,
+	_, err := resolveSecret("primary", &Definition{
+		Protocol:  ProtocolOpenAIChatCompat,
 		Model:     "gpt-4o",
 		BaseURL:   "https://provider.example",
 		APIKeyRef: secrettest.Ref("file://" + missing),
@@ -374,29 +373,29 @@ func TestBuildRouterWithRoutes_FallbackExecution(t *testing.T) {
 	}))
 	defer s2.Close()
 
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
+	models := Config{
+		Definitions: map[string]Definition{
 			"cand-1": {
-				Protocol: config.ProtocolOpenAIChatCompat,
+				Protocol: ProtocolOpenAIChatCompat,
 				Model:    "gpt-4o",
 				BaseURL:  s1.URL,
-				Capabilities: config.ModelCapabilities{
+				Capabilities: Capabilities{
 					ContextTokens: 128000,
 					Tokenizer:     "cl100k_base",
 				},
 			},
 			"cand-2": {
-				Protocol: config.ProtocolOpenAIChatCompat,
+				Protocol: ProtocolOpenAIChatCompat,
 				Model:    "gpt-4o-mini",
 				BaseURL:  s2.URL,
-				Capabilities: config.ModelCapabilities{
+				Capabilities: Capabilities{
 					ContextTokens: 128000,
 					Tokenizer:     "cl100k_base",
 				},
 			},
 		},
 	}
-	routes := map[string]config.ModelRoute{
+	routes := map[string]ModelRoute{
 		"primary": {
 			Candidates:          []string{"cand-1", "cand-2"},
 			MaxProviderAttempts: 8,
@@ -440,16 +439,16 @@ func TestBuildRouterWithRoutes_FallbackExecution(t *testing.T) {
 }
 
 func TestBuildRouterWithRoutes_Validation(t *testing.T) {
-	models := config.Models{
-		Definitions: map[string]config.ModelDefinition{
+	models := Config{
+		Definitions: map[string]Definition{
 			"primary": {
-				Protocol: config.ProtocolOpenAIChatCompat,
+				Protocol: ProtocolOpenAIChatCompat,
 				Model:    "gpt-4o",
 				BaseURL:  "http://127.0.0.1:9999",
 			},
 		},
 	}
-	routes := map[string]config.ModelRoute{
+	routes := map[string]ModelRoute{
 		"primary": {
 			Candidates: []string{"nonexistent"},
 		},
@@ -494,7 +493,7 @@ func TestModelAPIKeyKeepsTheModelSecretRules(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			spec := &config.ModelDefinition{BaseURL: tc.baseURL, APIKeyRef: secrettest.Ref(tc.ref(t))}
+			spec := &Definition{BaseURL: tc.baseURL, APIKeyRef: secrettest.Ref(tc.ref(t))}
 			got, err := resolveSecret("primary", spec)
 			if tc.refuse != "" {
 				if !fault.HasCode(err, ErrorCodeSecretInvalid) || !strings.Contains(err.Error(), tc.refuse) {

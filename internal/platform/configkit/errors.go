@@ -18,6 +18,7 @@ const (
 type FieldError struct {
 	Path     string
 	Position string
+	AtKey    bool
 	Err      error
 }
 
@@ -43,6 +44,10 @@ func (e *FieldError) Unwrap() error {
 
 func Invalid(path, detail string) error {
 	return Field(path, fault.New(ErrorCodeInvalid, detail))
+}
+
+func InvalidKey(path, detail string) error {
+	return &FieldError{Path: path, AtKey: true, Err: fault.New(ErrorCodeInvalid, detail)}
 }
 
 func Field(path string, err error) error {
@@ -75,5 +80,5 @@ func placeUnder(prefix string, err error) []error {
 	if node.Path != "" {
 		path = prefix + "." + node.Path
 	}
-	return []error{&FieldError{Path: path, Position: node.Position, Err: node.Err}}
+	return []error{&FieldError{Path: path, Position: node.Position, AtKey: node.AtKey, Err: node.Err}}
 }

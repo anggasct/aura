@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -97,11 +96,11 @@ func newModelsRoutesCmd(gf *globalFlags) *cobra.Command {
 				route := cfg.ModelRoutes[routeName]
 				attempts := route.MaxProviderAttempts
 				if attempts <= 0 {
-					attempts = config.DefaultModelRouteMaxProviderAttempts
+					attempts = model.DefaultModelRouteMaxProviderAttempts
 				}
 				delay := time.Duration(route.RetryDelayBudget)
 				if delay <= 0 {
-					delay = config.DefaultModelRouteRetryDelayBudget
+					delay = model.DefaultModelRouteRetryDelayBudget
 				}
 				cost := "-"
 				if route.CostBudgetUSD > 0 {

@@ -14,8 +14,8 @@ import (
 
 	adkmodel "google.golang.org/adk/v2/model"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
@@ -58,7 +58,7 @@ type Router struct {
 	routing     map[string]string
 	routes      map[string]adkmodel.LLM
 	circuits    *CircuitManager
-	definitions map[string]config.ModelDefinition
+	definitions map[string]Definition
 	components  struct {
 		adapters map[string]adkmodel.LLM
 		routes   map[string]adkmodel.LLM
@@ -82,7 +82,7 @@ func NewRouter(primary, auxiliary adkmodel.LLM, routing map[string]string) (*Rou
 	return r, nil
 }
 
-func BuildRouter(logger *slog.Logger, models config.Models) (*Router, error) {
+func BuildRouter(logger *slog.Logger, models Config) (*Router, error) {
 	return BuildRouterWithRoutes(logger, models, nil, nil)
 }
 
@@ -98,7 +98,7 @@ func firstVisionWiring(wiring []VisionWiring) VisionWiring {
 	return wiring[0]
 }
 
-func BuildComponents(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry, wiring ...VisionWiring) (adapters map[string]adkmodel.LLM, circuits *CircuitManager, err error) {
+func BuildComponents(logger *slog.Logger, models Config, routes map[string]ModelRoute, checkpoint CircuitCheckpointStore, prices *usage.PriceRegistry, wiring ...VisionWiring) (adapters map[string]adkmodel.LLM, circuits *CircuitManager, err error) {
 	if err := validateRoutingCapabilities(models); err != nil {
 		return nil, nil, err
 	}
@@ -155,7 +155,7 @@ func BuildComponents(logger *slog.Logger, models config.Models, routes map[strin
 	return adapters, circuits, nil
 }
 
-func BuildRouterWithRoutes(logger *slog.Logger, models config.Models, routes map[string]config.ModelRoute, store CircuitCheckpointStore, wiring ...VisionWiring) (*Router, error) {
+func BuildRouterWithRoutes(logger *slog.Logger, models Config, routes map[string]ModelRoute, store CircuitCheckpointStore, wiring ...VisionWiring) (*Router, error) {
 	vw := firstVisionWiring(wiring)
 	adapters, circuits, err := BuildComponents(logger, models, routes, store, nil, vw)
 	if err != nil {
@@ -209,7 +209,7 @@ func BuildRouterComponents(r *Router) (adapters, routes map[string]adkmodel.LLM)
 	return r.components.adapters, r.components.routes
 }
 
-func validateRoutingCapabilities(models config.Models) error {
+func validateRoutingCapabilities(models Config) error {
 	routing := make(map[string]string, len(defaultTaskRouting)+len(models.Routing))
 	for task, role := range defaultTaskRouting {
 		routing[task] = role
@@ -235,7 +235,7 @@ func validateRoutingCapabilities(models config.Models) error {
 	return nil
 }
 
-func modelHasCapability(capabilities config.ModelCapabilities, name string) bool {
+func modelHasCapability(capabilities Capabilities, name string) bool {
 	switch name {
 	case "streaming":
 		return capabilities.Streaming
@@ -331,25 +331,25 @@ func (r *Router) Circuits() *CircuitManager {
 	return r.circuits
 }
 
-func (r *Router) Definitions() map[string]config.ModelDefinition {
+func (r *Router) Definitions() map[string]Definition {
 	return r.definitions
 }
-func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, providers map[string]config.ProviderPreset, timeout, idleTimeout time.Duration, wiring ...VisionWiring) (adapter adkmodel.LLM, configured bool, err error) {
+func newAdapter(logger *slog.Logger, name string, spec *Definition, providers map[string]ProviderPreset, timeout, idleTimeout time.Duration, wiring ...VisionWiring) (adapter adkmodel.LLM, configured bool, err error) {
 	if spec == nil {
 		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", "model: definition is missing")
 	}
-	resolved, err := config.Models{Providers: providers}.ResolveDefinition(spec)
+	resolved, err := Config{Providers: providers}.ResolveDefinition(spec)
 	if err != nil {
 		return nil, false, newError(ErrorCodeProviderInvalid, name, "", resolveDetail(err))
 	}
 	if resolved.Protocol == "" || spec.Model == "" {
 		return nil, false, nil
 	}
-	if err := config.ValidateBaseURL(resolved.BaseURL); err != nil {
+	if err := egress.ValidateBaseURL(resolved.BaseURL); err != nil {
 		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("invalid base_url: %v", err))
 	}
 	switch resolved.Protocol {
-	case config.ProtocolAnthropicMessages, config.ProtocolOpenAIChatCompat, config.ProtocolOpenAIResponses, config.ProtocolGeminiNative:
+	case ProtocolAnthropicMessages, ProtocolOpenAIChatCompat, ProtocolOpenAIResponses, ProtocolGeminiNative:
 	default:
 		return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", resolved.Protocol))
 	}
@@ -366,42 +366,35 @@ func newAdapter(logger *slog.Logger, name string, spec *config.ModelDefinition, 
 		wire.detail = wire.policy.DetailFor(resolved.Protocol)
 	}
 	switch resolved.Protocol {
-	case config.ProtocolAnthropicMessages:
+	case ProtocolAnthropicMessages:
 		return newAnthropicAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
-	case config.ProtocolOpenAIChatCompat:
+	case ProtocolOpenAIChatCompat:
 		return newOpenAIAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
-	case config.ProtocolOpenAIResponses:
+	case ProtocolOpenAIResponses:
 		return newOpenAIResponsesAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
-	case config.ProtocolGeminiNative:
+	case ProtocolGeminiNative:
 		return newGeminiAdapter(logger, spec.Model, resolved.BaseURL, apiKey, timeout, idleTimeout, wire).withProvider(resolved), true, nil
 	}
 	return nil, false, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("unsupported protocol %q", resolved.Protocol))
 }
 
 func resolveDetail(err error) string {
-	var detail string
-	var configCoded *fault.Error[config.ErrorCode]
-	var kitCoded *fault.Error[configkit.ErrorCode]
-	switch {
-	case errors.As(err, &configCoded):
-		detail = configCoded.Detail
-	case errors.As(err, &kitCoded):
-		detail = kitCoded.Detail
-	default:
+	var coded *fault.Error[ErrorCode]
+	if !errors.As(err, &coded) {
 		return err.Error()
 	}
 	var field *configkit.FieldError
 	if errors.As(err, &field) && field.Path != "" {
-		return field.Path + " " + detail
+		return field.Path + " " + coded.Detail
 	}
-	return detail
+	return coded.Detail
 }
 
-func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
+func resolveSecret(name string, spec *Definition) (string, error) {
 	source := spec.APIKeyRef.Reference()
 	if source.Env != "" {
 		value, ok := os.LookupEnv(source.Env)
-		if !ok || (value == "" && !config.IsLoopbackBaseURL(spec.BaseURL)) {
+		if !ok || (value == "" && !egress.IsLoopbackBaseURL(spec.BaseURL)) {
 			return "", newError(ErrorCodeSecretInvalid, name, "", fmt.Sprintf("secret environment variable %q is unavailable", source.Env))
 		}
 		return value, nil
@@ -417,7 +410,7 @@ func resolveSecret(name string, spec *config.ModelDefinition) (string, error) {
 		}
 		return value, nil
 	}
-	if !config.IsLoopbackBaseURL(spec.BaseURL) {
+	if !egress.IsLoopbackBaseURL(spec.BaseURL) {
 		return "", newError(ErrorCodeSecretInvalid, name, "", "api_key_ref is required for a non-loopback endpoint")
 	}
 	return "", nil
