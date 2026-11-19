@@ -16,22 +16,9 @@ import (
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
-
-func ValidateCapabilities(capabilities Capabilities) error {
-	var problems []error
-	seen := make(map[string]bool, len(capabilities.Enabled))
-	for i, name := range capabilities.Enabled {
-		if seen[name] {
-			problems = append(problems, configkit.Invalid("capabilities.enabled["+strconv.Itoa(i)+"]", "is listed more than once"))
-		}
-		seen[name] = true
-	}
-	return errors.Join(problems...)
-}
 
 func ValidateSync(syncConfig *Sync) error {
 	if syncConfig == nil {
@@ -130,13 +117,6 @@ func ValidateRuntime(runtime Runtime) error {
 	}
 	if time.Duration(runtime.RunRetention) < MinRetention {
 		return configkit.Invalid("runtime.run_retention", "must be at least 24h")
-	}
-	return nil
-}
-
-func ValidateServer(server Server) error {
-	if server.Port < 1 || server.Port > 65535 {
-		return configkit.Invalid("server.port", fmt.Sprintf("%d is out of range (1-65535)", server.Port))
 	}
 	return nil
 }
@@ -275,17 +255,6 @@ func ApplyMCPServerDefaults(s *MCPServer) {
 	}
 }
 
-func ValidateLogging(loggingConfig Logging) error {
-	var problems []error
-	if _, err := logging.ParseLevel(loggingConfig.Level); err != nil {
-		problems = append(problems, configkit.Invalid("logging.level", "must be one of debug, info, warn, error"))
-	}
-	if _, err := logging.ParseFormat(loggingConfig.Format); err != nil {
-		problems = append(problems, configkit.Invalid("logging.format", "must be one of text, json"))
-	}
-	return errors.Join(problems...)
-}
-
 func ValidateStorage(storage Storage) error {
 	if storage.MaxOpenConnections < 1 || storage.MaxOpenConnections > 16 {
 		return configkit.Invalid("storage.max_open_connections", fmt.Sprintf("%d is out of range (1-16)", storage.MaxOpenConnections))
@@ -301,77 +270,6 @@ func ValidateStorage(storage Storage) error {
 	}
 	if storage.BackupRetention < 1 {
 		return configkit.Invalid("storage.backup_retention", "must be at least 1")
-	}
-	return nil
-}
-
-func ValidateTelemetry(t Telemetry) error {
-	switch t.Exporter {
-	case "", "none", "stdout", "otlp_grpc", "otlp_http":
-	default:
-		return configkit.Invalid("telemetry.exporter", "must be one of none, stdout, otlp_grpc, otlp_http")
-	}
-	if t.SampleRatio < 0 || t.SampleRatio > 1 {
-		return configkit.Invalid("telemetry.sample_ratio", fmt.Sprintf("%f is out of range (0-1)", t.SampleRatio))
-	}
-	if t.QueueSize < 0 {
-		return configkit.Invalid("telemetry.queue_size", "must not be negative")
-	}
-	if t.ExportTimeout < 0 {
-		return configkit.Invalid("telemetry.export_timeout", "must not be negative")
-	}
-	if (t.Exporter == "otlp_grpc" || t.Exporter == "otlp_http") && t.Endpoint == "" {
-		return configkit.Invalid("telemetry.endpoint", fmt.Sprintf("is required for exporter %q", t.Exporter))
-	}
-	return nil
-}
-
-func ValidateUsage(u Usage) error {
-	if u.Currency == "" {
-		return configkit.Invalid("usage.currency", "must not be empty")
-	}
-	if u.DailyBudgetMicros < 0 {
-		return configkit.Invalid("usage.daily_budget_micros", "must not be negative")
-	}
-	if u.MonthlyBudgetMicros < 0 {
-		return configkit.Invalid("usage.monthly_budget_micros", "must not be negative")
-	}
-	if u.ReservationTTL <= 0 {
-		return configkit.Invalid("usage.reservation_ttl", "must be positive")
-	}
-	return nil
-}
-
-func ValidateHealth(h Health) error {
-	if err := validateLoopbackListen(h.Listen, "health.listen"); err != nil {
-		return err
-	}
-	if h.CheckInterval <= 0 {
-		return configkit.Invalid("health.check_interval", "must be positive")
-	}
-	if h.CheckTimeout <= 0 {
-		return configkit.Invalid("health.check_timeout", "must be positive")
-	}
-	if h.CheckTimeout > h.CheckInterval {
-		return configkit.Invalid("health.check_timeout", "must not exceed health.check_interval")
-	}
-	if h.DiskWarningPercent < 1 || h.DiskWarningPercent > 99 {
-		return configkit.Invalid("health.disk_warning_percent", "must be between 1 and 99")
-	}
-	if h.DiskCriticalPercent < 1 || h.DiskCriticalPercent > 99 {
-		return configkit.Invalid("health.disk_critical_percent", "must be between 1 and 99")
-	}
-	if h.DiskCriticalPercent >= h.DiskWarningPercent {
-		return configkit.Invalid("health.disk_critical_percent", "must be below health.disk_warning_percent")
-	}
-	if h.DiskCriticalFloorBytes <= 0 {
-		return configkit.Invalid("health.disk_critical_floor_bytes", "must be positive")
-	}
-	if h.BackupMaxAge <= 0 {
-		return configkit.Invalid("health.backup_max_age", "must be positive")
-	}
-	if h.RestoreVerificationMaxAge <= 0 {
-		return configkit.Invalid("health.restore_verification_max_age", "must be positive")
 	}
 	return nil
 }
@@ -395,24 +293,6 @@ func ValidateTerminal(t Terminal) error {
 		return configkit.Invalid("terminal.plain_approval", "must be \"deny\"")
 	}
 	return nil
-}
-
-func validateLoopbackListen(listen, field string) error {
-	host, portText, err := net.SplitHostPort(listen)
-	if err != nil {
-		return configkit.Invalid(field, "must be host:port")
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil || port < 1 || port > 65535 {
-		return configkit.Invalid(field, "port must be between 1 and 65535")
-	}
-	if host == "localhost" {
-		return nil
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.IsLoopback() {
-		return nil
-	}
-	return configkit.Invalid(field, "must bind loopback; non-loopback probe exposure requires the authenticated admin surface")
 }
 
 func listenAddressProblem(field, address string) error {
@@ -1069,71 +949,6 @@ func IsSnowflake(id string) bool {
 		}
 	}
 	return true
-}
-
-func ValidateVision(vision *Vision) error {
-	if vision == nil {
-		return nil
-	}
-	var problems []error
-	if vision.MaxEncodedBytes <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_encoded_bytes", "must be positive"))
-	}
-	if vision.MaxPixels <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_pixels", "must be positive"))
-	}
-	if vision.MaxDimension <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_dimension", "must be positive"))
-	}
-	if vision.MaxImages <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_images", "must be positive"))
-	}
-	if vision.MaxFrames != 1 {
-		problems = append(problems, configkit.Invalid("vision.max_frames", "must be 1"))
-	}
-	if time.Duration(vision.DecodeTimeout) <= 0 || time.Duration(vision.DecodeTimeout) > 30*time.Second {
-		problems = append(problems, configkit.Invalid("vision.decode_timeout", "must be positive and at most 30s"))
-	}
-	if vision.MaxDecodeConcurrency <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_decode_concurrency", "must be positive"))
-	}
-	if vision.MaxRequestBytes <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_request_bytes", "must be positive"))
-	}
-	if vision.MaxTransformMemory <= 0 {
-		problems = append(problems, configkit.Invalid("vision.max_transform_memory_bytes", "must be positive"))
-	}
-	if !validVisionDetail(vision.Detail) {
-		problems = append(problems, configkit.Invalid("vision.detail", "must be auto, low, or high"))
-	}
-	if strings.TrimSpace(vision.TransformVersion) == "" {
-		problems = append(problems, configkit.Invalid("vision.transform_version", "must not be empty"))
-	}
-	for _, name := range slices.Sorted(maps.Keys(vision.Providers)) {
-		limits := vision.Providers[name]
-		if !validProtocolName(name) {
-			problems = append(problems, configkit.Invalid("vision.providers."+name, "is not a known provider protocol"))
-			continue
-		}
-		if limits.MaxImages < 0 || limits.MaxImages > vision.MaxImages {
-			problems = append(problems, configkit.Invalid("vision.providers."+name+".max_images", "must be between 0 and vision.max_images"))
-		}
-		if limits.MaxRequestBytes < 0 || limits.MaxRequestBytes > vision.MaxRequestBytes {
-			problems = append(problems, configkit.Invalid("vision.providers."+name+".max_request_bytes", "must be between 0 and vision.max_request_bytes"))
-		}
-		if limits.Detail != "" && !validVisionDetail(limits.Detail) {
-			problems = append(problems, configkit.Invalid("vision.providers."+name+".detail", "must be auto, low, or high"))
-		}
-	}
-	return errors.Join(problems...)
-}
-
-func validVisionDetail(detail string) bool {
-	return detail == "auto" || detail == "low" || detail == "high"
-}
-
-func validProtocolName(name string) bool {
-	return name == ProtocolOpenAIResponses || name == ProtocolOpenAIChatCompat || name == ProtocolAnthropicMessages || name == ProtocolGeminiNative
 }
 
 func ValidateTools(toolsConfig *Tools) error {

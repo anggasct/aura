@@ -17,7 +17,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -36,7 +35,7 @@ type Pipeline struct {
 	shutdown atomic.Bool
 }
 
-func NewPipeline(cfg config.Telemetry, logger *slog.Logger) (*Pipeline, error) {
+func NewPipeline(cfg Config, logger *slog.Logger) (*Pipeline, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -137,7 +136,7 @@ func validExporter(e string) bool {
 	return false
 }
 
-func buildExporters(cfg config.Telemetry, exporter string) (sdktrace.SpanExporter, sdkmetric.Exporter, error) {
+func buildExporters(cfg Config, exporter string) (sdktrace.SpanExporter, sdkmetric.Exporter, error) {
 	ctx := context.Background()
 	switch exporter {
 	case ExporterStdout:

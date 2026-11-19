@@ -15,8 +15,6 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 const (
@@ -167,7 +165,7 @@ func NewService(limits *Limits, opts ...Option) (*Service, error) {
 
 func MaxFrames() int { return 1 }
 
-func LimitsFromConfig(cfg *config.Vision) Limits {
+func LimitsFromConfig(cfg *Config) Limits {
 	if cfg == nil {
 		return Limits{}
 	}

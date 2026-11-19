@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 func deriveDefaults(cfg *Config) {
@@ -20,7 +21,7 @@ func deriveEmptyCollections(cfg *Config) {
 		cfg.Models.Providers = map[string]legacyconfig.ProviderPreset{}
 	}
 	if cfg.Vision != nil && cfg.Vision.Providers == nil {
-		cfg.Vision.Providers = map[string]legacyconfig.VisionProviderLimits{}
+		cfg.Vision.Providers = map[string]vision.ProviderLimits{}
 	}
 }
 

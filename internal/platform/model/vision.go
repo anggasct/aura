@@ -20,7 +20,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
@@ -212,7 +211,7 @@ type VisionPolicy struct {
 	maxTransformMemory int64
 }
 
-func NewVisionPolicy(cfg *config.Vision) *VisionPolicy {
+func NewVisionPolicy(cfg *vision.Config) *VisionPolicy {
 	if cfg == nil || !cfg.Enabled {
 		return nil
 	}

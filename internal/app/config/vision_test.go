@@ -1,8 +1,11 @@
 package config
 
 import (
+	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 func TestLoad_VisionDefaults(t *testing.T) {
@@ -13,21 +16,21 @@ func TestLoad_VisionDefaults(t *testing.T) {
 	if res.Config.Vision == nil {
 		t.Fatal("Vision is nil")
 	}
-	vision := res.Config.Vision
-	if !vision.Enabled || !vision.StripMetadata || !vision.OrientNormalize {
-		t.Errorf("vision flags = %+v", vision)
+	loaded := res.Config.Vision
+	if !loaded.Enabled || !loaded.StripMetadata || !loaded.OrientNormalize {
+		t.Errorf("vision flags = %+v", loaded)
 	}
-	if vision.MaxEncodedBytes != 20971520 || vision.MaxPixels != 40000000 || vision.MaxDimension != 8192 {
-		t.Errorf("vision bounds = %+v", vision)
+	if loaded.MaxEncodedBytes != 20971520 || loaded.MaxPixels != 40000000 || loaded.MaxDimension != 8192 {
+		t.Errorf("vision bounds = %+v", loaded)
 	}
-	if vision.MaxImages != 4 || vision.MaxFrames != 1 || vision.MaxDecodeConcurrency != 2 {
-		t.Errorf("vision counts = %+v", vision)
+	if loaded.MaxImages != 4 || loaded.MaxFrames != 1 || loaded.MaxDecodeConcurrency != 2 {
+		t.Errorf("vision counts = %+v", loaded)
 	}
-	if vision.MaxRequestBytes != 33554432 || vision.MaxTransformMemory != 268435456 {
-		t.Errorf("vision byte bounds = %+v", vision)
+	if loaded.MaxRequestBytes != 33554432 || loaded.MaxTransformMemory != 268435456 {
+		t.Errorf("vision byte bounds = %+v", loaded)
 	}
-	if vision.Detail != "auto" || vision.TransformVersion != "v1" {
-		t.Errorf("vision detail/version = %+v", vision)
+	if loaded.Detail != "auto" || loaded.TransformVersion != "v1" {
+		t.Errorf("vision detail/version = %+v", loaded)
 	}
 }
 
@@ -98,4 +101,48 @@ func TestLoad_VisionEnvOverride(t *testing.T) {
 	if res.Config.Vision.MaxImages != 2 || res.Config.Vision.Detail != "low" {
 		t.Errorf("vision = %+v", res.Config.Vision)
 	}
+}
+
+func TestVisionProviderProblemsSkipLimitChecksForUnknownProtocols(t *testing.T) {
+	outOfRange := vision.ProviderLimits{MaxImages: 99, MaxRequestBytes: -1, Detail: "ultra"}
+
+	t.Run("unknown protocol", func(t *testing.T) {
+		section := vision.Default()
+		section.Providers = map[string]vision.ProviderLimits{"nosuch": outOfRange}
+		got := problemTexts(visionProviderProblems(&section))
+		want := []string{"vision.providers.nosuch: config_invalid: is not a known provider protocol"}
+		if !slices.Equal(got, want) {
+			t.Errorf("problems = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("known protocols in sorted order", func(t *testing.T) {
+		section := vision.Default()
+		section.Providers = map[string]vision.ProviderLimits{
+			"openai_chat_compat": outOfRange,
+			"nosuch":             outOfRange,
+			"anthropic_messages": outOfRange,
+		}
+		got := problemTexts(visionProviderProblems(&section))
+		want := []string{
+			"vision.providers.anthropic_messages.max_images: config_invalid: must be between 0 and vision.max_images",
+			"vision.providers.anthropic_messages.max_request_bytes: config_invalid: must be between 0 and vision.max_request_bytes",
+			"vision.providers.anthropic_messages.detail: config_invalid: must be auto, low, or high",
+			"vision.providers.nosuch: config_invalid: is not a known provider protocol",
+			"vision.providers.openai_chat_compat.max_images: config_invalid: must be between 0 and vision.max_images",
+			"vision.providers.openai_chat_compat.max_request_bytes: config_invalid: must be between 0 and vision.max_request_bytes",
+			"vision.providers.openai_chat_compat.detail: config_invalid: must be auto, low, or high",
+		}
+		if !slices.Equal(got, want) {
+			t.Errorf("problems = %v, want %v", got, want)
+		}
+	})
+}
+
+func problemTexts(err error) []string {
+	var texts []string
+	for _, problem := range fieldProblems(err) {
+		texts = append(texts, problem.Error())
+	}
+	return texts
 }

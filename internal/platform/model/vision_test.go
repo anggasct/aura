@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 func newVisionCaptureServer(t *testing.T, captured *[]byte) *httptest.Server {
@@ -59,8 +60,8 @@ func (f *fakeBlobReader) ReadBlob(ctx context.Context, refID string, maxBytes in
 	return data, nil
 }
 
-func testVisionConfig() *config.Vision {
-	return &config.Vision{
+func testVisionConfig() *vision.Config {
+	return &vision.Config{
 		Enabled:              true,
 		MaxEncodedBytes:      20971520,
 		MaxPixels:            40000000,
@@ -75,7 +76,7 @@ func testVisionConfig() *config.Vision {
 		Detail:               "auto",
 		TransformVersion:     "v1",
 		MaxTransformMemory:   configkit.ByteSize(268435456),
-		Providers:            map[string]config.VisionProviderLimits{},
+		Providers:            map[string]vision.ProviderLimits{},
 	}
 }
 
@@ -132,7 +133,7 @@ func TestVisionPolicyDisabled(t *testing.T) {
 
 func TestVisionPolicyProviderNarrowing(t *testing.T) {
 	cfg := testVisionConfig()
-	cfg.Providers["openai_chat_compat"] = config.VisionProviderLimits{MaxImages: 2, Detail: "low"}
+	cfg.Providers["openai_chat_compat"] = vision.ProviderLimits{MaxImages: 2, Detail: "low"}
 	policy := NewVisionPolicy(cfg)
 	if policy == nil {
 		t.Fatal("policy is nil")
