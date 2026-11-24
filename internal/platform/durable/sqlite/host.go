@@ -14,6 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const claimBatchSize = 64
@@ -188,7 +189,7 @@ func (h *host) writeLease(ctx context.Context) error {
 	wctx, cancel := detached(ctx)
 	defer cancel()
 	owner := h.currentOwner()
-	if _, err := h.rt.db.ExecContext(wctx, `INSERT INTO durable_host (owner, expires_at, created_at) VALUES (?, `+dbNowMS+` + ?, ?)`,
+	if _, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, `INSERT INTO durable_host (owner, expires_at, created_at) VALUES (?, `+dbNowMS+` + ?, ?)`,
 		owner, h.rt.hostTTL.Milliseconds(), h.rt.stamp()); err != nil {
 		return hostLease(err)
 	}
@@ -248,7 +249,7 @@ func (h *host) pass(ctx context.Context) {
 func (h *host) deleteExpiredHosts(ctx context.Context) error {
 	wctx, cancel := detached(ctx)
 	defer cancel()
-	if _, err := h.rt.db.ExecContext(wctx, `DELETE FROM durable_host WHERE expires_at <= `+dbNowMS); err != nil {
+	if _, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, `DELETE FROM durable_host WHERE expires_at <= `+dbNowMS); err != nil {
 		return fmt.Errorf("delete expired hosts: %w", err)
 	}
 	return nil
@@ -256,7 +257,7 @@ func (h *host) deleteExpiredHosts(ctx context.Context) error {
 
 func (h *host) initSignalCursor(ctx context.Context) error {
 	var cursor int64
-	if err := h.rt.db.QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM durable_signal`).Scan(&cursor); err != nil {
+	if err := dbsqlite.Conn(ctx, h.rt.db).QueryRowContext(ctx, `SELECT COALESCE(MAX(id), 0) FROM durable_signal`).Scan(&cursor); err != nil {
 		return fmt.Errorf("read signal cursor: %w", err)
 	}
 	h.signalCursor = cursor
@@ -301,7 +302,7 @@ func (h *host) claimBatch(ctx context.Context, names string, handlers map[string
 func (h *host) claimRows(ctx context.Context, owner, names string) ([]claimedRun, error) {
 	wctx, cancel := detached(ctx)
 	defer cancel()
-	rows, err := h.rt.db.QueryContext(wctx, claimSQL, owner, h.rt.stamp(), names, claimBatchSize, owner)
+	rows, err := dbsqlite.Conn(wctx, h.rt.db).QueryContext(wctx, claimSQL, owner, h.rt.stamp(), names, claimBatchSize, owner)
 	if err != nil {
 		return nil, fmt.Errorf("claim runs: %w", err)
 	}
@@ -448,7 +449,7 @@ func (h *host) settle(ctx context.Context, exec *execution, end *runEnd) {
 func (h *host) writeEnd(ctx context.Context, exec *execution, end *runEnd) (bool, error) {
 	wctx, cancel := detached(ctx)
 	defer cancel()
-	res, err := h.rt.db.ExecContext(wctx, endRunSQL, string(end.state), end.detail, h.rt.stamp(), exec.key, exec.owner, exec.claim)
+	res, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, endRunSQL, string(end.state), end.detail, h.rt.stamp(), exec.key, exec.owner, exec.claim)
 	if err != nil {
 		return false, fmt.Errorf("write run end: %w", err)
 	}
@@ -507,7 +508,7 @@ func (h *host) applyCancelRequests(ctx context.Context) error {
 }
 
 func (h *host) queryKeys(ctx context.Context, query string, args ...any) ([]string, error) {
-	rows, err := h.rt.db.QueryContext(ctx, query, args...)
+	rows, err := dbsqlite.Conn(ctx, h.rt.db).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -527,7 +528,7 @@ func (h *host) queryKeys(ctx context.Context, query string, args ...any) ([]stri
 }
 
 func (h *host) wakeSignalled(ctx context.Context) error {
-	rows, err := h.rt.db.QueryContext(ctx, `SELECT run_key, MAX(id) FROM durable_signal WHERE id > ? GROUP BY run_key`, h.signalCursor)
+	rows, err := dbsqlite.Conn(ctx, h.rt.db).QueryContext(ctx, `SELECT run_key, MAX(id) FROM durable_signal WHERE id > ? GROUP BY run_key`, h.signalCursor)
 	if err != nil {
 		return fmt.Errorf("read new signals: %w", err)
 	}
@@ -560,7 +561,7 @@ func (h *host) warnUnclaimable(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("encode handler names: %w", err)
 	}
-	rows, err := h.rt.db.QueryContext(ctx, `SELECT key, handler FROM durable_run
+	rows, err := dbsqlite.Conn(ctx, h.rt.db).QueryContext(ctx, `SELECT key, handler FROM durable_run
 WHERE state = 'running'
   AND handler NOT IN (SELECT value FROM json_each(?))
   AND (owner IS NULL OR owner NOT IN (SELECT owner FROM durable_host WHERE expires_at > `+dbNowMS+`))`, string(names))
@@ -593,7 +594,7 @@ func (h *host) renew(ctx context.Context) {
 	}
 	wctx, cancel := detached(ctx)
 	defer cancel()
-	res, err := h.rt.db.ExecContext(wctx, `UPDATE durable_host SET expires_at = `+dbNowMS+` + ? WHERE owner = ? AND expires_at > `+dbNowMS,
+	res, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, `UPDATE durable_host SET expires_at = `+dbNowMS+` + ? WHERE owner = ? AND expires_at > `+dbNowMS,
 		h.rt.hostTTL.Milliseconds(), h.currentOwner())
 	var renewed int64
 	if err == nil {
@@ -635,7 +636,7 @@ func (h *host) loseLease(ctx context.Context) {
 
 func (h *host) restoreLease(ctx context.Context) {
 	wctx, cancel := detached(ctx)
-	_, err := h.rt.db.ExecContext(wctx, `DELETE FROM durable_host WHERE owner = ?`, h.currentOwner())
+	_, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, `DELETE FROM durable_host WHERE owner = ?`, h.currentOwner())
 	cancel()
 	if err != nil {
 		h.logFailure(ctx, "drop_lease", err)
@@ -660,10 +661,10 @@ func (h *host) stop(ctx context.Context) error {
 	defer cancel()
 	owner := h.currentOwner()
 	var failures []error
-	if _, err := h.rt.db.ExecContext(wctx, `UPDATE durable_run SET owner = NULL, updated_at = ? WHERE owner = ? AND state = 'running'`, h.rt.stamp(), owner); err != nil {
+	if _, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, `UPDATE durable_run SET owner = NULL, updated_at = ? WHERE owner = ? AND state = 'running'`, h.rt.stamp(), owner); err != nil {
 		failures = append(failures, fmt.Errorf("durable host stop: release runs: %w", err))
 	}
-	if _, err := h.rt.db.ExecContext(wctx, `DELETE FROM durable_host WHERE owner = ?`, owner); err != nil {
+	if _, err := dbsqlite.Conn(wctx, h.rt.db).ExecContext(wctx, `DELETE FROM durable_host WHERE owner = ?`, owner); err != nil {
 		failures = append(failures, fmt.Errorf("durable host stop: delete lease: %w", err))
 	}
 	if !returned {

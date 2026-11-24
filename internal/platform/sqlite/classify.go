@@ -42,6 +42,18 @@ func Classify(err error) error {
 	return fault.Wrap(code, detail, err)
 }
 
+func errorCode(err error) ErrorCode {
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
+		return code
+	}
+	var driverErr *sqlitedriver.Error
+	if !errors.As(err, &driverErr) {
+		return ErrorCodeFailed
+	}
+	code, _ := classifyDriverCode(driverErr.Code())
+	return code
+}
+
 func classifyDriverCode(code int) (mapped ErrorCode, detail string) {
 	switch code & sqlitePrimaryMask {
 	case sqliteBusy:
