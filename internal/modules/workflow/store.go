@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"modernc.org/sqlite"
-
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -41,19 +40,10 @@ func specJSON(spec *Spec) ([]byte, error) {
 	return encoded, nil
 }
 
-const (
-	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
-	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
-	sqliteConstraint           = 19   // SQLITE_CONSTRAINT
-)
-
 func isConstraintUnique(err error) bool {
-	var sqliteErr *sqlite.Error
-	if errors.As(err, &sqliteErr) {
-		code := sqliteErr.Code()
-		return code == sqliteConstraintUnique || code == sqliteConstraintPrimaryKey || code == sqliteConstraint
-	}
-	return strings.Contains(err.Error(), "UNIQUE constraint failed")
+	classified := sqlite.Classify(err)
+	return fault.HasCode(classified, sqlite.ErrorCodeConstraintUnique) ||
+		fault.HasCode(classified, sqlite.ErrorCodeConstraintPrimaryKey)
 }
 
 func (s *Store) beginImmediate(ctx context.Context) (*sql.Conn, error) {

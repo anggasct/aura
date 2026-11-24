@@ -130,7 +130,7 @@ func (s *sqliteChildStore) InsertRun(ctx context.Context, run *ChildRun) error {
 		if isConstraintUnique(err) {
 			return Errorf(ErrorCodeChildConflict, "child run already exists")
 		}
-		return classifyBusy(fmt.Errorf("insert child run: %w", err))
+		return classify(fmt.Errorf("insert child run: %w", err))
 	}
 	return nil
 }
@@ -150,7 +150,7 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 		&resultChildID, &resultSessionID, &resultContextDigest, &resultDurableKey,
 		&resultSourceRange, &resultModel, &resultPromptVersion, &resultTrust,
 	); err != nil {
-		return ChildRun{}, fmt.Errorf("scan child run: %w", err)
+		return ChildRun{}, classify(fmt.Errorf("scan child run: %w", err))
 	}
 	for target, raw := range map[*time.Time]string{&run.Deadline: deadline, &run.CreatedAt: created, &run.UpdatedAt: updated} {
 		parsed, err := sqlite.ParseTime(raw)
@@ -219,7 +219,7 @@ func (s *sqliteChildStore) GetRun(ctx context.Context, id string) (ChildRun, boo
 			result_source_range, result_model, result_prompt_version, result_trust FROM child_run WHERE id = ?`, id,
 	)
 	if err != nil {
-		return ChildRun{}, false, classifyBusy(fmt.Errorf("get child run: %w", err))
+		return ChildRun{}, false, classify(fmt.Errorf("get child run: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
@@ -247,7 +247,7 @@ func (s *sqliteChildStore) GetRunByInvocation(ctx context.Context, parentInvocat
 		 WHERE parent_invocation_id = ? AND idempotency_key = ?`, parentInvocation, idempotencyKey,
 	)
 	if err != nil {
-		return ChildRun{}, false, classifyBusy(fmt.Errorf("get child run by invocation: %w", err))
+		return ChildRun{}, false, classify(fmt.Errorf("get child run by invocation: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
@@ -274,11 +274,11 @@ func (s *sqliteChildStore) SetState(ctx context.Context, id, state string, now t
 		state, sqlite.FormatTime(now.UTC()), id,
 	)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("set child run state: %w", err))
+		return classify(fmt.Errorf("set child run state: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("set child run state: %w", err)
+		return classify(fmt.Errorf("set child run state: %w", err))
 	}
 	if affected == 0 {
 		return Errorf(ErrorCodeChildNotFound, "child run is not found")
@@ -358,11 +358,11 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 		sqlite.FormatTime(now.UTC()), id,
 	)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("set child result: %w", err))
+		return classify(fmt.Errorf("set child result: %w", err))
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("set child result: %w", err)
+		return classify(fmt.Errorf("set child result: %w", err))
 	}
 	if affected == 0 {
 		return Errorf(ErrorCodeChildNotFound, "child run is not found")
@@ -386,7 +386,7 @@ func (s *sqliteChildStore) ActiveForParent(ctx context.Context, parentSessionID 
 		 ORDER BY created_at, id`, parentSessionID,
 	)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active child runs: %w", err))
+		return nil, classify(fmt.Errorf("list active child runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	runs := []ChildRun{}
@@ -398,7 +398,7 @@ func (s *sqliteChildStore) ActiveForParent(ctx context.Context, parentSessionID 
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list active child runs: %w", err)
+		return nil, classify(fmt.Errorf("list active child runs: %w", err))
 	}
 	return runs, nil
 }
@@ -431,7 +431,7 @@ func (s *sqliteChildStore) List(ctx context.Context, state string, limit int) ([
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list child runs: %w", err))
+		return nil, classify(fmt.Errorf("list child runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	runs := []ChildRun{}
@@ -443,7 +443,7 @@ func (s *sqliteChildStore) List(ctx context.Context, state string, limit int) ([
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list child runs: %w", err)
+		return nil, classify(fmt.Errorf("list child runs: %w", err))
 	}
 	return runs, nil
 }

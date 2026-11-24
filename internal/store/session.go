@@ -37,14 +37,14 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("begin create session %s: %w", sess.ID, err))
+		return classify(fmt.Errorf("begin create session %s: %w", sess.ID, err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := CreateSessionTx(ctx, tx, sess); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return classifyBusy(fmt.Errorf("commit create session %s: %w", sess.ID, err))
+		return classify(fmt.Errorf("commit create session %s: %w", sess.ID, err))
 	}
 	return nil
 }
@@ -72,7 +72,7 @@ func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *Session) error {
 				fmt.Sprintf("session %s already exists", sess.ID),
 			)
 		}
-		return classifyBusy(fmt.Errorf("create session %s: %w", sess.ID, err))
+		return classify(fmt.Errorf("create session %s: %w", sess.ID, err))
 	}
 	return nil
 }
@@ -84,7 +84,7 @@ func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, err
 		`SELECT id, owner_id, agent_id, metadata_json, created_at, updated_at FROM session WHERE id = ?`, id,
 	).Scan(&sess.ID, &sess.OwnerID, &sess.AgentID, &metadata, &createdAt, &updatedAt)
 	if err != nil {
-		return Session{}, fmt.Errorf("get session %s: %w", id, err)
+		return Session{}, classify(fmt.Errorf("get session %s: %w", id, err))
 	}
 	sess.Metadata = json.RawMessage(metadata)
 	if sess.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
@@ -116,7 +116,7 @@ func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string,
 		sessionID, after, limit,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list events for session %s: %w", sessionID, err)
+		return nil, classify(fmt.Errorf("list events for session %s: %w", sessionID, err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -129,7 +129,7 @@ func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string,
 		events = append(events, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list events for session %s: %w", sessionID, err)
+		return nil, classify(fmt.Errorf("list events for session %s: %w", sessionID, err))
 	}
 	return events, nil
 }

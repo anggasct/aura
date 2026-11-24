@@ -108,7 +108,7 @@ func ReplayTurn(ctx context.Context, db *sql.DB, sessionID, turnID string) (even
 		sessionID, turnID,
 	)
 	if err != nil {
-		return nil, false, fmt.Errorf("replay turn %s: %w", turnID, err)
+		return nil, false, classify(fmt.Errorf("replay turn %s: %w", turnID, err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -127,7 +127,7 @@ func ReplayTurn(ctx context.Context, db *sql.DB, sessionID, turnID string) (even
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false, fmt.Errorf("replay turn %s: %w", turnID, err)
+		return nil, false, classify(fmt.Errorf("replay turn %s: %w", turnID, err))
 	}
 	return terminal, terminal != nil, nil
 }

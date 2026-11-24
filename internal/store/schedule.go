@@ -169,7 +169,7 @@ func (s *sqliteScheduleStore) InsertJob(ctx context.Context, job *ScheduledJob) 
 		if isConstraintUnique(err) {
 			return fault.New(ErrorCodeScheduleConflict, fmt.Sprintf("schedule job %q already exists", job.ID))
 		}
-		return classifyBusy(fmt.Errorf("insert schedule job: %w", err))
+		return classify(fmt.Errorf("insert schedule job: %w", err))
 	}
 	return nil
 }
@@ -220,11 +220,11 @@ func (s *sqliteScheduleStore) EditJob(ctx context.Context, id string, edit *JobE
 		edit.OriginChannel, edit.OriginDestination, edit.OverlapPolicy, edit.CatchUpGraceSeconds,
 		edit.ExpectedVersion+1, sqlite.FormatTime(now.UTC()), id, edit.ExpectedVersion, ScheduleJobDeleted)
 	if err != nil {
-		return ScheduledJob{}, classifyBusy(fmt.Errorf("edit schedule job: %w", err))
+		return ScheduledJob{}, classify(fmt.Errorf("edit schedule job: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return ScheduledJob{}, classifyBusy(fmt.Errorf("edit schedule job: %w", err))
+		return ScheduledJob{}, classify(fmt.Errorf("edit schedule job: %w", err))
 	}
 	if affected == 0 {
 		if _, findErr := s.Job(ctx, id); findErr != nil {
@@ -246,11 +246,11 @@ func (s *sqliteScheduleStore) SetJobState(ctx context.Context, id, state string,
 		`UPDATE scheduled_job SET state = ?, updated_at = ? WHERE id = ? AND state != ?`,
 		state, sqlite.FormatTime(now.UTC()), id, ScheduleJobDeleted)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("set schedule job state: %w", err))
+		return classify(fmt.Errorf("set schedule job state: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return classifyBusy(fmt.Errorf("set schedule job state: %w", err))
+		return classify(fmt.Errorf("set schedule job state: %w", err))
 	}
 	if affected == 0 {
 		if _, findErr := s.Job(ctx, id); findErr != nil {
@@ -291,7 +291,7 @@ func (s *sqliteScheduleStore) RecordFire(ctx context.Context, occurrence *Schedu
 		if isConstraintForeignKey(err) {
 			return fault.New(ErrorCodeScheduleNotFound, fmt.Sprintf("schedule job %q does not exist", occurrence.JobID))
 		}
-		return classifyBusy(fmt.Errorf("record occurrence fire: %w", err))
+		return classify(fmt.Errorf("record occurrence fire: %w", err))
 	}
 	return nil
 }
@@ -314,11 +314,11 @@ func (s *sqliteScheduleStore) SettleOccurrence(ctx context.Context, id, state, t
 		state, nullText(turnID), nullText(resultEventID), nullText(safeErrorCode),
 		sqlite.FormatTime(now.UTC()), id, OccurrenceFired)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("settle occurrence: %w", err))
+		return classify(fmt.Errorf("settle occurrence: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return classifyBusy(fmt.Errorf("settle occurrence: %w", err))
+		return classify(fmt.Errorf("settle occurrence: %w", err))
 	}
 	if affected == 0 {
 		if err := s.requireOccurrence(ctx, id); err != nil {
@@ -345,7 +345,7 @@ func (s *sqliteScheduleStore) Occurrences(ctx context.Context, jobID string, lim
 		FROM scheduled_occurrence WHERE job_id = ? ORDER BY scheduled_for_utc DESC, id DESC LIMIT ?`,
 		jobID, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list occurrences: %w", err))
+		return nil, classify(fmt.Errorf("list occurrences: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	items := []ScheduledOccurrence{}
@@ -358,7 +358,7 @@ func (s *sqliteScheduleStore) Occurrences(ctx context.Context, jobID string, lim
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list occurrences: %w", err))
+		return nil, classify(fmt.Errorf("list occurrences: %w", err))
 	}
 	return items, nil
 }
@@ -375,7 +375,7 @@ func scanOneScheduledJob(row rowScanner) (ScheduledJob, bool, error) {
 		return ScheduledJob{}, false, nil
 	}
 	if err != nil {
-		return ScheduledJob{}, false, classifyBusy(fmt.Errorf("load schedule job: %w", err))
+		return ScheduledJob{}, false, classify(fmt.Errorf("load schedule job: %w", err))
 	}
 	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
@@ -400,7 +400,7 @@ func (s *sqliteScheduleStore) requireOccurrence(ctx context.Context, id string) 
 		return fault.New(ErrorCodeScheduleNotFound, "occurrence not found")
 	}
 	if err != nil {
-		return classifyBusy(fmt.Errorf("load occurrence: %w", err))
+		return classify(fmt.Errorf("load occurrence: %w", err))
 	}
 	return nil
 }
@@ -413,7 +413,7 @@ func scanScheduledOccurrence(rows *sql.Rows) (ScheduledOccurrence, error) {
 		&item.ID, &item.JobID, &item.JobVersion, &scheduledForRaw, &item.State,
 		&turnID, &resultEventID, &safeErrorCode, &createdAtRaw, &updatedAtRaw,
 	); err != nil {
-		return ScheduledOccurrence{}, classifyBusy(fmt.Errorf("scan occurrence: %w", err))
+		return ScheduledOccurrence{}, classify(fmt.Errorf("scan occurrence: %w", err))
 	}
 	if !validOccurrenceState(item.State) {
 		return ScheduledOccurrence{}, Errorf(ErrorCodeScheduleInvalid, "occurrence row carries invalid state")
@@ -452,7 +452,7 @@ func (s *sqliteScheduleStore) ActiveOccurrence(ctx context.Context, jobID string
 		FROM scheduled_occurrence WHERE job_id = ? AND state = ? ORDER BY scheduled_for_utc DESC, id DESC LIMIT 1`,
 		jobID, OccurrenceFired)
 	if err != nil {
-		return ScheduledOccurrence{}, false, classifyBusy(fmt.Errorf("load active occurrence: %w", err))
+		return ScheduledOccurrence{}, false, classify(fmt.Errorf("load active occurrence: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
@@ -478,11 +478,11 @@ func (s *sqliteScheduleStore) AttachTurn(ctx context.Context, id, turnID string,
 		`UPDATE scheduled_occurrence SET turn_id = ?, updated_at = ? WHERE id = ? AND state = ?`,
 		turnID, sqlite.FormatTime(now.UTC()), id, OccurrenceFired)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("attach turn: %w", err))
+		return classify(fmt.Errorf("attach turn: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return classifyBusy(fmt.Errorf("attach turn: %w", err))
+		return classify(fmt.Errorf("attach turn: %w", err))
 	}
 	if affected == 0 {
 		if err := s.requireOccurrence(ctx, id); err != nil {
@@ -506,7 +506,7 @@ func (s *sqliteScheduleStore) OccurrenceByFire(ctx context.Context, jobID string
 		FROM scheduled_occurrence WHERE job_id = ? AND scheduled_for_utc = ?`,
 		jobID, sqlite.FormatTime(scheduledFor.UTC()))
 	if err != nil {
-		return ScheduledOccurrence{}, false, classifyBusy(fmt.Errorf("load occurrence by fire: %w", err))
+		return ScheduledOccurrence{}, false, classify(fmt.Errorf("load occurrence by fire: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
@@ -535,7 +535,7 @@ func (s *sqliteScheduleStore) ActiveJobs(ctx context.Context, limit int) ([]Sche
 		FROM scheduled_job WHERE state = ? ORDER BY id LIMIT ?`,
 		ScheduleJobActive, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active jobs: %w", err))
+		return nil, classify(fmt.Errorf("list active jobs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	jobs := []ScheduledJob{}
@@ -551,7 +551,7 @@ func (s *sqliteScheduleStore) ActiveJobs(ctx context.Context, limit int) ([]Sche
 		jobs = append(jobs, job)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active jobs: %w", err))
+		return nil, classify(fmt.Errorf("list active jobs: %w", err))
 	}
 	return jobs, nil
 }
@@ -569,7 +569,7 @@ func (s *sqliteScheduleStore) FiredOccurrences(ctx context.Context, limit int) (
 		FROM scheduled_occurrence WHERE state = ? ORDER BY scheduled_for_utc, id LIMIT ?`,
 		OccurrenceFired, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list fired occurrences: %w", err))
+		return nil, classify(fmt.Errorf("list fired occurrences: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	items := []ScheduledOccurrence{}
@@ -582,7 +582,7 @@ func (s *sqliteScheduleStore) FiredOccurrences(ctx context.Context, limit int) (
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list fired occurrences: %w", err))
+		return nil, classify(fmt.Errorf("list fired occurrences: %w", err))
 	}
 	return items, nil
 }
@@ -605,11 +605,11 @@ func (s *sqliteScheduleStore) PruneOccurrences(ctx context.Context, jobID string
 		)`,
 		jobID, sqlite.FormatTime(before.UTC()), limit)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("prune occurrences: %w", err))
+		return 0, classify(fmt.Errorf("prune occurrences: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("prune occurrences: %w", err))
+		return 0, classify(fmt.Errorf("prune occurrences: %w", err))
 	}
 	return int(affected), nil
 }
@@ -628,7 +628,7 @@ func (s *sqliteScheduleStore) ListJobs(ctx context.Context, limit int) ([]Schedu
 		FROM scheduled_job ORDER BY created_at DESC, id DESC LIMIT ?`,
 		limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list jobs: %w", err))
+		return nil, classify(fmt.Errorf("list jobs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	jobs := []ScheduledJob{}
@@ -644,7 +644,7 @@ func (s *sqliteScheduleStore) ListJobs(ctx context.Context, limit int) ([]Schedu
 		jobs = append(jobs, job)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list jobs: %w", err))
+		return nil, classify(fmt.Errorf("list jobs: %w", err))
 	}
 	return jobs, nil
 }

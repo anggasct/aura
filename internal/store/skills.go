@@ -97,7 +97,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
 `, row.ID, row.Name, row.Origin, row.Digest, row.State, row.Validation, row.Requested, row.Granted, nullSkillTime(row.ReviewedAt), created, now)
 	if err != nil {
-		return false, classifyBusy(codedError(ErrorCodeStorageUnavailable, "record skill scan", err))
+		return false, codedError(ErrorCodeStorageUnavailable, "record skill scan", sqlite.Classify(err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -123,7 +123,7 @@ FROM skill_package WHERE id = ?
 		return SkillRow{}, Errorf(ErrorCodeSkillNotFound, "skill is not registered")
 	}
 	if err != nil {
-		return SkillRow{}, classifyBusy(codedError(ErrorCodeStorageUnavailable, "read skill", err))
+		return SkillRow{}, codedError(ErrorCodeStorageUnavailable, "read skill", sqlite.Classify(err))
 	}
 	if err := row.bindTimes(reviewed, created, updated); err != nil {
 		return SkillRow{}, err
@@ -152,7 +152,7 @@ SELECT id, canonical_name, origin_json, content_digest, state, validation_json, 
 FROM skill_package WHERE state = ? ORDER BY updated_at DESC, id ASC LIMIT ?
 `, state, limit)
 	if err != nil {
-		return nil, classifyBusy(codedError(ErrorCodeStorageUnavailable, "list skills", err))
+		return nil, codedError(ErrorCodeStorageUnavailable, "list skills", sqlite.Classify(err))
 	}
 	defer func() { _ = rows.Close() }()
 	out := make([]SkillRow, 0, limit)
@@ -224,7 +224,7 @@ SET state = ?, granted_capabilities_json = ?, reviewed_at = ?, updated_at = ?
 WHERE id = ? AND state = ? AND content_digest = ?
 `, SkillStateActive, granted, now, now, id, SkillStateQuarantined, digest)
 	if err != nil {
-		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "accept skill", err))
+		return codedError(ErrorCodeStorageUnavailable, "accept skill", sqlite.Classify(err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -250,7 +250,7 @@ SET state = ?, reviewed_at = ?, updated_at = ?
 WHERE id = ? AND state = ?
 `, SkillStateRejected, now, now, id, SkillStateQuarantined)
 	if err != nil {
-		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "reject skill", err))
+		return codedError(ErrorCodeStorageUnavailable, "reject skill", sqlite.Classify(err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
@@ -269,7 +269,7 @@ func (s *sqliteSkillStore) classifyReviewConflict(ctx context.Context, id, diges
 		return Errorf(ErrorCodeSkillNotFound, "skill is not registered")
 	}
 	if err != nil {
-		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "read skill", err))
+		return codedError(ErrorCodeStorageUnavailable, "read skill", sqlite.Classify(err))
 	}
 	if digest != "" && current != digest {
 		return Errorf(ErrorCodeSkillDigestChanged, "skill content changed since review")
@@ -295,7 +295,7 @@ SELECT id, canonical_name, origin_json, content_digest, state, validation_json, 
 FROM skill_package ORDER BY updated_at DESC, id ASC LIMIT ?
 `, limit)
 	if err != nil {
-		return nil, classifyBusy(codedError(ErrorCodeStorageUnavailable, "list skills", err))
+		return nil, codedError(ErrorCodeStorageUnavailable, "list skills", sqlite.Classify(err))
 	}
 	defer func() { _ = rows.Close() }()
 	out := make([]SkillRow, 0, limit)
@@ -330,7 +330,7 @@ SET state = ?, updated_at = ?
 WHERE id = ? AND state = ?
 `, SkillStateDisabled, now, id, SkillStateActive)
 	if err != nil {
-		return classifyBusy(codedError(ErrorCodeStorageUnavailable, "disable skill", err))
+		return codedError(ErrorCodeStorageUnavailable, "disable skill", sqlite.Classify(err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {

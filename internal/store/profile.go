@@ -157,7 +157,7 @@ func (s *sqliteProfileStore) InsertFact(ctx context.Context, fact *ProfileFact) 
 		if isConstraintUnique(err) {
 			return Errorf(ErrorCodeProfileConflict, "profile fact already exists")
 		}
-		return classifyBusy(fmt.Errorf("insert profile fact: %w", err))
+		return classify(fmt.Errorf("insert profile fact: %w", err))
 	}
 	return nil
 }
@@ -173,7 +173,7 @@ func scanProfileFact(rows *sql.Rows) (ProfileFact, error) {
 		&fact.Status, &fact.Origin, &verified, &fact.Confidence, &fact.ConfidencePolicy,
 		&conflicts, &expires, &created, &updated,
 	); err != nil {
-		return ProfileFact{}, fmt.Errorf("scan profile fact: %w", err)
+		return ProfileFact{}, classify(fmt.Errorf("scan profile fact: %w", err))
 	}
 	fact.OwnerVerified = verified == 1
 	fact.ConflictsWithID = conflicts.String
@@ -212,12 +212,12 @@ func (s *sqliteProfileStore) GetFact(ctx context.Context, id string) (ProfileFac
 		`SELECT `+selectProfileFactColumns+` FROM profile_fact WHERE id = ?`, id,
 	)
 	if err != nil {
-		return ProfileFact{}, false, classifyBusy(fmt.Errorf("get profile fact: %w", err))
+		return ProfileFact{}, false, classify(fmt.Errorf("get profile fact: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return ProfileFact{}, false, classifyBusy(fmt.Errorf("get profile fact: %w", err))
+			return ProfileFact{}, false, classify(fmt.Errorf("get profile fact: %w", err))
 		}
 		return ProfileFact{}, false, nil
 	}
@@ -226,7 +226,7 @@ func (s *sqliteProfileStore) GetFact(ctx context.Context, id string) (ProfileFac
 		return ProfileFact{}, false, err
 	}
 	if err := rows.Err(); err != nil {
-		return ProfileFact{}, false, classifyBusy(fmt.Errorf("get profile fact: %w", err))
+		return ProfileFact{}, false, classify(fmt.Errorf("get profile fact: %w", err))
 	}
 	return fact, true, nil
 }
@@ -253,11 +253,11 @@ func (s *sqliteProfileStore) UpdateFact(ctx context.Context, fact *ProfileFact) 
 		if isConstraintUnique(err) {
 			return Errorf(ErrorCodeProfileConflict, "profile fact update conflicts")
 		}
-		return classifyBusy(fmt.Errorf("update profile fact: %w", err))
+		return classify(fmt.Errorf("update profile fact: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return classifyBusy(fmt.Errorf("update profile fact: %w", err))
+		return classify(fmt.Errorf("update profile fact: %w", err))
 	}
 	if affected == 0 {
 		return Errorf(ErrorCodeProfileNotFound, "profile fact does not exist")
@@ -293,11 +293,11 @@ func (s *sqliteProfileStore) AddEvidence(ctx context.Context, evidence *ProfileE
 		if isConstraintForeignKey(err) {
 			return false, Errorf(ErrorCodeProfileInvalid, "profile evidence references unknown rows")
 		}
-		return false, classifyBusy(fmt.Errorf("add profile evidence: %w", err))
+		return false, classify(fmt.Errorf("add profile evidence: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("add profile evidence: %w", err))
+		return false, classify(fmt.Errorf("add profile evidence: %w", err))
 	}
 	return affected > 0, nil
 }
@@ -316,7 +316,7 @@ func (s *sqliteProfileStore) ListEvidence(ctx context.Context, factID string) ([
 		factID,
 	)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list profile evidence: %w", err))
+		return nil, classify(fmt.Errorf("list profile evidence: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []ProfileEvidence
@@ -328,7 +328,7 @@ func (s *sqliteProfileStore) ListEvidence(ctx context.Context, factID string) ([
 			&evidence.FactID, &evidence.SourceEventID, &evidence.SourceDigest,
 			&provider, &model, &modelVersion, &promptVersion, &promptDigest, &observed,
 		); err != nil {
-			return nil, fmt.Errorf("scan profile evidence: %w", err)
+			return nil, classify(fmt.Errorf("scan profile evidence: %w", err))
 		}
 		evidence.Provider, evidence.Model = provider.String, model.String
 		evidence.ModelVersion, evidence.PromptVersion = modelVersion.String, promptVersion.String
@@ -341,7 +341,7 @@ func (s *sqliteProfileStore) ListEvidence(ctx context.Context, factID string) ([
 		out = append(out, evidence)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list profile evidence: %w", err))
+		return nil, classify(fmt.Errorf("list profile evidence: %w", err))
 	}
 	return out, nil
 }
@@ -361,7 +361,7 @@ func (s *sqliteProfileStore) ListActive(ctx context.Context, ownerID, category, 
 		ownerID, category, key,
 	)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active profile facts: %w", err))
+		return nil, classify(fmt.Errorf("list active profile facts: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []ProfileFact
@@ -373,7 +373,7 @@ func (s *sqliteProfileStore) ListActive(ctx context.Context, ownerID, category, 
 		out = append(out, fact)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active profile facts: %w", err))
+		return nil, classify(fmt.Errorf("list active profile facts: %w", err))
 	}
 	return out, nil
 }
@@ -408,7 +408,7 @@ func (s *sqliteProfileStore) ListFacts(ctx context.Context, ownerID, status, cat
 	args = append(args, limit)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list profile facts: %w", err))
+		return nil, classify(fmt.Errorf("list profile facts: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []ProfileFact
@@ -420,7 +420,7 @@ func (s *sqliteProfileStore) ListFacts(ctx context.Context, ownerID, status, cat
 		out = append(out, fact)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list profile facts: %w", err))
+		return nil, classify(fmt.Errorf("list profile facts: %w", err))
 	}
 	return out, nil
 }
@@ -479,7 +479,7 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 	}
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("search profile facts: %w", err))
+		return nil, classify(fmt.Errorf("search profile facts: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []ProfileFact
@@ -491,7 +491,7 @@ func (s *sqliteProfileStore) SearchFacts(ctx context.Context, ownerID, category,
 		out = append(out, fact)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("search profile facts: %w", err))
+		return nil, classify(fmt.Errorf("search profile facts: %w", err))
 	}
 	return out, nil
 }

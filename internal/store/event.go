@@ -9,17 +9,8 @@ import (
 	"math"
 	"time"
 
-	sqlitedriver "modernc.org/sqlite"
-
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-)
-
-const (
-	sqliteConstraintUnique     = 2067 // SQLITE_CONSTRAINT_UNIQUE
-	sqliteConstraintPrimaryKey = 1555 // SQLITE_CONSTRAINT_PRIMARYKEY
-	sqliteConstraintCheck      = 275  // SQLITE_CONSTRAINT_CHECK
-	sqliteConstraintForeignKey = 787  // SQLITE_CONSTRAINT_FOREIGNKEY
 )
 
 const insertRuntimeEventSQL = `
@@ -50,13 +41,13 @@ func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []RuntimeEven
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin append batch: %w", err)
+		return classify(fmt.Errorf("begin append batch: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, insertRuntimeEventSQL)
 	if err != nil {
-		return fmt.Errorf("prepare append batch: %w", err)
+		return classify(fmt.Errorf("prepare append batch: %w", err))
 	}
 	defer func() { _ = stmt.Close() }()
 
@@ -65,7 +56,7 @@ func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []RuntimeEven
 			return err
 		}
 	}
-	return tx.Commit()
+	return classify(tx.Commit())
 }
 
 func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (uint64, error) {
@@ -74,7 +65,7 @@ func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (
 		`SELECT MAX(sequence) FROM runtime_event WHERE session_id = ?`, sessionID,
 	).Scan(&seq)
 	if err != nil {
-		return 0, fmt.Errorf("last sequence for session %s: %w", sessionID, err)
+		return 0, classify(fmt.Errorf("last sequence for session %s: %w", sessionID, err))
 	}
 	if !seq.Valid {
 		return 0, nil
@@ -88,7 +79,7 @@ func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, fmt.Errorf("begin sequenced append: %w", err)
+		return 0, classify(fmt.Errorf("begin sequenced append: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	assigned, err := assignNextSequence(ctx, tx, sessionID)
@@ -100,7 +91,7 @@ func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string
 		return 0, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, classifyBusy(fmt.Errorf("commit sequenced append: %w", err))
+		return 0, classify(fmt.Errorf("commit sequenced append: %w", err))
 	}
 	return assigned, nil
 }
@@ -114,7 +105,7 @@ func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *RuntimeEvent) (se
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, false, fmt.Errorf("begin upsert event: %w", err)
+		return 0, false, classify(fmt.Errorf("begin upsert event: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	var stored int64
@@ -126,12 +117,12 @@ func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *RuntimeEvent) (se
 			return 0, false, err
 		}
 		if err := tx.Commit(); err != nil {
-			return 0, false, classifyBusy(fmt.Errorf("commit upsert event: %w", err))
+			return 0, false, classify(fmt.Errorf("commit upsert event: %w", err))
 		}
 		return assigned, true, nil
 	case errors.Is(err, sql.ErrNoRows):
 	default:
-		return 0, false, fmt.Errorf("lookup upsert event: %w", err)
+		return 0, false, classify(fmt.Errorf("lookup upsert event: %w", err))
 	}
 	assigned, err := assignNextSequence(ctx, tx, e.SessionID)
 	if err != nil {
@@ -142,7 +133,7 @@ func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *RuntimeEvent) (se
 		return 0, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, false, classifyBusy(fmt.Errorf("commit upsert event: %w", err))
+		return 0, false, classify(fmt.Errorf("commit upsert event: %w", err))
 	}
 	return assigned, false, nil
 }
@@ -152,7 +143,7 @@ func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 	if err := tx.QueryRowContext(ctx,
 		`SELECT MAX(sequence) FROM runtime_event WHERE session_id = ?`, sessionID,
 	).Scan(&highest); err != nil {
-		return 0, fmt.Errorf("read max sequence for session %s: %w", sessionID, err)
+		return 0, classify(fmt.Errorf("read max sequence for session %s: %w", sessionID, err))
 	}
 	next := int64(1)
 	if highest.Valid {
@@ -179,7 +170,7 @@ func AllocateSequenceTx(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 	}
 	sequence, err := assignNextSequence(ctx, tx, sessionID)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("allocate sequence: %w", err))
+		return 0, classify(fmt.Errorf("allocate sequence: %w", err))
 	}
 	return sequence, nil
 }
@@ -189,12 +180,12 @@ func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeE
 		`SELECT `+selectRuntimeEventColumns+` FROM runtime_event WHERE id = ?`, id,
 	)
 	if err != nil {
-		return RuntimeEvent{}, false, fmt.Errorf("lookup event %s: %w", id, err)
+		return RuntimeEvent{}, false, classify(fmt.Errorf("lookup event %s: %w", id, err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return RuntimeEvent{}, false, fmt.Errorf("lookup event %s: %w", id, err)
+			return RuntimeEvent{}, false, classify(fmt.Errorf("lookup event %s: %w", id, err))
 		}
 		return RuntimeEvent{}, false, nil
 	}
@@ -211,7 +202,7 @@ func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeE
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("begin checkpoint append: %w", err))
+		return classify(fmt.Errorf("begin checkpoint append: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -237,13 +228,13 @@ func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeE
 		)
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return classifyBusy(fmt.Errorf("lookup checkpoint event %s: %w", event.ID, err))
+		return classify(fmt.Errorf("lookup checkpoint event %s: %w", event.ID, err))
 	}
 	if err := AppendEventTx(ctx, tx, event); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return classifyBusy(fmt.Errorf("commit checkpoint append: %w", err))
+		return classify(fmt.Errorf("commit checkpoint append: %w", err))
 	}
 	return nil
 }
@@ -358,34 +349,23 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 				fmt.Sprintf("event %s violates a storage constraint", e.ID),
 			)
 		}
-		return classifyBusy(fmt.Errorf("append event %s: %w", e.ID, err))
+		return classify(fmt.Errorf("append event %s: %w", e.ID, err))
 	}
 	return nil
 }
 
 func isConstraintUnique(err error) bool {
-	return isConstraintCode(err, sqliteConstraintUnique, sqliteConstraintPrimaryKey)
+	classified := sqlite.Classify(err)
+	return fault.HasCode(classified, sqlite.ErrorCodeConstraintUnique) ||
+		fault.HasCode(classified, sqlite.ErrorCodeConstraintPrimaryKey)
 }
 
 func isConstraintForeignKey(err error) bool {
-	return isConstraintCode(err, sqliteConstraintForeignKey)
+	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintForeignKey)
 }
 
 func isConstraintCheck(err error) bool {
-	return isConstraintCode(err, sqliteConstraintCheck)
-}
-
-func isConstraintCode(err error, codes ...int) bool {
-	var sqliteErr *sqlitedriver.Error
-	if !errors.As(err, &sqliteErr) {
-		return false
-	}
-	for _, code := range codes {
-		if sqliteErr.Code() == code {
-			return true
-		}
-	}
-	return false
+	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck)
 }
 
 func nullableJSON(raw json.RawMessage) any {
@@ -405,7 +385,7 @@ func scanRuntimeEvent(rows *sql.Rows) (RuntimeEvent, error) {
 	var providerUsage sql.NullString
 	if err := rows.Scan(&e.ID, &e.SessionID, &sequence, &e.TurnID, &e.InvocationID, &e.Branch, &e.Author, &e.Kind,
 		&schemaVersion, &payload, &providerUsage, &createdAt); err != nil {
-		return RuntimeEvent{}, fmt.Errorf("scan runtime event: %w", err)
+		return RuntimeEvent{}, classify(fmt.Errorf("scan runtime event: %w", err))
 	}
 	var err error
 	if e.Sequence, err = sequenceFromDB(sequence); err != nil {

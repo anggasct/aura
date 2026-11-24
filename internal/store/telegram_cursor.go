@@ -32,7 +32,7 @@ func (s *sqliteTelegramCursorStore) Load(ctx context.Context, source string) (ne
 		return 0, false, nil
 	}
 	if err != nil {
-		return 0, false, classifyBusy(fmt.Errorf("load telegram cursor: %w", err))
+		return 0, false, classify(fmt.Errorf("load telegram cursor: %w", err))
 	}
 	return nextUpdateID, true, nil
 }
@@ -54,7 +54,7 @@ ON CONFLICT(source) DO UPDATE SET
     updated_at = excluded.updated_at
 `
 	if _, err := s.db.ExecContext(ctx, query, source, nextUpdateID, sqlite.FormatTime(at.UTC())); err != nil {
-		return classifyBusy(fmt.Errorf("advance telegram cursor: %w", err))
+		return classify(fmt.Errorf("advance telegram cursor: %w", err))
 	}
 	return nil
 }

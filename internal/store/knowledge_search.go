@@ -95,7 +95,7 @@ func (s *sqliteKBIndex) ScopeChunks(ctx context.Context, collections []string) (
 		`SELECT count(*) FROM kb_source s JOIN kb_chunk c ON c.source_id = s.id WHERE s.collection IN (`+placeholders(len(collections))+`)`,
 		stringArgs(collections)...).Scan(&count)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("count knowledge scope: %w", err))
+		return 0, classify(fmt.Errorf("count knowledge scope: %w", err))
 	}
 	return count, nil
 }
@@ -115,7 +115,7 @@ func (s *sqliteKBIndex) TermFrequency(ctx context.Context, collections []string,
 		`SELECT count(*) FROM (SELECT 1 FROM kb_chunk_fts WHERE kb_chunk_fts MATCH ? LIMIT ?)`,
 		kbScopeFilter(collections)+" AND {content heading}:"+quoteFTSTerm(term), limit).Scan(&count)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("count knowledge term: %w", err))
+		return 0, classify(fmt.Errorf("count knowledge term: %w", err))
 	}
 	return count, nil
 }
@@ -141,21 +141,21 @@ func (s *sqliteKBIndex) Search(ctx context.Context, collections, terms []string,
 		 JOIN kb_source s ON s.id = k.source_id
 		 ORDER BY r.score, k.id`, kbMatch(collections, terms), depth)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("search knowledge: %w", err))
+		return nil, classify(fmt.Errorf("search knowledge: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var hits []KBHit
 	for rows.Next() {
 		var hit KBHit
 		if err := rows.Scan(&hit.ChunkID, &hit.SourceID, &hit.Collection, &hit.Label, &hit.Heading, &hit.Ordinal, &hit.Content, &hit.Score); err != nil {
-			return nil, fmt.Errorf("scan knowledge hit: %w", err)
+			return nil, classify(fmt.Errorf("scan knowledge hit: %w", err))
 		}
 		if slices.Contains(collections, hit.Collection) {
 			hits = append(hits, hit)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("search knowledge: %w", err))
+		return nil, classify(fmt.Errorf("search knowledge: %w", err))
 	}
 	return hits, nil
 }
@@ -168,7 +168,7 @@ func KBIndexPresent(ctx context.Context, db *sql.DB) (bool, error) {
 	err := db.QueryRowContext(ctx,
 		`SELECT count(*) FROM sqlite_master WHERE name IN ('kb_collection', 'kb_source', 'kb_chunk', 'kb_chunk_fts')`).Scan(&tables)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("probe knowledge tables: %w", err))
+		return false, classify(fmt.Errorf("probe knowledge tables: %w", err))
 	}
 	return tables == 4, nil
 }

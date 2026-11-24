@@ -147,14 +147,14 @@ func (s *sqliteBroadcastStore) InsertItem(ctx context.Context, item *BroadcastIt
 		return *item, false, nil
 	}
 	if !isConstraintUnique(err) {
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("insert broadcast item: %w", err))
+		return BroadcastItem{}, false, classify(fmt.Errorf("insert broadcast item: %w", err))
 	}
 	existing, found, findErr := s.ItemByKey(ctx, item.Producer, item.IdempotencyKey)
 	if findErr != nil {
 		return BroadcastItem{}, false, findErr
 	}
 	if !found {
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("insert broadcast item: %w", err))
+		return BroadcastItem{}, false, classify(fmt.Errorf("insert broadcast item: %w", err))
 	}
 	if existing.ContentDigest != item.ContentDigest {
 		return BroadcastItem{}, false, fault.New(
@@ -201,7 +201,7 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("begin digest transaction: %w", err))
+		return BroadcastItem{}, false, classify(fmt.Errorf("begin digest transaction: %w", err))
 	}
 	committed := false
 	defer func() {
@@ -232,21 +232,21 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 	)
 	if err != nil {
 		if !isConstraintUnique(err) {
-			return BroadcastItem{}, false, classifyBusy(fmt.Errorf("insert digest parent: %w", err))
+			return BroadcastItem{}, false, classify(fmt.Errorf("insert digest parent: %w", err))
 		}
 		existing, found, findErr := s.ItemByKey(ctx, parent.Producer, parent.IdempotencyKey)
 		if findErr != nil {
 			return BroadcastItem{}, false, findErr
 		}
 		if !found {
-			return BroadcastItem{}, false, classifyBusy(fmt.Errorf("insert digest parent: %w", err))
+			return BroadcastItem{}, false, classify(fmt.Errorf("insert digest parent: %w", err))
 		}
 		return existing, true, nil
 	}
 	link, err := tx.PrepareContext(ctx,
 		`UPDATE broadcast_item SET state = ?, digest_parent_id = ?, updated_at = ? WHERE id = ? AND state = ?`)
 	if err != nil {
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("prepare digest link: %w", err))
+		return BroadcastItem{}, false, classify(fmt.Errorf("prepare digest link: %w", err))
 	}
 	defer func() { _ = link.Close() }()
 	var linked int64
@@ -254,11 +254,11 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 		result, err := link.ExecContext(ctx,
 			BroadcastStateCancelled, parent.ID, sqlite.FormatTime(parent.UpdatedAt.UTC()), id, BroadcastStateHeld)
 		if err != nil {
-			return BroadcastItem{}, false, classifyBusy(fmt.Errorf("link digest children: %w", err))
+			return BroadcastItem{}, false, classify(fmt.Errorf("link digest children: %w", err))
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {
-			return BroadcastItem{}, false, classifyBusy(fmt.Errorf("link digest children: %w", err))
+			return BroadcastItem{}, false, classify(fmt.Errorf("link digest children: %w", err))
 		}
 		linked += affected
 	}
@@ -266,7 +266,7 @@ func (s *sqliteBroadcastStore) CreateDigest(ctx context.Context, parent *Broadca
 		return BroadcastItem{}, false, Errorf(ErrorCodeBroadcastConflict, "digest children are not all held")
 	}
 	if err := tx.Commit(); err != nil {
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("commit digest transaction: %w", err))
+		return BroadcastItem{}, false, classify(fmt.Errorf("commit digest transaction: %w", err))
 	}
 	committed = true
 	return *parent, false, nil
@@ -278,7 +278,7 @@ func (s *sqliteBroadcastStore) findItem(ctx context.Context, query string, args 
 		if errors.Is(err, sql.ErrNoRows) {
 			return BroadcastItem{}, false, nil
 		}
-		return BroadcastItem{}, false, classifyBusy(fmt.Errorf("load broadcast item: %w", err))
+		return BroadcastItem{}, false, classify(fmt.Errorf("load broadcast item: %w", err))
 	}
 	return item, found, nil
 }
@@ -332,7 +332,7 @@ func scanBroadcastItem(rows *sql.Rows) (BroadcastItem, error) {
 		&createdAtRaw,
 		&updatedAtRaw,
 	); err != nil {
-		return BroadcastItem{}, classifyBusy(fmt.Errorf("scan broadcast item: %w", err))
+		return BroadcastItem{}, classify(fmt.Errorf("scan broadcast item: %w", err))
 	}
 	finished, _, err := finishBroadcastItemScan(&item, notBeforeRaw, createdAtRaw, updatedAtRaw, effectID, digestParentID)
 	return finished, err
@@ -376,7 +376,7 @@ func (s *sqliteBroadcastStore) DestinationCursor(ctx context.Context, alias stri
 		return time.Time{}, false, nil
 	}
 	if err != nil {
-		return time.Time{}, false, classifyBusy(fmt.Errorf("load destination cursor: %w", err))
+		return time.Time{}, false, classify(fmt.Errorf("load destination cursor: %w", err))
 	}
 	cursor, err := sqlite.ParseTime(raw)
 	if err != nil {
@@ -397,7 +397,7 @@ func (s *sqliteBroadcastStore) ClaimDispatchSlot(ctx context.Context, alias stri
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return time.Time{}, classifyBusy(fmt.Errorf("begin dispatch slot transaction: %w", err))
+		return time.Time{}, classify(fmt.Errorf("begin dispatch slot transaction: %w", err))
 	}
 	committed := false
 	defer func() {
@@ -412,7 +412,7 @@ func (s *sqliteBroadcastStore) ClaimDispatchSlot(ctx context.Context, alias stri
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
-		return time.Time{}, classifyBusy(fmt.Errorf("load destination cursor: %w", err))
+		return time.Time{}, classify(fmt.Errorf("load destination cursor: %w", err))
 	default:
 		cursor, parseErr := sqlite.ParseTime(raw)
 		if parseErr != nil {
@@ -430,10 +430,10 @@ func (s *sqliteBroadcastStore) ClaimDispatchSlot(ctx context.Context, alias stri
 		alias, sqlite.FormatTime(next), sqlite.FormatTime(now.UTC()),
 	)
 	if err != nil {
-		return time.Time{}, classifyBusy(fmt.Errorf("advance destination cursor: %w", err))
+		return time.Time{}, classify(fmt.Errorf("advance destination cursor: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
-		return time.Time{}, classifyBusy(fmt.Errorf("commit dispatch slot transaction: %w", err))
+		return time.Time{}, classify(fmt.Errorf("commit dispatch slot transaction: %w", err))
 	}
 	committed = true
 	return slot, nil
@@ -448,7 +448,7 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
-		return classifyBusy(fmt.Errorf("begin defer destination transaction: %w", err))
+		return classify(fmt.Errorf("begin defer destination transaction: %w", err))
 	}
 	committed := false
 	defer func() {
@@ -462,7 +462,7 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
-		return classifyBusy(fmt.Errorf("load destination cursor: %w", err))
+		return classify(fmt.Errorf("load destination cursor: %w", err))
 	default:
 		cursor, parseErr := sqlite.ParseTime(raw)
 		if parseErr != nil {
@@ -478,10 +478,10 @@ func (s *sqliteBroadcastStore) DeferDestination(ctx context.Context, alias strin
 		alias, sqlite.FormatTime(until.UTC()), sqlite.FormatTime(time.Now().UTC()),
 	)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("defer destination cursor: %w", err))
+		return classify(fmt.Errorf("defer destination cursor: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
-		return classifyBusy(fmt.Errorf("commit defer destination transaction: %w", err))
+		return classify(fmt.Errorf("commit defer destination transaction: %w", err))
 	}
 	committed = true
 	return nil
@@ -512,7 +512,7 @@ func (s *sqliteBroadcastStore) ListHeld(ctx context.Context, alias, priority str
 		ORDER BY created_at, id LIMIT ?`,
 		alias, priority, sqlite.FormatTime(notBefore.UTC()), limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list held broadcast items: %w", err))
+		return nil, classify(fmt.Errorf("list held broadcast items: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	items := []BroadcastItem{}
@@ -525,7 +525,7 @@ func (s *sqliteBroadcastStore) ListHeld(ctx context.Context, alias, priority str
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list held broadcast items: %w", err))
+		return nil, classify(fmt.Errorf("list held broadcast items: %w", err))
 	}
 	return items, nil
 }
@@ -543,7 +543,7 @@ func (s *sqliteBroadcastStore) ListActive(ctx context.Context, limit int) ([]Bro
 		ORDER BY not_before, created_at, id LIMIT ?`,
 		limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active broadcast items: %w", err))
+		return nil, classify(fmt.Errorf("list active broadcast items: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	items := []BroadcastItem{}
@@ -556,7 +556,7 @@ func (s *sqliteBroadcastStore) ListActive(ctx context.Context, limit int) ([]Bro
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list active broadcast items: %w", err))
+		return nil, classify(fmt.Errorf("list active broadcast items: %w", err))
 	}
 	return items, nil
 }
@@ -576,11 +576,11 @@ func (s *sqliteBroadcastStore) Settle(ctx context.Context, id, state, effectID s
 		WHERE id = ? AND state IN ('`+BroadcastStateHeld+`','`+BroadcastStateScheduled+`','`+BroadcastStateStarted+`','`+BroadcastStateUnknown+`')`,
 		state, nullText(effectID), sqlite.FormatTime(now.UTC()), id)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("settle broadcast item: %w", err))
+		return classify(fmt.Errorf("settle broadcast item: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return classifyBusy(fmt.Errorf("settle broadcast item: %w", err))
+		return classify(fmt.Errorf("settle broadcast item: %w", err))
 	}
 	if affected == 0 {
 		_, findErr := s.Item(ctx, id)
@@ -607,7 +607,7 @@ func (s *sqliteBroadcastStore) NoteAttempt(ctx context.Context, id string, attem
 		updated_at = ? WHERE id = ?`,
 		attempt, attempt, sqlite.FormatTime(now.UTC()), id)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("note broadcast attempt: %w", err))
+		return classify(fmt.Errorf("note broadcast attempt: %w", err))
 	}
 	return nil
 }
@@ -654,7 +654,7 @@ func (s *sqliteBroadcastStore) ListItems(ctx context.Context, states []string, l
 func (s *sqliteBroadcastStore) listBroadcastItems(ctx context.Context, query string, args ...any) ([]BroadcastItem, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list broadcast items: %w", err))
+		return nil, classify(fmt.Errorf("list broadcast items: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	items := []BroadcastItem{}
@@ -667,7 +667,7 @@ func (s *sqliteBroadcastStore) listBroadcastItems(ctx context.Context, query str
 		items = append(items, item)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list broadcast items: %w", err))
+		return nil, classify(fmt.Errorf("list broadcast items: %w", err))
 	}
 	return items, nil
 }

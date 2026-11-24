@@ -32,11 +32,11 @@ func Migrate(ctx context.Context, db *sql.DB, history []Migration) error {
 		return err
 	}
 	if _, err := db.ExecContext(ctx, bootstrapSchemaMigrationTableSQL); err != nil {
-		return fmt.Errorf("bootstrap schema_migration table: %w", err)
+		return Classify(fmt.Errorf("bootstrap schema_migration table: %w", err))
 	}
 	var appliedMax sql.NullInt64
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migration`).Scan(&appliedMax); err != nil {
-		return fmt.Errorf("read applied migration state: %w", err)
+		return Classify(fmt.Errorf("read applied migration state: %w", err))
 	}
 	maxVersion := history[len(history)-1].Version
 	if appliedMax.Valid && int(appliedMax.Int64) > maxVersion {
@@ -58,7 +58,7 @@ func SchemaVersions(ctx context.Context, db *sql.DB, history []Migration) (appli
 	latest = history[len(history)-1].Version
 	var appliedMax sql.NullInt64
 	if err := db.QueryRowContext(ctx, `SELECT MAX(version) FROM schema_migration`).Scan(&appliedMax); err != nil {
-		return 0, 0, fmt.Errorf("read applied migration state: %w", err)
+		return 0, 0, Classify(fmt.Errorf("read applied migration state: %w", err))
 	}
 	if appliedMax.Valid {
 		applied = int(appliedMax.Int64)
@@ -95,23 +95,23 @@ func applyMigration(ctx context.Context, db *sql.DB, m Migration) error {
 		return nil
 	case errors.Is(err, sql.ErrNoRows):
 	default:
-		return fmt.Errorf("read migration %d state: %w", m.Version, err)
+		return Classify(fmt.Errorf("read migration %d state: %w", m.Version, err))
 	}
 
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return fmt.Errorf("begin migration %d: %w", m.Version, err)
+		return Classify(fmt.Errorf("begin migration %d: %w", m.Version, err))
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := tx.ExecContext(ctx, m.SQL); err != nil {
-		return fmt.Errorf("apply migration %d: %w", m.Version, err)
+		return Classify(fmt.Errorf("apply migration %d: %w", m.Version, err))
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, ?, ?)`,
 		m.Version, checksum, time.Now().UTC().Format(time.RFC3339Nano),
 	); err != nil {
-		return fmt.Errorf("record migration %d: %w", m.Version, err)
+		return Classify(fmt.Errorf("record migration %d: %w", m.Version, err))
 	}
-	return tx.Commit()
+	return Classify(tx.Commit())
 }

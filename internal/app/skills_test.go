@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -82,5 +84,28 @@ func TestBuildSkillsEngine(t *testing.T) {
 	}
 	if _, err := buildSkillsEngine(t.Context(), nil, chatDB, nil); err == nil {
 		t.Errorf("nil config should fail")
+	}
+}
+
+type busySkillStore struct {
+	store.SkillStore
+	err error
+}
+
+func (s *busySkillStore) GetSkill(context.Context, string) (store.SkillRow, error) {
+	return store.SkillRow{}, s.err
+}
+
+func TestSkillStoreBusyStaysStorageBusy(t *testing.T) {
+	adapter := &skillStoreRegistry{inner: &busySkillStore{err: fault.New(sqlite.ErrorCodeBusy, "database is busy")}}
+	_, err := adapter.Get(t.Context(), "local/pdf@0123456789ab")
+	if err == nil {
+		t.Fatal("expected busy error, got nil")
+	}
+	if !fault.HasCode(err, sqlite.ErrorCodeBusy) {
+		t.Fatalf("err = %v, want %s", err, sqlite.ErrorCodeBusy)
+	}
+	if code, ok := skills.CodeOf(err); ok {
+		t.Fatalf("busy error was remapped to skills code %s: %v", code, err)
 	}
 }

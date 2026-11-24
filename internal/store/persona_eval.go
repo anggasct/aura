@@ -77,7 +77,7 @@ func (s *sqlitePersonaEvalStore) Record(ctx context.Context, result *PersonaEval
 	}
 	if _, err := s.db.ExecContext(ctx, `INSERT INTO persona_eval_result (`+personaEvalColumns+`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		recorded.ID, recorded.AgentID, recorded.Digest, recorded.Layer, passed, recorded.Score, recorded.CasesTotal, recorded.CasesFailed, string(detail), sqlite.FormatTime(recorded.CreatedAt)); err != nil {
-		return PersonaEvalResult{}, classifyBusy(fmt.Errorf("record persona eval: %w", err))
+		return PersonaEvalResult{}, classify(fmt.Errorf("record persona eval: %w", err))
 	}
 	return recorded, nil
 }
@@ -100,7 +100,7 @@ func (s *sqlitePersonaEvalStore) EverPassed(ctx context.Context, agentID, digest
 	err := s.db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM persona_eval_result WHERE agent_id = ? AND fingerprint = ? AND layer = ? AND passed = 1)`,
 		agentID, digest, layer).Scan(&passed)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("check persona eval history: %w", err))
+		return false, classify(fmt.Errorf("check persona eval history: %w", err))
 	}
 	return passed == 1, nil
 }
@@ -111,7 +111,7 @@ func (s *sqlitePersonaEvalStore) List(ctx context.Context, agentID string, limit
 	}
 	rows, err := s.db.QueryContext(ctx, `SELECT `+personaEvalColumns+` FROM persona_eval_result WHERE agent_id = ? ORDER BY created_at DESC, id DESC LIMIT ?`, agentID, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list persona evals: %w", err))
+		return nil, classify(fmt.Errorf("list persona evals: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var results []PersonaEvalResult
@@ -123,7 +123,7 @@ func (s *sqlitePersonaEvalStore) List(ctx context.Context, agentID string, limit
 		results = append(results, result)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list persona evals: %w", err)
+		return nil, classify(fmt.Errorf("list persona evals: %w", err))
 	}
 	return results, nil
 }

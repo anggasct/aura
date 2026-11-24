@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -148,7 +149,7 @@ func TestPinnedTurnFailsClosedWhenTheSkillIsUnavailable(t *testing.T) {
 func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T) {
 	for name, renderer := range map[string]SkillRenderer{
 		"storage failed":  &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")},
-		"storage busy":    &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageBusy, "read skill")},
+		"storage busy":    &stubSkillRenderer{err: fault.New(sqlite.ErrorCodeBusy, "read skill")},
 		"renderer broken": &stubSkillRenderer{err: errors.New("renderer panicked")},
 	} {
 		t.Run(name, func(t *testing.T) {
