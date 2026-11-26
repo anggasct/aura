@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
@@ -48,9 +49,9 @@ func testMemoryDocument(id, session, kind string) *store.MemoryDocument {
 	}
 }
 
-func testProfileFact(id string) *store.ProfileFact {
+func testProfileFact(id string) *profile.Fact {
 	now := time.Now().UTC().Truncate(time.Second)
-	return &store.ProfileFact{
+	return &profile.Fact{
 		ID: id, OwnerID: "owner-1", Category: "language", Key: "backend",
 		Value: "Go", ValueDigest: "digest-go", Status: "candidate", Origin: "derived",
 		Confidence: 0.5, ConfidencePolicy: "conf-v1", CreatedAt: now, UpdatedAt: now,

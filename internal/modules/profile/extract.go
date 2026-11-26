@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -49,14 +51,13 @@ type RawCandidate struct {
 	Category string
 	Key      string
 	Value    string
-	// Sources are originating event sequence numbers matching the request identity.
-	Sources []uint64
+	Sources  []uint64
 }
 
 func ParseCandidates(text string) ([]RawCandidate, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return nil, Errorf(ErrorCodeProfileInvalid, "extractor output is empty")
+		return nil, fault.New(ErrorCodeProfileInvalid, "extractor output is empty")
 	}
 	var raw []struct {
 		Category string   `json:"category"`
@@ -65,7 +66,7 @@ func ParseCandidates(text string) ([]RawCandidate, error) {
 		Sources  []uint64 `json:"sources"`
 	}
 	if err := json.Unmarshal([]byte(trimmed), &raw); err != nil {
-		return nil, Errorf(ErrorCodeProfileInvalid, "extractor output is not a candidate array")
+		return nil, fault.New(ErrorCodeProfileInvalid, "extractor output is not a candidate array")
 	}
 	candidates := make([]RawCandidate, 0, len(raw))
 	for _, item := range raw {
@@ -84,10 +85,10 @@ func ParseCandidates(text string) ([]RawCandidate, error) {
 
 func ExtractPrompt(promptVersion string, maxOutputTokens int) (string, error) {
 	if promptVersion != extractPromptV1 {
-		return "", Errorf(ErrorCodeProfileInvalid, "unsupported extractor prompt version")
+		return "", fault.New(ErrorCodeProfileInvalid, "unsupported extractor prompt version")
 	}
 	if maxOutputTokens <= 0 {
-		return "", Errorf(ErrorCodeInvalidArgument, "output bound must be positive")
+		return "", fault.New(ErrorCodeInvalidArgument, "output bound must be positive")
 	}
 	categories := strings.Join(Categories, ", ")
 	return "Extract durable owner facts from the source turn events as a JSON array. " +

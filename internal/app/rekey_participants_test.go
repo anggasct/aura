@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
@@ -44,7 +45,10 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 			t.Fatalf("UpsertDocument(%s): %v", doc.ID, err)
 		}
 	}
-	profiles := store.NewProfileStore(db)
+	profiles, err := profile.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
 	moving := testProfileFact("pf-moving")
 	moving.OwnerID = "kuma"
 	moving.Status = "active"
@@ -54,13 +58,17 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 	existing := testProfileFact("pf-existing")
 	existing.OwnerID = "local-owner"
 	existing.Key, existing.ValueDigest = "editor", "digest-nvim"
-	for _, fact := range []*store.ProfileFact{moving, colliding, existing} {
+	for _, fact := range []*profile.Fact{moving, colliding, existing} {
 		if err := profiles.InsertFact(ctx, fact); err != nil {
 			t.Fatalf("InsertFact(%s): %v", fact.ID, err)
 		}
 	}
 
-	preview, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, false, rekeyParticipants(db))
+	participants, err := rekeyParticipants(db)
+	if err != nil {
+		t.Fatalf("rekeyParticipants: %v", err)
+	}
+	preview, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, false, participants)
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
@@ -70,7 +78,7 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 		t.Fatalf("dry run wrote: %d legacy sessions left, %v", untouched, err)
 	}
 
-	applied, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, rekeyParticipants(db))
+	applied, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, participants)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -91,7 +99,7 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 		t.Fatalf("colliding fact = %+v, %v, %v; want left under the source", kept, found, err)
 	}
 
-	again, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, rekeyParticipants(db))
+	again, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, participants)
 	if err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
@@ -102,7 +110,11 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 
 func TestRekeyOwners_NoMatchesReportsZero(t *testing.T) {
 	db := newTestDB(t)
-	report, err := principal.Rekey(t.Context(), db, []principal.OwnerMove{{From: "kuma", To: "local-owner"}}, true, rekeyParticipants(db))
+	participants, err := rekeyParticipants(db)
+	if err != nil {
+		t.Fatalf("rekeyParticipants: %v", err)
+	}
+	report, err := principal.Rekey(t.Context(), db, []principal.OwnerMove{{From: "kuma", To: "local-owner"}}, true, participants)
 	if err != nil {
 		t.Fatalf("Rekey: %v", err)
 	}
@@ -111,6 +123,10 @@ func TestRekeyOwners_NoMatchesReportsZero(t *testing.T) {
 
 func TestRekeyOwners_RejectsInvalidMoves(t *testing.T) {
 	db := newTestDB(t)
+	participants, err := rekeyParticipants(db)
+	if err != nil {
+		t.Fatalf("rekeyParticipants: %v", err)
+	}
 	for name, moves := range map[string][]principal.OwnerMove{
 		"empty source":     {{From: "", To: "local-owner"}},
 		"empty target":     {{From: "kuma", To: " "}},
@@ -119,7 +135,7 @@ func TestRekeyOwners_RejectsInvalidMoves(t *testing.T) {
 		"chained move":     {{From: "kuma", To: "local-owner"}, {From: "local-owner", To: "x"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := principal.Rekey(t.Context(), db, moves, false, rekeyParticipants(db))
+			_, err := principal.Rekey(t.Context(), db, moves, false, participants)
 			if code, ok := fault.CodeOf[principal.ErrorCode](err); !ok || code != principal.ErrorCodeInvalidArgument {
 				t.Fatalf("code = %q, %v; want invalid_argument", code, ok)
 			}
