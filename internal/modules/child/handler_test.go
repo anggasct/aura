@@ -164,7 +164,7 @@ func testHandler() (*Handler, *fakeHandlerRuns, *fakeSessionExecutor) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute), ContextDigest: "digest-ch-1", DurableKey: "child/ch-1", ParentInvocation: "inv-1"},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done"}}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		panic(err)
 	}
@@ -211,7 +211,7 @@ func TestHandlerTerminalMapping(t *testing.T) {
 			"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
 		}}
 		exec := &fakeSessionExecutor{result: tc.result, err: tc.err}
-		handler, err := NewHandler(runs, exec)
+		handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 		if err != nil {
 			t.Fatalf("NewHandler: %v", err)
 		}
@@ -246,10 +246,13 @@ func TestHandlerRejects(t *testing.T) {
 	if err := handler.HandleInvocation(t.Context(), startPayload(t), nil); err == nil {
 		t.Error("expected nil clock rejection")
 	}
-	if _, err := NewHandler(nil, &fakeSessionExecutor{}); err == nil {
+	if _, err := NewHandler(nil); err == nil {
+		t.Error("expected nil deps rejection")
+	}
+	if _, err := NewHandler(&HandlerDeps{Exec: &fakeSessionExecutor{}}); err == nil {
 		t.Error("expected nil runs rejection")
 	}
-	if _, err := NewHandler(&fakeHandlerRuns{}, nil); err == nil {
+	if _, err := NewHandler(&HandlerDeps{Runs: &fakeHandlerRuns{}}); err == nil {
 		t.Error("expected nil executor rejection")
 	}
 }
@@ -259,7 +262,7 @@ func TestHandlerJournaledExecution(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done", TokensUsed: 10, CostMicros: 5, CompletedAt: time.Now().UTC()}}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -280,7 +283,7 @@ func TestHandlerCrashResumeWithoutDuplicateWork(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done", CompletedAt: time.Now().UTC()}}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -310,7 +313,7 @@ func TestHandlerDeadlineMapping(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(-time.Minute)},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", CompletedAt: time.Now().UTC()}}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -327,7 +330,7 @@ func TestHandlerDeadlineMapping(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
 	}}
 	exec2 := &fakeSessionExecutor{result: Result{Status: "deadline", CompletedAt: time.Now().UTC()}}
-	handler2, _ := NewHandler(runs2, exec2)
+	handler2, _ := NewHandler(&HandlerDeps{Runs: runs2, Exec: exec2})
 	if err := handler2.HandleInvocation(t.Context(), startPayload(t), time.Now().UTC); err != nil {
 		t.Fatalf("deadline result: %v", err)
 	}
@@ -342,9 +345,9 @@ func TestHandlerBudgetChargeAndRelease(t *testing.T) {
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", TokensUsed: 42, CostMicros: 7, CompletedAt: time.Now().UTC()}}
 	ledger := &fakeHandlerLedger{}
-	handler, err := NewHandlerWithLedger(runs, exec, ledger)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec, Ledger: ledger})
 	if err != nil {
-		t.Fatalf("NewHandlerWithLedger: %v", err)
+		t.Fatalf("NewHandler: %v", err)
 	}
 	if err := handler.HandleInvocation(t.Context(), startPayload(t), time.Now().UTC); err != nil {
 		t.Fatalf("HandleInvocation: %v", err)
@@ -362,7 +365,7 @@ func TestHandlerPersistsTypedResult(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute), ContextDigest: "digest-ch-1", DurableKey: "child/ch-1", ParentInvocation: "inv-1"},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "summary", TokensUsed: 3, CostMicros: 1, CompletedAt: time.Now().UTC()}}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -389,7 +392,7 @@ func TestHandlerPersistsTypedResult(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
 	}}
 	badExec := &fakeSessionExecutor{result: Result{Status: "completed", TokensUsed: -1, CompletedAt: time.Now().UTC()}}
-	badHandler, _ := NewHandler(badRuns, badExec)
+	badHandler, _ := NewHandler(&HandlerDeps{Runs: badRuns, Exec: badExec})
 	if err := badHandler.HandleInvocation(t.Context(), startPayload(t), time.Now().UTC); err == nil {
 		t.Fatal("negative usage must fail")
 	}
@@ -403,7 +406,7 @@ func TestHandlerNonResumableBecomesInterrupted(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute)},
 	}}
 	exec := &fakeSessionExecutor{err: ErrNonResumable}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -420,7 +423,7 @@ func TestHandlerDurableUsesJournaledBoundaries(t *testing.T) {
 		"ch-1": {ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Minute), ContextDigest: "digest-ch-1", DurableKey: "child/ch-1", ParentInvocation: "inv-1"},
 	}}
 	exec := &fakeSessionExecutor{result: Result{Status: "completed", Output: "done", CompletedAt: time.Now().UTC()}}
-	handler, err := NewHandler(runs, exec)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: exec})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}

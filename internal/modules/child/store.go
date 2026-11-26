@@ -1,17 +1,27 @@
-package store
+package child
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
-type ChildRun struct {
+const selectChildRunColumns = `SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
+	child_session_id, durable_key, context_digest, grants_json, budget_json,
+	state, deadline, created_at, updated_at,
+	result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
+	completed_at, result_provenance,
+	result_child_id, result_session_id, result_context_digest, result_durable_key,
+	result_source_range, result_model, result_prompt_version, result_trust FROM child_run`
+
+type Run struct {
 	ID                  string
 	IdempotencyKey      string
 	ParentSessionID     string
@@ -43,7 +53,7 @@ type ChildRun struct {
 	ResultTrust         string
 }
 
-type ChildResult struct {
+type StoredResult struct {
 	Status        string
 	Output        string
 	ArtifactsJSON string
@@ -61,25 +71,36 @@ type ChildResult struct {
 	Trust         string
 }
 
-type ChildStore interface {
-	InsertRun(ctx context.Context, run *ChildRun) error
-	GetRun(ctx context.Context, id string) (ChildRun, bool, error)
-	GetRunByInvocation(ctx context.Context, parentInvocation, idempotencyKey string) (ChildRun, bool, error)
+type Store interface {
+	InsertRun(ctx context.Context, run *Run) error
+	GetRun(ctx context.Context, id string) (Run, bool, error)
+	GetRunByInvocation(ctx context.Context, parentInvocation, idempotencyKey string) (Run, bool, error)
+	GetByChildSession(ctx context.Context, childSessionID string) (Run, bool, error)
+	Depth(ctx context.Context, sessionID string) (int, error)
 	SetState(ctx context.Context, id, state string, now time.Time) error
-	SetResult(ctx context.Context, id string, result *ChildResult, now time.Time) error
-	ActiveForParent(ctx context.Context, parentSessionID string) ([]ChildRun, error)
-	List(ctx context.Context, state string, limit int) ([]ChildRun, error)
+	SetResult(ctx context.Context, id string, result *StoredResult, now time.Time) error
+	ActiveForParent(ctx context.Context, parentSessionID string) ([]Run, error)
+	List(ctx context.Context, state string, limit int) ([]Run, error)
 }
 
-type sqliteChildStore struct {
+type SQLiteStore struct {
 	db *sql.DB
 }
 
-func NewChildStore(db *sql.DB) ChildStore {
-	return &sqliteChildStore{db: db}
+func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
+	if db == nil {
+		return nil, errNilArgument("db")
+	}
+	return &SQLiteStore{db: db}, nil
 }
 
-func checkChildRun(run *ChildRun) error {
+func isConstraintUnique(err error) bool {
+	classified := sqlite.Classify(err)
+	return fault.HasCode(classified, sqlite.ErrorCodeConstraintUnique) ||
+		fault.HasCode(classified, sqlite.ErrorCodeConstraintPrimaryKey)
+}
+
+func checkRun(run *Run) error {
 	if run == nil {
 		return errNilArgument("run")
 	}
@@ -98,9 +119,7 @@ func checkChildRun(run *ChildRun) error {
 	if !json.Valid([]byte(run.GrantsJSON)) || !json.Valid([]byte(run.BudgetJSON)) {
 		return Errorf(ErrorCodeInvalidArgument, "child grants and budget must be valid JSON")
 	}
-	switch run.State {
-	case "queued", "running", "succeeded", "failed", "cancelled", "deadline_exceeded", "interrupted":
-	default:
+	if !ValidState(run.State) {
 		return Errorf(ErrorCodeInvalidArgument, "child run state is not valid")
 	}
 	if run.Deadline.IsZero() || run.CreatedAt.IsZero() || run.UpdatedAt.IsZero() {
@@ -109,14 +128,14 @@ func checkChildRun(run *ChildRun) error {
 	return nil
 }
 
-func (s *sqliteChildStore) InsertRun(ctx context.Context, run *ChildRun) error {
-	if s.db == nil {
+func (s *SQLiteStore) InsertRun(ctx context.Context, run *Run) error {
+	if s == nil || s.db == nil {
 		return errNilArgument("db")
 	}
-	if err := checkChildRun(run); err != nil {
+	if err := checkRun(run); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`INSERT INTO child_run (
 			id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
 			child_session_id, durable_key, context_digest, grants_json, budget_json,
@@ -130,13 +149,13 @@ func (s *sqliteChildStore) InsertRun(ctx context.Context, run *ChildRun) error {
 		if isConstraintUnique(err) {
 			return Errorf(ErrorCodeChildConflict, "child run already exists")
 		}
-		return classify(fmt.Errorf("insert child run: %w", err))
+		return sqlite.Classify(fmt.Errorf("insert child run: %w", err))
 	}
 	return nil
 }
 
-func scanChildRun(rows *sql.Rows) (ChildRun, error) {
-	var run ChildRun
+func scanRun(rows *sql.Rows) (Run, error) {
+	var run Run
 	var deadline, created, updated string
 	var resultStatus, resultOutput, completedAt, resultProvenance sql.NullString
 	var resultChildID, resultSessionID, resultContextDigest, resultDurableKey sql.NullString
@@ -150,12 +169,12 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 		&resultChildID, &resultSessionID, &resultContextDigest, &resultDurableKey,
 		&resultSourceRange, &resultModel, &resultPromptVersion, &resultTrust,
 	); err != nil {
-		return ChildRun{}, classify(fmt.Errorf("scan child run: %w", err))
+		return Run{}, sqlite.Classify(fmt.Errorf("scan child run: %w", err))
 	}
 	for target, raw := range map[*time.Time]string{&run.Deadline: deadline, &run.CreatedAt: created, &run.UpdatedAt: updated} {
 		parsed, err := sqlite.ParseTime(raw)
 		if err != nil {
-			return ChildRun{}, fmt.Errorf("parse child run timestamps: %w", err)
+			return Run{}, fmt.Errorf("parse child run timestamps: %w", err)
 		}
 		*target = parsed
 	}
@@ -168,7 +187,7 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 	if completedAt.Valid && completedAt.String != "" {
 		parsed, err := sqlite.ParseTime(completedAt.String)
 		if err != nil {
-			return ChildRun{}, fmt.Errorf("parse child result timestamp: %w", err)
+			return Run{}, fmt.Errorf("parse child result timestamp: %w", err)
 		}
 		run.CompletedAt = parsed
 	}
@@ -205,80 +224,80 @@ func scanChildRun(rows *sql.Rows) (ChildRun, error) {
 	return run, nil
 }
 
-func (s *sqliteChildStore) GetRun(ctx context.Context, id string) (ChildRun, bool, error) {
-	if s.db == nil {
-		return ChildRun{}, false, errNilArgument("db")
+func (s *SQLiteStore) queryOneRun(ctx context.Context, op, query string, args ...any) (Run, bool, error) {
+	if s == nil || s.db == nil {
+		return Run{}, false, errNilArgument("db")
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
-			state, deadline, created_at, updated_at,
-			result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-			completed_at, result_provenance,
-			result_child_id, result_session_id, result_context_digest, result_durable_key,
-			result_source_range, result_model, result_prompt_version, result_trust FROM child_run WHERE id = ?`, id,
-	)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query, args...)
 	if err != nil {
-		return ChildRun{}, false, classify(fmt.Errorf("get child run: %w", err))
+		return Run{}, false, sqlite.Classify(fmt.Errorf("%s: %w", op, err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
-		return ChildRun{}, false, nil
+		if err := rows.Err(); err != nil {
+			return Run{}, false, sqlite.Classify(fmt.Errorf("%s: %w", op, err))
+		}
+		return Run{}, false, nil
 	}
-	run, err := scanChildRun(rows)
+	run, err := scanRun(rows)
 	if err != nil {
-		return ChildRun{}, false, err
+		return Run{}, false, err
+	}
+	if err := rows.Err(); err != nil {
+		return Run{}, false, sqlite.Classify(fmt.Errorf("%s: %w", op, err))
 	}
 	return run, true, nil
 }
 
-func (s *sqliteChildStore) GetRunByInvocation(ctx context.Context, parentInvocation, idempotencyKey string) (ChildRun, bool, error) {
-	if s.db == nil {
-		return ChildRun{}, false, errNilArgument("db")
-	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
-			state, deadline, created_at, updated_at,
-			result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-			completed_at, result_provenance,
-			result_child_id, result_session_id, result_context_digest, result_durable_key,
-			result_source_range, result_model, result_prompt_version, result_trust FROM child_run
-		 WHERE parent_invocation_id = ? AND idempotency_key = ?`, parentInvocation, idempotencyKey,
-	)
-	if err != nil {
-		return ChildRun{}, false, classify(fmt.Errorf("get child run by invocation: %w", err))
-	}
-	defer func() { _ = rows.Close() }()
-	if !rows.Next() {
-		return ChildRun{}, false, nil
-	}
-	run, err := scanChildRun(rows)
-	if err != nil {
-		return ChildRun{}, false, err
-	}
-	return run, true, nil
+func (s *SQLiteStore) GetRun(ctx context.Context, id string) (Run, bool, error) {
+	return s.queryOneRun(ctx, "get child run", selectChildRunColumns+` WHERE id = ?`, id)
 }
 
-func (s *sqliteChildStore) SetState(ctx context.Context, id, state string, now time.Time) error {
-	if s.db == nil {
+func (s *SQLiteStore) GetRunByInvocation(ctx context.Context, parentInvocation, idempotencyKey string) (Run, bool, error) {
+	return s.queryOneRun(ctx, "get child run by invocation", selectChildRunColumns+` WHERE parent_invocation_id = ? AND idempotency_key = ?`, parentInvocation, idempotencyKey)
+}
+
+func (s *SQLiteStore) GetByChildSession(ctx context.Context, childSessionID string) (Run, bool, error) {
+	return s.queryOneRun(ctx, "get child run by session", selectChildRunColumns+` WHERE child_session_id = ? LIMIT 1`, childSessionID)
+}
+
+func (s *SQLiteStore) Depth(ctx context.Context, sessionID string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, errNilArgument("db")
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return 0, Errorf(ErrorCodeInvalidArgument, "child session must not be empty")
+	}
+	var one int
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT 1 FROM child_run WHERE child_session_id = ? LIMIT 1`, sessionID,
+	).Scan(&one)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, sqlite.Classify(fmt.Errorf("query child depth: %w", err))
+	}
+	return 1, nil
+}
+
+func (s *SQLiteStore) SetState(ctx context.Context, id, state string, now time.Time) error {
+	if s == nil || s.db == nil {
 		return errNilArgument("db")
 	}
-	switch state {
-	case "queued", "running", "succeeded", "failed", "cancelled", "deadline_exceeded", "interrupted":
-	default:
+	if !ValidState(state) {
 		return Errorf(ErrorCodeInvalidArgument, "child run state is not valid")
 	}
-	result, err := s.db.ExecContext(ctx,
+	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`UPDATE child_run SET state = ?, updated_at = ? WHERE id = ?`,
 		state, sqlite.FormatTime(now.UTC()), id,
 	)
 	if err != nil {
-		return classify(fmt.Errorf("set child run state: %w", err))
+		return sqlite.Classify(fmt.Errorf("set child run state: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return classify(fmt.Errorf("set child run state: %w", err))
+		return sqlite.Classify(fmt.Errorf("set child run state: %w", err))
 	}
 	if affected == 0 {
 		return Errorf(ErrorCodeChildNotFound, "child run is not found")
@@ -286,8 +305,8 @@ func (s *sqliteChildStore) SetState(ctx context.Context, id, state string, now t
 	return nil
 }
 
-func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *ChildResult, now time.Time) error {
-	if s.db == nil {
+func (s *SQLiteStore) SetResult(ctx context.Context, id string, result *StoredResult, now time.Time) error {
+	if s == nil || s.db == nil {
 		return errNilArgument("db")
 	}
 	if result == nil {
@@ -344,7 +363,7 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 		}
 		return v
 	}
-	res, err := s.db.ExecContext(ctx,
+	res, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`UPDATE child_run SET result_status = ?, result_output = ?, result_artifacts_json = ?,
 			tokens_used = ?, cost_micros = ?, completed_at = ?, result_provenance = ?,
 			result_child_id = ?, result_session_id = ?, result_context_digest = ?, result_durable_key = ?,
@@ -358,11 +377,11 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 		sqlite.FormatTime(now.UTC()), id,
 	)
 	if err != nil {
-		return classify(fmt.Errorf("set child result: %w", err))
+		return sqlite.Classify(fmt.Errorf("set child result: %w", err))
 	}
 	affected, err := res.RowsAffected()
 	if err != nil {
-		return classify(fmt.Errorf("set child result: %w", err))
+		return sqlite.Classify(fmt.Errorf("set child result: %w", err))
 	}
 	if affected == 0 {
 		return Errorf(ErrorCodeChildNotFound, "child run is not found")
@@ -370,58 +389,43 @@ func (s *sqliteChildStore) SetResult(ctx context.Context, id string, result *Chi
 	return nil
 }
 
-func (s *sqliteChildStore) ActiveForParent(ctx context.Context, parentSessionID string) ([]ChildRun, error) {
-	if s.db == nil {
+func (s *SQLiteStore) ActiveForParent(ctx context.Context, parentSessionID string) ([]Run, error) {
+	if s == nil || s.db == nil {
 		return nil, errNilArgument("db")
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-			child_session_id, durable_key, context_digest, grants_json, budget_json,
-			state, deadline, created_at, updated_at,
-			result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-			completed_at, result_provenance,
-			result_child_id, result_session_id, result_context_digest, result_durable_key,
-			result_source_range, result_model, result_prompt_version, result_trust FROM child_run
-		 WHERE parent_session_id = ? AND state IN ('queued','running')
-		 ORDER BY created_at, id`, parentSessionID,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
+		selectChildRunColumns+` WHERE parent_session_id = ? AND state IN ('queued','running') ORDER BY created_at, id`,
+		parentSessionID,
 	)
 	if err != nil {
-		return nil, classify(fmt.Errorf("list active child runs: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("list active child runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
-	runs := []ChildRun{}
+	runs := []Run{}
 	for rows.Next() {
-		run, err := scanChildRun(rows)
+		run, err := scanRun(rows)
 		if err != nil {
 			return nil, err
 		}
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classify(fmt.Errorf("list active child runs: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("list active child runs: %w", err))
 	}
 	return runs, nil
 }
 
-func (s *sqliteChildStore) List(ctx context.Context, state string, limit int) ([]ChildRun, error) {
-	if s.db == nil {
+func (s *SQLiteStore) List(ctx context.Context, state string, limit int) ([]Run, error) {
+	if s == nil || s.db == nil {
 		return nil, errNilArgument("db")
 	}
 	if limit <= 0 {
 		return nil, Errorf(ErrorCodeInvalidArgument, "child list limit must be positive")
 	}
-	query := `SELECT id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id,
-		child_session_id, durable_key, context_digest, grants_json, budget_json,
-		state, deadline, created_at, updated_at,
-		result_status, result_output, result_artifacts_json, tokens_used, cost_micros,
-		completed_at, result_provenance,
-		result_child_id, result_session_id, result_context_digest, result_durable_key,
-		result_source_range, result_model, result_prompt_version, result_trust FROM child_run`
+	query := selectChildRunColumns
 	args := []any{}
 	if state != "" {
-		switch state {
-		case "queued", "running", "succeeded", "failed", "cancelled", "deadline_exceeded", "interrupted":
-		default:
+		if !ValidState(state) {
 			return nil, Errorf(ErrorCodeInvalidArgument, "child run state is not valid")
 		}
 		query += ` WHERE state = ?`
@@ -429,21 +433,21 @@ func (s *sqliteChildStore) List(ctx context.Context, state string, limit int) ([
 	}
 	query += ` ORDER BY created_at, id LIMIT ?`
 	args = append(args, limit)
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, classify(fmt.Errorf("list child runs: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("list child runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
-	runs := []ChildRun{}
+	runs := []Run{}
 	for rows.Next() {
-		run, err := scanChildRun(rows)
+		run, err := scanRun(rows)
 		if err != nil {
 			return nil, err
 		}
 		runs = append(runs, run)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classify(fmt.Errorf("list child runs: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("list child runs: %w", err))
 	}
 	return runs, nil
 }

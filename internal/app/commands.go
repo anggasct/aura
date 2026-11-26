@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"path/filepath"
 
@@ -10,6 +11,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
@@ -21,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -48,6 +51,56 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(skills.Commands(skillsOpener(gf))...)
 	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
 	root.AddCommand(codeexec.Commands(interpreterOpener(gf))...)
+	root.AddCommand(child.Commands(childOpener(gf))...)
+}
+
+func writeChildLines(cmd *cobra.Command, lines []string) error {
+	out := cmd.OutOrStdout()
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func childOpener(gf *globalFlags) child.Opener {
+	return func(cmd *cobra.Command, needsDurable bool, fn func(ctx context.Context, deps *child.CommandDeps) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		if result.Config.Children == nil || !result.Config.Children.Enabled {
+			return errors.New("subagent runner is not enabled")
+		}
+		var parts []Part
+		if needsDurable {
+			parts = []Part{PartDurable}
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: parts}, func(ctx context.Context, app *App) error {
+			store, err := child.NewSQLiteStore(app.db)
+			if err != nil {
+				return err
+			}
+			deps := &child.CommandDeps{Store: store}
+			if needsDurable {
+				registry, err := child.NewStoreRegistry(store, turnstore.NewSessionService(app.db))
+				if err != nil {
+					return err
+				}
+				runs, err := child.NewDurableCanceller(app.runtime)
+				if err != nil {
+					return err
+				}
+				canceller, err := child.NewCancelService(registry, runs)
+				if err != nil {
+					return err
+				}
+				deps.Canceller = canceller
+			}
+			return fn(ctx, deps)
+		})
+	}
 }
 
 func mcpTrustRegistryPath(cfg *appconfig.Config) (string, error) {

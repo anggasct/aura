@@ -36,4 +36,3 @@ internal/channels/terminal Console.SetInterrupts  # the console takes this colla
 internal/channels/terminal Console.SetSkills  # the console takes this collaborator at construction when the channels move
 internal/channels/terminal Console.SetTTY  # the console takes this collaborator at construction when the channels move
 internal/modules/builtin Executor.SetEmailOutbox  # builtin assembles tool adapters until each module provides its tools
-internal/modules/child Handler.SetSignaler  # until the child handler takes its signaler at construction
