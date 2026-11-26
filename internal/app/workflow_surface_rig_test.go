@@ -148,6 +148,7 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, executor, result.Config)
 	built, err := newWorkflowToolRunner(&workflowToolRunnerInput{
 		Executor: executor, Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: mustWorkflowStore(t, in.db),
 		Route: route, Logger: logger,

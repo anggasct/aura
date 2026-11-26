@@ -13,8 +13,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -96,7 +96,7 @@ func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 func TestStepToolCatalogMatchesTheBroker(t *testing.T) {
 	var configured appconfig.Config
 	runner, _, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *appconfig.Config) {
-		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+		cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		configured = *cfg
 	})
 	toolRunner, ok := runner.(*workflowToolRunner)
@@ -145,7 +145,7 @@ func commentWorkflow(credential string) *workflow.Spec {
 func TestWorkflowValidateRefusesAnUnconfiguredCredentialName(t *testing.T) {
 	t.Run("the deps every compile path shares", func(t *testing.T) {
 		configured := appconfig.Default()
-		configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+		configured.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		deps, err := workflowValidationDeps(&configured)
 		if err != nil {
 			t.Fatalf("workflowValidationDeps: %v", err)

@@ -460,7 +460,7 @@ func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	githubAdapter, err := github.NewAdapter(runs, in.runtime, logger)
+	githubAdapter, err := github.NewAdapter(newWorkflowCorrelationStore(runs), in.runtime, logger)
 	if err != nil {
 		return nil, err
 	}

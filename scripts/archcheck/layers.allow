@@ -1,5 +1,4 @@
 internal/platform/turn/engine -> internal/modules/skills  # engine renders skills until skills provide turn context
-internal/modules/github -> internal/modules/workflow  # github starts workflows until it uses a starter port
 internal/modules/builtin -> internal/modules/codeexec  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin -> internal/modules/fetch  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin -> internal/modules/filesystem  # builtin assembles tool adapters until each module provides its tools

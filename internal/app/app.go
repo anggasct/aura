@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -280,33 +278,21 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 	for _, value := range githubCredentialSecrets(in.result.Config) {
 		executor.Broker().RegisterSecret(value)
 	}
-	if credentials := githubCredentials(in.result.Config); len(credentials) > 0 {
-		if err := github.Register(executor, &github.ToolOptions{Credentials: credentials}); err != nil {
-			return nil, fmt.Errorf("register github tools: %w", err)
-		}
-	}
 	return executor, nil
 }
 
 func githubCredentialSecrets(cfg *appconfig.Config) []string {
-	var values []string
-	for _, credential := range githubCredentials(cfg) {
-		if value, err := credential.Ref.Reference().Resolve(); err == nil && strings.TrimSpace(value) != "" {
-			values = append(values, value)
-		}
+	if cfg == nil || cfg.Tools == nil {
+		return nil
 	}
-	return values
+	return cfg.Tools.GitHub.SecretValues()
 }
 
 func githubCredentials(cfg *appconfig.Config) []github.Credential {
-	if cfg.Tools == nil {
+	if cfg == nil || cfg.Tools == nil {
 		return nil
 	}
-	var credentials []github.Credential
-	for _, entry := range cfg.Tools.GitHub.Credentials {
-		credentials = append(credentials, github.Credential(entry))
-	}
-	return credentials
+	return cfg.Tools.GitHub.Credentials
 }
 
 type lifecycleStage struct {
