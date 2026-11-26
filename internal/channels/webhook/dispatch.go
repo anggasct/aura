@@ -1,26 +1,18 @@
-package app
+package webhook
 
 import (
 	"context"
 	"crypto/rand"
-	"database/sql"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"iter"
 	"log/slog"
-	"net"
-	"net/http"
-	"os"
+	"slices"
 	"sync"
 	"time"
 
-	appconfig "github.com/anggasct/aura/internal/app/config"
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
-	"github.com/anggasct/aura/internal/modules/github"
-	"github.com/anggasct/aura/internal/modules/workflow"
-	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -29,62 +21,92 @@ import (
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
-type webhookDispatcher struct {
+type SessionStore interface {
+	Create(ctx context.Context, session *turn.Session) error
+}
+
+type ExecutionStore interface {
+	platformwebhook.ExecutionStore
+}
+
+type EventHandler interface {
+	Handle(ctx context.Context, event *platformwebhook.AcceptedEvent) (handled bool, ref platformwebhook.ExecutionRef, err error)
+}
+
+type DispatcherDeps struct {
+	Sessions   SessionStore
+	Events     platformwebhook.EventLister
+	Executions ExecutionStore
+	Runtime    turn.AgentRuntime
+	Retention  time.Duration
+	Clock      func() time.Time
+	Logger     *slog.Logger
+	Handlers   []EventHandler
+}
+
+type Dispatcher struct {
 	mu         sync.Mutex
-	sessions   turnstore.SessionService
-	executions platformwebhook.ExecutionStore
+	sessions   SessionStore
+	executions ExecutionStore
 	backend    turn.AgentRuntime
 	retention  time.Duration
 	clock      func() time.Time
 	logger     *slog.Logger
-	github     *github.Adapter
+	handlers   []EventHandler
 	reconciler *platformwebhook.Reconciler
 	drains     sync.WaitGroup
 }
 
-func newWebhookDispatcher(sessions turnstore.SessionService, events platformwebhook.EventLister, executions platformwebhook.ExecutionStore, backend turn.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
-	if sessions == nil {
-		return nil, errors.New("webhook dispatcher requires a session store")
+var _ platformwebhook.Dispatcher = (*Dispatcher)(nil)
+
+func NewDispatcher(deps *DispatcherDeps) (*Dispatcher, error) {
+	if deps == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "dispatcher deps must not be nil")
 	}
-	if events == nil {
-		return nil, errors.New("webhook dispatcher requires an event lister")
+	if deps.Sessions == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "session store must not be nil")
 	}
-	if executions == nil {
-		return nil, errors.New("webhook dispatcher requires an execution store")
+	if deps.Events == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "event lister must not be nil")
 	}
-	if backend == nil {
-		return nil, errors.New("webhook dispatcher requires a runtime")
+	if deps.Executions == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "execution store must not be nil")
 	}
-	if retention <= 0 {
-		return nil, errors.New("webhook dispatcher requires a positive retention")
+	if deps.Runtime == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "runtime must not be nil")
 	}
-	if clock == nil {
-		return nil, errors.New("webhook dispatcher requires a clock")
+	if deps.Retention <= 0 {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "replay retention must be positive")
 	}
+	if deps.Clock == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "clock must not be nil")
+	}
+	logger := deps.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	reconciler, err := platformwebhook.NewReconciler(&platformwebhook.ReconcilerDeps{
-		Events:     events,
-		Executions: executions,
-		Clock:      clock,
+		Events:     deps.Events,
+		Executions: deps.Executions,
+		Clock:      deps.Clock,
 		EventPage:  platformwebhook.DefaultReconcileEventPage,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return &webhookDispatcher{
-		sessions:   sessions,
-		executions: executions,
-		backend:    backend,
-		retention:  retention,
-		clock:      clock,
+	return &Dispatcher{
+		sessions:   deps.Sessions,
+		executions: deps.Executions,
+		backend:    deps.Runtime,
+		retention:  deps.Retention,
+		clock:      deps.Clock,
 		logger:     logger,
+		handlers:   slices.Clone(deps.Handlers),
 		reconciler: reconciler,
 	}, nil
 }
 
-func (d *webhookDispatcher) reconcilePass() (*platformwebhook.ReconcilePass, error) {
+func (d *Dispatcher) ReconcilePass() (*platformwebhook.ReconcilePass, error) {
 	return platformwebhook.NewReconcilePass(&platformwebhook.ReconcilePassOptions{
 		Executions: d.executions,
 		Reconciler: d.reconciler,
@@ -95,12 +117,15 @@ func (d *webhookDispatcher) reconcilePass() (*platformwebhook.ReconcilePass, err
 	})
 }
 
-func (d *webhookDispatcher) Dispatch(ctx context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
+func (d *Dispatcher) Dispatch(ctx context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
 	if event == nil {
 		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "event must not be nil")
 	}
-	if d.github != nil {
-		handled, ref, err := d.github.Handle(ctx, event)
+	for _, handler := range d.handlers {
+		if handler == nil {
+			continue
+		}
+		handled, ref, err := handler.Handle(ctx, event)
 		if err != nil || handled {
 			return ref, err
 		}
@@ -148,7 +173,7 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *platformwebhook
 		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 
-	turnRequest := webhookTurnRequest(sessionID, turnID, event)
+	turnRequest := TurnRequest(sessionID, turnID, event)
 	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, turnRequest)
 	if err != nil {
 		d.logger.WarnContext(ctx, "webhook runtime refused the turn",
@@ -164,7 +189,7 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *platformwebhook
 	return platformwebhook.ExecutionRef{ExecutionID: executionID, TurnID: turnID}, nil
 }
 
-func (d *webhookDispatcher) replayIdentical(ctx context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
+func (d *Dispatcher) replayIdentical(ctx context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
 	empty := platformwebhook.ExecutionRef{}
 	previous, found, err := d.executions.ExecutionByNonce(ctx, event.KeyID, event.Nonce)
 	if err != nil {
@@ -188,7 +213,7 @@ func (d *webhookDispatcher) replayIdentical(ctx context.Context, event *platform
 	return platformwebhook.ExecutionRef{ExecutionID: previous.ID, TurnID: previous.TurnID}, nil
 }
 
-func (d *webhookDispatcher) settleReplayed(ctx context.Context, previous *platformwebhook.Execution, event *platformwebhook.AcceptedEvent) {
+func (d *Dispatcher) settleReplayed(ctx context.Context, previous *platformwebhook.Execution, event *platformwebhook.AcceptedEvent) {
 	if err := d.reconcileReplayed(ctx, previous, event); err != nil {
 		d.logger.WarnContext(ctx, "webhook replay reconcile failed",
 			"component", "webhook",
@@ -198,7 +223,7 @@ func (d *webhookDispatcher) settleReplayed(ctx context.Context, previous *platfo
 	}
 }
 
-func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *platformwebhook.Execution, event *platformwebhook.AcceptedEvent) error {
+func (d *Dispatcher) reconcileReplayed(ctx context.Context, previous *platformwebhook.Execution, event *platformwebhook.AcceptedEvent) error {
 	result, err := d.reconciler.Reconcile(ctx, previous)
 	if err != nil || result.Admitted {
 		return err
@@ -206,7 +231,7 @@ func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *pla
 	if err := d.createSession(ctx, previous.SessionID, event.KeyID, d.clock().UTC()); err != nil {
 		return err
 	}
-	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, webhookTurnRequest(previous.SessionID, previous.TurnID, event))
+	next, stop, err := startTurn(context.WithoutCancel(ctx), d.backend, TurnRequest(previous.SessionID, previous.TurnID, event))
 	if err != nil {
 		return fmt.Errorf("submit the turn of webhook execution %s: %w", previous.ID, err)
 	}
@@ -214,7 +239,7 @@ func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *pla
 	return nil
 }
 
-func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID string, now time.Time) error {
+func (d *Dispatcher) createSession(ctx context.Context, sessionID, keyID string, now time.Time) error {
 	err := d.sessions.Create(ctx, &turn.Session{
 		ID:        sessionID,
 		OwnerID:   "webhook:" + keyID,
@@ -231,11 +256,11 @@ func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID 
 	return nil
 }
 
-func (d *webhookDispatcher) startDrain(ctx context.Context, executionID string, next turnStep, stop func()) {
+func (d *Dispatcher) startDrain(ctx context.Context, executionID string, next turnStep, stop func()) {
 	d.drains.Go(func() { d.drain(ctx, executionID, next, stop) })
 }
 
-func (d *webhookDispatcher) Wait(ctx context.Context) error {
+func (d *Dispatcher) Wait(ctx context.Context) error {
 	done := make(chan struct{})
 	go func() {
 		d.drains.Wait()
@@ -249,7 +274,7 @@ func (d *webhookDispatcher) Wait(ctx context.Context) error {
 	}
 }
 
-func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next turnStep, stop func()) {
+func (d *Dispatcher) drain(ctx context.Context, executionID string, next turnStep, stop func()) {
 	defer stop()
 	var derivation platformwebhook.ExecutionDerivation
 	for {
@@ -268,7 +293,7 @@ func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next 
 	}
 }
 
-func (d *webhookDispatcher) transition(ctx context.Context, executionID string, outcome *platformwebhook.ExecutionOutcome) {
+func (d *Dispatcher) transition(ctx context.Context, executionID string, outcome *platformwebhook.ExecutionOutcome) {
 	if _, err := d.reconciler.Write(ctx, executionID, outcome); err != nil {
 		d.logger.WarnContext(ctx, "webhook state transition failed",
 			"component", "webhook",
@@ -302,7 +327,7 @@ func startTurn(ctx context.Context, backend turn.AgentRuntime, turnRequest *turn
 	return next, release, nil
 }
 
-func webhookTurnRequest(sessionID, turnID string, event *platformwebhook.AcceptedEvent) *turn.TurnRequest {
+func TurnRequest(sessionID, turnID string, event *platformwebhook.AcceptedEvent) *turn.TurnRequest {
 	return &turn.TurnRequest{
 		TurnID:         turnID,
 		SessionID:      sessionID,
@@ -335,11 +360,20 @@ func newWebhookID(prefix string) (string, error) {
 	return prefix + hex.EncodeToString(raw[:]), nil
 }
 
-type webhookStatusStore struct {
-	executions platformwebhook.ExecutionStore
+type ExecutionStatusStore struct {
+	executions ExecutionStore
 }
 
-func (s *webhookStatusStore) ExecutionStatus(ctx context.Context, id string) (platformwebhook.ExecutionStatus, error) {
+var _ platformwebhook.StatusStore = (*ExecutionStatusStore)(nil)
+
+func NewExecutionStatusStore(executions ExecutionStore) (*ExecutionStatusStore, error) {
+	if executions == nil {
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "execution store must not be nil")
+	}
+	return &ExecutionStatusStore{executions: executions}, nil
+}
+
+func (s *ExecutionStatusStore) ExecutionStatus(ctx context.Context, id string) (platformwebhook.ExecutionStatus, error) {
 	execution, err := s.executions.Execution(ctx, id)
 	if err != nil {
 		if fault.HasCode(err, platformwebhook.ErrorCodeExecutionNotFound) {
@@ -357,135 +391,4 @@ func (s *webhookStatusStore) ExecutionStatus(ctx context.Context, id string) (pl
 		UpdatedAt:     execution.UpdatedAt,
 		ExpiresAt:     execution.ExpiresAt,
 	}, nil
-}
-
-type webhookListener struct {
-	listen     string
-	handler    http.Handler
-	dispatcher *webhookDispatcher
-}
-
-func (l *webhookListener) Name() string { return "webhook" }
-
-func (l *webhookListener) Start(ctx context.Context) error {
-	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", l.listen)
-	if err != nil {
-		return fmt.Errorf("webhook listener: bind %s: %w", l.listen, err)
-	}
-	server := &http.Server{
-		Handler:           l.handler,
-		ReadHeaderTimeout: 5 * time.Second,
-		BaseContext:       func(net.Listener) context.Context { return ctx },
-	}
-	done := make(chan error, 1)
-	go func() { done <- server.Serve(listener) }()
-	select {
-	case err := <-done:
-		if errors.Is(err, http.ErrServerClosed) {
-			return nil
-		}
-		return fmt.Errorf("webhook listener: %w", err)
-	case <-ctx.Done():
-		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			return fmt.Errorf("webhook listener shutdown: %w", err)
-		}
-		if err := l.dispatcher.Wait(shutdownCtx); err != nil {
-			return fmt.Errorf("webhook listener drain: %w", err)
-		}
-		return nil
-	}
-}
-
-type webhookListenerInput struct {
-	cfg     *appconfig.Config
-	db      *sql.DB
-	backend turn.AgentRuntime
-	logger  *slog.Logger
-	runtime durable.Runtime
-}
-
-func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
-	if in == nil {
-		return nil, invalidOptions("webhook listener input must not be nil")
-	}
-	cfg, db, backend, logger := in.cfg, in.db, in.backend, in.logger
-	if cfg == nil {
-		return nil, errors.New("webhook listener requires configuration")
-	}
-	if db == nil {
-		return nil, errors.New("webhook listener requires storage")
-	}
-	if backend == nil {
-		return nil, errors.New("webhook listener requires a runtime")
-	}
-	if in.runtime == nil {
-		return nil, errors.New("webhook listener requires a durable runtime")
-	}
-	if logger == nil {
-		logger = slog.Default()
-	}
-	entries := make([]gatewaywebhook.KeyEntry, 0, len(cfg.Webhook.Keys))
-	for _, key := range cfg.Webhook.Keys {
-		var acceptUntil time.Time
-		if key.AcceptUntil != "" {
-			parsed, err := time.Parse(time.RFC3339, key.AcceptUntil)
-			if err != nil {
-				return nil, fmt.Errorf("webhook listener: key %q has an invalid rotation timestamp", key.ID)
-			}
-			acceptUntil = parsed
-		}
-		entries = append(entries, gatewaywebhook.KeyEntry{ID: key.ID, SecretEnv: key.SecretEnv, AcceptUntil: acceptUntil})
-	}
-	ring, err := gatewaywebhook.NewKeyRing(entries, webhookKeySource)
-	if err != nil {
-		return nil, err
-	}
-	limiter, err := gatewaywebhook.NewRateLimiter(cfg.Webhook.RequestsPerMinute, time.Now)
-	if err != nil {
-		return nil, err
-	}
-	executions, err := platformwebhook.NewSQLiteStore(db)
-	if err != nil {
-		return nil, err
-	}
-	sessions := turnstore.NewSessionService(db)
-	turns := turnstore.NewTurnStore(db)
-	dispatcher, err := newWebhookDispatcher(sessions, turns, executions, backend, time.Duration(cfg.Webhook.ReplayRetention), time.Now, logger)
-	if err != nil {
-		return nil, err
-	}
-	runs, err := workflow.NewStore(db, turns)
-	if err != nil {
-		return nil, err
-	}
-	githubAdapter, err := github.NewAdapter(newWorkflowCorrelationStore(runs), in.runtime, logger)
-	if err != nil {
-		return nil, err
-	}
-	dispatcher.github = githubAdapter
-	handler, err := gatewaywebhook.NewHandler(gatewaywebhook.Settings{
-		MaxBodySize:        int64(cfg.Webhook.MaxBodySize),
-		TimestampTolerance: time.Duration(cfg.Webhook.TimestampTolerance),
-	}, ring, limiter, time.Now, logger, dispatcher)
-	if err != nil {
-		return nil, err
-	}
-	status, err := gatewaywebhook.NewStatusHandler(ring, limiter, time.Now, time.Duration(cfg.Webhook.TimestampTolerance), logger, &webhookStatusStore{executions: executions})
-	if err != nil {
-		return nil, err
-	}
-	mux := http.NewServeMux()
-	mux.Handle(platformwebhook.StatusPathPrefix, status)
-	mux.Handle("/", handler)
-	return &webhookListener{listen: cfg.Webhook.Listen, handler: mux, dispatcher: dispatcher}, nil
-}
-
-func webhookKeySource(envName string) (string, error) {
-	value, ok := os.LookupEnv(envName)
-	if !ok || value == "" {
-		return "", fmt.Errorf("webhook: secret %s is unavailable", envName)
-	}
-	return value, nil
 }
