@@ -4,11 +4,11 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-func testDiscordConfig() *config.DiscordAccount {
+func testDiscordConfig() *Account {
 	account := testAdapterAccount()
 	return &account
 }
@@ -36,7 +36,7 @@ func testOwners(t *testing.T, identities ...string) *principal.Resolver {
 func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 	selfID := "999"
 	cases := map[string]struct {
-		mutate    func(*config.DiscordAccount, *messagePayload)
+		mutate    func(*Account, *messagePayload)
 		admit     bool
 		conv      string
 		extID     string
@@ -44,7 +44,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 		class     principal.Class
 	}{
 		"guild mention admitted": {
-			mutate:    func(*config.DiscordAccount, *messagePayload) {},
+			mutate:    func(*Account, *messagePayload) {},
 			admit:     true,
 			conv:      "channel:333",
 			extID:     "message:1001",
@@ -52,7 +52,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassTrusted,
 		},
 		"dm admitted": {
-			mutate: func(cfg *config.DiscordAccount, msg *messagePayload) {
+			mutate: func(cfg *Account, msg *messagePayload) {
 				msg.GuildID = ""
 				msg.Mentions = nil
 			},
@@ -63,7 +63,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassTrusted,
 		},
 		"owner identity admitted without allowlist entry": {
-			mutate:    func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.ID = "777" },
+			mutate:    func(_ *Account, msg *messagePayload) { msg.Author.ID = "777" },
 			admit:     true,
 			conv:      "channel:333",
 			extID:     "message:1001",
@@ -71,7 +71,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassOwner,
 		},
 		"owner identity dm keeps raw conversation key": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) {
+			mutate: func(_ *Account, msg *messagePayload) {
 				msg.Author.ID = "777"
 				msg.GuildID = ""
 				msg.Mentions = nil
@@ -83,7 +83,7 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassOwner,
 		},
 		"owner identity also allowlisted resolves as owner": {
-			mutate: func(cfg *config.DiscordAccount, msg *messagePayload) {
+			mutate: func(cfg *Account, msg *messagePayload) {
 				cfg.AllowedUserIDs = append(cfg.AllowedUserIDs, "777")
 				msg.Author.ID = "777"
 			},
@@ -94,40 +94,40 @@ func TestNormalizeMessage_AdmissionMatrix(t *testing.T) {
 			class:     principal.ClassOwner,
 		},
 		"owner identity still needs a mention in guilds": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) {
+			mutate: func(_ *Account, msg *messagePayload) {
 				msg.Author.ID = "777"
 				msg.Mentions = nil
 			},
 		},
 		"owner identity still bound by channel scope": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) {
+			mutate: func(_ *Account, msg *messagePayload) {
 				msg.Author.ID = "777"
 				msg.ChannelID = "444"
 			},
 		},
 		"non-allowlisted author denied": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.ID = "666" },
+			mutate: func(_ *Account, msg *messagePayload) { msg.Author.ID = "666" },
 		},
 		"bot author denied": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.Bot = true },
+			mutate: func(_ *Account, msg *messagePayload) { msg.Author.Bot = true },
 		},
 		"own message denied": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Author.ID = selfID },
+			mutate: func(_ *Account, msg *messagePayload) { msg.Author.ID = selfID },
 		},
 		"empty content ignored": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Content = "" },
+			mutate: func(_ *Account, msg *messagePayload) { msg.Content = "" },
 		},
 		"guild message without mention denied": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.Mentions = nil },
+			mutate: func(_ *Account, msg *messagePayload) { msg.Mentions = nil },
 		},
 		"guild message outside channel scope denied": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.ChannelID = "444" },
+			mutate: func(_ *Account, msg *messagePayload) { msg.ChannelID = "444" },
 		},
 		"guild message outside guild scope denied": {
-			mutate: func(_ *config.DiscordAccount, msg *messagePayload) { msg.GuildID = "555" },
+			mutate: func(_ *Account, msg *messagePayload) { msg.GuildID = "555" },
 		},
 		"dm refused when dms closed": {
-			mutate: func(cfg *config.DiscordAccount, msg *messagePayload) {
+			mutate: func(cfg *Account, msg *messagePayload) {
 				cfg.AcceptDMs = false
 				msg.GuildID = ""
 				msg.Mentions = nil
@@ -190,8 +190,8 @@ func TestNormalizeMessage_RejectsMalformed(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, _, err := normalizeMessage(cfg, nil, "999", authorAccess{}, msg)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
-				t.Errorf("code = %v, %v; want protocol_invalid", code, ok)
+			if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
+				t.Errorf("err = %v, want protocol_invalid", err)
 			}
 		})
 	}

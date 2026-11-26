@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -83,15 +84,23 @@ func newAccessAdapter(t *testing.T, persona string, owners []string, personas []
 	if err != nil {
 		t.Fatalf("persona router: %v", err)
 	}
-	adapter, err := New(&cfg, &cfg.Accounts[0], &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, &fakeSessionEnsurer{}, slog.New(slog.NewTextHandler(&logCapture{}, nil)))
+	observer := &accessObserver{denied: map[string]int{}, routed: map[string]int{}}
+	settings := observer.settings()
+	adapter, err := New(&Deps{
+		Config:            &cfg,
+		Account:           &cfg.Accounts[0],
+		Resumes:           &memoryResumeStore{},
+		Effects:           newFakeEffectRunner(),
+		Media:             &fakeMediaStore{},
+		Sessions:          &fakeSessionEnsurer{},
+		Logger:            slog.New(slog.NewTextHandler(&logCapture{}, nil)),
+		PersonaRouter:     router,
+		PrincipalResolver: testOwners(t, owners...),
+		Access:            &settings,
+	})
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}
-	adapter.SetPersonaRouter(router)
-	adapter.SetPrincipalResolver(testOwners(t, owners...))
-	observer := &accessObserver{denied: map[string]int{}, routed: map[string]int{}}
-	settings := observer.settings()
-	adapter.SetAccess(&settings)
 	adapter.selfID = "999"
 	sink := newMemorySink()
 	adapter.sink = sink
@@ -325,7 +334,7 @@ func TestOwnerApprovalTimeoutDeniesAndTellsTheRequester(t *testing.T) {
 	adapter.restBase = stub.srv.URL
 	adapter.rememberTarget("dm:111", &approvalBinding{principal: "discord:111", class: principal.ClassTrusted, persona: "team", actor: "111", channelID: "333"})
 	accepted, err := adapter.Decide(t.Context(), trustedPrompt(time.Now().Add(time.Hour)))
-	if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalTimeout {
+	if accepted || !fault.HasCode(err, ErrorCodeApprovalTimeout) {
 		t.Fatalf("Decide() = %v, %v; want approval_timeout", accepted, err)
 	}
 	notices := stub.waitPostTo(t, "333", 2)
@@ -355,7 +364,7 @@ func TestOwnerApprovalUnavailableDenies(t *testing.T) {
 			stub.dmCode = tc.dmCode
 			adapter, observer := newOwnerRoutedAdapter(t, stub, tc.owners, principal.ClassTrusted)
 			accepted, err := adapter.Decide(t.Context(), trustedPrompt(time.Now().Add(time.Minute)))
-			if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalUnavailable {
+			if accepted || !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
 				t.Fatalf("Decide() = %v, %v; want approval_unavailable", accepted, err)
 			}
 			if posts, _, _ := stub.counts(); posts != 0 {

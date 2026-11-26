@@ -12,7 +12,6 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/telegram"
@@ -195,22 +194,6 @@ func channelAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 		}
 	}
 	return settings
-}
-
-func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
-	shared := channelAccessSettings(cfg, db, recorder, runs)
-	return discord.AccessSettings{
-		ApprovalTimeout:  shared.ApprovalTimeout,
-		StandingGrantTTL: shared.StandingGrantTTL,
-		Grants:           shared.Grants,
-		Pairing:          shared.Pairing,
-		Budgets:          shared.Budgets,
-		Erasure:          shared.Erasure,
-		Handoffs:         shared.Handoffs,
-		Evals:            shared.Evals,
-		Denied:           shared.Denied,
-		ApprovalRouted:   shared.ApprovalRouted,
-	}
 }
 
 func telegramAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) telegram.AccessSettings {

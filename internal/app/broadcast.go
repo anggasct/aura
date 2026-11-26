@@ -174,7 +174,7 @@ func broadcastEffectProviders(cfg *appconfig.Config, db *sql.DB, logger *slog.Lo
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := newDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[0], db, artifactRoot, logger)
+	adapter, err := buildDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[0], db, artifactRoot, &discord.Deps{Logger: logger})
 	if err != nil {
 		return nil, err
 	}

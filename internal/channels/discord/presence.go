@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -40,13 +41,6 @@ type presenceSession struct {
 	stopped        bool
 }
 
-func (a *Adapter) SetSecretVault(vault *secret.Vault) {
-	if a == nil {
-		return
-	}
-	a.secretVault = vault
-}
-
 func presenceKey(channel, effectID string) string {
 	return channel + "|" + effectID
 }
@@ -60,56 +54,56 @@ func (a *Adapter) vaultOrNil() *secret.Vault {
 
 func (a *Adapter) triggerTyping(ctx context.Context, channelID string) error {
 	if a == nil {
-		return Errorf(ErrorCodeInvalidArgument, "adapter must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "adapter must not be nil")
 	}
 	if !isChannelID(channelID) {
-		return Errorf(ErrorCodeInvalidArgument, "typing channel is not a discord channel id")
+		return fault.New(ErrorCodeInvalidArgument, "typing channel is not a discord channel id")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	call, cancel := context.WithTimeout(ctx, restTimeout)
 	defer cancel()
 	endpoint := a.restBase + "/channels/" + channelID + "/typing"
 	req, err := http.NewRequestWithContext(call, http.MethodPost, endpoint, bytes.NewReader([]byte{}))
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "typing request is not constructible")
+		return fault.New(ErrorCodeProtocolInvalid, "typing request is not constructible")
 	}
 	req.Header.Set("Authorization", "Bot "+token)
 	req.Header.Set("Content-Length", "0")
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
-		return Errorf(ErrorCodeConnectionFailed, "typing trigger did not reach discord")
+		return fault.New(ErrorCodeConnectionFailed, "typing trigger did not reach discord")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusTooManyRequests {
-		return Errorf(ErrorCodeDeliveryAmbiguous, "typing trigger was rate limited")
+		return deliveryAmbiguous("typing trigger was rate limited")
 	}
 	if resp.StatusCode != http.StatusNoContent && (resp.StatusCode < 200 || resp.StatusCode >= 300) {
 		if resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden {
-			return Errorf(ErrorCodeDeliveryFailed, "typing trigger was rejected")
+			return fault.New(ErrorCodeDeliveryFailed, "typing trigger was rejected")
 		}
 		if resp.StatusCode == http.StatusNotFound {
-			return Errorf(ErrorCodeDeliveryFailed, "typing channel was not found")
+			return fault.New(ErrorCodeDeliveryFailed, "typing channel was not found")
 		}
-		return Errorf(ErrorCodeDeliveryAmbiguous, "typing trigger outcome is unknown")
+		return deliveryAmbiguous("typing trigger outcome is unknown")
 	}
 	return nil
 }
 
 func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*presenceSession, string, error) {
 	if req == nil {
-		return nil, "", Errorf(ErrorCodeInvalidArgument, "presence request must not be nil")
+		return nil, "", fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	if req.EffectID == "" {
-		return nil, "", Errorf(ErrorCodeInvalidArgument, "presence request carries no turn id")
+		return nil, "", fault.New(ErrorCodeInvalidArgument, "presence request carries no turn id")
 	}
 	channelID := req.Channel
 	if len(req.ReplyContext) > 0 {
 		var reference replyReference
 		if err := json.Unmarshal(req.ReplyContext, &reference); err != nil {
-			return nil, "", Errorf(ErrorCodeProtocolInvalid, "reply context is not decodable")
+			return nil, "", fault.New(ErrorCodeProtocolInvalid, "reply context is not decodable")
 		}
 		channelID, _, _ = deliveryTarget(&reference)
 	}
@@ -144,7 +138,7 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 
 func (a *Adapter) PresenceStarted(ctx context.Context, req *runtimechannelhost.DeliveryRequest) error {
 	if req == nil {
-		return Errorf(ErrorCodeInvalidArgument, "presence request must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	session, channelID, err := a.ensurePresence(req)
 	if err != nil {
@@ -248,7 +242,7 @@ func (a *Adapter) postInitialStatus(ctx context.Context, session *presenceSessio
 
 func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.DeliveryRequest, text, args string, failed bool) error {
 	if req == nil {
-		return Errorf(ErrorCodeInvalidArgument, "presence request must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	session, channelID, err := a.ensurePresence(req)
 	if err != nil {
@@ -334,7 +328,7 @@ func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presence
 	channelID := session.channelID
 	a.presenceMu.Unlock()
 	if request == nil {
-		return Errorf(ErrorCodeInvalidArgument, "presence request must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	if statusID == "" {
 		id, postErr := a.postPresenceMessage(ctx, request, channelID, display)
@@ -385,7 +379,7 @@ func (a *Adapter) stopPresence(turnID string) {
 
 func (a *Adapter) PresenceEnded(ctx context.Context, turnID string) error {
 	if turnID == "" {
-		return Errorf(ErrorCodeInvalidArgument, "presence turn id must not be empty")
+		return fault.New(ErrorCodeInvalidArgument, "presence turn id must not be empty")
 	}
 	a.stopPresence(turnID)
 	a.presenceMu.Lock()

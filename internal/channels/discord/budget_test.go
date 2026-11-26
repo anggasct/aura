@@ -30,7 +30,7 @@ func newBudgetAdapter(t *testing.T, persona string, gate *fakeBudgetGate) (*Adap
 	adapter, sink, observer := newAccessAdapter(t, persona, []string{"discord:777"}, accessPersonas())
 	settings := observer.settings()
 	settings.Budgets = gate
-	adapter.SetAccess(&settings)
+	adapter.access = settings
 	adapter.restBase = stub.srv.URL
 	return adapter, sink, stub
 }
@@ -109,7 +109,7 @@ func TestBudgetRefusalUsesPersonaMessage(t *testing.T) {
 	adapter, _, observer := newAccessAdapter(t, "team", []string{"discord:777"}, personas)
 	settings := observer.settings()
 	settings.Budgets = &fakeBudgetGate{refusal: BudgetRefusalExhausted}
-	adapter.SetAccess(&settings)
+	adapter.access = settings
 	adapter.restBase = stub.srv.URL
 	if admitted, _ := adapter.admit(t.Context(), textMessage("9631", "4400", "", "111", "halo", nil)); admitted {
 		t.Fatal("exhausted principal admitted")

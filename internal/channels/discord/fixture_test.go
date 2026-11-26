@@ -20,7 +20,6 @@ import (
 	"golang.org/x/net/websocket"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -227,17 +226,17 @@ func (g *fakeGateway) send(ws *websocket.Conn, op int, data any, seq *int64, typ
 	}
 }
 
-func testAdapterConfig() config.Discord {
-	return config.Discord{
+func testAdapterConfig() Config {
+	return Config{
 		Enabled:            true,
-		Accounts:           []config.DiscordAccount{testAdapterAccount()},
+		Accounts:           []Account{testAdapterAccount()},
 		MinEditInterval:    2000000000,
 		MaxAttachmentBytes: 20971520,
 	}
 }
 
-func testAdapterAccount() config.DiscordAccount {
-	return config.DiscordAccount{
+func testAdapterAccount() Account {
+	return Account{
 		Name:              "owner",
 		BotTokenRef:       secrettest.Ref("env://AURA_DISCORD_BOT_TOKEN"),
 		Persona:           auraagent.DefaultID,
@@ -257,7 +256,7 @@ func trustedBuiltinPersonas() []auraagent.Persona {
 	}
 }
 
-func discordChannelAccounts(cfg *config.Discord) []auraagent.ChannelAccount {
+func discordChannelAccounts(cfg *Config) []auraagent.ChannelAccount {
 	accounts := make([]auraagent.ChannelAccount, 0, len(cfg.Accounts))
 	for i := range cfg.Accounts {
 		accounts = append(accounts, auraagent.ChannelAccount{
@@ -270,7 +269,7 @@ func discordChannelAccounts(cfg *config.Discord) []auraagent.ChannelAccount {
 	return accounts
 }
 
-func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []auraagent.Binding) *auraagent.Router {
+func testPersonaRouter(t *testing.T, cfg *Config, bindings []auraagent.Binding) *auraagent.Router {
 	t.Helper()
 	registry, err := auraagent.Build(trustedBuiltinPersonas(), []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, []string{"primary"})
 	if err != nil {
@@ -283,14 +282,18 @@ func testPersonaRouter(t *testing.T, cfg *config.Discord, bindings []auraagent.B
 	return router
 }
 
-func newRoutedTestAdapter(t *testing.T, cfg *config.Discord, resumes ResumeStore, effects EffectRunner, artifacts MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
+func newRoutedTestAdapter(t *testing.T, cfg *Config, resumes ResumeStore, effects EffectRunner, artifacts MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
 	t.Helper()
-	adapter, err := New(cfg, &cfg.Accounts[0], resumes, effects, artifacts, sessions, logger)
-	if err != nil {
-		return nil, err
-	}
-	adapter.SetPersonaRouter(testPersonaRouter(t, cfg, nil))
-	return adapter, nil
+	return New(&Deps{
+		Config:        cfg,
+		Account:       &cfg.Accounts[0],
+		Resumes:       resumes,
+		Effects:       effects,
+		Media:         artifacts,
+		Sessions:      sessions,
+		Logger:        logger,
+		PersonaRouter: testPersonaRouter(t, cfg, nil),
+	})
 }
 
 func startTestAdapter(t *testing.T, gateway *fakeGateway, sink *memorySink, resumes *memoryResumeStore, logs *logCapture) *testContext {

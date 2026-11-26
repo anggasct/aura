@@ -10,12 +10,11 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeInvalidArgument      ErrorCode = "invalid_argument"
-	ErrorCodeStorageUnavailable   ErrorCode = "storage_unavailable"
-	ErrorCodeChannelResumeInvalid ErrorCode = "channel_resume_invalid"
-	ErrorCodeChildConflict        ErrorCode = "child_conflict"
-	ErrorCodeChildNotFound        ErrorCode = "child_not_found"
-	ErrorCodeChildInvalid         ErrorCode = "child_invalid"
+	ErrorCodeInvalidArgument    ErrorCode = "invalid_argument"
+	ErrorCodeStorageUnavailable ErrorCode = "storage_unavailable"
+	ErrorCodeChildConflict      ErrorCode = "child_conflict"
+	ErrorCodeChildNotFound      ErrorCode = "child_not_found"
+	ErrorCodeChildInvalid       ErrorCode = "child_invalid"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {

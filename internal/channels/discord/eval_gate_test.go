@@ -29,7 +29,7 @@ func newEvalAdapter(t *testing.T, persona string, gate *fakeEvalGate) (*Adapter,
 	adapter, sink, observer := newAccessAdapter(t, persona, []string{"discord:777"}, accessPersonas())
 	settings := observer.settings()
 	settings.Evals = gate
-	adapter.SetAccess(&settings)
+	adapter.access = settings
 	adapter.restBase = stub.srv.URL
 	return adapter, sink, stub, observer
 }
