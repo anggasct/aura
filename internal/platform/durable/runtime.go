@@ -20,6 +20,11 @@ type RunRef struct {
 	Key string
 }
 
+type HandlerRun struct {
+	Key     string
+	Payload []byte
+}
+
 type ReusePolicy int
 
 const (

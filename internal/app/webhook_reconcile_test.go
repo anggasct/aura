@@ -14,6 +14,7 @@ import (
 
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -54,12 +55,12 @@ func seedWebhookTurn(t *testing.T, db *sql.DB, seed *webhookTurnSeed) *store.Web
 	if !seed.withSession && len(seed.events) == 0 {
 		return execution
 	}
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: execution.SessionID, OwnerID: "webhook:primary", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create session %s: %v", execution.SessionID, err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	for i, event := range seed.events {
 		stored := &turn.Event{
 			ID: seed.id + "-" + event.id, SessionID: execution.SessionID, Sequence: uint64(i + 1),
@@ -165,7 +166,7 @@ func TestWebhookReconcileSettlesFromStoredEvents(t *testing.T) {
 			db := storetest.OpenMigrated(t)
 			execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_case", events: tc.events, withSession: tc.withSession})
 			reconciler := &webhookReconciler{
-				sessions: store.NewSessionService(db), executions: store.NewWebhookExecutionStore(db), clock: time.Now, page: testReconcileEventPage,
+				sessions: turnstore.NewSessionService(db), executions: store.NewWebhookExecutionStore(db), clock: time.Now, page: testReconcileEventPage,
 			}
 			result, err := reconciler.reconcile(t.Context(), execution)
 			if err != nil {
@@ -206,7 +207,7 @@ func turnEmitting(kinds ...string) func(turnID string) []turnOutcome {
 func appendTurnCompleted(t *testing.T, db *sql.DB, execution *store.WebhookExecution) {
 	t.Helper()
 	next := uint64(countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ?`, execution.SessionID)) + 1
-	if err := store.NewEventStore(db).Append(t.Context(), &turn.Event{
+	if err := turnstore.NewEventStore(db).Append(t.Context(), &turn.Event{
 		ID: "done-" + execution.TurnID, SessionID: execution.SessionID, Sequence: next, TurnID: execution.TurnID,
 		InvocationID: "inv-" + execution.TurnID, Author: "webhook:primary", Kind: turn.EventKindTurnCompleted,
 		SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(),

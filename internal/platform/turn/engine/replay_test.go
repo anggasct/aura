@@ -13,7 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 var replayEventKinds = []string{turn.EventKindModelStarted, turn.EventKindModelStarted, turn.EventKindMessageCompleted}
@@ -69,7 +69,7 @@ func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) it
 func streamedOnlyOnce() turn.Event {
 	return turn.Event{
 		ID:        NewTurnID(),
-		Kind:      store.EventKindADK,
+		Kind:      turnstore.EventKindADK,
 		Payload:   adkPartialStep("streamed by the first invocation only").Payload,
 		CreatedAt: time.Now().UTC(),
 	}
@@ -98,7 +98,7 @@ func (x *replayingExecutor) waitBlocked(t *testing.T) {
 
 func turnEventsOf(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
-	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), acceptedSessionOf(t, db, turnID), turnID)
+	events, err := turnstore.NewDedupeStore(db).ListTurnEvents(t.Context(), acceptedSessionOf(t, db, turnID), turnID)
 	if err != nil {
 		t.Fatalf("list the events of %s: %v", turnID, err)
 	}
@@ -183,7 +183,7 @@ func TestReplayedTurnStoresItsEventsOnce(t *testing.T) {
 	if ids := idsOfKind(all, turn.EventKindSkillActivated); !slices.Equal(ids, []string{"turn-1-ev-1"}) {
 		t.Errorf("stored skill activations = %v, want the first invocation's one", ids)
 	}
-	if ids := idsOfKind(all, store.EventKindADK); len(ids) != 0 {
+	if ids := idsOfKind(all, turnstore.EventKindADK); len(ids) != 0 {
 		t.Errorf("stored streamed chunks = %v, want none", ids)
 	}
 	for i := range before {

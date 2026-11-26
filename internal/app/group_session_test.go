@@ -10,13 +10,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
 func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	const (
 		alice  = "discord:601"
 		bob    = "discord:602"
@@ -40,7 +41,7 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 		turnRequest := &turn.TurnRequest{TurnID: "turn-" + eventID, SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main"}
 		if err := hook(ctx, turnRequest, []turn.Event{{
 			ID: eventID, SessionID: sessionID, Sequence: 1, TurnID: turnRequest.TurnID, Author: "user",
-			Kind: store.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
+			Kind: turnstore.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
 		}}); err != nil {
 			t.Fatalf("hook(%s): %v", eventID, err)
 		}

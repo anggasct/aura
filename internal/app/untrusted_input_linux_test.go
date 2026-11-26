@@ -24,6 +24,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -112,9 +113,9 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	name := "untrusted-input"
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, store.NewSessionService(db), builtin, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, turnstore.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -123,7 +124,7 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	}
 	rig.engine, err = runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
@@ -155,7 +156,7 @@ func (r *untrustedInputRig) grant(principalID, tool string) {
 func (r *untrustedInputRig) run(req *turn.TurnRequest) {
 	r.t.Helper()
 	now := time.Now().UTC()
-	err := store.NewSessionService(r.db).Create(r.t.Context(), &turn.Session{ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
+	err := turnstore.NewSessionService(r.db).Create(r.t.Context(), &turn.Session{ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		r.t.Fatalf("create session: %v", err)
 	}

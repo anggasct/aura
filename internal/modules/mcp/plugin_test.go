@@ -15,7 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -23,10 +23,10 @@ func countingBroker(t *testing.T, prompts *int) *toolbroker.Broker {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
 	session := turn.Session{ID: "session-1", OwnerID: "principal-1"}
-	if err := store.NewSessionService(db).Create(t.Context(), &session); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &session); err != nil {
 		t.Fatalf("Create(): %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal(): %v", err)
 	}

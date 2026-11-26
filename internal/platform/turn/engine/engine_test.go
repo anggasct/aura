@@ -16,8 +16,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -37,7 +37,7 @@ func (c Config) withShutdownTimeout(timeout time.Duration) Config {
 	return c
 }
 
-func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB, store.EventStore) {
+func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB, turnstore.EventStore) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
@@ -47,8 +47,8 @@ func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *s
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	events := store.NewEventStore(db)
-	dedupe := store.NewDedupeStore(db)
+	events := turnstore.NewEventStore(db)
+	dedupe := turnstore.NewDedupeStore(db)
 	deps.Events, deps.Dedupe, deps.Executor = events, dedupe, executor
 	engine, err := New(&deps)
 	if err != nil {
@@ -60,7 +60,7 @@ func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *s
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
 	sess := turn.Session{ID: id, OwnerID: "user-1"}
-	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const HandoffReplyEventPrefix = "handoff-reply-"
@@ -29,53 +30,39 @@ type HandoffReplyStore interface {
 }
 
 type sqliteHandoffReplyStore struct {
-	db *sql.DB
+	turns *turnstore.TurnStore
 }
 
 func NewHandoffReplyStore(db *sql.DB) HandoffReplyStore {
-	return &sqliteHandoffReplyStore{db: db}
+	return &sqliteHandoffReplyStore{turns: turnstore.NewTurnStore(db)}
 }
 
 func (s *sqliteHandoffReplyStore) List(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]HandoffReply, error) {
 	if limit < 1 {
 		return nil, fault.New(ErrorCodeInvalidArgument, "list handoff replies: limit must be positive")
 	}
-	after, err := sequenceToDB(afterSequence)
+	events, err := s.turns.ListSessionEvents(ctx, sessionID, turn.EventFilter{
+		AfterSequence: afterSequence,
+		Kind:          turnstore.EventKindADK,
+		IDPrefix:      HandoffReplyEventPrefix,
+		Limit:         limit,
+	})
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("list handoff replies: %w", err)
 	}
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+selectRuntimeEventColumns+`
-		 FROM runtime_event
-		 WHERE session_id = ? AND sequence > ? AND kind = ? AND substr(id, 1, ?) = ?
-		 ORDER BY sequence ASC
-		 LIMIT ?`,
-		sessionID, after, EventKindADK, len(HandoffReplyEventPrefix), HandoffReplyEventPrefix, limit,
-	)
-	if err != nil {
-		return nil, classify(fmt.Errorf("list handoff replies: %w", err))
-	}
-	defer func() { _ = rows.Close() }()
-	replies := make([]HandoffReply, 0, limit)
-	for rows.Next() {
-		event, err := scanRuntimeEvent(rows)
-		if err != nil {
-			return nil, fmt.Errorf("list handoff replies: %w", err)
-		}
-		reply, err := handoffReplyOf(&event)
+	replies := make([]HandoffReply, 0, len(events))
+	for i := range events {
+		reply, err := handoffReplyOf(&events[i])
 		if err != nil {
 			return nil, err
 		}
 		replies = append(replies, reply)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, classify(fmt.Errorf("list handoff replies: %w", err))
-	}
 	return replies, nil
 }
 
 func handoffReplyOf(event *turn.Event) (HandoffReply, error) {
-	decoded, err := RuntimeEventToADK(event)
+	decoded, err := turnstore.RuntimeEventToADK(event)
 	if err != nil {
 		return HandoffReply{}, fmt.Errorf("list handoff replies: %w", err)
 	}

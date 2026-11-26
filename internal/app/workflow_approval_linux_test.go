@@ -21,7 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type githubHarness struct {
@@ -178,12 +178,12 @@ func TestApprovalBindsToTheStoredPlanText(t *testing.T) {
 		gf := writeWorkflowFixtures(t, validWorkflowYAML)
 		db := openAccessDB(t, gf.configPath)
 		const plan = "1. approve — wait for owner approval\n2. write — run tool write_file (after approve)\n    path: note.md\n    content: [redacted]"
-		planned := unplannedProposal(t, workflow.NewStore(db), db, plan)
+		planned := unplannedProposal(t, mustWorkflowStore(t, db), db, plan)
 		out, err := runWorkflowCommand(t, gf, "proposal", "show", planned.ID)
 		if err != nil || !strings.HasSuffix(strings.TrimRight(out, "\n"), plan) {
 			t.Fatalf("proposal show = %q, %v, want the stored plan %q", out, err, plan)
 		}
-		unplanned := unplannedProposal(t, workflow.NewStore(db), db)
+		unplanned := unplannedProposal(t, mustWorkflowStore(t, db), db)
 		out, err = runWorkflowCommand(t, gf, "proposal", "show", unplanned.ID)
 		if err != nil || !strings.Contains(out, planNotStoredLine) {
 			t.Fatalf("proposal show without a stored plan = %q, %v, want %q", out, err, planNotStoredLine)
@@ -213,7 +213,7 @@ func unplannedProposal(t *testing.T, runs *workflow.Store, db *sql.DB, plan ...s
 		ID: workflow.NewProposalID(), SessionID: "ops/terminal:" + spec.ID, AgentID: "ops", PrincipalID: principal.OwnerID,
 		Spec: spec, PlanText: strings.Join(plan, ""), Digest: digest, CreatedAt: time.Now().UTC(),
 	}
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runs.CreateProposal(t.Context(), proposal); err != nil {

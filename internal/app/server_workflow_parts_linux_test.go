@@ -25,7 +25,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const deskReadsYAML = `id: desk-reads
@@ -73,7 +73,7 @@ func writeDeskServerConfig(t *testing.T) string {
 func createTestSession(t *testing.T, db *sql.DB, id, owner string) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
@@ -141,7 +141,7 @@ func TestServerPostsWorkflowCompletionsOnTheDefaultConfiguration(t *testing.T) {
 	db := compositionDatabase(t, path)
 	routine := quarantineRoutine("done_routine")
 	routine.Steps[0].Executor.ToolArgs = json.RawMessage(`{"path":"note.txt"}`)
-	if err := workflow.NewStore(db).SaveDefinition(t.Context(), routine); err != nil {
+	if err := mustWorkflowStore(t, db).SaveDefinition(t.Context(), routine); err != nil {
 		t.Fatalf("seed routine: %v", err)
 	}
 	createTestSession(t, db, "sess-done", principal.OwnerID)

@@ -9,6 +9,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -88,7 +89,7 @@ func seedChildRow(t *testing.T, cfg string) string {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
 		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)

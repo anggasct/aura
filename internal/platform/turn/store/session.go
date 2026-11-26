@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -18,6 +18,12 @@ const (
 	workflowSessionPrefix = "wf-"
 )
 
+type SessionService interface {
+	Create(ctx context.Context, sess *turn.Session) error
+	Get(ctx context.Context, sessionID string) (turn.Session, error)
+	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]turn.Event, error)
+}
+
 type sqliteSessionService struct {
 	db *sql.DB
 }
@@ -36,21 +42,12 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *turn.Session) e
 			"session ids starting with "+workflowSessionPrefix+" are reserved for workflow runs",
 		)
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return classify(fmt.Errorf("begin create session %s: %w", sess.ID, err))
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := CreateSessionTx(ctx, tx, sess); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return classify(fmt.Errorf("commit create session %s: %w", sess.ID, err))
-	}
-	return nil
+	return sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		return createSession(ctx, sqlite.Conn(ctx, s.db), sess)
+	})
 }
 
-func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *turn.Session) error {
+func createSession(ctx context.Context, q sqlite.Querier, sess *turn.Session) error {
 	if sess == nil {
 		return errNilArgument("session")
 	}
@@ -62,7 +59,7 @@ func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *turn.Session) error 
 	if agentID == "" {
 		agentID = defaultSessionAgentID
 	}
-	_, err := tx.ExecContext(ctx,
+	_, err := q.ExecContext(ctx,
 		`INSERT INTO session (id, owner_id, agent_id, metadata_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
 		sess.ID, sess.OwnerID, agentID, string(metadata), sqlite.FormatTime(sess.CreatedAt), sqlite.FormatTime(sess.UpdatedAt),
 	)
@@ -81,7 +78,7 @@ func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *turn.Session) error 
 func (s *sqliteSessionService) Get(ctx context.Context, id string) (turn.Session, error) {
 	var sess turn.Session
 	var metadata, createdAt, updatedAt string
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT id, owner_id, agent_id, metadata_json, created_at, updated_at FROM session WHERE id = ?`, id,
 	).Scan(&sess.ID, &sess.OwnerID, &sess.AgentID, &metadata, &createdAt, &updatedAt)
 	if err != nil {
@@ -108,7 +105,7 @@ func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string,
 	if err != nil {
 		return nil, err
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND sequence > ?

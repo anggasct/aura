@@ -9,17 +9,18 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func appendTextEvent(t *testing.T, db *sql.DB, sessionID, id, text string, at time.Time) {
 	t.Helper()
 	event := &session.Event{ID: id, InvocationID: id, Author: "lobby", Timestamp: at}
 	event.Content = genai.NewContentFromText(text, genai.RoleModel)
-	stored, err := RuntimeEventFromADK(sessionID, id, event)
+	stored, err := turnstore.RuntimeEventFromADK(sessionID, id, event)
 	if err != nil {
-		t.Fatalf("RuntimeEventFromADK(%s): %v", id, err)
+		t.Fatalf("turnstore.RuntimeEventFromADK(%s): %v", id, err)
 	}
-	if _, err := NewEventStore(db).AppendSequenced(t.Context(), sessionID, &stored); err != nil {
+	if _, err := turnstore.NewEventStore(db).AppendSequenced(t.Context(), sessionID, &stored); err != nil {
 		t.Fatalf("AppendSequenced(%s): %v", id, err)
 	}
 }
@@ -90,8 +91,8 @@ func TestHandoffReplyStoreRejectsInvalidBounds(t *testing.T) {
 	if _, err := replies.List(t.Context(), "lobby/http/one", 0, 0); !hasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("zero limit err = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
-	if _, err := replies.List(t.Context(), "lobby/http/one", ^uint64(0), 1); !hasCode(err, ErrorCodeEventSequenceInvalid) {
-		t.Fatalf("oversized cursor err = %v, want %s", err, ErrorCodeEventSequenceInvalid)
+	if _, err := replies.List(t.Context(), "lobby/http/one", ^uint64(0), 1); !fault.HasCode(err, turnstore.ErrorCodeEventSequenceInvalid) {
+		t.Fatalf("oversized cursor err = %v, want %s", err, turnstore.ErrorCodeEventSequenceInvalid)
 	}
 }
 

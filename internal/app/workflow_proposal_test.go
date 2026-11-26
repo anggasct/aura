@@ -15,7 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type proposalHarness struct {
@@ -47,7 +47,7 @@ func proposalFixture(t *testing.T) *proposalHarness {
 		return "call " + toolID + " " + string(args), nil
 	})
 	owner := &toolsbuiltin.WorkflowCaller{SessionID: "ops/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "ops"}
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: owner.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: owner.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	return &proposalHarness{controller: controller, runs: runs, cfg: cfg, owner: owner, db: db}
@@ -199,10 +199,10 @@ func TestWorkflowProposalShowRunsThroughTheCommand(t *testing.T) {
 		Spec: spec, Digest: digest, CreatedAt: time.Now().UTC(),
 	}
 	db := openAccessDB(t, gf.configPath)
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := workflow.NewStore(db).CreateProposal(t.Context(), proposal); err != nil {
+	if err := mustWorkflowStore(t, db).CreateProposal(t.Context(), proposal); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runWorkflowCommand(t, gf, "proposal", "show", proposal.ID)

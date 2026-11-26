@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -42,7 +43,7 @@ func TestBuildRelaysAnEffectfulToolRequestToTheTurnSubscriber(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	if err := store.NewSessionService(b.db).Create(t.Context(), &turn.Session{
+	if err := turnstore.NewSessionService(b.db).Create(t.Context(), &turn.Session{
 		ID: liveEventsSession, OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)

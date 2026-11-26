@@ -49,7 +49,7 @@ func TestDurableWorkflowGeneratedRunResumesFromTheStoreAfterAKilledProcess(t *te
 
 func (s *runSuite) waitSuspendedAfterOneBuild(t *testing.T) {
 	t.Helper()
-	disk := workflow.NewStore(s.db)
+	disk := mustWorkflowStore(t, s.db)
 	s.child.waitKillPoint(t, "the run is suspended after one stub-build", func() bool {
 		return workflowStatus(t, disk, s.plan.Run) == workflow.RunSuspended && len(s.ledger.records(t, executions(stubBuildTool))) == 1
 	})
@@ -57,7 +57,7 @@ func (s *runSuite) waitSuspendedAfterOneBuild(t *testing.T) {
 
 func (s *runSuite) requireResumedAtTheHold(t *testing.T) {
 	t.Helper()
-	disk := workflow.NewStore(s.db)
+	disk := mustWorkflowStore(t, s.db)
 	life := s.openSecondLife(t)
 	life.signal(t, holdSignal, []byte(`{"ci":"green"}`))
 
@@ -75,7 +75,7 @@ func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
 	t.Setenv(proofTokenEnv, proofToken)
 	api := startGitHubStub(t)
 	suite := startRunSuite(t, runStart{scenario: "github", github: api.server.URL})
-	disk := workflow.NewStore(suite.db)
+	disk := mustWorkflowStore(t, suite.db)
 	suite.child.waitKillPoint(t, "the run is suspended at the CI wait with its pull request created and bound", func() bool {
 		return api.creates.Load() == 1 && workflowStatus(t, disk, suite.plan.Run) == workflow.RunSuspended && suite.stepSucceeded(t, "open_pr") && len(correlations(t, disk, suite.plan.Run)) == 1
 	})
@@ -105,7 +105,7 @@ func TestDurableWorkflowWithGitHubToolsSurvivesAKilledProcess(t *testing.T) {
 
 func (s *runSuite) stepSucceeded(t *testing.T, stepID string) bool {
 	t.Helper()
-	steps, err := workflow.NewStore(s.db).Steps(t.Context(), s.plan.Run)
+	steps, err := mustWorkflowStore(t, s.db).Steps(t.Context(), s.plan.Run)
 	if err != nil {
 		t.Fatalf("Steps: %v", err)
 	}

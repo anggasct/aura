@@ -47,7 +47,7 @@ func builtinRegistry(t *testing.T) *auraagent.Registry {
 func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolController, *workflow.Store, *sql.DB) {
 	t.Helper()
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
-	runs := workflow.NewStore(db)
+	runs := mustWorkflowStore(t, db)
 	fake := durabletest.NewFake()
 	t.Cleanup(fake.Close)
 	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
@@ -167,7 +167,7 @@ func TestNonOwnersStartOnlyAllowlistedWorkflowsAndSeeOnlyTheirRuns(t *testing.T)
 
 func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
-	runs := workflow.NewStore(db)
+	runs := mustWorkflowStore(t, db)
 	interpreter := workflow.NewInterpreter(runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
 	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, toolsbuiltin.DefinitionNames(), nil)
 	if err != nil {

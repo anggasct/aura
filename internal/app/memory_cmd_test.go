@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -64,7 +65,7 @@ func seedMemoryDoc(t *testing.T, cfgPath, id, owner, session, content string, se
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	_ = sessions.Create(t.Context(), &turn.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
 	memoryStore := store.NewMemoryStore(db)
@@ -89,7 +90,7 @@ func seedMemorySummary(t *testing.T, cfgPath, id, owner, session string, expires
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	_ = sessions.Create(t.Context(), &turn.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
 	memoryStore := store.NewMemoryStore(db)

@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -76,11 +77,11 @@ func (s *stubRunner) Reconcile(ctx context.Context, id string, _ effect.Provider
 func openPushJournal(t *testing.T) *effect.Journal {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
-	svc := store.NewSessionService(db)
+	svc := turnstore.NewSessionService(db)
 	if err := svc.Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1"}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}

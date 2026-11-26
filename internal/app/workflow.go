@@ -27,7 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func newWorkflowCmd(gf *globalFlags) *cobra.Command {
@@ -222,7 +222,7 @@ func workflowMaxConcurrentSteps(cfg *appconfig.Config) int {
 
 type workflowToolRunnerInput struct {
 	Executor *toolsbuiltin.Executor
-	Sessions store.SessionService
+	Sessions turnstore.SessionService
 	Registry *auraagent.Registry
 	Runs     *workflow.Store
 	Route    *kitapproval.OwnerRoute
@@ -480,7 +480,11 @@ func newWorkflowRunsCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			runs, err := workflow.NewStore(db).Runs(ctx, statusFilter)
+			storeRuns, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+			if err != nil {
+				return err
+			}
+			runs, err := storeRuns.Runs(ctx, statusFilter)
 			if err != nil {
 				return err
 			}
@@ -513,7 +517,10 @@ func newWorkflowInspectCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			runs := workflow.NewStore(db)
+			runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+			if err != nil {
+				return err
+			}
 			run, err := runs.Run(ctx, args[0])
 			if err != nil {
 				return err
@@ -582,7 +589,10 @@ func newWorkflowCancelCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			defer func() { _ = db.Close() }()
-			runs := workflow.NewStore(db)
+			runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+			if err != nil {
+				return err
+			}
 			run, err := runs.Run(ctx, args[0])
 			if err != nil {
 				return err

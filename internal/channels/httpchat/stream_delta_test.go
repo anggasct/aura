@@ -13,7 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -44,13 +44,13 @@ func modelEvent(text, finish string, calls bool) turn.Event {
 	if err != nil {
 		panic(err)
 	}
-	event := turnEvent(store.EventKindADK)
+	event := turnEvent(turnstore.EventKindADK)
 	event.Payload = raw
 	return event
 }
 
 func toolResultEvent() turn.Event {
-	event := turnEvent(store.EventKindADK)
+	event := turnEvent(turnstore.EventKindADK)
 	event.Payload = json.RawMessage(`{"content":{"role":"user","parts":[{"functionResponse":{"name":"web_search"}}]}}`)
 	return event
 }
@@ -58,7 +58,7 @@ func toolResultEvent() turn.Event {
 func modelAnswerTexts(events []turn.Event) []string {
 	var texts []string
 	for i := range events {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
 		var decoded struct {

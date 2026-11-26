@@ -18,9 +18,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
-	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -298,7 +298,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 				yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 				return
 			}
-			re, err := store.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
+			re, err := turnstore.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
 			if err != nil {
 				yield(turn.Event{}, fmt.Errorf("map adk event: %w", err))
 				return

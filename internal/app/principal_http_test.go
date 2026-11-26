@@ -7,6 +7,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -30,7 +31,7 @@ func TestPrincipalAdminCoversHTTPKeys(t *testing.T) {
 	if _, err := keys.Revoke(t.Context(), "cccccccccccc", now); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	seedIdleSession(t, store.NewSessionService(db), "main/http/aaaaaaaaaaaa/one", "http:aaaaaaaaaaaa", now)
+	seedIdleSession(t, turnstore.NewSessionService(db), "main/http/aaaaaaaaaaaa/one", "http:aaaaaaaaaaaa", now)
 
 	out, err := runAccessCommand(t, newPrincipalCmd, cfg, "list")
 	if err != nil {
@@ -69,7 +70,7 @@ func TestRetentionSweepErasesIdleHTTPPrincipalsByKeyClass(t *testing.T) {
 	keys := store.NewAPIKeyStore(db)
 	seedAPIKey(t, keys, "aaaaaaaaaaaa", store.APIKeyClassPublic, now.Add(-9000*time.Hour))
 	seedAPIKey(t, keys, "bbbbbbbbbbbb", store.APIKeyClassTrusted, now.Add(-9000*time.Hour))
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/http/aaaaaaaaaaaa/one", "http:aaaaaaaaaaaa", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/http/bbbbbbbbbbbb/one", "http:bbbbbbbbbbbb", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/http/dddddddddddd/one", principal.OwnerID, now.Add(-9000*time.Hour))

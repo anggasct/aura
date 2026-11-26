@@ -20,7 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -28,12 +28,12 @@ func brokerEffectExecutor(t *testing.T) *effect.Executor {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(context.Background(), &turn.Session{
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}

@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -102,7 +103,7 @@ func RuntimeEventToADK(e *turn.Event) (*session.Event, error) {
 }
 
 func ReplayTurn(ctx context.Context, db *sql.DB, sessionID, turnID string) (event *session.Event, found bool, err error) {
-	rows, err := db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, db).QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND turn_id = ?

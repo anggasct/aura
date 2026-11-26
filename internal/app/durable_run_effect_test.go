@@ -185,7 +185,7 @@ func (s *runSuite) journaledAttempt(t *testing.T, attempt int) (journaledAction,
 
 func requireReturnedEffectOutcome(t *testing.T, suite *runSuite) {
 	t.Helper()
-	disk := workflow.NewStore(suite.db)
+	disk := mustWorkflowStore(t, suite.db)
 	if status := workflowStatus(t, disk, suite.plan.Run); status != workflow.RunSucceeded {
 		t.Errorf("workflow run status = %q, want %q", status, workflow.RunSucceeded)
 	}
@@ -235,7 +235,7 @@ func requireInterruptedEffectOutcome(t *testing.T, suite *runSuite) {
 
 func (s *runSuite) requireEffectStepRefused(t *testing.T, phrase string) {
 	t.Helper()
-	disk := workflow.NewStore(s.db)
+	disk := mustWorkflowStore(t, s.db)
 	if status := workflowStatus(t, disk, s.plan.Run); status != workflow.RunFailed {
 		t.Errorf("workflow run status = %q, want %q", status, workflow.RunFailed)
 	}

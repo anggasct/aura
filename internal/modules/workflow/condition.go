@@ -40,6 +40,7 @@ const (
 	ErrorCodePersonaMissing       ErrorCode = "workflow_persona_missing"
 	ErrorCodeSessionInvalid       ErrorCode = "workflow_session_invalid"
 	ErrorCodeApprovalSpent        ErrorCode = "workflow_approval_spent"
+	ErrorCodeInvalidArgument      ErrorCode = "invalid_argument"
 )
 
 const ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"

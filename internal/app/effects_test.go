@@ -14,7 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -27,12 +27,12 @@ func seedUnknownEffect(t *testing.T, dataRoot string) (configPath, intentID stri
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.NewSessionService(db).Create(ctx, &turn.Session{
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{
 		ID: "session-cli", OwnerID: "owner-cli", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	j, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	j, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}

@@ -20,7 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -230,9 +230,13 @@ func retentionRuntime(t *testing.T, db *sql.DB) *sqlite.Runtime {
 func newTestRunRetention(t *testing.T, db *sql.DB, interval time.Duration) (*runRetention, *syncBuffer) {
 	t.Helper()
 	logs := &syncBuffer{}
+	rt := retentionRuntime(t, db)
+	turns := turnstore.NewTurnStore(db)
 	return &runRetention{
-		pruner:    retentionRuntime(t, db),
-		orphans:   func(ctx context.Context) (int, error) { return store.DeleteOrphanedTurnRuns(ctx, db) },
+		pruner: rt,
+		orphans: func(ctx context.Context) (int, error) {
+			return runtimeengine.DeleteOrphanedTurnRuns(ctx, db, rt, turns)
+		},
 		retention: testRunRetention,
 		batch:     runRetentionBatch,
 		interval:  interval,

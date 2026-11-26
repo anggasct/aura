@@ -21,7 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type terminalBroker struct{}
@@ -77,7 +77,7 @@ func (r *terminalRunner) Run(ctx context.Context, req *terminal.Request) iter.Se
 }
 
 type terminalSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 	newID    func() (string, error)
 	agentID  string
 }
@@ -113,7 +113,7 @@ func (s *terminalSessions) Create(ctx context.Context, owner, agentID string) (t
 func (s *terminalSessions) Get(ctx context.Context, id string) (terminal.Session, error) {
 	internal, err := s.sessions.Get(ctx, id)
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); errors.Is(err, sql.ErrNoRows) || (ok && code == store.ErrorCodeSessionNotFound) {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); errors.Is(err, sql.ErrNoRows) || (ok && code == turnstore.ErrorCodeSessionNotFound) {
 			return terminal.Session{}, fmt.Errorf("%w: %s", terminal.ErrSessionNotFound, id)
 		}
 		return terminal.Session{}, err

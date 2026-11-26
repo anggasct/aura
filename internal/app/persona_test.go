@@ -14,7 +14,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writePersonaCLIConfig(t *testing.T, soul string) string {
@@ -97,7 +97,7 @@ func TestPersonaFingerprintFollowsSoulFile(t *testing.T) {
 func TestResolveChatPersona(t *testing.T) {
 	registry := personaRegistry(t, writePersonaCLIConfig(t, "You are Kuma."))
 	db := discordTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	if err := sessions.Create(t.Context(), &turn.Session{ID: "term-kuma", OwnerID: "local-owner", AgentID: "kuma", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -140,7 +140,7 @@ func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 	}
 
 	db := discordTestDB(t)
-	svc := store.NewSessionService(db)
+	svc := turnstore.NewSessionService(db)
 	sessions := &terminalSessions{sessions: svc, agentID: "engineer"}
 	created, err := sessions.Create(t.Context(), "local-owner", "")
 	if err != nil {

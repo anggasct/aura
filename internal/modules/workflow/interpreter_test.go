@@ -15,6 +15,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -76,9 +77,41 @@ func (s *Store) newRun(ctx context.Context, spec *Spec, input *RunInput, origin 
 	return s.createRun(ctx, &runCreate{Spec: spec, Input: input, Origin: origin, DurableKey: newID("dur")})
 }
 
+func mustNewStore(t *testing.T, db *sql.DB) *Store {
+	t.Helper()
+	disk, err := NewStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	return disk
+}
+
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	return NewStore(newTestDB(t))
+	return mustNewStore(t, newTestDB(t))
+}
+
+func TestNewStoreRequiresASessionCreator(t *testing.T) {
+	db := newTestDB(t)
+	cases := []struct {
+		name     string
+		db       *sql.DB
+		sessions SessionCreator
+	}{
+		{name: "nil database", sessions: turnstore.NewTurnStore(db)},
+		{name: "nil session creator", db: db},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			disk, err := NewStore(tc.db, tc.sessions)
+			if disk != nil {
+				t.Fatal("NewStore returned a store for invalid arguments")
+			}
+			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+				t.Fatalf("NewStore err = %v, want %s", err, ErrorCodeInvalidArgument)
+			}
+		})
+	}
 }
 
 func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
@@ -853,7 +886,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 	}
 	fake := durabletest.NewFake()
 	db := newTestDB(t)
-	disk := NewStore(db)
+	disk := mustNewStore(t, db)
 	block := make(chan struct{})
 	agents := &fakeAgentRunner{inFlight: block}
 	interpreter := NewInterpreter(disk, fake, &Options{
@@ -989,7 +1022,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 func TestRunsOrdersRunsByIdentity(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
-	disk := NewStore(db)
+	disk := mustNewStore(t, db)
 	spec := validTestSpec()
 	if err := disk.SaveDefinition(ctx, spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
@@ -1028,7 +1061,7 @@ func TestRunsOrdersRunsByIdentity(t *testing.T) {
 
 func TestSaveDefinitionConcurrentConflict(t *testing.T) {
 	db := newTestDB(t)
-	disk := NewStore(db)
+	disk := mustNewStore(t, db)
 	ctx := t.Context()
 
 	spec1 := &Spec{

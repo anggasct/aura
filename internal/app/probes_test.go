@@ -16,7 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -36,7 +36,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
-	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))
+	listener, err := buildProbeListener(&cfg, nil, turnstore.NewEventStore(db), turnstore.NewSessionService(db))
 	if err != nil {
 		t.Fatalf("buildProbeListener: %v", err)
 	}

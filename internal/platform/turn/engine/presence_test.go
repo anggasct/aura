@@ -11,8 +11,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type presenceCapture struct {
@@ -164,7 +164,7 @@ func TestExtractPresenceHelpers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
-	ev := &turn.Event{Kind: store.EventKindADK, Payload: raw}
+	ev := &turn.Event{Kind: turnstore.EventKindADK, Payload: raw}
 	text, args, ok := extractPresenceActivity(ev)
 	if !ok || text != "Checking tasks" || !strings.Contains(args, "notes.md") {
 		t.Fatalf("extract = %q,%q,%v", text, args, ok)
@@ -185,7 +185,7 @@ func TestExtractPresenceActivityOmitsParallelToolArgs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal event: %v", err)
 	}
-	ev := &turn.Event{Kind: store.EventKindADK, Payload: raw}
+	ev := &turn.Event{Kind: turnstore.EventKindADK, Payload: raw}
 	text, args, ok := extractPresenceActivity(ev)
 	if !ok || text != "Mencari catatan" {
 		t.Fatalf("extract = %q,%q,%v", text, args, ok)

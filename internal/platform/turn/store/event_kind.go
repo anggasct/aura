@@ -1,10 +1,11 @@
-package store
+package turnstore
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -18,9 +19,9 @@ func NewEventKindReader(db *sql.DB) EventKindReader {
 
 func (s *sqliteEventStore) LatestByKind(ctx context.Context, sessionID, kind string, limit int) ([]turn.Event, error) {
 	if limit <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "limit must be positive")
+		return nil, errorf(ErrorCodeInvalidArgument, "limit must be positive")
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND kind = ?

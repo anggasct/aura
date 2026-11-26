@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,7 @@ func TestBackupAndVerifyRestore(t *testing.T) {
 	db := newTestDB(t)
 	mustCreateSession(t, db, "session-1")
 
-	events := NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	e := newEvent("session-1", 1)
 	if err := events.Append(ctx, &e); err != nil {
 		t.Fatalf("Append: %v", err)

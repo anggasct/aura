@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func newWorkflowProposalsCmd(gf *globalFlags) *cobra.Command {
@@ -33,7 +34,11 @@ func newWorkflowProposalsCmd(gf *globalFlags) *cobra.Command {
 				return &usageError{err: errors.New("--status must be proposed, approved, rejected or expired")}
 			}
 			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
-				proposals, err := workflow.NewStore(db).Proposals(ctx, status, time.Now())
+				runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+				if err != nil {
+					return err
+				}
+				proposals, err := runs.Proposals(ctx, status, time.Now())
 				if err != nil {
 					return err
 				}
@@ -64,7 +69,11 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 			Args:  cobra.ExactArgs(1),
 			RunE: func(cmd *cobra.Command, args []string) error {
 				return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
-					proposal, err := workflow.NewStore(db).Proposal(ctx, args[0], time.Now())
+					runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+					if err != nil {
+						return err
+					}
+					proposal, err := runs.Proposal(ctx, args[0], time.Now())
 					if err != nil {
 						return err
 					}
@@ -100,7 +109,11 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 				}
 				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
 					secrets := slices.Concat(toolsbuiltin.ConfiguredToolSecrets(result.Config.Tools), githubCredentialSecrets(result.Config))
-					runID, err := approveStoredProposal(ctx, result.Config, app.interpreter, workflow.NewStore(app.db), args[0], secrets, time.Now())
+					runs, err := workflow.NewStore(app.db, app.turns)
+					if err != nil {
+						return err
+					}
+					runID, err := approveStoredProposal(ctx, result.Config, app.interpreter, runs, args[0], secrets, time.Now())
 					if err != nil {
 						return err
 					}
@@ -118,7 +131,10 @@ func newWorkflowProposalCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				return withApp(cmd, &commandInput{result: &result, parts: []Part{PartWorkflows}}, func(ctx context.Context, app *App) error {
-					runs := workflow.NewStore(app.db)
+					runs, err := workflow.NewStore(app.db, app.turns)
+					if err != nil {
+						return err
+					}
 					if _, err := runs.Proposal(ctx, args[0], time.Now()); err != nil {
 						return err
 					}

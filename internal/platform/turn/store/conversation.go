@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -27,9 +27,9 @@ func NewConversationSessionStore(db *sql.DB) ConversationSessionStore {
 
 func (s *sqliteConversationSessionStore) Resolve(ctx context.Context, conversationKey string) (sessionID string, found bool, err error) {
 	if conversationKey == "" {
-		return "", false, Errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
+		return "", false, errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
 	}
-	err = s.db.QueryRowContext(ctx,
+	err = sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT session_id FROM conversation_session WHERE conversation_key = ?`, conversationKey,
 	).Scan(&sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -43,9 +43,9 @@ func (s *sqliteConversationSessionStore) Resolve(ctx context.Context, conversati
 
 func (s *sqliteConversationSessionStore) Point(ctx context.Context, conversationKey, sessionID string) error {
 	if conversationKey == "" || sessionID == "" {
-		return Errorf(ErrorCodeInvalidArgument, "conversation key and session id must not be empty")
+		return errorf(ErrorCodeInvalidArgument, "conversation key and session id must not be empty")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 INSERT INTO conversation_session (conversation_key, session_id, updated_at) VALUES (?, ?, ?)
 ON CONFLICT(conversation_key) DO UPDATE SET
     session_id = excluded.session_id,
@@ -54,7 +54,7 @@ ON CONFLICT(conversation_key) DO UPDATE SET
 	)
 	if err != nil {
 		if isConstraintForeignKey(err) {
-			return Errorf(ErrorCodeSessionNotFound, "pointed session does not exist")
+			return errorf(ErrorCodeSessionNotFound, "pointed session does not exist")
 		}
 		return classify(fmt.Errorf("point conversation session: %w", err))
 	}
@@ -63,9 +63,9 @@ ON CONFLICT(conversation_key) DO UPDATE SET
 
 func (s *sqliteConversationSessionStore) Clear(ctx context.Context, conversationKey string) error {
 	if conversationKey == "" {
-		return Errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
+		return errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM conversation_session WHERE conversation_key = ?`, conversationKey); err != nil {
+	if _, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `DELETE FROM conversation_session WHERE conversation_key = ?`, conversationKey); err != nil {
 		return classify(fmt.Errorf("clear conversation session: %w", err))
 	}
 	return nil

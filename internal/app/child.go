@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -68,13 +69,13 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 		GrantsJSON: string(grants), BudgetJSON: string(budget),
 		State: child.StatusQueued, Deadline: deadline, CreatedAt: now, UpdatedAt: now,
 	}
-	sessions := store.NewSessionService(r.db)
+	sessions := turnstore.NewSessionService(r.db)
 	parent, err := sessions.Get(ctx, spec.ParentSessionID)
 	if err != nil {
 		return child.Spawn{}, false, err
 	}
 	if err := sessions.Create(ctx, &turn.Session{ID: spec.ChildSessionID, OwnerID: spec.OwnerID, AgentID: parent.AgentID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionIDConflict {
 			return child.Spawn{}, false, err
 		}
 	}
@@ -509,7 +510,7 @@ func (r childSessionRunner) parentSession(ctx context.Context, parentSessionID s
 	if r.db == nil || strings.TrimSpace(parentSessionID) == "" {
 		return turn.Session{}, errors.New("cli: parent session must not be empty")
 	}
-	sess, err := store.NewSessionService(r.db).Get(ctx, strings.TrimSpace(parentSessionID))
+	sess, err := turnstore.NewSessionService(r.db).Get(ctx, strings.TrimSpace(parentSessionID))
 	if err != nil {
 		return turn.Session{}, err
 	}

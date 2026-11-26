@@ -16,7 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -25,7 +25,7 @@ func TestTurnToolCallsLetTheJournalAllocateTheSequence(t *testing.T) {
 	dataRoot := t.TempDir()
 	db := storetest.OpenMigrated(t)
 	const session = "session-allocate"
-	if err := store.NewSessionService(db).Create(ctx, &turn.Session{ID: session, OwnerID: principal.OwnerID}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: session, OwnerID: principal.OwnerID}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	toolsCfg := config.DefaultTools()
@@ -50,7 +50,7 @@ func TestTurnToolCallsLetTheJournalAllocateTheSequence(t *testing.T) {
 		IdempotencyKey: "adk/" + session + "/turn-allocate/call-allocate", EventInvocation: "inv-allocate",
 		EventBranch: "main", EventAuthor: "agent",
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	for sequence := uint64(1); sequence <= 2; sequence++ {
 		if err := events.Append(ctx, &turn.Event{
 			ID: "other-" + string(rune('0'+sequence)), SessionID: session, Sequence: sequence, TurnID: "turn-other",

@@ -5,14 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestPrepare_RecordsIntentAndRequestedEvent(t *testing.T) {
@@ -487,9 +490,86 @@ func TestPrepare_EventPayloadIsSafe(t *testing.T) {
 
 func TestStorePackageContract(t *testing.T) {
 	t.Parallel()
-	err := store.AppendEventTx(context.Background(), nil, &turn.Event{})
-	if err == nil {
-		t.Fatal("expected nil-tx error")
+	db := storetest.OpenMigrated(t)
+	_, err := NewJournal(db, Options{})
+	assertCode(t, err, ErrorCodeInvalidArgument)
+}
+
+type failingEventTurnStore struct {
+	TurnStore
+	appendErr error
+}
+
+func (f failingEventTurnStore) AppendEvent(context.Context, *turn.Event) error {
+	return f.appendErr
+}
+
+func TestJournalPrepareLeavesNoIntentWhenItsEventCannotBeWritten(t *testing.T) {
+	t.Parallel()
+	db := storetest.OpenMigrated(t)
+	if err := seedSession(t, db); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	appendErr := errors.New("append failed")
+	j, err := NewJournal(db, Options{
+		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
+		Logger: slog.New(slog.DiscardHandler),
+		Turns:  failingEventTurnStore{TurnStore: turnstore.NewTurnStore(db), appendErr: appendErr},
+	})
+	if err != nil {
+		t.Fatalf("new journal: %v", err)
+	}
+	if _, err := j.Prepare(t.Context(), validPrepare(1)); !errors.Is(err, appendErr) {
+		t.Fatalf("Prepare err = %v, want appendErr", err)
+	}
+	if got := intentCount(t, db, ""); got != 0 {
+		t.Fatalf("intent rows = %d, want 0 after event append failure", got)
+	}
+}
+
+type recordingEventPublisher struct {
+	events []*turn.Event
+}
+
+func (r *recordingEventPublisher) Publish(e *turn.Event) {
+	r.events = append(r.events, e)
+}
+
+func TestJournalPublishesOnlyAfterTheOutermostCommit(t *testing.T) {
+	t.Parallel()
+	pub := &recordingEventPublisher{}
+	j, db := newTestJournalWithEvents(t, pub)
+
+	rollbackErr := errors.New("outer rollback")
+	err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		if _, err := j.Prepare(ctx, validPrepare(1)); err != nil {
+			return err
+		}
+		if len(pub.events) != 0 {
+			t.Fatalf("published %d events before commit, want 0", len(pub.events))
+		}
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx err = %v, want rollbackErr", err)
+	}
+	if len(pub.events) != 0 {
+		t.Fatalf("published %d events after rollback, want 0", len(pub.events))
+	}
+
+	if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		if _, err := j.Prepare(ctx, validPrepare(2)); err != nil {
+			return err
+		}
+		if len(pub.events) != 0 {
+			t.Fatalf("published %d events inside uncommitted outer tx, want 0", len(pub.events))
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("outer commit: %v", err)
+	}
+	if len(pub.events) != 1 || pub.events[0].Kind != EventKindToolRequested {
+		t.Fatalf("published events = %+v, want one tool.requested event", pub.events)
 	}
 }
 

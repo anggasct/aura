@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -89,7 +90,7 @@ func TestRetentionSweepSkipsAPrincipalWithLiveRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/discord:office/dm:21", "discord:21", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/discord:office/dm:24", "discord:24", now.Add(-721*time.Hour))
 	seedLiveRunRows(t, db, "run-live", "busy", "discord:21")

@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -186,7 +187,7 @@ func recordOwnerRekey(ctx context.Context, db *sql.DB, report store.OwnerRekeyRe
 	if err != nil {
 		return fmt.Errorf("cli: marshal owner rekey: %w", err)
 	}
-	_, _, err = store.NewEventStore(db).UpsertEvent(ctx, &turn.Event{
+	_, _, err = turnstore.NewEventStore(db).UpsertEvent(ctx, &turn.Event{
 		ID:            "principal-rekey-" + at.Format(time.RFC3339Nano),
 		SessionID:     sessionID,
 		TurnID:        "owner-action",

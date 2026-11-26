@@ -25,12 +25,13 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
 type webhookDispatcher struct {
 	mu         sync.Mutex
-	sessions   store.SessionService
+	sessions   turnstore.SessionService
 	executions store.WebhookExecutionStore
 	backend    turn.AgentRuntime
 	retention  time.Duration
@@ -41,7 +42,7 @@ type webhookDispatcher struct {
 	drains     sync.WaitGroup
 }
 
-func newWebhookDispatcher(sessions store.SessionService, executions store.WebhookExecutionStore, backend turn.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
+func newWebhookDispatcher(sessions turnstore.SessionService, executions store.WebhookExecutionStore, backend turn.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
 	if sessions == nil {
 		return nil, errors.New("webhook dispatcher requires a session store")
 	}
@@ -199,7 +200,7 @@ func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID 
 		UpdatedAt: now,
 	})
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return nil
 		}
 		return gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
@@ -442,12 +443,16 @@ func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
 		return nil, err
 	}
 	executions := store.NewWebhookExecutionStore(db)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	dispatcher, err := newWebhookDispatcher(sessions, executions, backend, time.Duration(cfg.Webhook.ReplayRetention), time.Now, logger)
 	if err != nil {
 		return nil, err
 	}
-	githubAdapter, err := github.NewAdapter(workflow.NewStore(db), in.runtime, logger)
+	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		return nil, err
+	}
+	githubAdapter, err := github.NewAdapter(runs, in.runtime, logger)
 	if err != nil {
 		return nil, err
 	}

@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -137,7 +138,7 @@ func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
 		t.Skip("the production workflow tool runner needs Linux: the filesystem adapters refuse other systems")
 	}
 	spec := w.spec()
-	if err := workflow.NewStore(suite.db).SaveDefinition(t.Context(), spec); err != nil {
+	if err := mustWorkflowStore(t, suite.db).SaveDefinition(t.Context(), spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
 	}
 	digest, err := workflow.Digest(spec)
@@ -218,7 +219,7 @@ func (w *workflowShape) startRun(t *testing.T, life *runLife) {
 
 func discoverTheRun(t *testing.T, suite *runSuite) {
 	t.Helper()
-	disk := workflow.NewStore(suite.db)
+	disk := mustWorkflowStore(t, suite.db)
 	var started *workflow.RunSummary
 	suite.child.waitKillPoint(t, "the first life has started its workflow run", func() bool {
 		runs, err := disk.Runs(t.Context(), "")
@@ -342,7 +343,7 @@ func seedChild(t *testing.T, suite *runSuite) {
 	t.Helper()
 	now := time.Now().UTC()
 	for _, id := range []string{childParent, childSession} {
-		if err := store.NewSessionService(suite.db).Create(t.Context(), &turn.Session{ID: id, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := turnstore.NewSessionService(suite.db).Create(t.Context(), &turn.Session{ID: id, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
 	}

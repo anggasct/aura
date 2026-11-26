@@ -15,7 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const soulDigestDisplayLength = 12
@@ -62,7 +62,7 @@ func logPersonas(ctx context.Context, logger *slog.Logger, registry *auraagent.R
 	}
 }
 
-func resolveChatPersona(ctx context.Context, registry *auraagent.Registry, sessions store.SessionService, sessionID, requested string) (string, error) {
+func resolveChatPersona(ctx context.Context, registry *auraagent.Registry, sessions turnstore.SessionService, sessionID, requested string) (string, error) {
 	if requested != "" {
 		if _, ok := registry.Lookup(requested); !ok {
 			return "", fault.New(turn.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", requested))

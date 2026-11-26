@@ -19,6 +19,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -141,7 +142,7 @@ agents:
 		provider:       fake,
 	}
 	name := "knowledge-capturing-model"
-	sessions, events := store.NewSessionService(db), store.NewEventStore(db)
+	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
 	provider, err := knowledge.NewContextProvider(retriever)
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
@@ -157,7 +158,7 @@ agents:
 	}
 	rig.engine, err = runtimeengine.New(&runtimeengine.Deps{
 		Events:       events,
-		Dedupe:       store.NewDedupeStore(db),
+		Dedupe:       turnstore.NewDedupeStore(db),
 		Executor:     executor,
 		Config:       engineLimits(2, 4),
 		Personas:     registryPersonas{registry: personaRegistry(t, path)},

@@ -16,8 +16,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -55,7 +55,7 @@ func (r e2eRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[ter
 }
 
 type e2eSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s e2eSessions) Create(ctx context.Context, owner, agentID string) (terminal.Session, error) {
@@ -86,12 +86,12 @@ func (s e2eSessions) ListEvents(ctx context.Context, sessionID string, after uin
 func TestTerminalVerticalSlice(t *testing.T) {
 	db := storetest.OpenMigrated(t)
 
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
@@ -131,14 +131,14 @@ func TestTerminalVerticalSlice(t *testing.T) {
 
 func TestTerminalReplayCompletedEventWins(t *testing.T) {
 	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"partial "}]}}`)},
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},
 	})
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}

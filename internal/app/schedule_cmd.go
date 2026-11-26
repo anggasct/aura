@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -356,7 +357,11 @@ func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.
 			return nil
 		}
 	}
-	if _, err := workflow.NewStore(db).LatestDefinition(ctx, id); err != nil {
+	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		return err
+	}
+	if _, err := runs.LatestDefinition(ctx, id); err != nil {
 		return &usageError{fmt.Errorf("workflow %q is neither a definition nor a saved routine", id)}
 	}
 	return nil

@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -51,7 +52,7 @@ func (s *emailSessions) SessionOwner(ctx context.Context, sessionID string) (own
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", false, nil
 	}
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionNotFound {
 		return "", false, nil
 	}
 	return "", false, err
@@ -80,7 +81,7 @@ func newEmailAdapter(cfg *appconfig.Config, account *config.EmailAccount, db *sq
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := email.New(&cfg.Channels.Email, account, connector, mailer, emailCursors{cursors: store.NewEmailCursorStore(db)}, executor, &emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}}, logger)
+	adapter, err := email.New(&cfg.Channels.Email, account, connector, mailer, emailCursors{cursors: store.NewEmailCursorStore(db)}, executor, &emailSessions{discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}}, logger)
 	if err != nil {
 		return nil, err
 	}

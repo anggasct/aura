@@ -14,7 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestApprovedProposalRunKeepsTheProposalTaint(t *testing.T) {
@@ -66,7 +66,7 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 		if runID == "" {
 			t.Fatalf("start output = %q, want a run id", out)
 		}
-		run, err := workflow.NewStore(openAccessDB(t, gf.configPath)).Run(t.Context(), runID)
+		run, err := mustWorkflowStore(t, openAccessDB(t, gf.configPath)).Run(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -163,10 +163,10 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 				Tainted: tc.tainted, Spec: spec, Digest: digest, CreatedAt: time.Now().UTC(),
 			}
 			db := openAccessDB(t, gf.configPath)
-			if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+			if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
 			}
-			if err := workflow.NewStore(db).CreateProposal(t.Context(), proposal); err != nil {
+			if err := mustWorkflowStore(t, db).CreateProposal(t.Context(), proposal); err != nil {
 				t.Fatal(err)
 			}
 			out, err := runWorkflowCommand(t, gf, "proposal", "show", proposal.ID)

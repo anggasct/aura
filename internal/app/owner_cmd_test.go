@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -109,7 +110,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openStorage: %v", err)
 	}
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	for id, owner := range map[string]string{
 		"terminal-1":                 current.Username,

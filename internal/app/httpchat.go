@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -45,7 +46,7 @@ func (d *apiKeyDirectory) GetByID(ctx context.Context, id string) (httpchat.Key,
 }
 
 type httpSessionStore struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s *httpSessionStore) Get(ctx context.Context, id string) (httpchat.Session, bool, error) {
@@ -53,7 +54,7 @@ func (s *httpSessionStore) Get(ctx context.Context, id string) (httpchat.Session
 	if errors.Is(err, sql.ErrNoRows) {
 		return httpchat.Session{}, false, nil
 	}
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionNotFound {
 		return httpchat.Session{}, false, nil
 	}
 	if err != nil {
@@ -92,7 +93,7 @@ func buildHTTPChat(cfg *appconfig.Config, db *sql.DB, backend turn.AgentRuntime,
 		return nil, nil, nil
 	}
 	gates := discordAccessSettings(cfg, db, recorder, nil)
-	sessions := &httpSessionStore{sessions: store.NewSessionService(db)}
+	sessions := &httpSessionStore{sessions: turnstore.NewSessionService(db)}
 	chat, err := httpchat.NewChat(&httpchat.ChatOptions{
 		Runtime:            backend,
 		Sessions:           sessions,

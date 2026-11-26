@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func newEffectsCmd(gf *globalFlags) *cobra.Command {
@@ -249,7 +250,7 @@ func newEffectsPruneCmd(gf *globalFlags) *cobra.Command {
 
 func withEffects(cmd *cobra.Command, gf *globalFlags, fn func(context.Context, *slog.Logger, *appconfig.Config, *effect.Journal) error) error {
 	return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
-		journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
+		journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Turns: turnstore.NewTurnStore(db)})
 		if err != nil {
 			return err
 		}

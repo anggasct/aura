@@ -17,7 +17,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func contextRow(kind, payload string) *turn.Event {
@@ -146,11 +146,11 @@ func openContextTestDB(t *testing.T, cfgPath string) *sql.DB {
 
 func seedContextSession(t *testing.T, db *sql.DB) {
 	t.Helper()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	for i, text := range []string{"first", "second"} {
 		if _, err := events.AppendSequenced(t.Context(), "sess-1", &turn.Event{
 			ID: "evt-" + string(rune('a'+i)), SessionID: "sess-1", TurnID: "t1",
@@ -166,7 +166,7 @@ func TestContextSummaryStoreRoundTrip(t *testing.T) {
 	cfgPath, _ := writeContextCLIConfig(t, "")
 	db := openContextTestDB(t, cfgPath)
 	seedContextSession(t, db)
-	adapter := newContextSummaryStore(store.NewSessionService(db), store.NewEventStore(db))
+	adapter := newContextSummaryStore(turnstore.NewSessionService(db), turnstore.NewEventStore(db))
 	listed, err := adapter.ListSummaries(t.Context(), "sess-1")
 	if err != nil {
 		t.Fatalf("ListSummaries: %v", err)

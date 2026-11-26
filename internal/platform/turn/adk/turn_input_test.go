@@ -15,7 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/adk/v2/tool"
@@ -47,7 +47,7 @@ func captureModelSet(t *testing.T, serverURL string) (name string, models model.
 	return name, model.Set{name: adapter}
 }
 
-func seedUserEvent(t *testing.T, events store.EventStore, sessionID, turnID, eventID, text string, seq uint64) {
+func seedUserEvent(t *testing.T, events turnstore.EventStore, sessionID, turnID, eventID, text string, seq uint64) {
 	t.Helper()
 	ev := &session.Event{
 		ID:        eventID,
@@ -55,7 +55,7 @@ func seedUserEvent(t *testing.T, events store.EventStore, sessionID, turnID, eve
 		Author:    "user",
 	}
 	ev.Content = genai.NewContentFromText(text, genai.RoleUser)
-	re, err := store.RuntimeEventFromADK(sessionID, turnID, ev)
+	re, err := turnstore.RuntimeEventFromADK(sessionID, turnID, ev)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
@@ -65,7 +65,7 @@ func seedUserEvent(t *testing.T, events store.EventStore, sessionID, turnID, eve
 	}
 }
 
-func seedAssistantEvent(t *testing.T, events store.EventStore, sessionID, turnID, eventID, text string, seq uint64) {
+func seedAssistantEvent(t *testing.T, events turnstore.EventStore, sessionID, turnID, eventID, text string, seq uint64) {
 	t.Helper()
 	ev := &session.Event{
 		ID:        eventID,
@@ -73,7 +73,7 @@ func seedAssistantEvent(t *testing.T, events store.EventStore, sessionID, turnID
 		Author:    "aura",
 	}
 	ev.Content = genai.NewContentFromText(text, genai.RoleModel)
-	re, err := store.RuntimeEventFromADK(sessionID, turnID, ev)
+	re, err := turnstore.RuntimeEventFromADK(sessionID, turnID, ev)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
@@ -231,7 +231,7 @@ func TestTurnToolLoopShapesPreserved(t *testing.T) {
 	}
 }
 
-func seedToolLoopHistory(t *testing.T, events store.EventStore, sessionID string) {
+func seedToolLoopHistory(t *testing.T, events turnstore.EventStore, sessionID string) {
 	t.Helper()
 	seedUserEvent(t, events, sessionID, "turn-prior-tool", "event-tool-1", "run the tool", 1)
 	callEvent := &session.Event{
@@ -249,7 +249,7 @@ func seedToolLoopHistory(t *testing.T, events store.EventStore, sessionID string
 			},
 		}},
 	}
-	re, err := store.RuntimeEventFromADK(sessionID, "turn-prior-tool", callEvent)
+	re, err := turnstore.RuntimeEventFromADK(sessionID, "turn-prior-tool", callEvent)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK call: %v", err)
 	}
@@ -272,7 +272,7 @@ func seedToolLoopHistory(t *testing.T, events store.EventStore, sessionID string
 			},
 		}},
 	}
-	re, err = store.RuntimeEventFromADK(sessionID, "turn-prior-tool", responseEvent)
+	re, err = turnstore.RuntimeEventFromADK(sessionID, "turn-prior-tool", responseEvent)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK response: %v", err)
 	}

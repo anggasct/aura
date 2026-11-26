@@ -10,7 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func (e *Engine) channelAdapterFor(req *turn.TurnRequest) (runtimechannelhost.ChannelPort, bool) {
@@ -86,7 +86,7 @@ func extractDeliveryTexts(events []turn.Event) []string {
 	for i := range events {
 		ev := &events[i]
 		switch ev.Kind {
-		case store.EventKindADK:
+		case turnstore.EventKindADK:
 			if text := adkAnswerText(ev.Payload, false); strings.TrimSpace(text) != "" {
 				texts = append(texts, text)
 			}
@@ -101,7 +101,7 @@ func extractDeliveryTexts(events []turn.Event) []string {
 	if len(texts) == 0 {
 		for i := range events {
 			ev := &events[i]
-			if ev.Kind != store.EventKindADK {
+			if ev.Kind != turnstore.EventKindADK {
 				continue
 			}
 			if text := adkAnswerText(ev.Payload, true); strings.TrimSpace(text) != "" {

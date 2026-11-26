@@ -28,10 +28,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type effectIntentIDs struct {
@@ -395,16 +396,10 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 	}
 	seed := func(t *testing.T, runID, owner, agent string) context.Context {
 		t.Helper()
-		tx, err := db.BeginTx(t.Context(), nil)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := store.CreateSessionTx(t.Context(), tx, &turn.Session{ID: workflow.RunSessionID(runID), OwnerID: owner, AgentID: agent}); err != nil {
+		if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+			return turnstore.NewTurnStore(db).CreateSession(ctx, &turn.Session{ID: workflow.RunSessionID(runID), OwnerID: owner, AgentID: agent})
+		}); err != nil {
 			t.Fatalf("create run session: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		t.Cleanup(cancel)
@@ -481,7 +476,7 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	disk := workflow.NewStore(db)
+	disk := mustWorkflowStore(t, db)
 	fake := durabletest.NewFake()
 	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{Tools: runner, Logger: slog.Default()})
 	tool := "write_file"

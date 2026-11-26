@@ -19,7 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeRoutedProfileConfig(t *testing.T, extra string) string {
@@ -228,12 +228,12 @@ func waitProfileFact(t *testing.T, service *profile.Service, status string, read
 func persistUserEvent(t *testing.T, db *sql.DB, sessionID, text string) turn.Event {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	event := userEvent(t, "evt-"+sessionID, 0, text)
 	event.SessionID, event.TurnID, event.InvocationID, event.SchemaVersion, event.CreatedAt = sessionID, "turn-1", "inv-1", 1, now
-	sequence, err := store.NewEventStore(db).AppendSequenced(t.Context(), sessionID, &event)
+	sequence, err := turnstore.NewEventStore(db).AppendSequenced(t.Context(), sessionID, &event)
 	if err != nil {
 		t.Fatalf("AppendSequenced: %v", err)
 	}

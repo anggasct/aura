@@ -9,7 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/checkpoint"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const checkpointSchemaVersion uint16 = 1
@@ -73,7 +73,7 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *turn.Checkpoint
 			CreatedAt:     time.Now().UTC(),
 		}
 		if err := appender.AppendCheckpoint(ctx, event); err != nil {
-			if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeEventSequenceConflict {
+			if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeEventSequenceConflict {
 				return codedError(turn.ErrorCodeCheckpointStale, "checkpoint id is already bound to different state", err)
 			}
 			return codedError(turn.ErrorCodeStorageUnavailable, "append checkpoint event", err)

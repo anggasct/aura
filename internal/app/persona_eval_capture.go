@@ -23,7 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type personaEvalModel struct {
@@ -101,7 +101,7 @@ func capturePersonaTurn(ctx context.Context, definition *auraagent.Definition, c
 }
 
 func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, class principal.Class, principalID string) (personaeval.Capture, error) {
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	model := &personaEvalModel{}
 	name := model.Name()
 	evaluated := *definition

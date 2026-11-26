@@ -26,7 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/history"
 )
 
@@ -304,7 +304,7 @@ func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.
 	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		return zero, err
 	}
-	if err := store.NewSessionService(db).Create(ctx, &turn.Session{ID: SessionID, OwnerID: principalID, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: SessionID, OwnerID: principalID, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		return zero, err
 	}
 	return fn(db)
@@ -317,7 +317,7 @@ func approvalRouted(ctx context.Context, definition *auraagent.Definition, c *Ca
 }
 
 func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, c *Case) (bool, error) {
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		return false, err
 	}

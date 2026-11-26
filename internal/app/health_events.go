@@ -13,7 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -25,12 +25,12 @@ const (
 )
 
 type healthEventLog struct {
-	events   store.EventStore
-	sessions store.SessionService
+	events   turnstore.EventStore
+	sessions turnstore.SessionService
 	mu       sync.Mutex
 }
 
-func newHealthEventLog(events store.EventStore, sessions store.SessionService) *healthEventLog {
+func newHealthEventLog(events turnstore.EventStore, sessions turnstore.SessionService) *healthEventLog {
 	return &healthEventLog{events: events, sessions: sessions}
 }
 
@@ -77,7 +77,7 @@ func (l *healthEventLog) ensureSession(ctx context.Context) error {
 		return fmt.Errorf("health event: %w", err)
 	}
 	if err := l.sessions.Create(ctx, &turn.Session{ID: healthSessionID, OwnerID: "system"}); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return nil
 		}
 		return fmt.Errorf("health event: %w", err)
@@ -92,7 +92,7 @@ func (l *healthEventLog) history(ctx context.Context) ([]health.Transition, erro
 	for {
 		listed, err := l.sessions.ListEvents(ctx, healthSessionID, after, pageSize)
 		if err != nil {
-			if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
+			if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionNotFound {
 				return nil, nil
 			}
 			return nil, fmt.Errorf("health event history: %w", err)

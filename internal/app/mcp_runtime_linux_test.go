@@ -31,7 +31,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -207,7 +207,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	session := turn.Session{ID: "session-1", OwnerID: "owner-1"}
-	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
+	if err := turnstore.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	harness := &mcpHarness{cfg: appconfig.Default(), db: db, report: capabilitytest.All(t), approve: true}

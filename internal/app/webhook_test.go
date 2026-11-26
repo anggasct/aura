@@ -23,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -32,7 +33,7 @@ type fakeTurnRuntime struct {
 	calls     int
 	overload  bool
 	events    func(turnID string) []turnOutcome
-	store     store.EventStore
+	store     turnstore.EventStore
 	sequences map[string]uint64
 	parts     [][]runtimeingress.InputPart
 	sessions  []string
@@ -120,7 +121,7 @@ func acceptedTurnEvents(turnID string) []turnOutcome {
 type webhookTestRig struct {
 	db       *sql.DB
 	backend  *fakeTurnRuntime
-	sessions store.SessionService
+	sessions turnstore.SessionService
 	logger   *slog.Logger
 }
 
@@ -132,11 +133,11 @@ func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatche
 func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispatcher, store.WebhookExecutionStore) {
 	t.Helper()
 	executions := store.NewWebhookExecutionStore(rig.db)
-	rig.backend.store = store.NewEventStore(rig.db)
+	rig.backend.store = turnstore.NewEventStore(rig.db)
 	rig.backend.sequences = make(map[string]uint64)
 	sessions := rig.sessions
 	if sessions == nil {
-		sessions = store.NewSessionService(rig.db)
+		sessions = turnstore.NewSessionService(rig.db)
 	}
 	dispatcher, err := newWebhookDispatcher(sessions, executions, rig.backend, 24*time.Hour, time.Now, rig.logger)
 	if err != nil {
@@ -371,7 +372,7 @@ func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
-	return db, workflow.NewStore(db)
+	return db, mustWorkflowStore(t, db)
 }
 
 type queuedRuntime struct{ durable.Runtime }

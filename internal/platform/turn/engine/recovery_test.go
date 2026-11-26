@@ -21,8 +21,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type holdingExecutor struct {
@@ -470,7 +470,7 @@ func TestRecoverTurnsEndsATurnWhoseRunEndedWithoutATerminalEvent(t *testing.T) {
 			requireTerminals(t, rig.db, eventFilter{turnID: "turn-2", kinds: []string{turn.EventKindTurnCompleted}})
 			requireTerminals(t, rig.db, eventFilter{turnID: "turn-1", kinds: []string{tc.terminal}})
 			if tc.code != "" {
-				events, err := store.NewDedupeStore(rig.db).ListTurnEvents(t.Context(), "session-a", "turn-1")
+				events, err := turnstore.NewDedupeStore(rig.db).ListTurnEvents(t.Context(), "session-a", "turn-1")
 				if err != nil {
 					t.Fatalf("list events: %v", err)
 				}
@@ -669,7 +669,7 @@ func TestTurnRunWithATerminalEventOnlyReleases(t *testing.T) {
 				Payload:       []byte(`{"outcome":"completed"}`),
 				CreatedAt:     time.Now().UTC(),
 			}
-			if _, err := store.NewEventStore(rig.db).AppendSequenced(t.Context(), "session-a", completed); err != nil {
+			if _, err := turnstore.NewEventStore(rig.db).AppendSequenced(t.Context(), "session-a", completed); err != nil {
 				t.Fatalf("write turn-1 completed: %v", err)
 			}
 			startTurnRun(t, rig.runtime, done)

@@ -323,59 +323,6 @@ func TestErasePrincipalDeletesTheTurnRunsOfItsSessions(t *testing.T) {
 	}
 }
 
-func TestDeleteOrphanedTurnRuns(t *testing.T) {
-	const (
-		liveSession     = "lobby/discord:owner/dm:601"
-		returnedSession = "lobby/discord:owner/dm:600"
-		goneSession     = "lobby/discord:owner/dm:599"
-	)
-	db := newTestDB(t)
-	seedPersonaSession(t, db, liveSession, "discord:601", "lobby")
-	seedPersonaSession(t, db, returnedSession, "discord:600", "lobby")
-	for _, run := range []durableRunFixture{
-		{key: "turn-gone-running", handler: "turn", payload: `{"turn_id":"turn-gone-running","session_id":"` + goneSession + `"}`, state: "running", actions: 2},
-		{key: "turn-returned-running", handler: "turn", payload: `{"turn_id":"turn-returned-running","session_id":"` + returnedSession + `"}`, state: "running", actions: 1},
-		{key: "turn-returned-failed", handler: "turn", payload: `{"turn_id":"turn-returned-failed","session_id":"` + returnedSession + `"}`, state: "failed", actions: 1},
-		{key: "turn-live", handler: "turn", payload: `{"turn_id":"turn-live","session_id":"` + liveSession + `"}`, state: "succeeded", actions: 1},
-		{key: "workflow-gone", handler: "workflow", payload: `{"session_id":"` + goneSession + `"}`, state: "succeeded", actions: 1},
-		{key: "turn-not-json", handler: "turn", payload: `not json`, state: "failed", actions: 1},
-		{key: "turn-no-session", handler: "turn", payload: `{"turn_id":"turn-no-session"}`, state: "failed", actions: 1},
-	} {
-		seedDurableRun(t, db, run)
-	}
-	for _, event := range []turnEventFixture{
-		{session: liveSession, turn: "turn-live", kind: "turn.accepted"},
-		{session: liveSession, turn: "turn-returned-running", kind: "turn.accepted"},
-		{session: returnedSession, turn: "turn-returned-failed", kind: "turn.cancelled"},
-		{session: returnedSession, turn: "turn-returned-later", kind: "turn.accepted"},
-	} {
-		seedTurnEvent(t, db, event)
-	}
-	deleted, err := DeleteOrphanedTurnRuns(t.Context(), db)
-	if err != nil || deleted != 3 {
-		t.Fatalf("DeleteOrphanedTurnRuns = %d, %v; want 3", deleted, err)
-	}
-	orphans := `('turn-gone-running', 'turn-returned-running', 'turn-returned-failed')`
-	kept := `('turn-live', 'workflow-gone', 'turn-not-json', 'turn-no-session')`
-	for query, expect := range map[string]int{
-		`SELECT COUNT(*) FROM durable_run WHERE key IN ` + orphans:        0,
-		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ` + orphans: 0,
-		`SELECT COUNT(*) FROM durable_run WHERE key IN ` + kept:           4,
-		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ` + kept:    4,
-		`SELECT COUNT(*) FROM durable_run`:                                4,
-	} {
-		if got := countRows(t, db, query); got != expect {
-			t.Errorf("%s = %d, want %d", query, got, expect)
-		}
-	}
-	if again, err := DeleteOrphanedTurnRuns(t.Context(), db); err != nil || again != 0 {
-		t.Errorf("second DeleteOrphanedTurnRuns = %d, %v; want 0", again, err)
-	}
-	if _, err := DeleteOrphanedTurnRuns(t.Context(), nil); !hasCode(err, ErrorCodeInvalidArgument) {
-		t.Errorf("DeleteOrphanedTurnRuns without a database = %v, want %s", err, ErrorCodeInvalidArgument)
-	}
-}
-
 func TestErasureCountsRunSessionsApart(t *testing.T) {
 	const (
 		chat = "lobby/discord:owner/dm:601"
