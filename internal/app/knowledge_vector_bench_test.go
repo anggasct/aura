@@ -15,7 +15,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -103,8 +102,16 @@ func BenchmarkKnowledgeHybridSearchOverAHundredThousandVectors(b *testing.B) {
 	loader.SetMaxOpenConns(knowledgeLoaderConns)
 	b.Cleanup(func() { _ = loader.Close() })
 
+	reader, err := knowledge.NewSQLiteVectorSource(pool)
+	if err != nil {
+		b.Fatalf("NewSQLiteVectorSource(pool): %v", err)
+	}
+	loaderSource, err := knowledge.NewSQLiteVectorSource(loader)
+	if err != nil {
+		b.Fatalf("NewSQLiteVectorSource(loader): %v", err)
+	}
 	index, err := knowledge.NewMemoryIndex(&knowledge.MemoryIndexConfig{
-		Reader: newKnowledgeVectorSource(pool), Loader: newKnowledgeVectorSource(loader),
+		Reader: reader, Loader: loaderSource,
 		Fingerprint: benchVectorFingerprint, Dimensions: benchVectorDimensions, MaxMemory: benchVectorMemory,
 	})
 	if err != nil {
@@ -125,7 +132,11 @@ func BenchmarkKnowledgeHybridSearchOverAHundredThousandVectors(b *testing.B) {
 		BatchSize: 96, MaxMemory: benchVectorMemory,
 	}
 	embedder := benchEmbedder{vector: benchUnitVector(rand.New(rand.NewSource(99)), benchVectorDimensions)}
-	retriever, err := knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, benchSecrets{},
+	kbIndex, err := knowledge.NewSQLiteIndex(pool)
+	if err != nil {
+		b.Fatalf("NewSQLiteIndex: %v", err)
+	}
+	retriever, err := knowledge.NewRetriever(kbIndex, benchSecrets{},
 		knowledge.WithVectors(&knowledge.VectorConfig{Index: index, Embedder: embedder, Settings: settings}))
 	if err != nil {
 		b.Fatalf("NewRetriever: %v", err)

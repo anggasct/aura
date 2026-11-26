@@ -1,4 +1,4 @@
-package store
+package knowledge
 
 import (
 	"bytes"
@@ -6,20 +6,57 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 var kbTestTime = time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
 
-func kbChunks(texts ...string) []KBChunk {
-	chunks := make([]KBChunk, 0, len(texts))
+func newKBTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return storetest.OpenMigrated(t)
+}
+
+func mustNewSQLiteStore(t *testing.T, db *sql.DB) *SQLiteStore {
+	t.Helper()
+	s, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	return s
+}
+
+func mustNewSQLiteIndex(t *testing.T, db *sql.DB) *SQLiteIndex {
+	t.Helper()
+	idx, err := NewSQLiteIndex(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteIndex: %v", err)
+	}
+	return idx
+}
+
+func mustNewSQLiteVectorSource(t *testing.T, db *sql.DB) *SQLiteVectorSource {
+	t.Helper()
+	src, err := NewSQLiteVectorSource(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteVectorSource: %v", err)
+	}
+	return src
+}
+
+func kbChunks(texts ...string) []Chunk {
+	chunks := make([]Chunk, 0, len(texts))
 	for i, text := range texts {
-		chunks = append(chunks, KBChunk{Ordinal: i, Heading: "Section", Content: text, SHA256: kbDigest(text)})
+		chunks = append(chunks, Chunk{Ordinal: i, Heading: "Section", Content: text, SHA256: kbDigest(text)})
 	}
 	return chunks
 }
@@ -29,11 +66,11 @@ func kbDigest(text string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func kbWrite(collection, uri, digest string, chunks []KBChunk) *KBSourceWrite {
-	return &KBSourceWrite{
-		Collection: collection, Kind: KBSourceKindFile, URI: uri, Label: "notes.md",
+func kbWrite(collection, uri, digest string, chunks []Chunk) *SourceWrite {
+	return &SourceWrite{
+		Collection: collection, Kind: SourceKindFile, URI: uri, Label: "notes.md",
 		ContentSHA256: strings.Repeat(digest, 64)[:64], IngestVersion: 1, IngestedAt: kbTestTime,
-		Chunks: chunks, Limits: KBLimits{CollectionChunks: 100, TotalChunks: 200},
+		Chunks: chunks, CollectionCap: 100, TotalCap: 200,
 	}
 }
 
@@ -46,7 +83,7 @@ func kbIndexHits(t *testing.T, db *sql.DB, match string) int {
 	return hits
 }
 
-func kbCheckClean(t *testing.T, kb KBStore) {
+func kbCheckClean(t *testing.T, kb Store) {
 	t.Helper()
 	report, err := kb.Check(t.Context())
 	if err != nil {
@@ -57,8 +94,75 @@ func kbCheckClean(t *testing.T, kb KBStore) {
 	}
 }
 
+func pragmaValue(t *testing.T, db *sql.DB, name string) string {
+	t.Helper()
+	var value string
+	if err := db.QueryRowContext(t.Context(), "PRAGMA "+name).Scan(&value); err != nil {
+		t.Fatalf("PRAGMA %s: %v", name, err)
+	}
+	return value
+}
+
+func TestSQLiteConstructorsRefuseNilDB(t *testing.T) {
+	if _, err := NewSQLiteStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteStore(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	if _, err := NewSQLiteIndex(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteIndex(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	if _, err := NewSQLiteVectorSource(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteVectorSource(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+}
+
+func TestReplaceSourceJoinsCallersTransaction(t *testing.T) {
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
+	ctx := t.Context()
+
+	rollbackErr := errors.New("abort outer transaction")
+	err := sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		res, err := kb.ReplaceSource(txCtx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text")))
+		if err != nil {
+			return err
+		}
+		if res.Status != StatusAdded {
+			t.Fatalf("ReplaceSource status = %q, want %q", res.Status, StatusAdded)
+		}
+		src, found, err := kb.GetSource(txCtx, "support", "/docs/a.md")
+		if err != nil || !found || src.ID != res.SourceID {
+			t.Fatalf("GetSource inside tx = %+v, %t, %v", src, found, err)
+		}
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx error = %v, want %v", err, rollbackErr)
+	}
+	if _, found, err := kb.GetSource(ctx, "support", "/docs/a.md"); err != nil || found {
+		t.Fatalf("source survived rolled-back outer tx: found=%t err=%v", found, err)
+	}
+}
+
+func TestRemoveSourceRefusesCallersTransaction(t *testing.T) {
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
+	ctx := t.Context()
+
+	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text"))); err != nil {
+		t.Fatalf("ReplaceSource: %v", err)
+	}
+	err := sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		_, err := kb.RemoveSource(txCtx, "support", "/docs/a.md", true)
+		return err
+	})
+	requireCode(t, err, ErrorCodeInvalidArgument)
+	if _, found, err := kb.GetSource(ctx, "support", "/docs/a.md"); err != nil || !found {
+		t.Fatalf("source was removed despite active tx refusal: found=%t err=%v", found, err)
+	}
+}
+
 func TestKnowledgeSchemaHasSecureDeletePorterAndScope(t *testing.T) {
-	db := newTestDB(t)
+	db := newKBTestDB(t)
 	ctx := t.Context()
 	for _, name := range []string{"kb_collection", "kb_source", "kb_chunk", "kb_chunk_fts"} {
 		var found string
@@ -76,17 +180,17 @@ func TestKnowledgeSchemaHasSecureDeletePorterAndScope(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT v FROM kb_chunk_fts_config WHERE k = 'secure-delete'`).Scan(&secureDelete); err != nil || secureDelete != 1 {
 		t.Fatalf("secure-delete option = %d, %v; want 1", secureDelete, err)
 	}
-	kb := NewKBStore(db)
+	kb := mustNewSQLiteStore(t, db)
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/policy.md", "a", kbChunks("Customers may request a Refund within thirty days."))); err != nil {
 		t.Fatalf("ReplaceSource: %v", err)
 	}
 	if hits := kbIndexHits(t, db, `"refunds"`); hits != 1 {
 		t.Errorf("stemmed match hits = %d, want 1", hits)
 	}
-	if hits := kbIndexHits(t, db, `scope:`+KBScope("support")); hits != 1 {
+	if hits := kbIndexHits(t, db, `scope:`+ScopeToken("support")); hits != 1 {
 		t.Errorf("scope token hits = %d, want 1", hits)
 	}
-	if hits := kbIndexHits(t, db, `scope:`+KBScope("other")); hits != 0 {
+	if hits := kbIndexHits(t, db, `scope:`+ScopeToken("other")); hits != 0 {
 		t.Errorf("foreign scope token hits = %d, want 0", hits)
 	}
 }
@@ -94,7 +198,7 @@ func TestKnowledgeSchemaHasSecureDeletePorterAndScope(t *testing.T) {
 func TestKnowledgeScopeSeparatesCollectionsThatDifferByHyphenOrStem(t *testing.T) {
 	scopes := map[string]string{}
 	for _, id := range []string{"hr-docs", "hrdocs", "hr-doc", "refund", "refunds"} {
-		scope := KBScope(id)
+		scope := ScopeToken(id)
 		if previous, clash := scopes[scope]; clash {
 			t.Fatalf("scope clash between %q and %q", previous, id)
 		}
@@ -106,18 +210,18 @@ func TestKnowledgeScopeSeparatesCollectionsThatDifferByHyphenOrStem(t *testing.T
 }
 
 func TestKnowledgeReplaceSourceDiffsByChunkHash(t *testing.T) {
-	db := newTestDB(t)
+	db := newKBTestDB(t)
 	ctx := t.Context()
-	kb := NewKBStore(db)
+	kb := mustNewSQLiteStore(t, db)
 
 	added, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text", "beta text", "gamma text")))
-	if err != nil || added.Status != KBWriteAdded || added.ChunksAdded != 3 || added.ChunksKept != 0 {
+	if err != nil || added.Status != StatusAdded || added.ChunksAdded != 3 || added.ChunksKept != 0 {
 		t.Fatalf("first write = %+v, %v", added, err)
 	}
 	idsBefore := kbChunkIDs(t, db)
 
 	unchanged, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text", "beta text", "gamma text")))
-	if err != nil || unchanged.Status != KBWriteUnchanged || unchanged.ChunksAdded != 0 {
+	if err != nil || unchanged.Status != StatusUnchanged || unchanged.ChunksAdded != 0 {
 		t.Fatalf("unchanged write = %+v, %v", unchanged, err)
 	}
 	if generation := kbGeneration(t, db, "support"); generation != 1 {
@@ -125,7 +229,7 @@ func TestKnowledgeReplaceSourceDiffsByChunkHash(t *testing.T) {
 	}
 
 	replaced, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "b", kbChunks("alpha text", "beta text changed", "gamma text")))
-	if err != nil || replaced.Status != KBWriteReplaced || replaced.ChunksAdded != 1 || replaced.ChunksRemoved != 1 || replaced.ChunksKept != 2 {
+	if err != nil || replaced.Status != StatusReplaced || replaced.ChunksAdded != 1 || replaced.ChunksRemoved != 1 || replaced.ChunksKept != 2 {
 		t.Fatalf("replace write = %+v, %v", replaced, err)
 	}
 	idsAfter := kbChunkIDs(t, db)
@@ -147,8 +251,8 @@ func TestKnowledgeReplaceSourceDiffsByChunkHash(t *testing.T) {
 }
 
 func TestKnowledgeReplaceSourceHandlesMovedChunksWithoutOrdinalCollision(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha", "beta", "gamma"))); err != nil {
 		t.Fatalf("first write: %v", err)
@@ -164,26 +268,26 @@ func TestKnowledgeReplaceSourceHandlesMovedChunksWithoutOrdinalCollision(t *test
 }
 
 func TestKnowledgeReplaceSourceRejectsCapsAndKeepsOldChunks(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha", "beta"))); err != nil {
 		t.Fatalf("first write: %v", err)
 	}
 	tooMany := kbWrite("support", "/docs/a.md", "b", kbChunks("one", "two", "three"))
-	tooMany.Limits.CollectionChunks = 2
-	if _, err := kb.ReplaceSource(ctx, tooMany); !hasStoreCode(err, ErrorCodeKBCapExceeded) {
-		t.Fatalf("collection cap error = %v, want %s", err, ErrorCodeKBCapExceeded)
+	tooMany.CollectionCap = 2
+	if _, err := kb.ReplaceSource(ctx, tooMany); !fault.HasCode(err, ErrorCodeCapExceeded) {
+		t.Fatalf("collection cap error = %v, want %s", err, ErrorCodeCapExceeded)
 	}
 	other := kbWrite("support", "/docs/b.md", "c", kbChunks("delta"))
-	other.Limits.CollectionChunks = 2
-	if _, err := kb.ReplaceSource(ctx, other); !hasStoreCode(err, ErrorCodeKBCapExceeded) {
-		t.Fatalf("second source collection cap error = %v, want %s", err, ErrorCodeKBCapExceeded)
+	other.CollectionCap = 2
+	if _, err := kb.ReplaceSource(ctx, other); !fault.HasCode(err, ErrorCodeCapExceeded) {
+		t.Fatalf("second source collection cap error = %v, want %s", err, ErrorCodeCapExceeded)
 	}
 	total := kbWrite("elsewhere", "/docs/c.md", "d", kbChunks("epsilon"))
-	total.Limits.TotalChunks = 2
-	if _, err := kb.ReplaceSource(ctx, total); !hasStoreCode(err, ErrorCodeKBCapExceeded) {
-		t.Fatalf("total cap error = %v, want %s", err, ErrorCodeKBCapExceeded)
+	total.TotalCap = 2
+	if _, err := kb.ReplaceSource(ctx, total); !fault.HasCode(err, ErrorCodeCapExceeded) {
+		t.Fatalf("total cap error = %v, want %s", err, ErrorCodeCapExceeded)
 	}
 	sources, err := kb.ListSources(ctx, "support")
 	if err != nil || len(sources) != 1 || sources[0].Chunks != 2 {
@@ -196,36 +300,36 @@ func TestKnowledgeReplaceSourceRejectsCapsAndKeepsOldChunks(t *testing.T) {
 }
 
 func TestKnowledgeReplaceSourceRejectsInvalidWrites(t *testing.T) {
-	kb := NewKBStore(newTestDB(t))
+	kb := mustNewSQLiteStore(t, newKBTestDB(t))
 	cases := []struct {
 		name   string
-		mutate func(*KBSourceWrite)
+		mutate func(*SourceWrite)
 	}{
-		{"empty collection", func(w *KBSourceWrite) { w.Collection = "" }},
-		{"unknown kind", func(w *KBSourceWrite) { w.Kind = "ftp" }},
-		{"short digest", func(w *KBSourceWrite) { w.ContentSHA256 = "abc" }},
-		{"no chunks", func(w *KBSourceWrite) { w.Chunks = nil }},
-		{"sparse ordinals", func(w *KBSourceWrite) { w.Chunks[0].Ordinal = 4 }},
-		{"empty content", func(w *KBSourceWrite) { w.Chunks[0].Content = "" }},
-		{"no limits", func(w *KBSourceWrite) { w.Limits = KBLimits{} }},
+		{"empty collection", func(w *SourceWrite) { w.Collection = "" }},
+		{"unknown kind", func(w *SourceWrite) { w.Kind = "ftp" }},
+		{"short digest", func(w *SourceWrite) { w.ContentSHA256 = "abc" }},
+		{"no chunks", func(w *SourceWrite) { w.Chunks = nil }},
+		{"sparse ordinals", func(w *SourceWrite) { w.Chunks[0].Ordinal = 4 }},
+		{"empty content", func(w *SourceWrite) { w.Chunks[0].Content = "" }},
+		{"no limits", func(w *SourceWrite) { w.CollectionCap = 0; w.TotalCap = 0 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			write := kbWrite("support", "/docs/a.md", "a", kbChunks("alpha"))
 			tc.mutate(write)
-			if _, err := kb.ReplaceSource(t.Context(), write); !hasStoreCode(err, ErrorCodeInvalidArgument) {
+			if _, err := kb.ReplaceSource(t.Context(), write); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("error = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})
 	}
-	if _, err := kb.ReplaceSource(t.Context(), nil); !hasStoreCode(err, ErrorCodeInvalidArgument) {
+	if _, err := kb.ReplaceSource(t.Context(), nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("nil write error = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }
 
 func TestKnowledgeCascadeDeleteKeepsIndexConsistent(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha unique", "beta unique"))); err != nil {
 		t.Fatalf("write a: %v", err)
@@ -243,8 +347,8 @@ func TestKnowledgeCascadeDeleteKeepsIndexConsistent(t *testing.T) {
 }
 
 func TestKnowledgeRemoveSourceDryRunChangesNothing(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha", "beta"))); err != nil {
 		t.Fatalf("write: %v", err)
@@ -256,11 +360,11 @@ func TestKnowledgeRemoveSourceDryRunChangesNothing(t *testing.T) {
 	if generation := kbGeneration(t, db, "support"); generation != 1 {
 		t.Errorf("generation after dry run = %d, want 1", generation)
 	}
-	if _, err := kb.RemoveSource(ctx, "support", "/docs/missing.md", false); !hasStoreCode(err, ErrorCodeKBSourceNotFound) {
-		t.Fatalf("missing dry run error = %v, want %s", err, ErrorCodeKBSourceNotFound)
+	if _, err := kb.RemoveSource(ctx, "support", "/docs/missing.md", false); !fault.HasCode(err, ErrorCodeSourceNotFound) {
+		t.Fatalf("missing dry run error = %v, want %s", err, ErrorCodeSourceNotFound)
 	}
-	if _, err := kb.RemoveSource(ctx, "support", "/docs/missing.md", true); !hasStoreCode(err, ErrorCodeKBSourceNotFound) {
-		t.Fatalf("missing apply error = %v, want %s", err, ErrorCodeKBSourceNotFound)
+	if _, err := kb.RemoveSource(ctx, "support", "/docs/missing.md", true); !fault.HasCode(err, ErrorCodeSourceNotFound) {
+		t.Fatalf("missing apply error = %v, want %s", err, ErrorCodeSourceNotFound)
 	}
 	sources, err := kb.ListSources(ctx, "support")
 	if err != nil || len(sources) != 1 {
@@ -269,8 +373,8 @@ func TestKnowledgeRemoveSourceDryRunChangesNothing(t *testing.T) {
 }
 
 func TestKnowledgeCollectionOutlivesItsLastSourceAndKeepsGeneration(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha"))); err != nil {
 		t.Fatalf("write: %v", err)
@@ -309,8 +413,8 @@ func TestKnowledgeCheckDetectsDamagedIndex(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := newTestDB(t)
-			kb := NewKBStore(db)
+			db := newKBTestDB(t)
+			kb := mustNewSQLiteStore(t, db)
 			ctx := t.Context()
 			if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text", "beta text"))); err != nil {
 				t.Fatalf("write: %v", err)
@@ -333,13 +437,13 @@ func TestKnowledgeCheckDetectsDamagedIndex(t *testing.T) {
 }
 
 func TestKnowledgeCheckDetectsScopeMismatch(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text"))); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := db.ExecContext(ctx, `UPDATE kb_chunk SET scope = ?`, KBScope("other")); err != nil {
+	if _, err := db.ExecContext(ctx, `UPDATE kb_chunk SET scope = ?`, ScopeToken("other")); err != nil {
 		t.Fatalf("update scope: %v", err)
 	}
 	report, err := kb.Check(ctx)
@@ -350,7 +454,7 @@ func TestKnowledgeCheckDetectsScopeMismatch(t *testing.T) {
 
 func TestKnowledgeSourceNeverUsesInsertOrReplace(t *testing.T) {
 	forbidden := regexp.MustCompile(`(?i)(insert\s+or\s+replace|replace\s+into)\s+(into\s+)?kb_`)
-	for _, path := range []string{"knowledge.go", filepath.Join("history", "history.go"), filepath.Join("..", "modules", "knowledge", "service.go")} {
+	for _, path := range []string{"store.go", "store_embedding.go", filepath.Join("..", "..", "store", "history", "history.go"), "service.go"} {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)
@@ -362,7 +466,7 @@ func TestKnowledgeSourceNeverUsesInsertOrReplace(t *testing.T) {
 }
 
 func TestKnowledgeSourceRequiresItsCollection(t *testing.T) {
-	db := newTestDB(t)
+	db := newKBTestDB(t)
 	_, err := db.ExecContext(t.Context(),
 		`INSERT INTO kb_source (id, collection, kind, uri, label, content_sha256, ingest_version, ingested_at) VALUES ('s', 'missing', 'file', '/x.md', 'x', 'd', 1, 'now')`)
 	if err == nil {
@@ -371,8 +475,8 @@ func TestKnowledgeSourceRequiresItsCollection(t *testing.T) {
 }
 
 func TestKnowledgeRemoveErasesTermFromIndexAndWriteAheadLog(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	const term = "quokkafernweed"
 	const termStem = "quokkafern"
@@ -476,7 +580,7 @@ func kbChunkIDs(t *testing.T, db *sql.DB) map[int]string {
 func kbGeneration(t *testing.T, db *sql.DB, collection string) int64 {
 	t.Helper()
 	var generation int64
-	if err := db.QueryRowContext(context.Background(), `SELECT generation FROM kb_collection WHERE id = ?`, collection).Scan(&generation); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT generation FROM kb_collection WHERE id = ?`, collection).Scan(&generation); err != nil {
 		t.Fatalf("read generation: %v", err)
 	}
 	return generation

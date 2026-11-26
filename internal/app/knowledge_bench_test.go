@@ -11,7 +11,6 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -65,7 +64,11 @@ func BenchmarkKnowledgeSearchLargeScope(b *testing.B) {
 		b.Fatalf("openKnowledgeReadPool: %v", err)
 	}
 	b.Cleanup(func() { _ = pool.Close() })
-	retriever, err := knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, benchSecrets{})
+	kbIndex, err := knowledge.NewSQLiteIndex(pool)
+	if err != nil {
+		b.Fatalf("NewSQLiteIndex: %v", err)
+	}
+	retriever, err := knowledge.NewRetriever(kbIndex, benchSecrets{})
 	if err != nil {
 		b.Fatalf("NewRetriever: %v", err)
 	}

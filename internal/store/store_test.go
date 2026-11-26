@@ -60,15 +60,6 @@ func newTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func pragmaValue(t *testing.T, db *sql.DB, name string) string {
-	t.Helper()
-	var v string
-	if err := db.QueryRowContext(context.Background(), "PRAGMA "+name).Scan(&v); err != nil {
-		t.Fatalf("pragma %s: %v", name, err)
-	}
-	return v
-}
-
 func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
 	t.Helper()
 	ctx := context.Background()

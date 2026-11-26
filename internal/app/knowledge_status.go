@@ -6,9 +6,9 @@ import (
 	"slices"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type personaKnowledgeScope struct {
@@ -51,11 +51,15 @@ func knowledgeScopeReader(cfg *appconfig.Config, dbPath string) func(ctx context
 			return nil, false, err
 		}
 		defer func() { _ = db.Close() }()
-		present, err := store.KBIndexPresent(ctx, db)
+		present, err := knowledge.IndexPresent(ctx, db)
 		if err != nil || !present {
 			return nil, present, err
 		}
-		collections, err := store.NewKBStore(db).ListCollections(ctx)
+		kbStore, err := knowledge.NewSQLiteStore(db)
+		if err != nil {
+			return nil, true, err
+		}
+		collections, err := kbStore.ListCollections(ctx)
 		if err != nil {
 			return nil, true, err
 		}
