@@ -10,7 +10,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -60,7 +59,7 @@ func proposalFixture(t *testing.T) *proposalHarness {
 	interpreter := base.Interpreter()
 	deps := interpreter.ValidationDeps()
 	deps.Agents = registry
-	deps.StepAllowed = stepCeiling(registry, toolsbuiltin.NewStepCatalog(nil))
+	deps.StepAllowed = stepCeiling(registry, newStepCatalog(nil))
 	if err := interpreter.LoadAll(t.Context(), nil, deps); err != nil {
 		t.Fatal(err)
 	}

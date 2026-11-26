@@ -5,9 +5,6 @@ import (
 	"fmt"
 	"slices"
 	"strings"
-	"unicode/utf8"
-
-	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const MCPToolPrefix = "mcp_"
@@ -73,34 +70,14 @@ func ListedInCeiling(ceiling []string, name string, definition *Definition) bool
 }
 
 const (
-	Version         = "v1"
-	HandoffToolName = "handoff_to_owner"
-
-	EmailSendToolName = "email_send"
-	EmailChannel      = "email"
-
-	MaxEmailSubjectBytes = 160
-	MaxEmailBodyBytes    = 65536
-
-	KBSearchToolName       = "kb_search"
-	MaxKBSearchQueryRunes  = 500
-	MaxKBSearchResultLimit = 10
-
-	CodeExecuteToolName = "code_execute"
-
-	WorkflowListToolName        = "workflow_list"
-	WorkflowStartToolName       = "workflow_start"
-	WorkflowStatusToolName      = "workflow_status"
-	WorkflowCancelToolName      = "workflow_cancel"
-	WorkflowProposeToolName     = "workflow_propose"
-	WorkflowSaveRoutineToolName = "workflow_save_routine"
-
-	MaxWorkflowObjectiveRunes = 2000
+	Version          = "v1"
+	KBSearchToolName = "kb_search"
 )
 
 type Definition struct {
 	Name                 string
 	Version              string
+	Channel              string
 	Server               string
 	Plugin               *PluginRef
 	Schema               json.RawMessage
@@ -141,222 +118,8 @@ func (d *Definition) Validate(raw json.RawMessage) (json.RawMessage, error) {
 }
 
 func (d *Definition) validate(raw json.RawMessage) (json.RawMessage, error) {
-	if d.Validator != nil {
-		return d.Validator(raw)
+	if d.Validator == nil {
+		return nil, fmt.Errorf("tool %q has no validator", d.Name)
 	}
-	value, err := DecodeObject(raw)
-	if err != nil {
-		return nil, err
-	}
-	switch d.Name {
-	case "exec":
-		if err := RejectUnknown(value, "command", "shell"); err != nil {
-			return nil, err
-		}
-		if err := ValidateStringArray(value, "command", true); err != nil {
-			return nil, err
-		}
-		if err := ValidateOptionalBool(value, "shell"); err != nil {
-			return nil, err
-		}
-	case "read_file":
-		if err := RejectUnknown(value, "path", "max_bytes"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "path"); err != nil {
-			return nil, err
-		}
-		if err := ValidateOptionalInteger(value, "max_bytes", 1); err != nil {
-			return nil, err
-		}
-	case "write_file":
-		if err := RejectUnknown(value, "path", "content", "overwrite"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "path"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "content"); err != nil {
-			return nil, err
-		}
-		if err := ValidateOptionalBool(value, "overwrite"); err != nil {
-			return nil, err
-		}
-	case "list_dir":
-		if err := RejectUnknown(value, "path", "recursive"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "path"); err != nil {
-			return nil, err
-		}
-		if err := ValidateOptionalBool(value, "recursive"); err != nil {
-			return nil, err
-		}
-	case "web_fetch":
-		if err := RejectUnknown(value, "url"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "url"); err != nil {
-			return nil, err
-		}
-	case WorkflowListToolName:
-		if err := RejectUnknown(value); err != nil {
-			return nil, err
-		}
-	case WorkflowStartToolName:
-		if err := RejectUnknown(value, "id", "objective"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "id"); err != nil {
-			return nil, err
-		}
-		if objective, ok := value["objective"]; ok {
-			text, isString := objective.(string)
-			if !isString || utf8.RuneCountInString(text) > MaxWorkflowObjectiveRunes {
-				return nil, fmt.Errorf("argument %q must be a string of at most %d characters", "objective", MaxWorkflowObjectiveRunes)
-			}
-		}
-	case WorkflowSaveRoutineToolName:
-		if err := RejectUnknown(value, "run_id", "name"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "run_id"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "name"); err != nil {
-			return nil, err
-		}
-	case WorkflowProposeToolName:
-		if err := RejectUnknown(value, "spec"); err != nil {
-			return nil, err
-		}
-		if spec, ok := value["spec"].(map[string]any); !ok || len(spec) == 0 {
-			return nil, fmt.Errorf("argument %q must be a workflow spec object", "spec")
-		}
-	case WorkflowStatusToolName, WorkflowCancelToolName:
-		if err := RejectUnknown(value, "run_id"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "run_id"); err != nil {
-			return nil, err
-		}
-	case HandoffToolName:
-		if err := RejectUnknown(value, "reason"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "reason"); err != nil {
-			return nil, err
-		}
-	case EmailSendToolName:
-		return validateEmailSend(value)
-	case CodeExecuteToolName:
-		return validateCodeExecute(value)
-	case KBSearchToolName:
-		if err := RejectUnknown(value, "query", "limit"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "query"); err != nil {
-			return nil, err
-		}
-		if query, _ := value["query"].(string); utf8.RuneCountInString(query) > MaxKBSearchQueryRunes {
-			return nil, fmt.Errorf("argument %q must be at most %d characters", "query", MaxKBSearchQueryRunes)
-		}
-		if err := ValidateOptionalInteger(value, "limit", 1); err != nil {
-			return nil, err
-		}
-		if limit, ok := value["limit"].(json.Number); ok {
-			if n, _ := limit.Int64(); n > MaxKBSearchResultLimit {
-				return nil, fmt.Errorf("argument %q must be at most %d", "limit", MaxKBSearchResultLimit)
-			}
-		}
-	case "web_search":
-		if err := RejectUnknown(value, "query", "max_results"); err != nil {
-			return nil, err
-		}
-		if err := ValidateString(value, "query"); err != nil {
-			return nil, err
-		}
-		if err := ValidateOptionalInteger(value, "max_results", 1); err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("unknown tool %q", d.Name)
-	}
-	return json.Marshal(value)
-}
-
-func Builtins() []Definition {
-	return []Definition{
-		{Name: "exec", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/exec/v1","type":"object","properties":{"command":{"type":"array","items":{"type":"string"},"minItems":1},"shell":{"type":"boolean"}},"required":["command"],"additionalProperties":false}`), RequiredCapabilities: []string{"exec-linux"}, RequiresApproval: true, Effectful: true},
-		{Name: CodeExecuteToolName, Version: Version, Schema: codeExecuteSchema(), RequiredCapabilities: []string{"code-interpreter"}, RequiresApproval: true, Effectful: true},
-		{Name: "read_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/read_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"max_bytes":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
-		{Name: "write_file", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/write_file/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"content":{"type":"string"},"overwrite":{"type":"boolean"}},"required":["path","content"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-write"}, RequiresApproval: true, Effectful: true},
-		{Name: "list_dir", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/list_dir/v1","type":"object","properties":{"path":{"type":"string","minLength":1},"recursive":{"type":"boolean"}},"required":["path"],"additionalProperties":false}`), RequiredCapabilities: []string{"workspace-read"}},
-		{Name: "web_fetch", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`), RequiredCapabilities: []string{"public-web"}, ExternalSink: true},
-		{Name: "web_search", Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`), RequiredCapabilities: []string{"provider-search"}, ExternalSink: true},
-		{Name: KBSearchToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/kb_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["query"],"additionalProperties":false}`)},
-		{Name: HandoffToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`), OptIn: true, Orchestration: true},
-		{Name: EmailSendToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/email_send/v1","type":"object","properties":{"to":{"type":"string","minLength":3,"maxLength":254},"subject":{"type":"string","minLength":1,"maxLength":160},"body":{"type":"string","minLength":1,"maxLength":65536}},"required":["to","subject","body"],"additionalProperties":false}`), Effectful: true, OptIn: true, Display: []string{"to", "subject", "body"}},
-		{Name: WorkflowListToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_list/v1","type":"object","properties":{},"additionalProperties":false}`), OptIn: true, Orchestration: true},
-		{Name: WorkflowStartToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`), OptIn: true, Orchestration: true, ExternalSink: true},
-		{Name: WorkflowStatusToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true, Orchestration: true},
-		{Name: WorkflowProposeToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_propose/v1","type":"object","properties":{"spec":{"type":"object","properties":{"goal":{"type":"string","minLength":1},"steps":{"type":"array","minItems":1}},"required":["goal","steps"]}},"required":["spec"],"additionalProperties":false}`), OptIn: true, Orchestration: true, ExternalSink: true},
-		{Name: WorkflowSaveRoutineToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_save_routine/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1,"maxLength":64}},"required":["run_id","name"],"additionalProperties":false}`), OptIn: true, Orchestration: true},
-		{Name: WorkflowCancelToolName, Version: Version, Schema: []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_cancel/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`), OptIn: true, Orchestration: true},
-	}
-}
-
-func validateEmailSend(value map[string]any) (json.RawMessage, error) {
-	if err := RejectUnknown(value, "to", "subject", "body"); err != nil {
-		return nil, err
-	}
-	for _, key := range []string{"to", "subject", "body"} {
-		if err := ValidateString(value, key); err != nil {
-			return nil, err
-		}
-	}
-	rawTo, _ := value["to"].(string)
-	subject, _ := value["subject"].(string)
-	body, _ := value["body"].(string)
-	to := strings.ToLower(strings.TrimSpace(rawTo))
-	if !principal.IsPlainEmailAddress(to) {
-		return nil, fmt.Errorf("argument %q must be exactly one plain email address", "to")
-	}
-	value["to"] = to
-	if len(subject) > MaxEmailSubjectBytes {
-		return nil, fmt.Errorf("argument %q must be at most %d bytes", "subject", MaxEmailSubjectBytes)
-	}
-	if len(body) > MaxEmailBodyBytes {
-		return nil, fmt.Errorf("argument %q must be at most %d bytes", "body", MaxEmailBodyBytes)
-	}
-	return json.Marshal(value)
-}
-
-func DefinitionsByKey() map[string]*Definition {
-	definitions := Builtins()
-	result := make(map[string]*Definition, len(definitions))
-	for i := range definitions {
-		definition := &definitions[i]
-		definition.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
-		definition.Schema = slices.Clone(definition.Schema)
-		result[definition.Key()] = definition
-	}
-	return result
-}
-
-func ChannelOf(name string) string {
-	if name == EmailSendToolName {
-		return EmailChannel
-	}
-	return ""
-}
-
-func EffectTier(name string) bool {
-	definitions := Builtins()
-	for i := range definitions {
-		if definitions[i].Name == name {
-			return definitions[i].Effectful
-		}
-	}
-	return true
+	return d.Validator(raw)
 }

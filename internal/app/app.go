@@ -16,7 +16,6 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
@@ -27,12 +26,14 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -107,7 +108,7 @@ const (
 type App struct {
 	surface      Surface
 	group        *server.LifecycleGroup
-	builtin      *toolsbuiltin.Executor
+	builtin      *runtimeadk.BrokerExecutor
 	serve        func(ctx context.Context) error
 	logger       *slog.Logger
 	db           *sql.DB
@@ -280,21 +281,59 @@ type toolExecutorInput struct {
 	events       *turn.EventBus
 }
 
-func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
-	if in == nil || in.result == nil || in.wiring == nil || in.events == nil {
-		return nil, invalidOptions("tool executor input must carry a config result, wiring and the live event bus")
+func newToolBroker(in *toolExecutorInput) (*toolbroker.Broker, *runtimeadk.BrokerExecutor, storage.ArtifactStore, error) {
+	if in == nil || in.result == nil || in.result.Config == nil || in.wiring == nil {
+		return nil, nil, nil, invalidOptions("tool executor input must carry a config result and wiring")
 	}
-	wiring := in.wiring
-	executor, err := toolsbuiltin.New(in.result.Config.Tools, in.result.Config.Storage.ArtifactQuota, in.db, in.artifactRoot, in.result.CapabilityReport, in.logger,
-		wiring.observer, wiring.decider, wiring.access,
-		toolsbuiltin.WithApprovalReachable(wiring.reachable), toolsbuiltin.WithLiveEvents(in.events))
+	if in.events == nil {
+		return nil, nil, nil, fault.New(turn.ErrorCodeInvalidArgument, "live events publisher must not be nil")
+	}
+	if in.result.Config.Tools == nil {
+		return nil, nil, nil, errors.New("tools configuration is required")
+	}
+	if in.db == nil {
+		return nil, nil, nil, errors.New("storage database is required")
+	}
+	if in.artifactRoot == "" {
+		return nil, nil, nil, errors.New("artifact root is required")
+	}
+	logger := in.logger
+	if logger == nil {
+		logger = slog.Default()
+	}
+	journal, err := effect.NewJournal(in.db, effect.Options{Logger: logger, Events: in.events, Turns: turnstore.NewTurnStore(in.db)})
 	if err != nil {
-		return nil, err
+		return nil, nil, nil, err
+	}
+	effects, err := effect.NewExecutor(journal)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	host := in.result.CapabilityReport.Active()
+	artifacts := storage.NewArtifactStore(in.db, in.artifactRoot, int64(in.result.Config.Storage.ArtifactQuota))
+	wiring := in.wiring
+	broker, err := toolbroker.New(&toolbroker.Options{
+		Secrets:              configuredToolSecrets(in.result.Config.Tools),
+		MaxInlineResultBytes: in.result.Config.Tools.MaxInlineResultBytes,
+		Artifacts:            artifacts,
+		Effects:              effects,
+		Observer:             wiring.observer,
+		ApprovalDecider:      wiring.decider,
+		Access:               wiring.access,
+		HostCapabilities:     host,
+		ApprovalReachable:    wiring.reachable,
+	})
+	if err != nil {
+		return nil, nil, nil, err
 	}
 	for _, value := range githubCredentialSecrets(in.result.Config) {
-		executor.Broker().RegisterSecret(value)
+		broker.RegisterSecret(value)
 	}
-	return executor, nil
+	executor, err := runtimeadk.NewBrokerExecutor(broker, host)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return broker, executor, artifacts, nil
 }
 
 func githubCredentialSecrets(cfg *appconfig.Config) []string {
@@ -363,7 +402,9 @@ type build struct {
 	events     turnstore.EventStore
 	wiring     toolWiring
 	liveEvents *turn.EventBus
-	builtin    *toolsbuiltin.Executor
+	broker     *toolbroker.Broker
+	artifacts  storage.ArtifactStore
+	builtin    *runtimeadk.BrokerExecutor
 	routeModel func(route string) (string, error)
 	ledger     *usage.Ledger
 
@@ -621,14 +662,16 @@ func (b *build) buildKernel(ctx context.Context) error {
 		return err
 	}
 	if b.onServer() || b.cfg.Tools != nil {
-		builtin, err := newToolExecutor(&toolExecutorInput{
+		broker, builtin, artifacts, err := newToolBroker(&toolExecutorInput{
 			result: b.result, db: b.db, artifactRoot: b.artifactRoot, logger: b.logger, wiring: &b.wiring,
 			events: b.liveEvents,
 		})
 		if err != nil {
 			return err
 		}
+		b.broker = broker
 		b.builtin = builtin
+		b.artifacts = artifacts
 	}
 	if b.onServer() {
 		if err := b.buildServerTools(ctx); err != nil {
@@ -645,11 +688,8 @@ func (b *build) buildKernel(ctx context.Context) error {
 		return err
 	}
 	b.ledger = ledger
-	b.execOpts = append(b.execOpts, runtimeadk.WithBudgetLedger(ledger, "primary"))
-	if b.builtin != nil {
-		b.execOpts = append(b.execOpts, runtimeadk.WithBuiltinToolExecutor(b.builtin))
-	}
 	b.execOpts = append(b.execOpts,
+		runtimeadk.WithBudgetLedger(ledger, "primary"),
 		runtimeadk.WithAgentResolver(registry, routeModel),
 		ownerContextOption(ctx, b.cfg.Owner, b.logger))
 	return nil
@@ -660,11 +700,15 @@ func (b *build) buildTurnRuntime() error {
 		return invalidOptions("the turn runtime requires the live event bus")
 	}
 	var broker turn.ToolBroker = terminalBroker{}
+	execOpts := slices.Clone(b.execOpts)
 	if b.builtin != nil {
 		broker = b.builtin
+		if len(b.builtin.Definitions()) > 0 {
+			execOpts = append(execOpts, runtimeadk.WithBuiltinToolExecutor(b.builtin))
+		}
 	}
 	executor, err := runtimeadk.NewADKExecutor(
-		"aura", b.primaryModel(), b.models, b.sessions, broker, nil, b.logger, b.execOpts...,
+		"aura", b.primaryModel(), b.models, b.sessions, broker, nil, b.logger, execOpts...,
 	)
 	if err != nil {
 		return err

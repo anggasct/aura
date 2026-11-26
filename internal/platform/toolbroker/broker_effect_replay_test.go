@@ -104,7 +104,7 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 		},
 	}
 	if config.unlimited {
-		policy := DefaultPolicy()
+		policy := fixturePolicy()
 		rule := policy.Rules["exec"]
 		rule.Constraints.MaxOutputBytes = 0
 		policy.Rules["exec"] = rule
@@ -113,7 +113,7 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 	if config.artifacts {
 		options.Artifacts = storage.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 8<<20)
 	}
-	broker, err := New(options)
+	broker, err := newFixtureBrokerOrErr(t, options)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

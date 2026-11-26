@@ -16,7 +16,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -118,7 +117,7 @@ const scenarioPersona = "scenario"
 func (w *workflowShape) registry(t *testing.T) *auraagent.Registry {
 	t.Helper()
 	persona := auraagent.Persona{ID: scenarioPersona, Description: "runs the scenario tools", Instructions: "run the listed tools", Tools: w.known}
-	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, []string{"primary"})
+	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, appconfig.BuiltinToolDefinitions(), []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
@@ -133,7 +132,7 @@ func (w *workflowShape) deps(t *testing.T, registry *auraagent.Registry, runner 
 	}
 	return &workflow.ValidationDeps{
 		KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry,
-		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, toolsbuiltin.NewStepCatalog(broker.Definitions())),
+		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, newStepCatalog(broker.Definitions())),
 	}
 }
 

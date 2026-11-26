@@ -55,7 +55,7 @@ func newAccessBroker(t *testing.T, access AccessPolicy) *accessBroker {
 			return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 		}
 	}
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1":      adapter("exec"),

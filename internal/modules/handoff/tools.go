@@ -16,7 +16,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
-const handoffResultNote = "The owner was notified and will reply in this conversation. Do not continue the request yourself; tell the person the owner will follow up."
+const (
+	ToolName          = "handoff_to_owner"
+	handoffResultNote = "The owner was notified and will reply in this conversation. Do not continue the request yourself; tell the person the owner will follow up."
+)
 
 type Request struct {
 	SessionID   string
@@ -31,7 +34,7 @@ type Opener interface {
 
 func ToolDefinition() tools.Definition {
 	return tools.Definition{
-		Name:          tools.HandoffToolName,
+		Name:          ToolName,
 		Version:       tools.Version,
 		Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`),
 		OptIn:         true,
@@ -42,7 +45,7 @@ func ToolDefinition() tools.Definition {
 
 func ToolRule() approval.Rule {
 	return approval.Rule{
-		ToolName:    tools.HandoffToolName,
+		ToolName:    ToolName,
 		ToolVersion: tools.Version,
 		AllowedTrust: []approval.TrustLabel{
 			approval.TrustOwnerInput,

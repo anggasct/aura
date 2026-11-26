@@ -5,7 +5,6 @@ import (
 	"testing"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -41,7 +40,7 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 
 	interpreter := mustWorkflowInterpreter(t, runs, queuedRuntime{durabletest.NewFake()}, nil)
 	spec := &workflow.Spec{ID: "terminal_demo", Goal: "Run the demo", Version: 1, Source: workflow.SourceDefined, Steps: []workflow.StepSpec{{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: time.Minute}}}
-	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatal(err)
 	}
 	run, err := interpreter.StartConfigured(t.Context(), spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")

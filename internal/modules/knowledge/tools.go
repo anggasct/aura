@@ -16,6 +16,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
+const (
+	MaxSearchQueryRunes  = 500
+	MaxSearchResultLimit = 10
+)
+
 var emptyKnowledgeSearch = json.RawMessage(`{"results":[],"truncated":false,"mode":"lexical"}`)
 
 func SearchToolDefinition() tools.Definition {
@@ -83,7 +88,7 @@ func NewToolAdapter(retriever *Retriever) toolbroker.Adapter {
 		}
 		limit := DefaultSearchLimit
 		if args.Limit != nil {
-			limit = min(max(*args.Limit, 1), tools.MaxKBSearchResultLimit)
+			limit = min(max(*args.Limit, 1), MaxSearchResultLimit)
 		}
 		budgeted, cancel := context.WithTimeout(ctx, RetrievalBudget)
 		defer cancel()
@@ -138,8 +143,8 @@ func validateSearchArguments(raw json.RawMessage) (json.RawMessage, error) {
 	if !ok || query == "" {
 		return nil, fmt.Errorf("argument %q must be a non-empty string", "query")
 	}
-	if utf8.RuneCountInString(query) > tools.MaxKBSearchQueryRunes {
-		return nil, fmt.Errorf("argument %q must be at most %d characters", "query", tools.MaxKBSearchQueryRunes)
+	if utf8.RuneCountInString(query) > MaxSearchQueryRunes {
+		return nil, fmt.Errorf("argument %q must be at most %d characters", "query", MaxSearchQueryRunes)
 	}
 	if rawLimit, ok := object["limit"]; ok {
 		number, ok := rawLimit.(json.Number)
@@ -150,8 +155,8 @@ func validateSearchArguments(raw json.RawMessage) (json.RawMessage, error) {
 		if err != nil || n < 1 {
 			return nil, fmt.Errorf("argument %q must be at least %d", "limit", 1)
 		}
-		if n > tools.MaxKBSearchResultLimit {
-			return nil, fmt.Errorf("argument %q must be at most %d", "limit", tools.MaxKBSearchResultLimit)
+		if n > MaxSearchResultLimit {
+			return nil, fmt.Errorf("argument %q must be at most %d", "limit", MaxSearchResultLimit)
 		}
 	}
 	return json.Marshal(object)

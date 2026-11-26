@@ -205,10 +205,6 @@ func RunWithCatalog(ctx context.Context, definition *auraagent.Definition, cases
 	return report, nil
 }
 
-func runCase(ctx context.Context, definition *auraagent.Definition, c *Case, captures map[principal.Class]*Capture, capturer Capturer) (bool, error) {
-	return runCaseWithCatalog(ctx, definition, c, captures, capturer, nil)
-}
-
 func runCaseWithCatalog(ctx context.Context, definition *auraagent.Definition, c *Case, captures map[principal.Class]*Capture, capturer Capturer, catalog []tools.Definition) (bool, error) {
 	switch c.Kind {
 	case KindFixedReply:
@@ -279,20 +275,30 @@ func (definitionPolicy) StandingGrant(context.Context, string, string, string, s
 }
 
 func newBroker(definition *auraagent.Definition, decider toolbroker.ApprovalDecider, effects *effect.Executor, catalog []tools.Definition) (*toolbroker.Broker, error) {
-	adapters := map[string]toolbroker.Adapter{}
 	var catalogCapabilities []string
-	listed := catalog
-	if len(listed) == 0 {
-		listed = tools.Builtins()
+	for i := range catalog {
+		catalogCapabilities = append(catalogCapabilities, catalog[i].RequiredCapabilities...)
 	}
-	for i := range listed {
-		builtin := &listed[i]
-		catalogCapabilities = append(catalogCapabilities, builtin.RequiredCapabilities...)
-		adapters[builtin.Key()] = func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
-			return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: json.RawMessage(`{}`)}, nil
+	broker, err := toolbroker.New(&toolbroker.Options{
+		ApprovalDecider:  decider,
+		Access:           definitionPolicy{definition: definition},
+		Effects:          effects,
+		HostCapabilities: catalogCapabilities,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stub := func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+		return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: json.RawMessage(`{}`)}, nil
+	}
+	for i := range catalog {
+		builtin := catalog[i]
+		rule := toolbroker.DefaultRule(&builtin)
+		if err := broker.RegisterTool(&builtin, stub, &rule); err != nil {
+			return nil, err
 		}
 	}
-	return toolbroker.New(&toolbroker.Options{Adapters: adapters, ApprovalDecider: decider, Access: definitionPolicy{definition: definition}, Effects: effects, HostCapabilities: catalogCapabilities})
+	return broker, nil
 }
 
 func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.DB) (T, error)) (T, error) {
@@ -323,19 +329,12 @@ func approvalRouted(ctx context.Context, definition *auraagent.Definition, c *Ca
 }
 
 func lookupToolDefinition(catalog []tools.Definition, key string) (tools.Definition, bool) {
-	if len(catalog) > 0 {
-		for i := range catalog {
-			if catalog[i].Key() == key {
-				return catalog[i], true
-			}
+	for i := range catalog {
+		if catalog[i].Key() == key {
+			return catalog[i], true
 		}
-		return tools.Definition{}, false
 	}
-	definition, ok := tools.DefinitionsByKey()[key]
-	if !ok || definition == nil {
-		return tools.Definition{}, false
-	}
-	return *definition, true
+	return tools.Definition{}, false
 }
 
 func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, c *Case, catalog []tools.Definition) (bool, error) {

@@ -11,7 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/storage"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -30,7 +29,7 @@ func (adapters telegramAdapters) Check(ctx context.Context) []health.Finding {
 }
 
 func newTelegramAdapter(cfg *appconfig.Config, account *config.TelegramAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*telegram.Adapter, error) {
-	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	executor, err := newChannelEffects(db, logger)
 	if err != nil {
 		return nil, err
 	}

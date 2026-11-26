@@ -16,15 +16,12 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/channels/telegram"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
-	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
@@ -180,7 +177,7 @@ func newChannelBuildContext(cfg *appconfig.Config, router *auraagent.Router, db 
 }
 
 func buildDiscordAdapter(cfg *appconfig.Config, account *discord.Account, db *sql.DB, artifactRoot string, deps *discord.Deps) (*discord.Adapter, error) {
-	executor, err := toolsbuiltin.NewChannelEffects(db, deps.Logger)
+	executor, err := newChannelEffects(db, deps.Logger)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +326,7 @@ func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		executor, err := toolsbuiltin.NewChannelEffects(bc.db, bc.logger)
+		executor, err := newChannelEffects(bc.db, bc.logger)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -372,52 +369,11 @@ func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute
 	return ports, checks, []*email.Adapter(adapters), nil
 }
 
-type emailOutboxBridge struct {
-	outbox *email.Outbox
-}
-
-var _ toolsbuiltin.EmailOutbox = (*emailOutboxBridge)(nil)
-
-func (b *emailOutboxBridge) RouteOf(sessionID string) (toolsbuiltin.EmailRoute, bool) {
-	route, ok := b.outbox.RouteOf(sessionID)
-	return toolsbuiltin.EmailRoute{Account: route.Account, Sender: route.Sender}, ok
-}
-
-func (b *emailOutboxBridge) Send(ctx context.Context, message *toolsbuiltin.EmailMessage) (string, error) {
-	if message == nil {
-		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "the message cannot be sent as written")
-	}
-	messageID, err := b.outbox.Send(ctx, &email.Outgoing{
-		SessionID:      message.SessionID,
-		IdempotencyKey: message.IdempotencyKey,
-		To:             message.To,
-		Subject:        message.Subject,
-		Body:           message.Body,
-	})
-	if err == nil {
-		return messageID, nil
-	}
-	if ctx.Err() != nil {
-		return "", ctx.Err()
-	}
-	if errors.Is(err, email.ErrNoRoute) {
-		return "", toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "this session has no email account to send from")
-	}
-	switch code, _ := fault.CodeOf[email.ErrorCode](err); code {
-	case email.ErrorCodeMessageInvalid, email.ErrorCodeInvalidArgument:
-		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "the message cannot be sent as written")
-	case email.ErrorCodeDeliveryAmbiguous:
-		return "", toolbroker.Errorf(toolbroker.ResultExecutionFailed, "the delivery outcome is unknown and the message was not resent")
-	default:
-		return "", toolbroker.Errorf(toolbroker.ResultExecutionFailed, "email could not be sent")
-	}
-}
-
 func recoverEmailEffects(ctx context.Context, cfg *appconfig.Config, db *sql.DB, logger *slog.Logger) error {
 	if !cfg.Channels.Email.Enabled {
 		return nil
 	}
-	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	executor, err := newChannelEffects(db, logger)
 	if err != nil {
 		return err
 	}

@@ -14,7 +14,7 @@ import (
 
 func observingBroker(t *testing.T, observations *[]Observation, observerCtxs *[]context.Context, adapters map[string]Adapter) *Broker {
 	t.Helper()
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Adapters: adapters,
 		Observer: func(ctx context.Context, observation Observation) {
 			*observations = append(*observations, observation)
@@ -43,11 +43,11 @@ func passthroughAdapters() map[string]Adapter {
 func TestBrokerObservationCarriesPolicyApprovalExecutorMetadata(t *testing.T) {
 	var observations []Observation
 	var observerCtxs []context.Context
-	policy := DefaultPolicy()
+	policy := fixturePolicy()
 	readRule := policy.Rules["read_file"]
 	readRule.RequiresApproval = true
 	policy.Rules["read_file"] = readRule
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Policy: policy,
 		Adapters: map[string]Adapter{
 			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {

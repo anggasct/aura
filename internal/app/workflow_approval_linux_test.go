@@ -53,7 +53,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	if err := h.interpreter.LoadAll(t.Context(), nil, deps); err != nil {
 		t.Fatal(err)
 	}
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, &cfg), db: h.db, artifactRoot: filepath.Join(dir, "artifacts"), logger: slog.New(slog.DiscardHandler),
 		wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})

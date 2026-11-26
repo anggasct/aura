@@ -1,9 +1,10 @@
 package shellexec
 
 import (
-	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -13,23 +14,12 @@ import (
 )
 
 func TestShellexecToolMatchesBuiltinCatalog(t *testing.T) {
-	wantPtr, ok := tools.DefinitionsByKey()[ToolName+"@"+tools.Version]
-	if !ok {
-		t.Fatal("exec@v1 missing from builtin catalog")
-	}
 	got := ToolDefinition()
-	if got.Validator == nil {
-		t.Fatal("ToolDefinition().Validator must not be nil")
+	if got.Name != ToolName || got.Version != tools.Version || got.Validator == nil {
+		t.Fatalf("ToolDefinition() = %+v", got)
 	}
-	if !got.RequiresApproval || !got.Effectful {
-		t.Fatalf("ToolDefinition() = %+v, want RequiresApproval and Effectful", got)
-	}
-	gotCopy := got
-	gotCopy.Validator = nil
-	wantCopy := *wantPtr
-	wantCopy.Validator = nil
-	if !reflect.DeepEqual(gotCopy, wantCopy) {
-		t.Fatalf("ToolDefinition() non-func fields differ from catalog:\n got: %+v\nwant: %+v", gotCopy, wantCopy)
+	if !got.RequiresApproval || !got.Effectful || !slices.Equal(got.RequiredCapabilities, []string{"exec-linux"}) {
+		t.Fatalf("ToolDefinition() = %+v, want RequiresApproval, Effectful, and exec-linux", got)
 	}
 
 	payloads := []struct {
@@ -54,25 +44,26 @@ func TestShellexecToolMatchesBuiltinCatalog(t *testing.T) {
 	for _, tc := range payloads {
 		t.Run(tc.name, func(t *testing.T) {
 			gotOut, gotErr := got.Validate(json.RawMessage(tc.raw))
-			wantOut, wantErr := wantPtr.Validate(json.RawMessage(tc.raw))
 			if (gotErr == nil) != tc.ok {
 				t.Fatalf("got.Validate(%s) err = %v, want ok=%t", tc.raw, gotErr, tc.ok)
 			}
-			if (gotErr == nil) != (wantErr == nil) {
-				t.Fatalf("parity mismatch for %s: gotErr=%v wantErr=%v", tc.raw, gotErr, wantErr)
-			}
-			if tc.ok && !bytes.Equal(gotOut, wantOut) {
-				t.Fatalf("validated output mismatch: got %s, want %s", gotOut, wantOut)
+			if tc.ok && !json.Valid(gotOut) {
+				t.Fatalf("validated output is not valid JSON: %s", gotOut)
 			}
 		})
 	}
 
-	wantRule, ok := toolbroker.DefaultPolicy().Rules[ToolName]
-	if !ok {
-		t.Fatal("exec missing from DefaultPolicy")
-	}
+	wantRule := toolbroker.DefaultRule(&got)
 	if gotRule := ToolRule(); !reflect.DeepEqual(gotRule, wantRule) {
 		t.Fatalf("ToolRule() = %+v, want %+v", gotRule, wantRule)
+	}
+}
+
+func TestExecRequiresCommandArray(t *testing.T) {
+	definition := ToolDefinition()
+	_, err := definition.Validate(json.RawMessage(`{"command":[]}`))
+	if err == nil || !strings.Contains(err.Error(), "non-empty") {
+		t.Fatalf("Validate error = %v", err)
 	}
 }
 

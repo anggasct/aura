@@ -10,7 +10,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -36,7 +35,7 @@ func waitingSpec(id, goal string) *workflow.Spec {
 
 func builtinRegistry(t *testing.T) *auraagent.Registry {
 	t.Helper()
-	registry, err := auraagent.Build(nil, toolsbuiltin.DefinitionNames(), nil)
+	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,11 +52,11 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflow.Controlle
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"workflow_start"}, PublicTools: []string{"workflow_start"}, Workflows: allowlist,
-	}}, toolsbuiltin.DefinitionNames(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps := &workflow.ValidationDeps{Agents: registry, KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames(), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
+	deps := &workflow.ValidationDeps{Agents: registry, KnownTools: definitionNames(), EffectfulTools: effectfulToolNames(), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
 	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
 		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 			t.Fatal(err)
@@ -172,7 +171,7 @@ func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := mustWorkflowStore(t, db)
 	interpreter := mustWorkflowInterpreter(t, runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, toolsbuiltin.DefinitionNames(), nil)
+	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

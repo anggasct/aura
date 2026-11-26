@@ -1,9 +1,9 @@
 package fetch
 
 import (
-	"bytes"
 	"encoding/json"
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -12,21 +12,12 @@ import (
 )
 
 func TestToolDefinitionMatchesBuiltinCatalog(t *testing.T) {
-	wantPtr, ok := tools.DefinitionsByKey()[ToolName+"@"+tools.Version]
-	if !ok {
-		t.Fatal("web_fetch@v1 missing from builtin catalog")
-	}
 	got := ToolDefinition()
-	if got.Validator == nil {
-		t.Fatal("ToolDefinition().Validator must not be nil")
+	if got.Name != ToolName || got.Version != tools.Version || got.Validator == nil {
+		t.Fatalf("ToolDefinition() = %+v", got)
 	}
-
-	gotCopy := got
-	gotCopy.Validator = nil
-	wantCopy := *wantPtr
-	wantCopy.Validator = nil
-	if !reflect.DeepEqual(gotCopy, wantCopy) {
-		t.Fatalf("ToolDefinition() non-func fields differ from catalog:\n got: %+v\nwant: %+v", gotCopy, wantCopy)
+	if !got.ExternalSink || got.RequiresApproval || got.Effectful || !slices.Equal(got.RequiredCapabilities, []string{"public-web"}) {
+		t.Fatalf("ToolDefinition() flags = %+v", got)
 	}
 
 	payloads := []struct {
@@ -47,25 +38,19 @@ func TestToolDefinitionMatchesBuiltinCatalog(t *testing.T) {
 	for _, tc := range payloads {
 		t.Run(tc.name, func(t *testing.T) {
 			gotOut, gotErr := got.Validate(json.RawMessage(tc.raw))
-			wantOut, wantErr := wantPtr.Validate(json.RawMessage(tc.raw))
 			if (gotErr == nil) != tc.ok {
 				t.Fatalf("got.Validate(%s) err = %v, want ok=%t", tc.raw, gotErr, tc.ok)
 			}
-			if (gotErr == nil) != (wantErr == nil) {
-				t.Fatalf("parity mismatch for %s: gotErr=%v wantErr=%v", tc.raw, gotErr, wantErr)
-			}
-			if tc.ok && !bytes.Equal(gotOut, wantOut) {
-				t.Fatalf("validated output mismatch: got %s, want %s", gotOut, wantOut)
+			if tc.ok && !json.Valid(gotOut) {
+				t.Fatalf("validated output is not valid JSON: %s", gotOut)
 			}
 		})
 	}
 }
 
 func TestToolRuleMatchesDefaultPolicy(t *testing.T) {
-	want, ok := toolbroker.DefaultPolicy().Rules[ToolName]
-	if !ok {
-		t.Fatal("web_fetch missing from DefaultPolicy")
-	}
+	def := ToolDefinition()
+	want := toolbroker.DefaultRule(&def)
 	got := ToolRule()
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("ToolRule() = %+v, want %+v", got, want)

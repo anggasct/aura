@@ -4,13 +4,13 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
-func registerGitHubModule(t *testing.T, executor *toolsbuiltin.Executor, cfg *appconfig.Config) {
+func registerGitHubModule(t *testing.T, executor *runtimeadk.BrokerExecutor, cfg *appconfig.Config) {
 	t.Helper()
 	mod, err := github.New(&github.ModuleDeps{Config: githubConfig(cfg)})
 	if err != nil {

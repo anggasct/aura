@@ -9,16 +9,17 @@ import (
 	"testing"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
 type kbSearchRig struct {
 	*knowledgeTurnRig
-	builtin  *toolsbuiltin.Executor
+	builtin  *runtimeadk.BrokerExecutor
 	personas registryPersonas
 }
 
@@ -33,9 +34,16 @@ func newKBSearchRig(t *testing.T) *kbSearchRig {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	builtin, err := toolsbuiltin.New(rig.cfg.Tools, rig.cfg.Storage.ArtifactQuota, rig.db, artifactRoot, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, nil, newAccessPolicy(registry, rig.db, nil))
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: rig.cfg, CapabilityReport: capabilitytest.All(t)},
+		db:           rig.db,
+		artifactRoot: artifactRoot,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring:       &toolWiring{access: newAccessPolicy(registry, rig.db, nil)},
+		events:       turn.NewEventBus(slog.New(slog.DiscardHandler)),
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
 	if err := builtin.Broker().RegisterProvider(knowledge.NewToolProvider(rig.retriever)); err != nil {
 		t.Fatalf("RegisterProvider: %v", err)

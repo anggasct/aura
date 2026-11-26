@@ -47,7 +47,7 @@ func newDisplayHarness(t *testing.T, display []string, secrets ...string) *displ
 	definition.Schema = json.RawMessage(`{"type":"object"}`)
 	definition.RequiresApproval = true
 	definition.Validator = strictObjectValidator
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Secrets: secrets,
 		Access:  h.access,
@@ -167,7 +167,7 @@ func TestDuplicateAndCaseVariantKeysNeverReachApprovalOrExecution(t *testing.T) 
 }
 
 func TestDuplicateKeysAreRejectedForBuiltinToolsToo(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t), Adapters: map[string]Adapter{
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t), Adapters: map[string]Adapter{
 		"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			return ToolResult{Output: json.RawMessage(`{}`)}, nil
 		},
@@ -194,7 +194,7 @@ func TestPluginApprovalDisplayIsRedactedBeforeItIsSized(t *testing.T) {
 
 func TestOtherToolsKeepTheirJSONRenderingWithEscapedControlCharacters(t *testing.T) {
 	var prompted *ApprovalPrompt
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {

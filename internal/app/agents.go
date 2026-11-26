@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -133,7 +132,7 @@ func orNone(value string) string {
 }
 
 func personaToolNames(cfg *appconfig.Config) []string {
-	names := toolsbuiltin.DefinitionNames()
+	names := definitionNames()
 	if len(githubCredentials(cfg)) > 0 {
 		names = append(names, github.ToolNames()...)
 	}
@@ -154,7 +153,8 @@ func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 	if cfg.Agents != nil {
 		overrides = cfg.Agents.Definitions
 	}
-	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), cfg.MCP.ServerNames(), modelRoutes)
+	catalog := append(appconfig.BuiltinToolDefinitions(), github.Definitions()...)
+	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), catalog, cfg.MCP.ServerNames(), modelRoutes)
 	if err != nil {
 		return nil, err
 	}

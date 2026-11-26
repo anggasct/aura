@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/broadcast"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/effect"
@@ -86,7 +85,7 @@ func newReplayFixture(t *testing.T, gap time.Duration) *replayFixture {
 	}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	executor, err := toolsbuiltin.NewChannelEffects(db, slog.Default())
+	executor, err := newChannelEffects(db, slog.Default())
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}

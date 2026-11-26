@@ -14,7 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/modules/broadcast"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/mcp"
@@ -192,8 +191,10 @@ func (b *build) buildServerTools(ctx context.Context) error {
 	if err := b.registerModule("handoff", handoffMod); err != nil {
 		return err
 	}
-	b.builtin.SetEmailOutbox(&emailOutboxBridge{outbox: email.NewOutbox(s.emailMailboxes)})
-	pluginMod, err := buildPluginModule(ctx, cfg, db, b.builtin.Broker(), b.result.CapabilityReport, b.logger)
+	if err := b.broker.RegisterProvider(email.NewToolProvider(s.emailMailboxes...)); err != nil {
+		return err
+	}
+	pluginMod, err := buildPluginModule(ctx, cfg, db, b.broker, b.result.CapabilityReport, b.logger)
 	if err != nil {
 		return err
 	}
@@ -241,7 +242,7 @@ func (b *build) startMCPServers(ctx context.Context, plugins *plugin.Module) err
 	mod, err := mcp.New(ctx, &mcp.ModuleDeps{
 		Config:       cfg.MCP,
 		Plugins:      mcpPlugins,
-		Broker:       b.builtin.Broker(),
+		Broker:       b.broker,
 		TrustPath:    trustPath,
 		Meters:       b.meters(),
 		Capabilities: b.result.CapabilityReport,
@@ -308,7 +309,7 @@ func (b *build) buildChannelHost() error {
 
 func (b *build) buildBroadcast() error {
 	cfg, db, logger, s := b.cfg, b.db, b.logger, b.server
-	broadcastEffects, err := toolsbuiltin.NewChannelEffects(db, logger)
+	broadcastEffects, err := newChannelEffects(db, logger)
 	if err != nil {
 		return err
 	}

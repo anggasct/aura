@@ -20,7 +20,6 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -254,7 +253,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	}
 	mail := newFakeMail()
 	submissions := newFakeSubmissions()
-	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}

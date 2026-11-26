@@ -9,7 +9,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
@@ -62,9 +61,16 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 			if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: "telegram:5", AgentID: auraagent.DefaultID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 				t.Fatalf("Create session: %v", err)
 			}
-			executor, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, telegramOriginAccess{})
+			executor, err := newTestToolExecutor(&toolExecutorInput{
+				result:       &appconfig.LoadResult{Config: &cfg, CapabilityReport: capabilitytest.All(t)},
+				db:           db,
+				artifactRoot: t.TempDir(),
+				logger:       slog.New(slog.DiscardHandler),
+				wiring:       &toolWiring{decider: decider, access: telegramOriginAccess{}},
+				events:       turn.NewEventBus(slog.New(slog.DiscardHandler)),
+			})
 			if err != nil {
-				t.Fatalf("toolsbuiltin.New: %v", err)
+				t.Fatalf("newTestToolExecutor: %v", err)
 			}
 			_, err = executor.Broker().Execute(t.Context(), &toolbroker.ToolRequest{
 				RequestID:      "request-1",

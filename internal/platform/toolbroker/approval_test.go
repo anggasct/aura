@@ -17,7 +17,7 @@ func TestBrokerApprovalDeciderAcceptExecutes(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
 	var approvals []string
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -52,7 +52,7 @@ func TestBrokerApprovalDeciderAcceptExecutes(t *testing.T) {
 func TestBrokerApprovalDeciderReturnsPastDeadlineFailsClosed(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -83,7 +83,7 @@ func TestBrokerApprovalDeciderReturnsPastDeadlineFailsClosed(t *testing.T) {
 func TestBrokerApprovalDeciderRejectBlocksExecution(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -110,7 +110,7 @@ func TestBrokerApprovalDeciderRejectBlocksExecution(t *testing.T) {
 
 func TestBrokerApprovalDeciderErrorFailsClosed(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -136,7 +136,7 @@ func TestBrokerApprovalDeciderErrorFailsClosed(t *testing.T) {
 func TestBrokerApprovalPromptIsReadableWhileTheCanonicalRequestStaysExact(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	var prompted *ApprovalPrompt
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -176,7 +176,7 @@ func TestBrokerApprovalPromptIsReadableWhileTheCanonicalRequestStaysExact(t *tes
 func TestBrokerApprovalPromptCarriesCanonicalScope(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	var prompted *ApprovalPrompt
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -223,7 +223,7 @@ func TestBrokerApprovalPromptCarriesCanonicalScope(t *testing.T) {
 func TestBrokerApprovalPromptBoundsDisplayArguments(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	var prompted *ApprovalPrompt
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -255,7 +255,7 @@ func TestBrokerApprovalPromptBoundsDisplayArguments(t *testing.T) {
 func TestBrokerApprovedGrantReplayIsAnsweredFromTheJournal(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {

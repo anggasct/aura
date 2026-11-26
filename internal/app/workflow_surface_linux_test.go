@@ -22,8 +22,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/email"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -87,7 +87,7 @@ func startGitHubCommentStub(t *testing.T) *gitHubCommentStub {
 func (r *surfaceRig) pointGitHubAtTheStub(t *testing.T) {
 	t.Helper()
 	for _, name := range github.ToolNames() {
-		r.executor.UnregisterTool(name, github.ToolVersion)
+		r.executor.Broker().UnregisterTool(name, github.ToolVersion)
 	}
 	provider, err := github.NewToolProvider(&github.ToolOptions{
 		BaseURL: os.Getenv("AURA_TEST_GITHUB_BASE"), HTTPClient: &http.Client{},
@@ -698,8 +698,8 @@ func driveToolRun(t *testing.T, rig *surfaceRig, id string, origin *workflow.Run
 	}
 	deps := &workflow.ValidationDeps{
 		Agents:         rig.registry,
-		KnownTools:     append(toolsbuiltin.DefinitionNames(), recordedTool),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     append(definitionNames(), recordedTool),
+		EffectfulTools: effectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
 		StepAllowed:    acceptStepAllowed,
 	}
@@ -782,7 +782,7 @@ func TestWorkflowEmailSendIsRefusedBeforeTheBroker(t *testing.T) {
 	for _, origin := range []surfaceOrigin{ownerOrigin, trustedOrigin} {
 		t.Run(string(origin.class), func(t *testing.T) {
 			call := surfaceCall("run-email-"+string(origin.class), origin, workflow.ApprovalInstalled)
-			_, err := rig.runner.Invoke(stepContextFor(t, rig.db, call), toolsbuiltin.EmailSendToolName, args)
+			_, err := rig.runner.Invoke(stepContextFor(t, rig.db, call), email.SendToolName, args)
 			codeIs(t, err, workflow.ErrorCodeCapabilityUnavailable)
 			if got := len(rig.observed.all()); got != 0 {
 				t.Fatalf("the broker saw %d calls, want none", got)

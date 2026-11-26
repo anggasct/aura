@@ -17,13 +17,13 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -71,7 +71,7 @@ type surfaceInput struct {
 
 type surfaceRig struct {
 	runner       *workflow.ToolStepRunner
-	executor     *toolsbuiltin.Executor
+	executor     *runtimeadk.BrokerExecutor
 	db           *sql.DB
 	workspace    string
 	registry     *auraagent.Registry
@@ -142,12 +142,12 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 		access:    newAccessPolicy(registry, in.db, nil),
 		reachable: kitapproval.Reachable(targets),
 	}
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: result, db: in.db, artifactRoot: artifactRoot, logger: slog.New(slog.DiscardHandler), wiring: wiring,
 		events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
-		t.Fatalf("newToolExecutor: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
 	registerGitHubModule(t, executor, result.Config)
 	runner, err := workflow.NewToolStepRunner(&workflow.ToolStepRunnerDeps{

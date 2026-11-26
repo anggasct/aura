@@ -14,7 +14,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -113,7 +112,7 @@ func (recallMarkerProvider) Required(*turn.TurnRequest) bool { return false }
 type catalogExecutor struct{}
 
 func (catalogExecutor) Definitions() []runtimeadk.BuiltinToolDefinition {
-	return toolsbuiltin.CatalogDefinitions()
+	return catalogDefinitions()
 }
 
 func (catalogExecutor) Execute(context.Context, *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {

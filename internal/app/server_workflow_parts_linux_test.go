@@ -14,7 +14,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -78,7 +77,7 @@ func createTestSession(t *testing.T, db *sql.DB, id, owner string) {
 	}
 }
 
-func executeWorkflowTool(t *testing.T, executor *toolsbuiltin.Executor, tool string, caller *workflow.Caller, arguments string) json.RawMessage {
+func executeWorkflowTool(t *testing.T, executor *runtimeadk.BrokerExecutor, tool string, caller *workflow.Caller, arguments string) json.RawMessage {
 	t.Helper()
 	output, err := executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 		RequestID: "call-" + tool, TurnID: "turn-" + tool, SessionID: caller.SessionID, PrincipalID: caller.PrincipalID,
@@ -307,7 +306,7 @@ func TestServerWorkflowPartsNeedTheirDependencies(t *testing.T) {
 	for name, strip := range map[string]func(b *build){
 		"no interpreter":   func(b *build) { b.interpreter = nil },
 		"no surface tools": func(b *build) { b.builtin = nil },
-		"no tool broker":   func(b *build) { b.builtin = &toolsbuiltin.Executor{} },
+		"no tool broker":   func(b *build) { b.builtin = &runtimeadk.BrokerExecutor{} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := buildServerPhases(t, "")

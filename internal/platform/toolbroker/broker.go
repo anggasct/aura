@@ -162,10 +162,10 @@ func New(options *Options) (*Broker, error) {
 	if options == nil {
 		options = &Options{}
 	}
-	definitions := tools.DefinitionsByKey()
+	definitions := map[string]*tools.Definition{}
 	policy := options.Policy
 	if policy.Version == "" {
-		policy = DefaultPolicy()
+		policy = approval.Policy{Version: "builtin-tools-v1", Rules: map[string]approval.Rule{}}
 	}
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("toolbroker: invalid policy: %w", err)
@@ -219,16 +219,6 @@ func DefaultRule(definition *tools.Definition) approval.Rule {
 			Timeout:        30 * time.Second,
 		},
 	}
-}
-
-func DefaultPolicy() approval.Policy {
-	listed := tools.Builtins()
-	rules := make(map[string]approval.Rule, len(listed))
-	for i := range listed {
-		definition := &listed[i]
-		rules[definition.Name] = DefaultRule(definition)
-	}
-	return approval.Policy{Version: "builtin-tools-v1", Rules: rules}
 }
 
 func (b *Broker) RegisterSecret(value string) {

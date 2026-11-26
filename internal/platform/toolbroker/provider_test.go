@@ -90,10 +90,7 @@ func TestBrokerRegisterProviderRefusesNilAndValidatesEntries(t *testing.T) {
 }
 
 func TestBrokerRegisterProviderIsAtomicOnFailure(t *testing.T) {
-	broker, err := New(&Options{})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
+	broker := newFixtureBroker(t, &Options{})
 
 	overwriting := sampleRegistration(tools.KBSearchToolName)
 	overwriting.Rule.RequiresApproval = true
@@ -101,7 +98,7 @@ func TestBrokerRegisterProviderIsAtomicOnFailure(t *testing.T) {
 	invalidRule := sampleRegistration("broken_tool")
 	invalidRule.Rule.Constraints.MaxOutputBytes = -1
 
-	err = broker.RegisterProvider(stubToolProvider{
+	err := broker.RegisterProvider(stubToolProvider{
 		regs: []ToolRegistration{overwriting, invalidRule},
 	})
 	if err == nil {

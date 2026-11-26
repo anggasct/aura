@@ -93,6 +93,7 @@ func mustBehaviorService(t *testing.T, evalStore personaeval.Store, models behav
 	svc, err := personaeval.NewService(&personaeval.ServiceDeps{
 		Store:    evalStore,
 		Capturer: capturePersonaTurn,
+		Catalog:  appconfig.BuiltinToolDefinitions(),
 		Converse: models.converse,
 		JudgeFor: models.judge,
 	})
@@ -162,7 +163,7 @@ func gateRegistry(t *testing.T, behavior *auraagent.PersonaEvalBehavior) *auraag
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"web_search"}, PublicTools: []string{"web_search"}, Evals: auraagent.PersonaEvals{Behavior: behavior},
-	}}, []string{"web_search"}, []string{auraagent.DefaultEvalJudgeRoute})
+	}}, []string{"web_search"}, appconfig.BuiltinToolDefinitions(), []string{auraagent.DefaultEvalJudgeRoute})
 	if err != nil {
 		t.Fatal(err)
 	}

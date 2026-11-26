@@ -10,7 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const goldenExecRequestDigest = "fd05ada23732a95373285a61121a701d5969ce09e0327a6e73e710881fd91f83"
@@ -47,7 +46,7 @@ func newGateProbe(t *testing.T, host []string) *gateProbe {
 			return ToolResult{Class: ResultOK, Output: json.RawMessage(`{}`)}, nil
 		}
 	}
-	broker, err := New(&Options{
+	broker := newFixtureBroker(t, &Options{
 		HostCapabilities: host,
 		Effects:          probe.executor,
 		Adapters:         adapters,
@@ -56,9 +55,6 @@ func newGateProbe(t *testing.T, host []string) *gateProbe {
 			return true, nil
 		},
 	})
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	probe.broker = broker
 	return probe
 }
@@ -146,7 +142,7 @@ func TestBrokerRunsToolsWhoseCapabilityTheHostHolds(t *testing.T) {
 				t.Fatalf("Execute = %+v, %v; want ok", result, err)
 			}
 			wantPrompts := 0
-			if definition := tools.DefinitionsByKey()[tool.name+"@v1"]; definition.RequiresApproval {
+			if definition := fixtureDefinition(tool.name); definition.RequiresApproval {
 				wantPrompts = 1
 			}
 			if probe.adapter != 1 || probe.prompts != wantPrompts {
@@ -174,10 +170,7 @@ func TestRequestDigestIsIndependentOfTheHostSet(t *testing.T) {
 	}
 	for name, host := range map[string][]string{"full host": capabilitytest.Host(t), "empty host": nil} {
 		t.Run(name, func(t *testing.T) {
-			broker, err := New(&Options{HostCapabilities: host})
-			if err != nil {
-				t.Fatalf("New: %v", err)
-			}
+			broker := newFixtureBroker(t, &Options{HostCapabilities: host})
 			canonical, err := broker.canonicalRequest(request)
 			if err != nil {
 				t.Fatalf("canonicalRequest: %v", err)
@@ -190,7 +183,11 @@ func TestRequestDigestIsIndependentOfTheHostSet(t *testing.T) {
 }
 
 func TestDefaultPolicyVersionIsUnchanged(t *testing.T) {
-	if got := DefaultPolicy().Version; got != "builtin-tools-v1" {
+	broker, err := New(&Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := broker.Policy().Version; got != "builtin-tools-v1" {
 		t.Fatalf("policy version = %q, want builtin-tools-v1", got)
 	}
 }

@@ -43,7 +43,7 @@ func githubEntry(name, ref string) string {
 	return fmt.Sprintf("      - name: %q\n        ref: %q\n", name, ref)
 }
 
-func loadGitHubConfig(t *testing.T, section string) (*legacyconfig.Tools, error) {
+func loadGitHubConfig(t *testing.T, section string) (*Tools, error) {
 	t.Helper()
 	body := strings.Replace(webSearchBase, "%s\n", section, 1)
 	result, err := LoadWithOptions(writeTempConfig(t, body), execLinuxOptions(t))

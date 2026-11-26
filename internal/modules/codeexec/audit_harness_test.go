@@ -176,8 +176,6 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor, Artifacts: harness.artifacts,
-		Adapters:       map[string]toolbroker.Adapter{auditToolKey: runner.Adapter()},
-		ArgumentChecks: map[string]toolbroker.ArgumentCheck{auditToolKey: runner.ArgumentCheck},
 		ApprovalDecider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 			return true, nil
 		},
@@ -190,6 +188,9 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 		},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.RegisterProvider(NewToolProvider(runner.Adapter(), runner.ArgumentCheck)); err != nil {
 		t.Fatal(err)
 	}
 	harness.journal, harness.broker = journal, broker

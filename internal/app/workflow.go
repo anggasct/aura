@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -21,16 +20,16 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
-func stepToolCatalog(cfg *appconfig.Config) (*toolsbuiltin.StepCatalog, error) {
+func stepToolCatalog(cfg *appconfig.Config) (*stepCatalog, error) {
 	credentials := githubCredentials(cfg)
 	if len(credentials) == 0 {
-		return toolsbuiltin.NewStepCatalog(nil), nil
+		return newStepCatalog(nil), nil
 	}
 	definitions, err := github.CheckedDefinitions(credentials)
 	if err != nil {
 		return nil, fmt.Errorf("prepare github step tools: %w", err)
 	}
-	return toolsbuiltin.NewStepCatalog(definitions), nil
+	return newStepCatalog(definitions), nil
 }
 
 func workflowValidationDeps(cfg *appconfig.Config) (*workflow.ValidationDeps, error) {
@@ -39,8 +38,8 @@ func workflowValidationDeps(cfg *appconfig.Config) (*workflow.ValidationDeps, er
 		return nil, err
 	}
 	deps := &workflow.ValidationDeps{
-		KnownTools:     toolsbuiltin.StepToolNames(personaToolNames(cfg)),
-		EffectfulTools: append(toolsbuiltin.EffectfulToolNames(), github.ToolNames()...),
+		KnownTools:     stepToolNames(personaToolNames(cfg)),
+		EffectfulTools: append(effectfulToolNames(), github.ToolNames()...),
 		CheckToolCall:  catalog.CheckArguments,
 	}
 	if cfg.Workflows != nil {
@@ -55,7 +54,7 @@ func workflowValidationDeps(cfg *appconfig.Config) (*workflow.ValidationDeps, er
 	return deps, nil
 }
 
-func stepCeiling(registry *auraagent.Registry, steps *toolsbuiltin.StepCatalog) func(agentID string, class principal.Class, toolID string) (allowed, personaKnown bool) {
+func stepCeiling(registry *auraagent.Registry, steps *stepCatalog) func(agentID string, class principal.Class, toolID string) (allowed, personaKnown bool) {
 	return func(agentID string, class principal.Class, toolID string) (bool, bool) {
 		persona, known := registry.Lookup(agentID)
 		if !known {
@@ -207,7 +206,7 @@ func workflowOpener(gf *globalFlags) workflow.CommandOpener {
 				if err != nil {
 					return err
 				}
-				secrets := slices.Concat(toolsbuiltin.ConfiguredToolSecrets(result.Config.Tools), githubCredentialSecrets(result.Config))
+				secrets := slices.Concat(configuredToolSecrets(result.Config.Tools), githubCredentialSecrets(result.Config))
 				return fn(ctx, &workflow.CommandDeps{
 					DefinitionsDir: workflowDefinitionsDir(result.Config),
 					ValidationDeps: func() (*workflow.ValidationDeps, error) {
