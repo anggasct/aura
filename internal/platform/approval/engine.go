@@ -32,7 +32,7 @@ func NewEngine(policy Policy, handler Handler, hostCapabilities []string) (*Engi
 	}
 	clonedRules := make(map[string]Rule, len(policy.Rules))
 	for k, v := range policy.Rules {
-		clonedRules[k] = v
+		clonedRules[k] = cloneRule(&v)
 	}
 	policyCopy := policy
 	policyCopy.Rules = clonedRules
@@ -49,10 +49,30 @@ func NewEngine(policy Policy, handler Handler, hostCapabilities []string) (*Engi
 	}, nil
 }
 
+func cloneRule(rule *Rule) Rule {
+	cloned := *rule
+	cloned.RequiredCapabilities = slices.Clone(rule.RequiredCapabilities)
+	cloned.AllowedTrust = slices.Clone(rule.AllowedTrust)
+	return cloned
+}
+
 func (e *Engine) PolicyVersion() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.policy.Version
+}
+
+func (e *Engine) Policy() Policy {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	rules := make(map[string]Rule, len(e.policy.Rules))
+	for k, v := range e.policy.Rules {
+		rules[k] = cloneRule(&v)
+	}
+	return Policy{
+		Version: e.policy.Version,
+		Rules:   rules,
+	}
 }
 
 func validateContext(ctx context.Context) error {
@@ -162,7 +182,7 @@ func (e *Engine) RegisterRule(rule *Rule) error {
 	if e.policy.Rules == nil {
 		e.policy.Rules = make(map[string]Rule)
 	}
-	e.policy.Rules[rule.ToolName] = *rule
+	e.policy.Rules[rule.ToolName] = cloneRule(rule)
 	return nil
 }
 
@@ -187,7 +207,7 @@ func (e *Engine) RegisterRules(rules []Rule) error {
 		e.policy.Rules = make(map[string]Rule, len(rules))
 	}
 	for i := range rules {
-		e.policy.Rules[rules[i].ToolName] = rules[i]
+		e.policy.Rules[rules[i].ToolName] = cloneRule(&rules[i])
 	}
 	return nil
 }

@@ -1,16 +1,16 @@
 package toolbroker
 
 import (
-	"slices"
-
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 type ToolRegistration struct {
-	Definition tools.Definition
-	Adapter    Adapter
-	Rule       approval.Rule
+	Definition    tools.Definition
+	Adapter       Adapter
+	Rule          approval.Rule
+	ArgumentCheck ArgumentCheck
+	ApprovalGuard ApprovalGuard
 }
 
 type ToolProvider interface {
@@ -51,10 +51,7 @@ func (b *Broker) RegisterProvider(provider ToolProvider) error {
 		}
 		seenNames[reg.Rule.ToolName] = struct{}{}
 
-		defCopy := reg.Definition
-		defCopy.Schema = slices.Clone(reg.Definition.Schema)
-		defCopy.RequiredCapabilities = slices.Clone(reg.Definition.RequiredCapabilities)
-		defs[i] = defCopy
+		defs[i] = cloneDefinition(&reg.Definition)
 		rules[i] = reg.Rule
 	}
 
@@ -69,6 +66,16 @@ func (b *Broker) RegisterProvider(provider ToolProvider) error {
 		key := defCopy.Key()
 		b.definitions[key] = &defCopy
 		b.adapters[key] = registrations[i].Adapter
+		if registrations[i].ArgumentCheck != nil {
+			b.argumentChecks[key] = registrations[i].ArgumentCheck
+		} else {
+			delete(b.argumentChecks, key)
+		}
+		if registrations[i].ApprovalGuard != nil {
+			b.guards[defCopy.Name] = registrations[i].ApprovalGuard
+		} else {
+			delete(b.guards, defCopy.Name)
+		}
 	}
 	return nil
 }
