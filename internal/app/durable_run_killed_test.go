@@ -128,7 +128,7 @@ func correlations(t *testing.T, disk *workflow.Store, runID string) []workflow.C
 
 func deliverCICompletion(t *testing.T, life *runLife) {
 	t.Helper()
-	adapter, err := githubadapter.NewAdapter(life.workflows, life.runtime, nil)
+	adapter, err := githubadapter.NewAdapter(newWorkflowCorrelationStore(life.workflows), life.runtime, nil)
 	if err != nil {
 		t.Fatalf("github adapter: %v", err)
 	}

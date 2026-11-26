@@ -23,7 +23,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -58,7 +57,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	storetest.Seed(t, filepath.Join(dir, "aura.db"))
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
@@ -72,6 +71,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, executor, &cfg)
 	output, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: "read_file", ToolVersion: "v1", Arguments: json.RawMessage(`{"path":"note.txt"}`),
@@ -91,7 +91,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`)
 	}
 	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *appconfig.Config) {
-		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+		cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		cfg.Agents.Definitions = append(cfg.Agents.Definitions, auraagent.Persona{
 			ID: "reviewer", Description: "d", Instructions: "i", Tools: []string{github.ToolComment},
 		})
@@ -119,7 +119,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 var providerSafeToolName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 type gitHubToolRig struct {
-	credentials []config.GitHubCredential
+	credentials []github.Credential
 	wiring      toolWiring
 	access      func(db *sql.DB) toolbroker.AccessPolicy
 }
@@ -152,11 +152,12 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, executor, &cfg)
 	return executor, db
 }
 
-func oneCredential() []config.GitHubCredential {
-	return []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+func oneCredential() []github.Credential {
+	return []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 }
 
 func approveAll(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return true, nil }
@@ -419,6 +420,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, builtin, cfg)
 	name := "http-chat-model"
 	events := turnstore.NewEventStore(db)
 	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,

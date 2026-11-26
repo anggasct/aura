@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -67,7 +68,7 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	loaded = result.Config.Tools
-	want := []legacyconfig.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TOKEN")}, {Name: "release", Ref: secrettest.Ref("file:///etc/aura/github-release-token")}}
+	want := []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TOKEN")}, {Name: "release", Ref: secrettest.Ref("file:///etc/aura/github-release-token")}}
 	if got := loaded.GitHub.Credentials; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("Credentials = %+v, want %+v", got, want)
 	}

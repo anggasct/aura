@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -233,7 +234,7 @@ type Tools struct {
 	Exec                 ToolExec      `json:"exec"`
 	Fetch                ToolFetch     `json:"fetch"`
 	WebSearch            ToolWebSearch `json:"web_search"`
-	GitHub               ToolGitHub    `json:"github,omitzero"`
+	GitHub               github.Config `json:"github,omitzero"`
 }
 
 type ToolExec struct {

@@ -583,7 +583,7 @@ func ValidateTools(toolsConfig *Tools) error {
 	if toolsConfig.Fetch.MaxEncodedBytes <= 0 || toolsConfig.Fetch.MaxDecodedBytes <= 0 {
 		return configkit.Invalid("tools.fetch", "body limits must be positive")
 	}
-	if err := validateToolGitHub(&toolsConfig.GitHub); err != nil {
+	if err := configkit.Under("tools.github", toolsConfig.GitHub.Validate()); err != nil {
 		return err
 	}
 	return validateWebSearch(&toolsConfig.WebSearch)

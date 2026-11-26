@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -177,9 +178,27 @@ func (b *build) buildServerTools(ctx context.Context) error {
 	cfg, db, s := b.cfg, b.db, b.server
 	notifiers := handoffNotifiers(s.channels)
 	if cfg.Channels.HTTP.Enabled {
-		notifiers = append(notifiers, newHTTPHandoffNotifier(s.ownerRoute, s.approvalAdapters))
+		httpNotifier, err := newHTTPHandoffNotifier(s.ownerRoute, s.approvalAdapters)
+		if err != nil {
+			return err
+		}
+		notifiers = append(notifiers, httpNotifier)
 	}
-	b.builtin.SetHandoffOpener(newHandoffService(db, notifiers))
+	var handoffTimeout time.Duration
+	if cfg.Access != nil {
+		handoffTimeout = time.Duration(cfg.Access.HandoffTimeout)
+	}
+	handoffMod, err := handoff.New(&handoff.ModuleDeps{
+		DB:        db,
+		Notifiers: notifiers,
+		Timeout:   handoffTimeout,
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.registerModule("handoff", handoffMod); err != nil {
+		return err
+	}
 	b.builtin.SetEmailOutbox(&emailOutbox{adapters: s.emailMailboxes})
 	plugins, err := planPlugins(ctx, cfg, db, b.builtin.Broker())
 	if err != nil {

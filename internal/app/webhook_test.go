@@ -432,7 +432,7 @@ func TestDispatcherRoutesGitHubEventToCorrelation(t *testing.T) {
 	_, disk := githubTestStore(t)
 	fake := durabletest.NewFake()
 	runID := githubTestBinding(t, disk, fake)
-	adapter, err := github.NewAdapter(disk, fake, nil)
+	adapter, err := github.NewAdapter(newWorkflowCorrelationStore(disk), fake, nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestDispatcherFallsBackToTurnsForNonGitHub(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
-	adapter, err := github.NewAdapter(disk, durabletest.NewFake(), nil)
+	adapter, err := github.NewAdapter(newWorkflowCorrelationStore(disk), durabletest.NewFake(), nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
@@ -527,7 +527,7 @@ func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	fake := durabletest.NewFake()
 	runID := githubTestBinding(t, disk, fake)
 	counter := &signalCountingRuntime{Runtime: fake}
-	adapter, err := github.NewAdapter(disk, counter, nil)
+	adapter, err := github.NewAdapter(newWorkflowCorrelationStore(disk), counter, nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
