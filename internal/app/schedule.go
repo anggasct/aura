@@ -17,14 +17,12 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
-	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type cronTurnEngine interface {
@@ -175,47 +173,6 @@ func notifyContentJSON(text string) string {
 		return `{"text":""}`
 	}
 	return string(raw)
-}
-
-func buildCronBroadcaster(cfg *appconfig.Config, db *sql.DB, rt durable.Runtime, channels *broadcastChannels) (*broadcast.Broadcaster, error) {
-	location, err := time.LoadLocation(cfg.Broadcast.Timezone)
-	if err != nil {
-		return nil, fmt.Errorf("broadcast timezone %q is not valid", cfg.Broadcast.Timezone)
-	}
-	startMin, err := broadcast.ParseHourMinute(cfg.Broadcast.QuietHours.Start)
-	if err != nil {
-		return nil, fmt.Errorf("broadcast quiet start: %w", err)
-	}
-	endMin, err := broadcast.ParseHourMinute(cfg.Broadcast.QuietHours.End)
-	if err != nil {
-		return nil, fmt.Errorf("broadcast quiet end: %w", err)
-	}
-	registered := map[string]bool{}
-	for source := range channels.senders {
-		registered[source] = true
-	}
-	return broadcast.New(
-		broadcast.Policy{
-			Destinations:   cfg.Broadcast.Destinations,
-			Quiet:          broadcast.QuietConfig{Enabled: cfg.Broadcast.QuietHours.Enabled, Location: location, StartMin: startMin, EndMin: endMin},
-			MaxDigestItems: cfg.Broadcast.MaxDigestItems,
-			MaxDigestBytes: cfg.Broadcast.MaxDigestBytes,
-		},
-		&cronChannelRegistry{registered: registered},
-		&broadcastItemStore{store: store.NewBroadcastStore(db)},
-		func(ctx context.Context, itemID string) error {
-			return broadcast.StartItemRun(ctx, rt, itemID)
-		},
-		nil,
-	)
-}
-
-type cronChannelRegistry struct {
-	registered map[string]bool
-}
-
-func (r *cronChannelRegistry) Registered(source string) bool {
-	return r.registered[source]
 }
 
 func scheduleOpener(gf *globalFlags) schedule.Opener {

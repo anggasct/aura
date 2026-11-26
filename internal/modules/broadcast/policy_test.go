@@ -21,7 +21,7 @@ func testQuietBroadcaster(t *testing.T, zone, start, end string) *Broadcaster {
 	}
 	policy := testPolicy()
 	policy.Quiet = QuietConfig{Enabled: true, Location: loc, StartMin: startMin, EndMin: endMin}
-	broadcaster, err := New(
+	broadcaster, err := NewBroadcaster(
 		policy,
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),

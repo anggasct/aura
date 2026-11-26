@@ -152,7 +152,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
 		legacyconfig.ValidateEmail(&cfg.Channels.Email),
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
-		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
+		configkit.Under("broadcast", cfg.Broadcast.Validate()),
 		configkit.Under("scheduler", cfg.Scheduler.Validate()),
 		legacyconfig.ValidateMemory(&cfg.Memory),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
@@ -141,7 +140,7 @@ func TestLoad_BroadcastRouteParity(t *testing.T) {
 		if got := err == nil; got != tc.want {
 			t.Errorf("ParseRoute(%q) = %v, want accept=%v", tc.route, got, tc.want)
 		}
-		if got := legacyconfig.ValidBroadcastRoute(tc.route); got != tc.want {
+		if got := broadcastpkg.ValidRoute(tc.route); got != tc.want {
 			t.Errorf("validBroadcastRoute(%q) = %v, want %v", tc.route, got, tc.want)
 		}
 		path := writeBroadcastConfig(t, "version: 1\nbroadcast:\n  destinations: {default: \""+tc.route+"\"}\n")

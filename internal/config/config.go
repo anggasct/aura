@@ -16,18 +16,6 @@ type Channels struct {
 	HTTP     HTTP     `json:"http"`
 }
 
-type Broadcast struct {
-	Timezone       string             `json:"timezone"`
-	QuietHours     QuietHours         `json:"quiet_hours"`
-	MaxDigestItems int                `json:"max_digest_items"`
-	MaxDigestBytes int64              `json:"max_digest_bytes"`
-	MaxAttempts    int                `json:"max_attempts"`
-	MaxDeliveryAge configkit.Duration `json:"max_delivery_age"`
-	MinDispatchGap configkit.Duration `json:"min_dispatch_gap"`
-	Destinations   map[string]string  `json:"destinations"`
-	Fallback       map[string]string  `json:"fallback"`
-}
-
 type Memory struct {
 	Enabled              bool               `json:"enabled"`
 	MaxDocuments         int                `json:"max_documents"`
@@ -40,12 +28,6 @@ type Memory struct {
 	RangeLiveWindow      int                `json:"range_live_window"`
 	PurgeInterval        configkit.Duration `json:"purge_interval"`
 	PurgeLimit           int                `json:"purge_limit"`
-}
-
-type QuietHours struct {
-	Enabled bool   `json:"enabled"`
-	Start   string `json:"start"`
-	End     string `json:"end"`
 }
 
 type Sync struct {
@@ -412,20 +394,6 @@ func DefaultChannels() Channels {
 			MaxHistoryBytes:     HTTPMaxHistoryBytes,
 			KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
 		},
-	}
-}
-
-func DefaultBroadcast() Broadcast {
-	return Broadcast{
-		Timezone:       "UTC",
-		QuietHours:     QuietHours{Enabled: true, Start: "23:00", End: "07:00"},
-		MaxDigestItems: 20,
-		MaxDigestBytes: 12000,
-		MaxAttempts:    3,
-		MaxDeliveryAge: configkit.Duration(24 * time.Hour),
-		MinDispatchGap: configkit.Duration(5 * time.Second),
-		Destinations:   map[string]string{},
-		Fallback:       map[string]string{},
 	}
 }
 

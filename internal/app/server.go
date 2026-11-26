@@ -73,8 +73,7 @@ type serverBuild struct {
 	host               *runtimeengine.Host
 	broadcastRuntime   durable.Runtime
 	hostedHandlers     []string
-	broadcastWiring    *broadcastChannels
-	broadcastRunner    *broadcast.Runner
+	broadcastMod       *broadcast.Module
 	scheduleMod        *schedule.Module
 	scheduledWorkflows *scheduleWorkflows
 	erasureRuns        *erasureRuns
@@ -305,12 +304,8 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	s.broadcastWiring = buildBroadcastSenders(s.channels, broadcastEffects, b.sessions)
+	senders := buildBroadcastSenders(s.channels, broadcastEffects, b.sessions)
 	broadcastRecorder, err := telemetry.NewBroadcastRecorder(b.meters())
-	if err != nil {
-		return err
-	}
-	s.broadcastRunner, err = buildBroadcastRunner(cfg, db, logger, s.broadcastWiring, broadcastRecorderObserver(broadcastRecorder))
 	if err != nil {
 		return err
 	}
@@ -318,13 +313,26 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
+	s.broadcastMod, err = broadcast.New(&broadcast.ModuleDeps{
+		Config:   cfg.Broadcast,
+		DB:       db,
+		Senders:  senders,
+		Runtime:  s.broadcastRuntime,
+		Logger:   logger,
+		Observer: broadcastRecorderObserver(broadcastRecorder),
+	})
+	if err != nil {
 		return err
 	}
+	registrar, ok := s.broadcastRuntime.(durable.HandlerRegistrar)
+	if !ok || registrar == nil {
+		return errors.New("broadcast handler target does not accept handlers")
+	}
+	registrar.RegisterHandler(broadcast.HandlerName, s.broadcastMod.Handle)
 	s.hostedHandlers = append(s.hostedHandlers, broadcast.HandlerName)
-	runtime := s.broadcastRuntime
+	broadcastMod := s.broadcastMod
 	return b.group.Add(&lifecycleStage{name: "broadcast_resume", start: func(ctx context.Context) error {
-		resumed, err := resumeBroadcastRunners(ctx, runtime, db)
+		resumed, err := broadcastMod.Resume(ctx)
 		if err != nil {
 			return err
 		}
@@ -337,10 +345,6 @@ func (b *build) buildBroadcast() error {
 
 func (b *build) buildSchedule() error {
 	cfg, db, logger, s := b.cfg, b.db, b.logger, b.server
-	cronBroadcaster, err := buildCronBroadcaster(cfg, db, s.broadcastRuntime, s.broadcastWiring)
-	if err != nil {
-		return err
-	}
 	scheduleRecorder, err := telemetry.NewScheduleRecorder(b.meters())
 	if err != nil {
 		return err
@@ -350,7 +354,7 @@ func (b *build) buildSchedule() error {
 		Config:   cfg.Scheduler,
 		DB:       db,
 		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows},
-		Notify:   &cronNotifier{broadcaster: cronBroadcaster},
+		Notify:   &cronNotifier{broadcaster: s.broadcastMod.Broadcaster()},
 		Starter:  s.broadcastRuntime,
 		Logger:   logger,
 		Observer: scheduleRecorderObserver(scheduleRecorder),

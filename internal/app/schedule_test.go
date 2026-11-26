@@ -21,7 +21,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -146,15 +145,25 @@ func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	}
 }
 
+type testChannelRegistry map[string]bool
+
+func (r testChannelRegistry) Registered(source string) bool {
+	return r[source]
+}
+
 func testCronBroadcaster(t *testing.T, db *sql.DB, started *[]string) *broadcast.Broadcaster {
 	t.Helper()
-	broadcaster, err := broadcast.New(
+	items, err := broadcast.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("broadcast.NewSQLiteStore(): %v", err)
+	}
+	broadcaster, err := broadcast.NewBroadcaster(
 		broadcast.Policy{
 			Destinations:   map[string]string{"default": "discord:owner"},
 			MaxDigestItems: 20, MaxDigestBytes: 12000,
 		},
-		&cronChannelRegistry{registered: map[string]bool{"discord": true}},
-		&broadcastItemStore{store: store.NewBroadcastStore(db)},
+		testChannelRegistry{"discord": true},
+		items,
 		func(_ context.Context, itemID string) error {
 			*started = append(*started, itemID)
 			return nil
@@ -162,7 +171,7 @@ func testCronBroadcaster(t *testing.T, db *sql.DB, started *[]string) *broadcast
 		nil,
 	)
 	if err != nil {
-		t.Fatalf("broadcast.New(): %v", err)
+		t.Fatalf("broadcast.NewBroadcaster(): %v", err)
 	}
 	return broadcaster
 }
@@ -180,7 +189,11 @@ func TestCronNotifierSubmitsBroadcast(t *testing.T) {
 	if len(started) != 1 {
 		t.Fatalf("broadcast runs started = %v", started)
 	}
-	items, err := store.NewBroadcastStore(db).ListItems(t.Context(), nil, 10)
+	store, err := broadcast.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("broadcast.NewSQLiteStore(): %v", err)
+	}
+	items, err := store.ListItems(t.Context(), nil, 10)
 	if err != nil {
 		t.Fatalf("ListItems(): %v", err)
 	}

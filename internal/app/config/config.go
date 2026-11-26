@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -41,7 +42,7 @@ type Config struct {
 	Health       health.Config               `json:"health"`
 	Terminal     legacyconfig.Terminal       `json:"terminal"`
 	Webhook      platformwebhook.Config      `json:"webhook"`
-	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
+	Broadcast    broadcast.Config            `json:"broadcast"`
 	Scheduler    schedule.Config             `json:"scheduler"`
 	Memory       legacyconfig.Memory         `json:"memory"`
 	Skills       *skills.Config              `json:"skills,omitempty"`
@@ -81,7 +82,7 @@ func Default() Config {
 		Terminal:     legacyconfig.DefaultTerminal(),
 		Webhook:      platformwebhook.Default(),
 		Channels:     legacyconfig.DefaultChannels(),
-		Broadcast:    legacyconfig.DefaultBroadcast(),
+		Broadcast:    broadcast.Default(),
 		Scheduler:    schedule.Default(),
 		Memory:       legacyconfig.DefaultMemory(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),

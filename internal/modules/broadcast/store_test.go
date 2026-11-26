@@ -1,7 +1,9 @@
-package store
+package broadcast
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -10,39 +12,55 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
-func testBroadcastItem(id, producer, key string) *BroadcastItem {
+func testBroadcastItem(id, producer, key string) *ItemRecord {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	return &BroadcastItem{
+	return &ItemRecord{
 		ID:               id,
 		Producer:         producer,
 		IdempotencyKey:   key,
 		ContentDigest:    "digest-" + key,
-		Priority:         BroadcastPriorityInfo,
+		Priority:         PriorityInfo,
 		DestinationAlias: "default",
 		ContentJSON:      `{"text":"hello"}`,
-		State:            BroadcastStateScheduled,
+		State:            StateScheduled,
 		NotBefore:        now,
 		CreatedAt:        now,
 		UpdatedAt:        now,
 	}
 }
 
+func mustNewSQLiteStore(t *testing.T) (*sql.DB, *SQLiteStore) {
+	t.Helper()
+	db := storetest.OpenMigrated(t)
+	s, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
+	return db, s
+}
+
+func TestNewSQLiteStoreRefusesNilDB(t *testing.T) {
+	if _, err := NewSQLiteStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteStore(nil) = %v, want invalid_argument", err)
+	}
+}
+
 func TestBroadcastStore_InsertLoadRoundTrip(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	item := testBroadcastItem("bcst-1", "cron", "key-1")
-	stored, replayed, err := s.InsertItem(ctx, item)
+	stored, replayed, err := s.Insert(ctx, item)
 	if err != nil {
-		t.Fatalf("InsertItem(): %v", err)
+		t.Fatalf("Insert(): %v", err)
 	}
 	if replayed {
 		t.Error("first insert reported replay")
 	}
-	if stored.ID != "bcst-1" || stored.State != BroadcastStateScheduled {
+	if stored.ID != "bcst-1" || stored.State != StateScheduled {
 		t.Errorf("stored item mismatch: %+v", stored)
 	}
 
@@ -69,21 +87,20 @@ func TestBroadcastStore_InsertLoadRoundTrip(t *testing.T) {
 	}
 	if _, err := s.Item(ctx, "missing"); err == nil {
 		t.Error("Item(missing) accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeNotFound {
 		t.Errorf("Item(missing) code = %v, %v; want broadcast_not_found", code, ok)
 	}
 }
 
 func TestBroadcastStore_IdenticalReplayReturnsID(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
-	first, replayed, err := s.InsertItem(ctx, testBroadcastItem("bcst-1", "cron", "key-1"))
+	first, replayed, err := s.Insert(ctx, testBroadcastItem("bcst-1", "cron", "key-1"))
 	if err != nil || replayed {
 		t.Fatalf("first insert = %+v, %v, %v", first.ID, replayed, err)
 	}
-	second, replayed, err := s.InsertItem(ctx, testBroadcastItem("bcst-2", "cron", "key-1"))
+	second, replayed, err := s.Insert(ctx, testBroadcastItem("bcst-2", "cron", "key-1"))
 	if err != nil {
 		t.Fatalf("replay insert: %v", err)
 	}
@@ -96,58 +113,55 @@ func TestBroadcastStore_IdenticalReplayReturnsID(t *testing.T) {
 }
 
 func TestBroadcastStore_MismatchedReuseConflicts(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
-	if _, _, err := s.InsertItem(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
+	if _, _, err := s.Insert(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
 		t.Fatalf("first insert: %v", err)
 	}
 	changed := testBroadcastItem("bcst-2", "cron", "key-1")
 	changed.ContentDigest = "digest-changed"
-	if _, _, err := s.InsertItem(ctx, changed); err == nil {
+	if _, _, err := s.Insert(ctx, changed); err == nil {
 		t.Fatal("mismatched reuse accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastConflict {
-		t.Errorf("mismatch code = %v, %v; want broadcast_conflict", code, ok)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
+		t.Errorf("mismatch code = %v, %v; want conflict", code, ok)
 	}
 }
 
 func TestBroadcastStore_RejectsInvalidRows(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
-	valid := func() *BroadcastItem { return testBroadcastItem("bcst-1", "cron", "key-1") }
+	valid := func() *ItemRecord { return testBroadcastItem("bcst-1", "cron", "key-1") }
 	cases := []struct {
 		name   string
-		mutate func(*BroadcastItem)
+		mutate func(*ItemRecord)
 	}{
-		{"empty id", func(item *BroadcastItem) { item.ID = "" }},
-		{"empty producer", func(item *BroadcastItem) { item.Producer = "" }},
-		{"empty key", func(item *BroadcastItem) { item.IdempotencyKey = "" }},
-		{"bad priority", func(item *BroadcastItem) { item.Priority = "critical" }},
-		{"empty destination", func(item *BroadcastItem) { item.DestinationAlias = "" }},
-		{"non-json content", func(item *BroadcastItem) { item.ContentJSON = "not json" }},
-		{"bad state", func(item *BroadcastItem) { item.State = "flying" }},
-		{"negative attempts", func(item *BroadcastItem) { item.AttemptCount = -1 }},
+		{"empty id", func(item *ItemRecord) { item.ID = "" }},
+		{"empty producer", func(item *ItemRecord) { item.Producer = "" }},
+		{"empty key", func(item *ItemRecord) { item.IdempotencyKey = "" }},
+		{"bad priority", func(item *ItemRecord) { item.Priority = "critical" }},
+		{"empty destination", func(item *ItemRecord) { item.DestinationAlias = "" }},
+		{"non-json content", func(item *ItemRecord) { item.ContentJSON = "not json" }},
+		{"bad state", func(item *ItemRecord) { item.State = "flying" }},
+		{"negative attempts", func(item *ItemRecord) { item.AttemptCount = -1 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			item := valid()
 			tc.mutate(item)
-			if _, _, err := s.InsertItem(ctx, item); err == nil {
+			if _, _, err := s.Insert(ctx, item); err == nil {
 				t.Errorf("invalid row accepted: %+v", item)
 			}
 		})
 	}
-	if _, _, err := s.InsertItem(ctx, nil); err == nil {
+	if _, _, err := s.Insert(ctx, nil); err == nil {
 		t.Error("nil item accepted")
 	}
 }
 
 func TestBroadcastStore_ConcurrentSameKeySingleID(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	const writers = 8
@@ -157,7 +171,7 @@ func TestBroadcastStore_ConcurrentSameKeySingleID(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			stored, _, err := s.InsertItem(ctx, testBroadcastItem("bcst-new", "cron", "shared-key"))
+			stored, _, err := s.Insert(ctx, testBroadcastItem("bcst-new", "cron", "shared-key"))
 			if err != nil {
 				t.Errorf("concurrent insert: %v", err)
 				return
@@ -177,11 +191,10 @@ func TestBroadcastStore_ConcurrentSameKeySingleID(t *testing.T) {
 }
 
 func TestBroadcastStore_RejectsCorruptRow(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	db, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
-	if _, _, err := s.InsertItem(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
+	if _, _, err := s.Insert(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `UPDATE broadcast_item SET not_before = 'not-a-time' WHERE id = 'bcst-1'`); err != nil {
@@ -189,22 +202,22 @@ func TestBroadcastStore_RejectsCorruptRow(t *testing.T) {
 	}
 	if _, err := s.Item(ctx, "bcst-1"); err == nil {
 		t.Error("corrupt timestamp accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastInvalid {
-		t.Errorf("corrupt row code = %v, %v; want broadcast_invalid", code, ok)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeUnavailable {
+		t.Errorf("corrupt row code = %v, %v; want unavailable", code, ok)
 	}
 }
 
-func digestParentFixture(id string) *BroadcastItem {
+func digestParentFixture(id string) *ItemRecord {
 	now := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
-	return &BroadcastItem{
+	return &ItemRecord{
 		ID:               id,
 		Producer:         "system:digest",
 		IdempotencyKey:   "digest:2026-09-13T07:00:00Z:default:info:0",
 		ContentDigest:    "digest-parent",
-		Priority:         BroadcastPriorityInfo,
+		Priority:         PriorityInfo,
 		DestinationAlias: "default",
 		ContentJSON:      `{"count":2}`,
-		State:            BroadcastStateScheduled,
+		State:            StateScheduled,
 		NotBefore:        now,
 		CreatedAt:        now,
 		UpdatedAt:        now,
@@ -212,18 +225,17 @@ func digestParentFixture(id string) *BroadcastItem {
 }
 
 func TestBroadcastStore_CreateDigestLinksChildren(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	held := testBroadcastItem("bcst-1", "cron", "key-1")
-	held.State = BroadcastStateHeld
-	if _, _, err := s.InsertItem(ctx, held); err != nil {
+	held.State = StateHeld
+	if _, _, err := s.Insert(ctx, held); err != nil {
 		t.Fatalf("seed child: %v", err)
 	}
 	held2 := testBroadcastItem("bcst-2", "cron", "key-2")
-	held2.State = BroadcastStateHeld
-	if _, _, err := s.InsertItem(ctx, held2); err != nil {
+	held2.State = StateHeld
+	if _, _, err := s.Insert(ctx, held2); err != nil {
 		t.Fatalf("seed child: %v", err)
 	}
 
@@ -239,7 +251,7 @@ func TestBroadcastStore_CreateDigestLinksChildren(t *testing.T) {
 		if err != nil {
 			t.Fatalf("child %s: %v", id, err)
 		}
-		if child.State != BroadcastStateCancelled || child.DigestParentID != "bcst-dg-1" {
+		if child.State != StateCancelled || child.DigestParentID != "bcst-dg-1" {
 			t.Errorf("child %s not linked: %+v", id, child)
 		}
 	}
@@ -250,23 +262,42 @@ func TestBroadcastStore_CreateDigestLinksChildren(t *testing.T) {
 	}
 }
 
+func TestBroadcastStore_CreateDigestReplaySameID(t *testing.T) {
+	_, s := mustNewSQLiteStore(t)
+	ctx := t.Context()
+
+	held := testBroadcastItem("bcst-1", "cron", "key-1")
+	held.State = StateHeld
+	if _, _, err := s.Insert(ctx, held); err != nil {
+		t.Fatalf("seed child: %v", err)
+	}
+	parent := digestParentFixture("bcst-dg-same")
+	first, replayed, err := s.CreateDigest(ctx, parent, []string{"bcst-1"})
+	if err != nil || replayed || first.ID != "bcst-dg-same" {
+		t.Fatalf("first CreateDigest = %+v, %v, %v", first.ID, replayed, err)
+	}
+	again, replayed, err := s.CreateDigest(ctx, digestParentFixture("bcst-dg-same"), []string{"bcst-1"})
+	if err != nil || !replayed || again.ID != "bcst-dg-same" {
+		t.Fatalf("same-ID CreateDigest replay = %+v, %v, %v; want replayed existing parent", again.ID, replayed, err)
+	}
+}
+
 func TestBroadcastStore_CreateDigestRejectsUnheld(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	scheduled := testBroadcastItem("bcst-1", "cron", "key-1")
-	if _, _, err := s.InsertItem(ctx, scheduled); err != nil {
+	if _, _, err := s.Insert(ctx, scheduled); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if _, _, err := s.CreateDigest(ctx, digestParentFixture("bcst-dg-1"), []string{"bcst-1"}); err == nil {
 		t.Fatal("non-held child linked")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastConflict {
-		t.Errorf("code = %v, %v; want broadcast_conflict", code, ok)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
+		t.Errorf("code = %v, %v; want conflict", code, ok)
 	}
 	if _, err := s.Item(ctx, "bcst-dg-1"); err == nil {
 		t.Error("parent persisted despite child failure")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeNotFound {
 		t.Errorf("parent lookup = %v, %v; want not found", code, ok)
 	}
 	if _, _, err := s.CreateDigest(ctx, digestParentFixture("bcst-dg-2"), nil); err == nil {
@@ -275,8 +306,7 @@ func TestBroadcastStore_CreateDigestRejectsUnheld(t *testing.T) {
 }
 
 func TestBroadcastStore_DispatchSlotsArePaced(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	gap := 5 * time.Second
@@ -307,7 +337,7 @@ func TestBroadcastStore_DispatchSlotsArePaced(t *testing.T) {
 func TestBroadcastStore_CursorSurvivesRestart(t *testing.T) {
 	dir := t.TempDir()
 	dsn := dir + "/broadcast.db"
-	open := func(t *testing.T) *sql.DB {
+	open := func(t *testing.T) *SQLiteStore {
 		t.Helper()
 		db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 		if err != nil {
@@ -317,14 +347,18 @@ func TestBroadcastStore_CursorSurvivesRestart(t *testing.T) {
 		if err := sqlite.Migrate(t.Context(), db, history.Migrations()); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
-		return db
+		s, err := NewSQLiteStore(db)
+		if err != nil {
+			t.Fatalf("NewSQLiteStore: %v", err)
+		}
+		return s
 	}
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	first := NewBroadcastStore(open(t))
+	first := open(t)
 	if _, err := first.ClaimDispatchSlot(t.Context(), "default", now, 5*time.Second); err != nil {
 		t.Fatalf("claim: %v", err)
 	}
-	second := NewBroadcastStore(open(t))
+	second := open(t)
 	cursor, found, err := second.DestinationCursor(t.Context(), "default")
 	if err != nil || !found || !cursor.Equal(now.Add(5*time.Second)) {
 		t.Errorf("reopened cursor = %v, %v, %v; want persisted now+gap", cursor, found, err)
@@ -336,8 +370,7 @@ func TestBroadcastStore_CursorSurvivesRestart(t *testing.T) {
 }
 
 func TestBroadcastStore_DeferExtendsCursor(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 
@@ -361,8 +394,7 @@ func TestBroadcastStore_DeferExtendsCursor(t *testing.T) {
 }
 
 func TestBroadcastStore_DeferNoopReleasesTransaction(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	db, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 
@@ -387,8 +419,7 @@ func TestBroadcastStore_DeferNoopReleasesTransaction(t *testing.T) {
 }
 
 func TestBroadcastStore_ConcurrentSlotsSerialized(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 
@@ -421,8 +452,7 @@ func TestBroadcastStore_ConcurrentSlotsSerialized(t *testing.T) {
 }
 
 func TestBroadcastStore_ListHeldAndActive(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	seed := func(id, state, alias string, notBefore time.Time) {
@@ -431,32 +461,32 @@ func TestBroadcastStore_ListHeldAndActive(t *testing.T) {
 		item.State = state
 		item.DestinationAlias = alias
 		item.NotBefore = notBefore
-		if _, _, err := s.InsertItem(ctx, item); err != nil {
+		if _, _, err := s.Insert(ctx, item); err != nil {
 			t.Fatalf("seed %s: %v", id, err)
 		}
 	}
 	morning := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
-	seed("held-1", BroadcastStateHeld, "default", morning)
-	seed("held-2", BroadcastStateHeld, "default", morning.Add(time.Hour))
-	seed("held-other", BroadcastStateHeld, "plain", morning)
-	seed("sched-1", BroadcastStateScheduled, "default", morning)
-	seed("done-1", BroadcastStateSucceeded, "default", morning)
+	seed("held-1", StateHeld, "default", morning)
+	seed("held-2", StateHeld, "default", morning.Add(time.Hour))
+	seed("held-other", StateHeld, "plain", morning)
+	seed("sched-1", StateScheduled, "default", morning)
+	seed("done-1", StateSucceeded, "default", morning)
 
-	held, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning, 10)
+	held, err := s.ListHeld(ctx, "default", PriorityInfo, morning, 10)
 	if err != nil {
 		t.Fatalf("ListHeld(): %v", err)
 	}
 	if len(held) != 1 || held[0].ID != "held-1" {
 		t.Errorf("held due = %v, want [held-1]", held)
 	}
-	all, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning.Add(2*time.Hour), 10)
+	all, err := s.ListHeld(ctx, "default", PriorityInfo, morning.Add(2*time.Hour), 10)
 	if err != nil || len(all) != 2 || all[0].ID != "held-1" || all[1].ID != "held-2" {
 		t.Errorf("held window = %v, %v; want ordered held-1, held-2", all, err)
 	}
-	if _, err := s.ListHeld(ctx, "", BroadcastPriorityInfo, morning, 10); err == nil {
+	if _, err := s.ListHeld(ctx, "", PriorityInfo, morning, 10); err == nil {
 		t.Error("empty alias accepted")
 	}
-	if _, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning, 0); err == nil {
+	if _, err := s.ListHeld(ctx, "default", PriorityInfo, morning, 0); err == nil {
 		t.Error("non-positive limit accepted")
 	}
 
@@ -468,19 +498,18 @@ func TestBroadcastStore_ListHeldAndActive(t *testing.T) {
 		t.Fatalf("active = %d, want 4 (done excluded)", len(active))
 	}
 	for _, item := range active {
-		if item.State == BroadcastStateSucceeded {
+		if item.State == StateSucceeded {
 			t.Errorf("terminal item listed: %+v", item)
 		}
 	}
 }
 
 func TestBroadcastStore_SettleAndAttempt(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	db, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
 
-	if _, _, err := s.InsertItem(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
+	if _, _, err := s.Insert(ctx, testBroadcastItem("bcst-1", "cron", "key-1")); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES ('sess-1','cron','{}','2026-09-12T12:00:00Z','2026-09-12T12:00:00Z')`); err != nil {
@@ -492,24 +521,24 @@ func TestBroadcastStore_SettleAndAttempt(t *testing.T) {
 	if err := s.NoteAttempt(ctx, "bcst-1", 2, now); err != nil {
 		t.Fatalf("NoteAttempt(): %v", err)
 	}
-	if err := s.Settle(ctx, "bcst-1", BroadcastStateSucceeded, "effect-1", now); err != nil {
+	if err := s.Settle(ctx, "bcst-1", StateSucceeded, "effect-1", now); err != nil {
 		t.Fatalf("Settle(): %v", err)
 	}
 	item, err := s.Item(ctx, "bcst-1")
 	if err != nil {
 		t.Fatalf("Item(): %v", err)
 	}
-	if item.State != BroadcastStateSucceeded || item.EffectID != "effect-1" || item.AttemptCount != 2 {
+	if item.State != StateSucceeded || item.EffectID != "effect-1" || item.AttemptCount != 2 {
 		t.Errorf("settled item mismatch: %+v", item)
 	}
-	if err := s.Settle(ctx, "bcst-1", BroadcastStateFailed, "", now); err == nil {
+	if err := s.Settle(ctx, "bcst-1", StateFailed, "", now); err == nil {
 		t.Error("double settle accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastConflict {
-		t.Errorf("double settle code = %v, %v; want broadcast_conflict", code, ok)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
+		t.Errorf("double settle code = %v, %v; want conflict", code, ok)
 	}
-	if err := s.Settle(ctx, "missing", BroadcastStateFailed, "", now); err == nil {
+	if err := s.Settle(ctx, "missing", StateFailed, "", now); err == nil {
 		t.Error("missing settle accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBroadcastNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeNotFound {
 		t.Errorf("missing settle code = %v, %v; want broadcast_not_found", code, ok)
 	}
 	if err := s.Settle(ctx, "bcst-1", "flying", "", now); err == nil {
@@ -521,19 +550,18 @@ func TestBroadcastStore_SettleAndAttempt(t *testing.T) {
 }
 
 func TestBroadcastStore_ListHeldHonorsLimit(t *testing.T) {
-	db := newTestDB(t)
-	s := NewBroadcastStore(db)
+	_, s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 	morning := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
 	for i := range 5 {
 		item := testBroadcastItem("held-"+string(rune('a'+i)), "cron", "key-"+string(rune('a'+i)))
-		item.State = BroadcastStateHeld
+		item.State = StateHeld
 		item.NotBefore = morning
-		if _, _, err := s.InsertItem(ctx, item); err != nil {
+		if _, _, err := s.Insert(ctx, item); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	held, err := s.ListHeld(ctx, "default", BroadcastPriorityInfo, morning, 3)
+	held, err := s.ListHeld(ctx, "default", PriorityInfo, morning, 3)
 	if err != nil {
 		t.Fatalf("ListHeld(): %v", err)
 	}
@@ -550,7 +578,7 @@ func TestBroadcastStore_ListHeldHonorsLimit(t *testing.T) {
 }
 
 func TestBroadcastStore_SchemaVersion(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
@@ -568,5 +596,39 @@ func TestBroadcastStore_SchemaVersion(t *testing.T) {
 	}
 	if !strings.Contains(ddl, "UNIQUE(producer, idempotency_key)") {
 		t.Error("broadcast_item misses the idempotency uniqueness constraint")
+	}
+}
+
+func TestBroadcastStoreJoinsCallersTransaction(t *testing.T) {
+	db, s := mustNewSQLiteStore(t)
+	ctx := t.Context()
+	now := time.Date(2026, 9, 13, 7, 0, 0, 0, time.UTC)
+	rollbackErr := errors.New("abort outer transaction")
+
+	err := sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		held := testBroadcastItem("bcst-tx-child", "cron", "key-tx-child")
+		held.State = StateHeld
+		if _, _, err := s.Insert(txCtx, held); err != nil {
+			return err
+		}
+		if _, _, err := s.CreateDigest(txCtx, digestParentFixture("bcst-tx-dg"), []string{"bcst-tx-child"}); err != nil {
+			return err
+		}
+		if _, err := s.ClaimDispatchSlot(txCtx, "tx-alias", now, 5*time.Second); err != nil {
+			return err
+		}
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx err = %v, want %v", err, rollbackErr)
+	}
+	if _, found, err := s.Load(ctx, "bcst-tx-child"); err != nil || found {
+		t.Fatalf("child survived rollback: found=%v err=%v", found, err)
+	}
+	if _, found, err := s.Load(ctx, "bcst-tx-dg"); err != nil || found {
+		t.Fatalf("digest parent survived rollback: found=%v err=%v", found, err)
+	}
+	if _, found, err := s.DestinationCursor(ctx, "tx-alias"); err != nil || found {
+		t.Fatalf("cursor survived rollback: found=%v err=%v", found, err)
 	}
 }

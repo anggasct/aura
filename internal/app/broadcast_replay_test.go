@@ -17,7 +17,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -70,7 +69,7 @@ func (s *journaledTestSender) Send(ctx context.Context, req *broadcast.SendReque
 
 type replayFixture struct {
 	db       *sql.DB
-	store    *broadcastItemStore
+	store    *broadcast.SQLiteStore
 	effects  *effect.Executor
 	provider *countingEffectProvider
 	runner   *broadcast.Runner
@@ -92,9 +91,12 @@ func newReplayFixture(t *testing.T, gap time.Duration) *replayFixture {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}
 	provider := &countingEffectProvider{}
-	adapter := &broadcastItemStore{store: store.NewBroadcastStore(db)}
+	items, err := broadcast.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
 	runner, err := broadcast.NewRunner(
-		adapter,
+		items,
 		map[string]string{"default": "test:owner"},
 		map[string]broadcast.Sender{"test": &journaledTestSender{effects: executor, provider: provider}},
 		broadcast.RunPolicy{
@@ -107,7 +109,7 @@ func newReplayFixture(t *testing.T, gap time.Duration) *replayFixture {
 	if err != nil {
 		t.Fatalf("NewRunner(): %v", err)
 	}
-	return &replayFixture{db: db, store: adapter, effects: executor, provider: provider, runner: runner}
+	return &replayFixture{db: db, store: items, effects: executor, provider: provider, runner: runner}
 }
 
 func seedReplayItem(t *testing.T, fixture *replayFixture, id, state string, notBefore time.Time) {
@@ -198,7 +200,7 @@ func TestBroadcastReplay_CrashBetweenSendAndSettle(t *testing.T) {
 }
 
 type crashAdapter struct {
-	store *broadcastItemStore
+	store *broadcast.SQLiteStore
 }
 
 func (s *crashAdapter) Insert(ctx context.Context, record *broadcast.ItemRecord) (broadcast.ItemRecord, bool, error) {
