@@ -109,9 +109,12 @@ func (p *sendToolProvider) route(sessionID string) (Route, bool) {
 }
 
 func (p *sendToolProvider) guard(_ context.Context, request *toolbroker.ToolRequest) (bool, error) {
+	if request == nil {
+		return true, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "request must not be nil")
+	}
 	var args sendArguments
 	if err := json.Unmarshal(request.Arguments, &args); err != nil {
-		return false, err
+		return true, err
 	}
 	route, ok := p.route(request.SessionID)
 	return !ok || args.To != route.Sender, nil

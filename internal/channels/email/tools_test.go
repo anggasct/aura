@@ -107,7 +107,7 @@ func TestEmailGuardRequiresApprovalUnlessTheRecipientIsTheSessionSender(t *testi
 		{name: "a look-alike recipient needs approval", outbox: stub, session: sendToolSession, args: `{"to":"ann@example.net.evil.example","subject":"s","body":"b"}`, want: true},
 		{name: "an unknown session needs approval", outbox: stub, session: "main/discord:owner/dm:1", args: `{"to":"ann@example.net","subject":"s","body":"b"}`, want: true},
 		{name: "no outbox needs approval", session: sendToolSession, args: `{"to":"ann@example.net","subject":"s","body":"b"}`, want: true},
-		{name: "unreadable arguments fail", outbox: stub, session: sendToolSession, args: `{`, wantErr: true},
+		{name: "unreadable arguments fail closed", outbox: stub, session: sendToolSession, args: `{`, want: true, wantErr: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -122,6 +122,16 @@ func TestEmailGuardRequiresApprovalUnlessTheRecipientIsTheSessionSender(t *testi
 			}
 		})
 	}
+	t.Run("nil request fails closed", func(t *testing.T) {
+		provider := newToolProvider(stub)
+		got, err := provider.Tools()[0].ApprovalGuard(t.Context(), nil)
+		if !got || err == nil {
+			t.Fatalf("guard(nil) = %v, %v; want true with invalid-argument error", got, err)
+		}
+		if code, ok := fault.CodeOf[toolbroker.ResultClass](err); !ok || code != toolbroker.ResultInvalidArgument {
+			t.Fatalf("guard(nil) err = %v, want %s", err, toolbroker.ResultInvalidArgument)
+		}
+	})
 }
 
 func TestEmailGuardIgnoresEveryModelSuppliedFieldExceptTheRecipient(t *testing.T) {

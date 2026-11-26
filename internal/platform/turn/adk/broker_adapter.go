@@ -38,6 +38,9 @@ func (e *BrokerExecutor) Broker() *toolbroker.Broker {
 }
 
 func (e *BrokerExecutor) Definitions() []BuiltinToolDefinition {
+	if e == nil || e.broker == nil {
+		return nil
+	}
 	definitions := e.broker.Definitions()
 	result := make([]BuiltinToolDefinition, 0, len(definitions))
 	for i := range definitions {
@@ -79,6 +82,9 @@ func (e *BrokerExecutor) offers(definition *auratools.Definition) bool {
 }
 
 func (e *BrokerExecutor) Evaluate(ctx context.Context, request *approval.ToolRequest) (approval.PolicyDecision, error) {
+	if e == nil || e.broker == nil {
+		return approval.PolicyDecision{}, approval.Errorf(approval.ErrorCodeInvalidArgument, "tool broker must not be nil")
+	}
 	if request == nil {
 		return approval.PolicyDecision{}, approval.Errorf(approval.ErrorCodeInvalidArgument, "tool request must not be nil")
 	}
@@ -91,6 +97,9 @@ func (e *BrokerExecutor) Evaluate(ctx context.Context, request *approval.ToolReq
 }
 
 func (e *BrokerExecutor) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+	if e == nil || e.broker == nil {
+		return nil, invalidArgument("tool broker must not be nil")
+	}
 	if request == nil {
 		return nil, fault.New(turn.ErrorCodeInvalidArgument, "builtin tool request must not be nil")
 	}

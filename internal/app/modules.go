@@ -70,6 +70,7 @@ func (b *build) buildModules(ctx context.Context) error {
 		b.buildKnowledge,
 		b.buildGitHub,
 		b.buildInterpreter,
+		b.buildServerWorkflows,
 		b.buildPersonaEval,
 	}
 	for _, step := range steps {
@@ -124,6 +125,13 @@ func (b *build) buildBuiltinTools(context.Context) error {
 	return b.registerModule("search", searchMod)
 }
 
+func (b *build) buildServerWorkflows(ctx context.Context) error {
+	if !b.onServer() {
+		return nil
+	}
+	return b.buildWorkflows(ctx, true)
+}
+
 func (b *build) addHealthCheck(check *health.RegisteredCheck) {
 	if b.onServer() {
 		b.server.checks = append(b.server.checks, *check)
@@ -149,9 +157,6 @@ func (b *build) registerModule(name string, mod any) error {
 			}
 			b.addHealthCheck(&check)
 		}
-	}
-	if th, ok := mod.(turn.TurnHook); ok {
-		b.turnHooks = append(b.turnHooks, th)
 	}
 	switch m := mod.(type) {
 	case server.Lifecycle:

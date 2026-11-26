@@ -26,6 +26,20 @@ func TestNewBrokerExecutorRejectsNilBroker(t *testing.T) {
 	}
 }
 
+func TestZeroBrokerExecutorFailsClosed(t *testing.T) {
+	for _, exec := range []*BrokerExecutor{nil, {}} {
+		if defs := exec.Definitions(); defs != nil {
+			t.Fatalf("Definitions() = %v, want nil", defs)
+		}
+		if _, err := exec.Evaluate(t.Context(), &approval.ToolRequest{}); !fault.HasCode(err, approval.ErrorCodeInvalidArgument) {
+			t.Fatalf("Evaluate() err = %v, want %s", err, approval.ErrorCodeInvalidArgument)
+		}
+		if _, err := exec.Execute(t.Context(), &BuiltinToolRequest{}); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+			t.Fatalf("Execute() err = %v, want %s", err, turn.ErrorCodeInvalidArgument)
+		}
+	}
+}
+
 func TestDefinitionsCarryTheApprovedPluginDescription(t *testing.T) {
 	broker, err := toolbroker.New(&toolbroker.Options{})
 	if err != nil {

@@ -426,8 +426,10 @@ func (b *build) buildSchedule() error {
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {
-	if err := b.buildWorkflows(ctx, true); err != nil {
-		return err
+	if b.workflowMod == nil {
+		if err := b.buildWorkflows(ctx, true); err != nil {
+			return err
+		}
 	}
 	s := b.server
 	s.hostedHandlers = append(s.hostedHandlers, workflow.HandlerName)

@@ -368,3 +368,17 @@ func TestMCPCloseWithoutRunClosesSubprocesses(t *testing.T) {
 		t.Fatalf("stopped = %v, want mcp defer to close subprocesses even without Run", stopped)
 	}
 }
+
+func TestCompositionChatWithToolsAndNoEnabledCapabilities(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	extra := fmt.Sprintf("tools:\n  workspace: %s\n", t.TempDir())
+	result := loadCompositionConfig(t, writeChatCompositionConfig(t, extra))
+	app := buildApp(t, chatCompositionOptions(result, &syncBuffer{}))
+	if err := app.Run(t.Context()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
