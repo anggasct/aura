@@ -11,6 +11,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -51,10 +52,10 @@ func (s *tokenStore) namespace(create bool) (*os.Root, error) {
 	}
 	if create {
 		if err := os.MkdirAll(s.dir, dirMode); err != nil {
-			return nil, Wrap(ErrUnavailable, err, "the secrets directory cannot be created")
+			return nil, fault.New(ErrUnavailable, "the secrets directory cannot be created")
 		}
 		if err := os.Chmod(s.dir, dirMode); err != nil {
-			return nil, Wrap(ErrUnavailable, err, "the secrets directory cannot be protected")
+			return nil, fault.New(ErrUnavailable, "the secrets directory cannot be protected")
 		}
 	}
 	base, err := os.OpenRoot(s.dir)
@@ -64,10 +65,10 @@ func (s *tokenStore) namespace(create bool) (*os.Root, error) {
 	defer func() { _ = base.Close() }()
 	if create {
 		if err := base.Mkdir(s.id, dirMode); err != nil && !errors.Is(err, fs.ErrExist) {
-			return nil, Wrap(ErrUnavailable, err, "the plugin secrets directory cannot be created")
+			return nil, fault.New(ErrUnavailable, "the plugin secrets directory cannot be created")
 		}
 		if err := base.Chmod(s.id, dirMode); err != nil {
-			return nil, Wrap(ErrUnavailable, err, "the plugin secrets directory cannot be protected")
+			return nil, fault.New(ErrUnavailable, "the plugin secrets directory cannot be protected")
 		}
 	}
 	return base.OpenRoot(s.id)
@@ -87,12 +88,12 @@ func (s *tokenStore) load() (tokenFile, bool, error) {
 		if errors.Is(err, fs.ErrNotExist) {
 			return tokenFile{}, false, nil
 		}
-		return tokenFile{}, false, Wrap(ErrUnavailable, err, "the stored token cannot be read")
+		return tokenFile{}, false, fault.New(ErrUnavailable, "the stored token cannot be read")
 	}
 	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, maxTokenFileBytes+1))
 	if err != nil {
-		return tokenFile{}, false, Wrap(ErrUnavailable, err, "the stored token cannot be read")
+		return tokenFile{}, false, fault.New(ErrUnavailable, "the stored token cannot be read")
 	}
 	if len(data) > maxTokenFileBytes {
 		return tokenFile{}, false, nil
@@ -110,17 +111,17 @@ func (s *tokenStore) load() (tokenFile, bool, error) {
 }
 
 func asUnavailable(err error, detail string) error {
-	if _, coded := CodeOf(err); coded {
+	if _, coded := fault.CodeOf[ErrorCode](err); coded {
 		return err
 	}
-	return Wrap(ErrUnavailable, err, detail)
+	return fault.New(ErrUnavailable, detail)
 }
 
 func (s *tokenStore) save(stored *tokenFile) error {
 	stored.Version = tokenFileVersion
 	data, err := json.Marshal(*stored)
 	if err != nil {
-		return Wrap(ErrUnavailable, err, "the token cannot be encoded")
+		return fault.New(ErrUnavailable, "the token cannot be encoded")
 	}
 	ns, err := s.namespace(true)
 	if err != nil {
@@ -130,25 +131,25 @@ func (s *tokenStore) save(stored *tokenFile) error {
 	temp := ".tmp-" + rand.Text()
 	file, err := ns.OpenFile(temp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, fileMode)
 	if err != nil {
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	if _, err := file.Write(data); err != nil {
 		_ = file.Close()
 		_ = ns.Remove(temp)
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	if err := file.Sync(); err != nil {
 		_ = file.Close()
 		_ = ns.Remove(temp)
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	if err := file.Close(); err != nil {
 		_ = ns.Remove(temp)
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	if err := ns.Rename(temp, tokenFileName); err != nil {
 		_ = ns.Remove(temp)
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	return syncDirectory(ns)
 }
@@ -156,11 +157,11 @@ func (s *tokenStore) save(stored *tokenFile) error {
 func syncDirectory(ns *os.Root) error {
 	dir, err := ns.Open(".")
 	if err != nil {
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	defer func() { _ = dir.Close() }()
 	if err := dir.Sync(); err != nil {
-		return Wrap(ErrUnavailable, err, "the token cannot be stored")
+		return fault.New(ErrUnavailable, "the token cannot be stored")
 	}
 	return nil
 }
@@ -174,11 +175,11 @@ func (s *tokenStore) erase() error {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil
 		}
-		return Wrap(ErrUnavailable, err, "the secrets directory cannot be opened")
+		return fault.New(ErrUnavailable, "the secrets directory cannot be opened")
 	}
 	defer func() { _ = base.Close() }()
 	if err := base.RemoveAll(s.id); err != nil {
-		return Wrap(ErrUnavailable, err, "the plugin secrets cannot be erased")
+		return fault.New(ErrUnavailable, "the plugin secrets cannot be erased")
 	}
 	return nil
 }

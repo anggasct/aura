@@ -8,8 +8,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ApprovedTool struct {
@@ -24,7 +24,7 @@ type Active struct {
 	Version string
 	Kind    string
 	Root    string
-	Server  config.MCPServer
+	Server  BackendServer
 	Auth    auth.Strategy
 	Tools   []ApprovedTool
 	Egress  []string
@@ -79,7 +79,7 @@ func (s *Service) Plan(ctx context.Context) (*Plan, error) {
 }
 
 func holdFor(record *Record, err error) Held {
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || (code != ErrTampered && code != ErrAuthRequired && code != ErrAuthFailed) {
 		code = ErrSurfacePending
 	}
@@ -87,7 +87,7 @@ func holdFor(record *Record, err error) Held {
 }
 
 func (a *Active) AuthStatus(ctx context.Context) ErrorCode {
-	code, _ := CodeOf(readiness(ctx, a))
+	code, _ := fault.CodeOf[ErrorCode](readiness(ctx, a))
 	return code
 }
 
@@ -99,7 +99,7 @@ func authError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if code, coded := auth.CodeOf(err); coded && code == auth.ErrFailed {
+	if fault.HasCode(err, auth.ErrFailed) {
 		return Errorf(ErrAuthFailed, "the authorization was rejected; run aura plugin login and restart")
 	}
 	return Errorf(ErrAuthRequired, "the plugin has no usable authorization; run aura plugin login and restart")
@@ -183,7 +183,7 @@ func requiredPending(manifest *Manifest, granted map[GrantKey]string) string {
 			return "secret " + manifest.Secrets[i].Name
 		}
 	}
-	if manifest.Backend.Transport == config.MCPTransportStreamableHTTP && !egressGranted(manifest.Backend.URL, granted) {
+	if manifest.Backend.Transport == TransportStreamableHTTP && !egressGranted(manifest.Backend.URL, granted) {
 		return "egress for the backend url"
 	}
 	if manifest.Auth.Kind == AuthOAuth2 && !egressGranted(manifest.Auth.TokenURL, granted) {

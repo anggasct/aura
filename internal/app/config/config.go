@@ -4,6 +4,7 @@ import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/plugin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -26,7 +27,7 @@ type Config struct {
 	Agents       *auraagent.Config           `json:"agents,omitempty"`
 	Workflows    *legacyconfig.Workflows     `json:"workflows,omitempty"`
 	MCP          *legacyconfig.MCP           `json:"mcp,omitempty"`
-	Plugins      *legacyconfig.Plugins       `json:"plugins,omitempty"`
+	Plugins      *plugin.Config              `json:"plugins,omitempty"`
 	Server       server.Config               `json:"server"`
 	Logging      logging.Config              `json:"logging"`
 	Models       model.Config                `json:"models"`

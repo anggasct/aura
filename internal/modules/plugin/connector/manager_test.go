@@ -491,7 +491,7 @@ func TestPluginThatCannotStartStaysOffWithBackendUnavailable(t *testing.T) {
 				f.starter.failures[0] = tc.startError
 			}
 			err := f.manager.Start(t.Context())
-			if code, ok := CodeOf(err); !ok || code != ErrBackendUnavailable {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrBackendUnavailable {
 				t.Fatalf("Start error = %v, want %s", err, ErrBackendUnavailable)
 			}
 			statuses := f.manager.Statuses()
@@ -538,7 +538,7 @@ func TestNewManagerRejectsUnusableConfiguration(t *testing.T) {
 				Plugins: tc.plugins, Broker: broker, Starter: newStarter(nil), HTTPClient: api.client(),
 				Validator: func(json.RawMessage, int64) func(json.RawMessage) (json.RawMessage, error) { return nil },
 			})
-			if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 				t.Fatalf("NewManager error = %v, want %s", err, ErrConfigInvalid)
 			}
 		})
@@ -550,11 +550,11 @@ func TestToolFailureTextCarriesNoInternalDetail(t *testing.T) {
 	cases := []struct {
 		name string
 		tool *Tool
-		fail *Error
+		fail *callFailure
 	}{
-		{"read tool", &Tool{Name: "search"}, Wrap(ErrBackendUnavailable, cause, "the connector session could not start")},
-		{"effect tool not performed", &Tool{Name: "send", Effect: true}, Wrap(ErrBackendUnavailable, cause, "the connector session could not start")},
-		{"effect tool sent", &Tool{Name: "send", Effect: true}, &Error{Code: ErrBackendUnavailable, RequestSent: true, Err: cause}},
+		{"read tool", &Tool{Name: "search"}, wrapFailure(ErrBackendUnavailable, cause, "the connector session could not start")},
+		{"effect tool not performed", &Tool{Name: "send", Effect: true}, wrapFailure(ErrBackendUnavailable, cause, "the connector session could not start")},
+		{"effect tool sent", &Tool{Name: "send", Effect: true}, &callFailure{code: ErrBackendUnavailable, requestSent: true, cause: cause}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -564,7 +564,7 @@ func TestToolFailureTextCarriesNoInternalDetail(t *testing.T) {
 			}
 		})
 	}
-	cancelled := toolFailure(&Tool{Name: "search"}, Wrap(ErrBackendUnavailable, context.Canceled, "the call was cancelled"))
+	cancelled := toolFailure(&Tool{Name: "search"}, wrapFailure(ErrBackendUnavailable, context.Canceled, "the call was cancelled"))
 	if !errors.Is(cancelled, context.Canceled) {
 		t.Fatalf("a cancelled call lost its cause: %v", cancelled)
 	}

@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
 	"github.com/anggasct/aura/internal/modules/plugin/auth/authtest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -81,8 +82,8 @@ func TestParseManifestAcceptsOAuth2(t *testing.T) {
 			if spec.Kind != AuthOAuth2 || spec.ClientIDRef != clientIDRef || spec.TokenURL == "" || spec.AuthorizeURL == "" || spec.RedirectURI == "" || len(spec.Scopes) == 0 {
 				t.Fatalf("auth spec = %+v", spec)
 			}
-			if server := manifest.ServerConfig("/plugins/mailer/1.0.0"); server.Auth != nil {
-				t.Fatalf("server auth = %+v, want the strategy to own authentication", server.Auth)
+			if server := manifest.ServerConfig("/plugins/mailer/1.0.0"); server.URL != "https://api.mail.example/mcp" {
+				t.Fatalf("server = %+v", server)
 			}
 		})
 	}
@@ -480,8 +481,8 @@ func TestPlanReportsAPermanentlyRejectedTokenAfterARestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewRequest: %v", err)
 	}
-	if code, _ := auth.CodeOf(plan.Active[0].Auth.Authorize(t.Context(), request)); code != auth.ErrFailed {
-		t.Fatalf("Authorize code = %q", code)
+	if !fault.HasCode(plan.Active[0].Auth.Authorize(t.Context(), request), auth.ErrFailed) {
+		t.Fatalf("Authorize did not return %q", auth.ErrFailed)
 	}
 	if got := plan.Active[0].AuthStatus(t.Context()); got != ErrAuthFailed {
 		t.Fatalf("running status = %q, want %q", got, ErrAuthFailed)

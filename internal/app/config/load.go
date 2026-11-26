@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/plugin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -144,7 +145,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateTerminal(cfg.Terminal),
 		legacyconfig.ValidateWorkflows(cfg.Workflows),
 		legacyconfig.ValidateMCP(cfg.MCP),
-		legacyconfig.ValidatePlugins(cfg.Plugins),
+		validatePlugins(cfg.Plugins),
 		legacyconfig.ValidateWebhook(&cfg.Webhook),
 		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
 		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
@@ -429,4 +430,11 @@ func validateContext(section *compaction.Config) error {
 		return nil
 	}
 	return configkit.Under("context", section.Validate())
+}
+
+func validatePlugins(section *plugin.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("plugins", section.Validate())
 }

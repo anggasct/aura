@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -138,15 +139,15 @@ func (h *host) release() {
 	<-h.gate
 }
 
-func (h *host) ensureSession(ctx, callCtx context.Context) (Session, *Error) {
+func (h *host) ensureSession(ctx, callCtx context.Context) (Session, *callFailure) {
 	if h.closed {
-		return nil, Errorf(ErrBackendUnavailable, "the connector is shut down")
+		return nil, failf(ErrBackendUnavailable, "the connector is shut down")
 	}
 	if h.session != nil {
 		return h.session, nil
 	}
 	if !h.lastStart.IsZero() && time.Since(h.lastStart) < RestartInterval {
-		return nil, Errorf(ErrBackendUnavailable, "the connector restarted too recently")
+		return nil, failf(ErrBackendUnavailable, "the connector restarted too recently")
 	}
 	h.lastStart = time.Now()
 	session, err := h.starter.StartSession(context.WithoutCancel(callCtx), &SessionRequest{
@@ -160,7 +161,7 @@ func (h *host) ensureSession(ctx, callCtx context.Context) (Session, *Error) {
 		MaxOutputBytes: h.cfg.MaxMessageBytes,
 	})
 	if err != nil || session == nil {
-		return nil, Wrap(ErrBackendUnavailable, err, "the connector session could not start")
+		return nil, wrapFailure(ErrBackendUnavailable, err, "the connector session could not start")
 	}
 	h.session = session
 	h.alive.Store(true)
@@ -200,10 +201,10 @@ func (h *host) close(ctx context.Context) error {
 	return nil
 }
 
-func (h *host) exchange(ctx, callCtx context.Context, session Session, message any) ([]byte, *Error) {
+func (h *host) exchange(ctx, callCtx context.Context, session Session, message any) ([]byte, *callFailure) {
 	payload, err := json.Marshal(message)
 	if err != nil {
-		return nil, Wrap(ErrRPCInvalid, err, "the host message cannot be encoded")
+		return nil, wrapFailure(ErrRPCInvalid, err, "the host message cannot be encoded")
 	}
 	raw, err := session.Request(callCtx, payload)
 	if err != nil {
@@ -212,25 +213,25 @@ func (h *host) exchange(ctx, callCtx context.Context, session Session, message a
 	return raw, nil
 }
 
-func (h *host) requestFailure(ctx, callCtx context.Context, err error) *Error {
-	var coded *Error
+func (h *host) requestFailure(ctx, callCtx context.Context, err error) *callFailure {
+	var coded *fault.Error[ErrorCode]
 	switch {
 	case ctx.Err() != nil:
-		return Wrap(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
+		return wrapFailure(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
 	case callCtx.Err() != nil:
-		return Errorf(ErrRPCLimit, "the call exceeded its time limit")
+		return failf(ErrRPCLimit, "the call exceeded its time limit")
 	case errors.As(err, &coded):
-		return &Error{Code: coded.Code, Detail: coded.Detail}
+		return &callFailure{code: coded.Code, detail: coded.Detail}
 	default:
-		return Errorf(ErrBackendUnavailable, "the connector session ended")
+		return failf(ErrBackendUnavailable, "the connector session ended")
 	}
 }
 
-func (h *host) describe(ctx context.Context) ([]describedTool, *Error) {
+func (h *host) describe(ctx context.Context) ([]describedTool, *callFailure) {
 	callCtx, cancel := context.WithTimeout(ctx, h.cfg.RequestTimeout)
 	defer cancel()
 	if err := h.acquire(callCtx); err != nil {
-		return nil, Wrap(ErrBackendUnavailable, err, "the connector is busy")
+		return nil, wrapFailure(ErrBackendUnavailable, err, "the connector is busy")
 	}
 	defer h.release()
 	if _, fail := h.ensureSession(ctx, callCtx); fail != nil {
@@ -244,14 +245,14 @@ func (h *host) describes(tool *Tool) bool {
 	return index >= 0 && tools.CheckDisplaySchema(tool.Display, h.described[index].InputSchema) == nil
 }
 
-func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Error) {
+func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *callFailure) {
 	callCtx, cancel := context.WithTimeout(ctx, h.cfg.RequestTimeout)
 	defer cancel()
 	if err := h.acquire(callCtx); err != nil {
 		if ctx.Err() != nil {
-			return nil, Wrap(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
+			return nil, wrapFailure(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
 		}
-		return nil, Errorf(ErrRPCLimit, "the call exceeded its time limit")
+		return nil, failf(ErrRPCLimit, "the call exceeded its time limit")
 	}
 	defer h.release()
 	session, fail := h.ensureSession(ctx, callCtx)
@@ -260,7 +261,7 @@ func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Err
 	}
 	if !h.describes(request.tool) {
 		h.drop(ctx)
-		return nil, Errorf(ErrToolDrift, "the connector no longer describes this tool as approved")
+		return nil, failf(ErrToolDrift, "the connector no longer describes this tool as approved")
 	}
 	state := &callState{id: fmt.Sprintf("%s-%d", h.cfg.ID, h.calls.Add(1))}
 	arguments := request.arguments
@@ -282,15 +283,15 @@ func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Err
 		switch {
 		case parsed.result != nil:
 			if request.tool.Effect && state.lastMutation != mutationAccepted {
-				return nil, h.finish(state, Errorf(ErrEffectNotPerformed, "the connector ended an effect without a confirmed state-changing request"))
+				return nil, h.finish(state, failf(ErrEffectNotPerformed, "the connector ended an effect without a confirmed state-changing request"))
 			}
 			return parsed.result, nil
 		case parsed.http == nil:
-			return nil, h.finish(state, &Error{Code: ErrConnector, Reported: parsed.code})
+			return nil, h.finish(state, &callFailure{code: ErrConnector, reported: parsed.code})
 		}
 		state.steps++
 		if state.steps > maxHTTPSteps {
-			return nil, h.abort(ctx, state, Errorf(ErrRPCLimit, "the connector exceeded the request step bound"))
+			return nil, h.abort(ctx, state, failf(ErrRPCLimit, "the connector exceeded the request step bound"))
 		}
 		result, fail := h.perform(callCtx, ctx, request.tool, state, parsed.http)
 		if fail != nil {
@@ -300,13 +301,13 @@ func (h *host) invoke(ctx context.Context, request *call) (json.RawMessage, *Err
 	}
 }
 
-func (h *host) finish(state *callState, fail *Error) *Error {
-	fail.RequestSent = state.sent
+func (h *host) finish(state *callState, fail *callFailure) *callFailure {
+	fail.requestSent = state.sent
 	return fail
 }
 
-func (h *host) abort(ctx context.Context, state *callState, fail *Error) *Error {
+func (h *host) abort(ctx context.Context, state *callState, fail *callFailure) *callFailure {
 	h.drop(ctx)
-	h.logger.WarnContext(ctx, "connector call ended", "component", "plugin_connector", "plugin", h.cfg.ID, "code", string(fail.Code))
+	h.logger.WarnContext(ctx, "connector call ended", "component", "plugin_connector", "plugin", h.cfg.ID, "code", string(fail.code))
 	return h.finish(state, fail)
 }

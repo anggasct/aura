@@ -233,7 +233,7 @@ func TestAnAmbiguousStatusNeverGivesTheConnectorAChanceToResend(t *testing.T) {
 	h := newTestHost(t, api, starter, &bearerAuth{token: testToken})
 	_, fail := invokeTool(t, h, effectTool(h))
 	mustCode(t, fail, ErrRequestFailed)
-	if !fail.RequestSent {
+	if !fail.requestSent {
 		t.Fatal("an ambiguous status must count as sent")
 	}
 	if api.count() != 1 || len(connector.received()) != 0 {
@@ -267,7 +267,7 @@ func TestStatusClassificationIgnoresTheBody(t *testing.T) {
 			})
 			h := newTestHost(t, api, starter, &bearerAuth{})
 			_, fail := invokeTool(t, h, effectTool(h))
-			if fail == nil || fail.RequestSent != tc.sent {
+			if fail == nil || fail.requestSent != tc.sent {
 				t.Fatalf("failure = %v, want sent=%v", fail, tc.sent)
 			}
 		})

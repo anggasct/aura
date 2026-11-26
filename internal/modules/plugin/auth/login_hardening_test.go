@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -18,7 +20,7 @@ const (
 )
 
 func loginDetail(err error) string {
-	var coded *Error
+	var coded *fault.Error[ErrorCode]
 	if errors.As(err, &coded) {
 		return coded.Detail
 	}

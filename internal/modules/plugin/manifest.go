@@ -19,11 +19,11 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -38,23 +38,30 @@ const (
 	BackendMCP       = "mcp"
 	BackendConnector = "connector"
 
+	TransportStdio          = "stdio"
+	TransportStreamableHTTP = "streamable_http"
+
 	AuthNone         = auth.KindNone
 	AuthStaticSecret = auth.KindStaticSecret
 	AuthOAuth2       = auth.KindOAuth2
 
-	maxNameRunes         = 64
-	maxDescriptionBytes  = 1024
-	maxCapabilities      = 16
-	maxTools             = 64
-	maxEgress            = 32
-	maxSecrets           = 2
-	maxScopes            = 32
-	maxURLBytes          = 2048
-	maxArgs              = 64
-	maxArgBytes          = 1024
-	maxCommandBytes      = 512
-	maxProblemsReported  = 8
-	validationServerRoot = "/plugin"
+	defaultStartupTimeout = 10 * time.Second
+	defaultRequestTimeout = 30 * time.Second
+	defaultConnectTimeout = 10 * time.Second
+	defaultMaxMessageSize = 1024 * 1024
+
+	maxNameRunes        = 64
+	maxDescriptionBytes = 1024
+	maxCapabilities     = 16
+	maxTools            = 64
+	maxEgress           = 32
+	maxSecrets          = 2
+	maxScopes           = 32
+	maxURLBytes         = 2048
+	maxArgs             = 64
+	maxArgBytes         = 1024
+	maxCommandBytes     = 512
+	maxProblemsReported = 8
 )
 
 var (
@@ -123,6 +130,19 @@ type Backend struct {
 	RequestTimeout string   `yaml:"request_timeout" json:"request_timeout"`
 	ConnectTimeout string   `yaml:"connect_timeout" json:"connect_timeout"`
 	MaxMessageSize string   `yaml:"max_message_size" json:"max_message_size"`
+}
+
+type BackendServer struct {
+	Name           string
+	Transport      string
+	Command        string
+	Args           []string
+	URL            string
+	StartupTimeout configkit.Duration
+	RequestTimeout configkit.Duration
+	ConnectTimeout configkit.Duration
+	MaxMessageSize configkit.ByteSize
+	Capabilities   []string
 }
 
 type backendProbe struct {
@@ -201,7 +221,7 @@ func (m *Manifest) Validate() error {
 	if !auraagent.ValidPluginID(m.ID) {
 		found.add("id must match [a-z][a-z0-9-]{1,47}")
 	}
-	if !config.ValidPluginVersion(m.Version) {
+	if !ValidVersion(m.Version) {
 		found.add("version must be a semantic version")
 	}
 	if err := validateText("name", m.Name, maxNameRunes, false); err != "" {
@@ -534,7 +554,7 @@ func validateAuthorizeParams(found *problems, params map[string]string) {
 }
 
 func (m *Manifest) backendCarriesAuth() bool {
-	return m.Backend.Kind == BackendConnector || m.Backend.Transport == config.MCPTransportStreamableHTTP
+	return m.Backend.Kind == BackendConnector || m.Backend.Transport == TransportStreamableHTTP
 }
 
 func (m *Manifest) validateBackend(found *problems) {
@@ -567,9 +587,8 @@ func (m *Manifest) validateBackend(found *problems) {
 	if !validByteSize(backend.MaxMessageSize) {
 		local.add("backend.max_message_size must be a byte size")
 	}
-	if len(local) == 0 {
-		server := m.ServerConfig(validationServerRoot)
-		if err := config.ValidateMCPServer(&server, "backend"); err != nil {
+	if len(local) == 0 && backend.Kind == BackendMCP && backend.Transport == TransportStreamableHTTP {
+		if err := egress.ValidateBaseURL(backend.URL); err != nil {
 			local.add("backend does not describe a valid mcp server")
 		}
 	}
@@ -589,17 +608,17 @@ func (m *Manifest) validateConnectorTransport(local *problems) {
 func (m *Manifest) validateMCPTransport(local *problems) {
 	backend := &m.Backend
 	switch backend.Transport {
-	case config.MCPTransportStdio:
+	case TransportStdio:
 		if !validBundleCommand(backend.Command) {
 			local.add("backend.command must be a relative path inside the bundle")
 		}
 		if backend.URL != "" {
 			local.add("backend.url is not allowed for the stdio transport")
 		}
-	case config.MCPTransportStreamableHTTP:
+	case TransportStreamableHTTP:
 		m.validateBackendURL(local)
 	default:
-		local.add("backend.transport must be %s or %s", config.MCPTransportStdio, config.MCPTransportStreamableHTTP)
+		local.add("backend.transport must be %s or %s", TransportStdio, TransportStreamableHTTP)
 	}
 }
 
@@ -625,9 +644,9 @@ func (m *Manifest) validateBackendURL(found *problems) {
 	}
 }
 
-func (m *Manifest) ServerConfig(bundleRoot string) config.MCPServer {
+func (m *Manifest) ServerConfig(bundleRoot string) BackendServer {
 	backend := &m.Backend
-	server := config.MCPServer{
+	server := BackendServer{
 		Name:           m.ID,
 		Transport:      backend.Transport,
 		Args:           slices.Clone(backend.Args),
@@ -641,13 +660,28 @@ func (m *Manifest) ServerConfig(bundleRoot string) config.MCPServer {
 		server.Command = filepath.Join(bundleRoot, filepath.Clean(backend.Command))
 	}
 	if backend.Kind == BackendConnector {
-		server.Transport = config.MCPTransportStdio
+		server.Transport = TransportStdio
 	}
 	capabilities := slices.Clone(m.Capabilities)
 	slices.Sort(capabilities)
 	server.Capabilities = capabilities
-	config.ApplyMCPServerDefaults(&server)
+	applyBackendServerDefaults(&server)
 	return server
+}
+
+func applyBackendServerDefaults(s *BackendServer) {
+	if s.StartupTimeout == 0 {
+		s.StartupTimeout = configkit.Duration(defaultStartupTimeout)
+	}
+	if s.RequestTimeout == 0 {
+		s.RequestTimeout = configkit.Duration(defaultRequestTimeout)
+	}
+	if s.MaxMessageSize == 0 {
+		s.MaxMessageSize = defaultMaxMessageSize
+	}
+	if s.Transport == TransportStreamableHTTP && s.ConnectTimeout == 0 {
+		s.ConnectTimeout = configkit.Duration(defaultConnectTimeout)
+	}
 }
 
 func parseDuration(text string) time.Duration {
@@ -772,7 +806,7 @@ func (m *Manifest) Canonical() ([]byte, error) {
 	}
 	data, err := json.Marshal(&normalized)
 	if err != nil {
-		return nil, Wrap(ErrManifestInvalid, err, "the manifest cannot be encoded")
+		return nil, fault.New(ErrManifestInvalid, "the manifest cannot be encoded")
 	}
 	return data, nil
 }
