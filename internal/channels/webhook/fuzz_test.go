@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func FuzzParseRequestAuth(f *testing.F) {
@@ -40,7 +42,7 @@ func FuzzParseEnvelope(f *testing.F) {
 	f.Add([]byte{0xff, 0xfe, 0x00})
 	f.Add([]byte(`{"event_id":"` + strings.Repeat("x", 100_000) + `"}`))
 	f.Fuzz(func(t *testing.T, body []byte) {
-		envelope, err := ParseEnvelope(body)
+		envelope, err := platformwebhook.ParseEnvelope(body)
 		if err != nil {
 			return
 		}

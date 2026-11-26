@@ -9,22 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-type Webhook struct {
-	Enabled            bool               `json:"enabled"`
-	Listen             string             `json:"listen_address"`
-	MaxBodySize        configkit.ByteSize `json:"max_body_size"`
-	TimestampTolerance configkit.Duration `json:"timestamp_tolerance"`
-	ReplayRetention    configkit.Duration `json:"replay_retention"`
-	RequestsPerMinute  int                `json:"requests_per_minute"`
-	Keys               []WebhookKey       `json:"keys"`
-}
-
-type WebhookKey struct {
-	ID          string `json:"id"`
-	SecretEnv   string `json:"secret_env"`
-	AcceptUntil string `json:"accept_until"`
-}
-
 type Channels struct {
 	Discord  Discord  `json:"discord"`
 	Telegram Telegram `json:"telegram"`
@@ -69,17 +53,6 @@ type QuietHours struct {
 	Enabled bool   `json:"enabled"`
 	Start   string `json:"start"`
 	End     string `json:"end"`
-}
-
-type Skills struct {
-	Enabled                 bool               `json:"enabled"`
-	Roots                   []string           `json:"roots"`
-	AutoSelect              bool               `json:"auto_select"`
-	MaxIndexedSkills        int                `json:"max_indexed_skills"`
-	MaxInstructionTokens    int                `json:"max_instruction_tokens"`
-	MaxSessionContextTokens int                `json:"max_session_context_tokens"`
-	MaxResourceBytes        int64              `json:"max_resource_bytes"`
-	QuarantineRetention     configkit.Duration `json:"quarantine_retention"`
 }
 
 type Sync struct {
@@ -370,7 +343,6 @@ type MCPStaticAuth struct {
 }
 
 var (
-	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	mcpServerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	syncBranchPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
@@ -412,16 +384,6 @@ func DefaultTerminal() Terminal {
 		InMemoryHistory:     100,
 		SecondInterruptTime: configkit.Duration(2 * time.Second),
 		PlainApproval:       "deny",
-	}
-}
-
-func DefaultWebhook() Webhook {
-	return Webhook{
-		Listen:             "127.0.0.1:8282",
-		MaxBodySize:        configkit.ByteSize(1 << 20),
-		TimestampTolerance: configkit.Duration(5 * time.Minute),
-		ReplayRetention:    configkit.Duration(24 * time.Hour),
-		RequestsPerMinute:  60,
 	}
 }
 
@@ -494,19 +456,6 @@ func DefaultMemory() Memory {
 		RangeLiveWindow:      5,
 		PurgeInterval:        configkit.Duration(1 * time.Hour),
 		PurgeLimit:           100,
-	}
-}
-
-func DefaultSkills() *Skills {
-	return &Skills{
-		Enabled:                 true,
-		Roots:                   []string{"/srv/aura/skills"},
-		AutoSelect:              true,
-		MaxIndexedSkills:        256,
-		MaxInstructionTokens:    5000,
-		MaxSessionContextTokens: 15000,
-		MaxResourceBytes:        8388608,
-		QuarantineRetention:     configkit.Duration(720 * time.Hour),
 	}
 }
 

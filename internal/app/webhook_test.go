@@ -14,7 +14,6 @@ import (
 	"testing"
 	"time"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -23,8 +22,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -125,21 +124,24 @@ type webhookTestRig struct {
 	logger   *slog.Logger
 }
 
-func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatcher, store.WebhookExecutionStore) {
+func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatcher, platformwebhook.ExecutionStore) {
 	t.Helper()
 	return newWebhookTestDispatcher(t, &webhookTestRig{db: storetest.OpenMigrated(t), backend: backend})
 }
 
-func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispatcher, store.WebhookExecutionStore) {
+func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispatcher, platformwebhook.ExecutionStore) {
 	t.Helper()
-	executions := store.NewWebhookExecutionStore(rig.db)
+	executions, err := platformwebhook.NewSQLiteStore(rig.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
 	rig.backend.store = turnstore.NewEventStore(rig.db)
 	rig.backend.sequences = make(map[string]uint64)
 	sessions := rig.sessions
 	if sessions == nil {
 		sessions = turnstore.NewSessionService(rig.db)
 	}
-	dispatcher, err := newWebhookDispatcher(sessions, executions, rig.backend, 24*time.Hour, time.Now, rig.logger)
+	dispatcher, err := newWebhookDispatcher(sessions, turnstore.NewTurnStore(rig.db), executions, rig.backend, 24*time.Hour, time.Now, rig.logger)
 	if err != nil {
 		t.Fatalf("newWebhookDispatcher: %v", err)
 	}
@@ -151,12 +153,12 @@ func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispat
 	return dispatcher, executions
 }
 
-func webhookTestEvent() *gatewaywebhook.AcceptedEvent {
-	return &gatewaywebhook.AcceptedEvent{
+func webhookTestEvent() *platformwebhook.AcceptedEvent {
+	return &platformwebhook.AcceptedEvent{
 		KeyID:      "primary",
 		Nonce:      "nonce-abcdefghijklmnop",
 		BodyDigest: "digest-1",
-		Envelope: gatewaywebhook.Envelope{
+		Envelope: platformwebhook.Envelope{
 			EventID:  "evt-1",
 			Subject:  "hello",
 			Payload:  []byte(`{"k":1}`),
@@ -165,7 +167,7 @@ func webhookTestEvent() *gatewaywebhook.AcceptedEvent {
 	}
 }
 
-func waitForExecutionState(t *testing.T, executions store.WebhookExecutionStore, id, want string) store.WebhookExecution {
+func waitForExecutionState(t *testing.T, executions platformwebhook.ExecutionStore, id, want string) platformwebhook.Execution {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -195,7 +197,7 @@ func TestWebhookDispatcher_AcceptCompletesTurn(t *testing.T) {
 		t.Fatalf("empty execution reference: %+v", ref)
 	}
 
-	execution := waitForExecutionState(t, executions, ref.ExecutionID, store.WebhookExecutionStateCompleted)
+	execution := waitForExecutionState(t, executions, ref.ExecutionID, platformwebhook.StateCompleted)
 	if execution.TurnID != ref.TurnID {
 		t.Errorf("turn id = %q, want %q", execution.TurnID, ref.TurnID)
 	}
@@ -236,7 +238,7 @@ func TestWebhookDispatcher_IdenticalReplayReturnsOriginal(t *testing.T) {
 	if first != second {
 		t.Errorf("replay ref = %+v, want %+v", second, first)
 	}
-	waitForExecutionState(t, executions, first.ExecutionID, store.WebhookExecutionStateCompleted)
+	waitForExecutionState(t, executions, first.ExecutionID, platformwebhook.StateCompleted)
 	if backend.submitted() != 1 {
 		t.Errorf("submitted turns = %d, want 1", backend.submitted())
 	}
@@ -254,10 +256,10 @@ func TestWebhookDispatcher_ChangedBodyConflicts(t *testing.T) {
 	changed.BodyDigest = "digest-2"
 	if _, err := dispatcher.Dispatch(t.Context(), changed); err == nil {
 		t.Fatal("expected replay conflict, got nil")
-	} else if code, ok := gatewaywebhook.CodeOf(err); !ok || code != gatewaywebhook.ErrorCodeReplayConflict {
-		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, gatewaywebhook.ErrorCodeReplayConflict)
+	} else if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); !ok || code != platformwebhook.ErrorCodeReplayConflict {
+		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, platformwebhook.ErrorCodeReplayConflict)
 	}
-	waitForExecutionState(t, executions, first.ExecutionID, store.WebhookExecutionStateCompleted)
+	waitForExecutionState(t, executions, first.ExecutionID, platformwebhook.StateCompleted)
 }
 
 func TestWebhookDispatcher_OverloadLeavesNoRow(t *testing.T) {
@@ -266,8 +268,8 @@ func TestWebhookDispatcher_OverloadLeavesNoRow(t *testing.T) {
 
 	if _, err := dispatcher.Dispatch(t.Context(), webhookTestEvent()); err == nil {
 		t.Fatal("expected overload error, got nil")
-	} else if code, ok := gatewaywebhook.CodeOf(err); !ok || code != gatewaywebhook.ErrorCodeRuntimeOverloaded {
-		t.Fatalf("overload code = %v (ok=%v), want %s", code, ok, gatewaywebhook.ErrorCodeRuntimeOverloaded)
+	} else if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); !ok || code != platformwebhook.ErrorCodeRuntimeOverloaded {
+		t.Fatalf("overload code = %v (ok=%v), want %s", code, ok, platformwebhook.ErrorCodeRuntimeOverloaded)
 	}
 	if _, found, err := executions.ExecutionByNonce(t.Context(), "primary", "nonce-abcdefghijklmnop"); err != nil || found {
 		t.Errorf("overloaded request left an execution row: found=%v err=%v", found, err)
@@ -279,7 +281,7 @@ func TestWebhookDispatcher_ConcurrentDuplicatesSubmitOnce(t *testing.T) {
 	dispatcher, executions := webhookTestSetup(t, backend)
 
 	const callers = 8
-	refs := make([]gatewaywebhook.ExecutionRef, callers)
+	refs := make([]platformwebhook.ExecutionRef, callers)
 	errs := make([]error, callers)
 	var group sync.WaitGroup
 	for i := range callers {
@@ -297,11 +299,11 @@ func TestWebhookDispatcher_ConcurrentDuplicatesSubmitOnce(t *testing.T) {
 		if errs[i] != nil {
 			t.Fatalf("caller %d: %v", i, errs[i])
 		}
-		if refs[i] != refs[0] || refs[i] == (gatewaywebhook.ExecutionRef{}) {
+		if refs[i] != refs[0] || refs[i] == (platformwebhook.ExecutionRef{}) {
 			t.Fatalf("caller %d ref = %+v, want %+v", i, refs[i], refs[0])
 		}
 	}
-	waitForExecutionState(t, executions, refs[0].ExecutionID, store.WebhookExecutionStateCompleted)
+	waitForExecutionState(t, executions, refs[0].ExecutionID, platformwebhook.StateCompleted)
 	if backend.submitted() != 1 {
 		t.Errorf("submitted turns = %d, want 1", backend.submitted())
 	}
@@ -314,7 +316,7 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 	ctx := t.Context()
 
 	now := time.Now().UTC()
-	orphan := &store.WebhookExecution{
+	orphan := &platformwebhook.Execution{
 		ID:         "whex_orphan",
 		KeyID:      "primary",
 		EventID:    "evt-1",
@@ -322,7 +324,7 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 		BodyDigest: "digest-1",
 		TurnID:     "turn_orphan",
 		SessionID:  "sess_orphan",
-		State:      store.WebhookExecutionStateAccepted,
+		State:      platformwebhook.StateAccepted,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		ExpiresAt:  now.Add(24 * time.Hour),
@@ -338,7 +340,7 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 	if ref.ExecutionID != "whex_orphan" || ref.TurnID != "turn_orphan" {
 		t.Fatalf("replay ref = %+v, want the orphaned identity", ref)
 	}
-	execution := waitForExecutionState(t, executions, "whex_orphan", store.WebhookExecutionStateCompleted)
+	execution := waitForExecutionState(t, executions, "whex_orphan", platformwebhook.StateCompleted)
 	if got := backend.submittedSessions(); !slices.Equal(got, []string{"sess_orphan"}) {
 		t.Errorf("submitted turn sessions = %v, want one turn in sess_orphan", got)
 	}
@@ -363,7 +365,7 @@ func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	execution := waitForExecutionState(t, executions, ref.ExecutionID, store.WebhookExecutionStateFailed)
+	execution := waitForExecutionState(t, executions, ref.ExecutionID, platformwebhook.StateFailed)
 	if execution.ErrorCode != "model_capability_unsupported" {
 		t.Errorf("error code = %q, want model_capability_unsupported", execution.ErrorCode)
 	}
@@ -436,7 +438,7 @@ func TestDispatcherRoutesGitHubEventToCorrelation(t *testing.T) {
 	}
 	dispatcher.github = adapter
 
-	event := &gatewaywebhook.AcceptedEvent{
+	event := &platformwebhook.AcceptedEvent{
 		KeyID: "github", Nonce: "nonce-abcdefghijklmnop", BodyDigest: "digest-github-1", Body: githubSuiteBody(),
 	}
 	ref, err := dispatcher.Dispatch(context.Background(), event)
@@ -499,20 +501,20 @@ func (c *signalCountingRuntime) count() int {
 	return c.signals
 }
 
-func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []byte) *gatewaywebhook.AcceptedEvent {
+func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []byte) *platformwebhook.AcceptedEvent {
 	t.Helper()
-	document, err := json.Marshal(gatewaywebhook.Envelope{
+	document, err := json.Marshal(platformwebhook.Envelope{
 		EventID: eventID, Subject: "github delivery", Payload: json.RawMessage(payload),
 	})
 	if err != nil {
 		t.Fatalf("marshal envelope: %v", err)
 	}
-	parsed, err := gatewaywebhook.ParseEnvelope(document)
+	parsed, err := platformwebhook.ParseEnvelope(document)
 	if err != nil {
 		t.Fatalf("ParseEnvelope: %v", err)
 	}
 	sum := sha256.Sum256(document)
-	return &gatewaywebhook.AcceptedEvent{
+	return &platformwebhook.AcceptedEvent{
 		KeyID: "github", Nonce: nonce,
 		BodyDigest: hex.EncodeToString(sum[:]), Body: document, Envelope: parsed,
 	}
@@ -545,7 +547,7 @@ func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	if counter.count() != 1 {
 		t.Errorf("signals = %d, want exactly one for envelope github event", counter.count())
 	}
-	reserialized := &gatewaywebhook.AcceptedEvent{
+	reserialized := &platformwebhook.AcceptedEvent{
 		KeyID: "github", Nonce: "nonce-abcdefghijklmnop",
 		BodyDigest: "different-digest-for-reserialized-envelope",
 		Body:       []byte(`{"event_id":"evt-github-1","subject":"github delivery","payload":{}}`),
@@ -603,7 +605,7 @@ func TestWebhookDispatcher_FinishedDrainIsNotResubmittedAsOrphan(t *testing.T) {
 		t.Fatalf("Wait: %v", err)
 	}
 	execution, found, err := executions.ExecutionByNonce(t.Context(), "primary", "nonce-abcdefghijklmnop")
-	if err != nil || !found || execution.State != store.WebhookExecutionStateAccepted {
+	if err != nil || !found || execution.State != platformwebhook.StateAccepted {
 		t.Fatalf("execution = %+v, %v, %v; want it left accepted by a turn that ended without a terminal event", execution, found, err)
 	}
 	again, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())

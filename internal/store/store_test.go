@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -72,20 +71,6 @@ func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
 		t.Fatalf("migrate to v%d: %v", upTo, err)
 	}
 	return db
-}
-
-func wantCode(t *testing.T, err error, want ErrorCode) {
-	t.Helper()
-	if err == nil {
-		t.Fatalf("expected error with code %s, got nil", want)
-	}
-	got, ok := fault.CodeOf[ErrorCode](err)
-	if !ok {
-		t.Fatalf("error %v carries no store code, want %s", err, want)
-	}
-	if got != want {
-		t.Errorf("error code = %s, want %s", got, want)
-	}
 }
 
 func newSession(id string) turn.Session {

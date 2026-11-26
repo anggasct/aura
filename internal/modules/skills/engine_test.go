@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const engineBodyMarker = "UNIQUE-BODY-MARKER-7f3a9c"
@@ -324,6 +326,5 @@ func nilCtxForTest() context.Context {
 }
 
 func isCode(err error, want ErrorCode) bool {
-	code, ok := CodeOf(err)
-	return ok && code == want
+	return fault.HasCode(err, want)
 }

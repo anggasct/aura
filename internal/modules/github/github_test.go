@@ -10,10 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func suiteBody(t *testing.T, action string, pull int, sha string) []byte {

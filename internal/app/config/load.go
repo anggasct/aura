@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/skills"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -126,7 +127,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		configkit.Under("models", cfg.Models.Validate()),
 		configkit.Under("model_routes", model.ValidateRoutes(cfg.ModelRoutes)),
 		legacyconfig.ValidateTools(cfg.Tools),
-		legacyconfig.ValidateSkills(cfg.Skills),
+		validateSkills(cfg.Skills),
 		validateContext(cfg.Context),
 		legacyconfig.ValidateProfile(cfg.Profile),
 		legacyconfig.ValidateChildren(cfg.Children),
@@ -146,7 +147,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateWorkflows(cfg.Workflows),
 		legacyconfig.ValidateMCP(cfg.MCP),
 		validatePlugins(cfg.Plugins),
-		legacyconfig.ValidateWebhook(&cfg.Webhook),
+		configkit.Under("webhook", cfg.Webhook.Validate()),
 		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
 		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
 		legacyconfig.ValidateEmail(&cfg.Channels.Email),
@@ -437,4 +438,11 @@ func validatePlugins(section *plugin.Config) error {
 		return nil
 	}
 	return configkit.Under("plugins", section.Validate())
+}
+
+func validateSkills(section *skills.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("skills", section.Validate())
 }

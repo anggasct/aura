@@ -452,7 +452,11 @@ func (b *build) addEdgeListeners() error {
 		if err := s.listeners.Add(webhookListener); err != nil {
 			return err
 		}
-		if err := b.group.Add(server.Background("webhook_reconcile", webhookListener.dispatcher.reconcilePass().run)); err != nil {
+		reconcilePass, err := webhookListener.dispatcher.reconcilePass()
+		if err != nil {
+			return err
+		}
+		if err := b.group.Add(server.Background("webhook_reconcile", reconcilePass.Run)); err != nil {
 			return err
 		}
 	}

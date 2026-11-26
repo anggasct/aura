@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -36,7 +37,7 @@ func NewSessionContext(engine *Engine, log ActivationLog, maxRunes int) (*Sessio
 func (e *Engine) Current(ctx context.Context, id, digest string) (bool, error) {
 	record, err := e.registry.Get(ctx, id)
 	if err != nil {
-		if code, ok := CodeOf(err); ok && code == ErrorCodeSkillNotFound {
+		if fault.HasCode(err, ErrorCodeSkillNotFound) {
 			return false, nil
 		}
 		return false, err

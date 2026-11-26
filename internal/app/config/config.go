@@ -5,6 +5,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/skills"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -17,6 +18,7 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type Config struct {
@@ -37,11 +39,11 @@ type Config struct {
 	Usage        usage.Config                `json:"usage"`
 	Health       health.Config               `json:"health"`
 	Terminal     legacyconfig.Terminal       `json:"terminal"`
-	Webhook      legacyconfig.Webhook        `json:"webhook"`
+	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
 	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
 	Memory       legacyconfig.Memory         `json:"memory"`
-	Skills       *legacyconfig.Skills        `json:"skills,omitempty"`
+	Skills       *skills.Config              `json:"skills,omitempty"`
 	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
 	Owner        *principal.Owner            `json:"owner,omitempty"`
@@ -59,6 +61,7 @@ func Default() Config {
 	defaultAgents := auraagent.Default()
 	defaultAccess := principal.Default()
 	defaultVision := vision.Default()
+	defaultSkills := skills.Default()
 	defaultContext := compaction.Default()
 	return Config{
 		Version:      1,
@@ -75,13 +78,13 @@ func Default() Config {
 		Usage:        usage.Default(),
 		Health:       health.Default(),
 		Terminal:     legacyconfig.DefaultTerminal(),
-		Webhook:      legacyconfig.DefaultWebhook(),
+		Webhook:      platformwebhook.Default(),
 		Channels:     legacyconfig.DefaultChannels(),
 		Broadcast:    legacyconfig.DefaultBroadcast(),
 		Scheduler:    legacyconfig.DefaultScheduler(),
 		Memory:       legacyconfig.DefaultMemory(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),
-		Skills:       legacyconfig.DefaultSkills(),
+		Skills:       &defaultSkills,
 		Sync:         legacyconfig.DefaultSync(),
 		Vision:       &defaultVision,
 		Context:      &defaultContext,

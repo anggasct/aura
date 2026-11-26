@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/secret"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type KeyEntry struct {
@@ -27,25 +28,25 @@ type KeyRing struct {
 
 func NewKeyRing(entries []KeyEntry, source KeySource) (*KeyRing, error) {
 	if entries == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "key entries must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "key entries must not be nil")
 	}
 	if source == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "key source must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "key source must not be nil")
 	}
 	ring := &KeyRing{keys: make(map[string]KeyConfig, len(entries)), vault: secret.New()}
 	for _, entry := range entries {
 		if entry.ID == "" {
-			return nil, Errorf(ErrorCodeInvalidArgument, "key entry id must not be empty")
+			return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "key entry id must not be empty")
 		}
 		if _, duplicate := ring.keys[entry.ID]; duplicate {
-			return nil, Errorf(ErrorCodeInvalidArgument, "key id %q configured more than once", entry.ID)
+			return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "key id %q configured more than once", entry.ID)
 		}
 		value, err := source(entry.SecretEnv)
 		if err != nil {
-			return nil, Errorf(ErrorCodeKeyResolutionFailed, "key %q secret is unavailable", entry.ID)
+			return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeKeyResolutionFailed, "key %q secret is unavailable", entry.ID)
 		}
 		if value == "" {
-			return nil, Errorf(ErrorCodeKeyResolutionFailed, "key %q secret is unavailable", entry.ID)
+			return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeKeyResolutionFailed, "key %q secret is unavailable", entry.ID)
 		}
 		ring.keys[entry.ID] = KeyConfig{ID: entry.ID, Secret: value, AcceptUntil: entry.AcceptUntil}
 		ring.vault.Set(entry.ID, value)
@@ -56,7 +57,7 @@ func NewKeyRing(entries []KeyEntry, source KeySource) (*KeyRing, error) {
 func (r *KeyRing) Lookup(id string, now time.Time) (string, error) {
 	key, ok := r.keys[id]
 	if !ok || (!key.AcceptUntil.IsZero() && !now.Before(key.AcceptUntil)) {
-		return "", Errorf(ErrorCodeAuthFailed, "unknown or expired key")
+		return "", platformwebhook.Errorf(platformwebhook.ErrorCodeAuthFailed, "unknown or expired key")
 	}
 	return key.Secret, nil
 }

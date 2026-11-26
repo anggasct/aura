@@ -7,6 +7,8 @@ import (
 	"strings"
 	"syscall"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const validSkillDocument = "---\nname: pdf-tools\ndescription: Handle PDF files.\n---\n# Instructions\nDo things.\n"
@@ -205,8 +207,8 @@ func TestScanDirArguments(t *testing.T) {
 	result := ScanDir(nilCtx, dir, "local")
 	if result.Err == nil {
 		t.Errorf("nil ctx should fail")
-	} else if code, ok := CodeOf(result.Err); !ok || code != ErrorCodeInvalidArgument {
-		t.Errorf("code = %v, %v", code, ok)
+	} else if !fault.HasCode(result.Err, ErrorCodeInvalidArgument) {
+		t.Errorf("err = %v, want %s", result.Err, ErrorCodeInvalidArgument)
 	}
 	for _, scope := range []string{"", "has space", "has\ttab"} {
 		result := ScanDir(context.Background(), dir, scope)
@@ -217,8 +219,8 @@ func TestScanDirArguments(t *testing.T) {
 	result = ScanDir(context.Background(), filepath.Join(dir, "missing"), "local")
 	if result.Err == nil {
 		t.Errorf("missing dir should fail")
-	} else if code, ok := CodeOf(result.Err); !ok || code != ErrorCodeInvalidArgument {
-		t.Errorf("code = %v, %v", code, ok)
+	} else if !fault.HasCode(result.Err, ErrorCodeInvalidArgument) {
+		t.Errorf("err = %v, want %s", result.Err, ErrorCodeInvalidArgument)
 	}
 }
 

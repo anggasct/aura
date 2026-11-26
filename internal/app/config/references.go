@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func validateReferences(cfg *Config, doc *document) error {
@@ -44,7 +45,7 @@ func modelRouteReferenceProblems(routes model.Routes, models model.Config) error
 	return errors.Join(problems...)
 }
 
-func webhookListenProblem(webhook *legacyconfig.Webhook, healthListen string) error {
+func webhookListenProblem(webhook *platformwebhook.Config, healthListen string) error {
 	if webhook == nil {
 		return configkit.Invalid("webhook", "must not be nil")
 	}
