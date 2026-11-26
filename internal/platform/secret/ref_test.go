@@ -82,3 +82,18 @@ func TestParseRefAcceptsEnvAndAbsoluteFileOnly(t *testing.T) {
 		}
 	})
 }
+
+func TestValidEnvName(t *testing.T) {
+	t.Parallel()
+
+	for _, name := range []string{"A", "A_1", "_lower9", "AURA_WEBHOOK_SECRET"} {
+		if !ValidEnvName(name) {
+			t.Errorf("ValidEnvName(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"", "1A", "a-b", "not a name!", "A$B"} {
+		if ValidEnvName(name) {
+			t.Errorf("ValidEnvName(%q) = true, want false", name)
+		}
+	}
+}

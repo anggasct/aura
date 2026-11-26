@@ -25,6 +25,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -287,7 +288,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 	cfg, db, _ := kbTestStorage(t, cfgPath)
 	const secretValue = "kb-webhook-secret-value-0123456789"
 	t.Setenv("KB_TEST_WEBHOOK_SECRET", secretValue)
-	cfg.Webhook.Keys = []config.WebhookKey{{ID: "hook", SecretEnv: "KB_TEST_WEBHOOK_SECRET"}}
+	cfg.Webhook.Keys = []platformwebhook.Key{{ID: "hook", SecretEnv: "KB_TEST_WEBHOOK_SECRET"}}
 	service, err := newKnowledgeService(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("newKnowledgeService: %v", err)
@@ -308,7 +309,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 		t.Errorf("rejected source left %d chunks", chunks)
 	}
 
-	cfg.Webhook.Keys = []config.WebhookKey{{ID: "hook", SecretEnv: "KB_TEST_UNSET_SECRET_VARIABLE"}}
+	cfg.Webhook.Keys = []platformwebhook.Key{{ID: "hook", SecretEnv: "KB_TEST_UNSET_SECRET_VARIABLE"}}
 	_, err = service.Add(t.Context(), "support", writeKBDocument(t, "other.md", "harmless text"))
 	requireKBCode(t, err, knowledge.ErrorCodeSecretUnavailable)
 	if !strings.Contains(err.Error(), "webhook_hook") {
@@ -322,7 +323,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 func TestStrictSecretVaultNamesEveryUnresolvedReferenceAndMatchesTheLenientVault(t *testing.T) {
 	cfg := appconfig.Default()
 	t.Setenv("KB_TEST_SET_SECRET", "set-secret-value")
-	cfg.Webhook.Keys = []config.WebhookKey{
+	cfg.Webhook.Keys = []platformwebhook.Key{
 		{ID: "set", SecretEnv: "KB_TEST_SET_SECRET"},
 		{ID: "unset", SecretEnv: "KB_TEST_UNSET_SECRET_ONE"},
 	}

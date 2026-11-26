@@ -9,10 +9,10 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -134,7 +134,7 @@ func TestKnowledgeSearchDropsAChunkMatchingANewlyAddedVaultValue(t *testing.T) {
 		t.Fatalf("hits before the secret exists = %d, want 2", len(hits))
 	}
 	t.Setenv("KB_TEST_LATE_SECRET", secretValue)
-	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_LATE_SECRET"}}
+	rig.cfg.Webhook.Keys = []platformwebhook.Key{{ID: "late", SecretEnv: "KB_TEST_LATE_SECRET"}}
 	hits := rig.search(t, []string{"support"}, "refund")
 	if len(hits) != 1 || hits[0].Label != "clean.md" {
 		t.Fatalf("hits after the secret exists = %+v, want only clean.md", hits)
@@ -144,7 +144,7 @@ func TestKnowledgeSearchDropsAChunkMatchingANewlyAddedVaultValue(t *testing.T) {
 func TestKnowledgeSearchFailsClosedWhenASecretReferenceIsUnresolvable(t *testing.T) {
 	rig := newKBRetrievalRig(t)
 	rig.add(t, "support", "policy.md", "Refunds are issued within thirty days.")
-	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_UNSET_RETRIEVAL_SECRET"}}
+	rig.cfg.Webhook.Keys = []platformwebhook.Key{{ID: "late", SecretEnv: "KB_TEST_UNSET_RETRIEVAL_SECRET"}}
 	hits, err := ownerSearch(t.Context(), rig.retriever, []string{"support"}, "refund", knowledge.SearchDepth)
 	if code, ok := fault.CodeOf[knowledge.ErrorCode](err); !ok || code != knowledge.ErrorCodeSecretUnavailable || len(hits) != 0 {
 		t.Fatalf("hits = %v, error = %v", hits, err)

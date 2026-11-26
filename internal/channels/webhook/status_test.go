@@ -11,19 +11,21 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type stubStatusStore struct {
-	status ExecutionStatus
+	status platformwebhook.ExecutionStatus
 	err    error
 }
 
-func (s *stubStatusStore) ExecutionStatus(_ context.Context, _ string) (ExecutionStatus, error) {
+func (s *stubStatusStore) ExecutionStatus(_ context.Context, _ string) (platformwebhook.ExecutionStatus, error) {
 	return s.status, s.err
 }
 
-func statusFixture(now time.Time) ExecutionStatus {
-	return ExecutionStatus{
+func statusFixture(now time.Time) platformwebhook.ExecutionStatus {
+	return platformwebhook.ExecutionStatus{
 		ExecutionID: "whex_1",
 		TurnID:      "turn_1",
 		State:       "completed",
@@ -33,7 +35,7 @@ func statusFixture(now time.Time) ExecutionStatus {
 	}
 }
 
-func newStatusHarness(t *testing.T, now time.Time, store StatusStore) (*StatusHandler, *bytes.Buffer) {
+func newStatusHarness(t *testing.T, now time.Time, store platformwebhook.StatusStore) (*StatusHandler, *bytes.Buffer) {
 	t.Helper()
 	ring, err := NewKeyRing([]KeyEntry{{ID: "primary", SecretEnv: "AURA_TEST_PRIMARY"}}, func(envName string) (string, error) {
 		if value, ok := testKeySecrets[envName]; ok {
@@ -163,7 +165,7 @@ func TestStatusHandler_UnknownAndExpiredAreNotFound(t *testing.T) {
 	path := "/webhook/executions/whex_missing"
 	sig := Sign(vectorSecret, StatusSigningBytes(vectorTimestamp, vectorNonce, path))
 
-	unknown, _ := newStatusHarness(t, now, &stubStatusStore{err: Errorf(ErrorCodeExecutionNotFound, "unknown execution")})
+	unknown, _ := newStatusHarness(t, now, &stubStatusStore{err: platformwebhook.Errorf(platformwebhook.ErrorCodeExecutionNotFound, "unknown execution")})
 	rec := httptest.NewRecorder()
 	unknown.ServeHTTP(rec, signedStatusRequest(t, path, vectorTimestamp, vectorNonce, sig))
 	if rec.Code != http.StatusNotFound {

@@ -144,7 +144,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateWorkflows(cfg.Workflows),
 		legacyconfig.ValidateMCP(cfg.MCP),
 		legacyconfig.ValidatePlugins(cfg.Plugins),
-		legacyconfig.ValidateWebhook(&cfg.Webhook),
+		configkit.Under("webhook", cfg.Webhook.Validate()),
 		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
 		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
 		legacyconfig.ValidateEmail(&cfg.Channels.Email),

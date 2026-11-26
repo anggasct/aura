@@ -1,4 +1,4 @@
-package store
+package webhook
 
 import (
 	"database/sql"
@@ -10,10 +10,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
-func webhookFixture(now time.Time) *WebhookExecution {
-	return &WebhookExecution{
+func webhookFixture(now time.Time) *Execution {
+	return &Execution{
 		ID:         "whex_1",
 		KeyID:      "primary",
 		EventID:    "evt-1",
@@ -21,16 +22,28 @@ func webhookFixture(now time.Time) *WebhookExecution {
 		BodyDigest: "digest-1",
 		TurnID:     "turn_1",
 		SessionID:  "sess_1",
-		State:      WebhookExecutionStateAccepted,
+		State:      StateAccepted,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		ExpiresAt:  now.Add(24 * time.Hour),
 	}
 }
 
+func mustNewSQLiteStore(t *testing.T, db *sql.DB) *SQLiteStore {
+	t.Helper()
+	s, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	return s
+}
+
 func TestWebhookExecutionStore_InsertAndRead(t *testing.T) {
-	db := newTestDB(t)
-	s := NewWebhookExecutionStore(db)
+	if _, err := NewSQLiteStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteStore(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	db := storetest.OpenMigrated(t)
+	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
@@ -50,7 +63,7 @@ func TestWebhookExecutionStore_InsertAndRead(t *testing.T) {
 		t.Fatalf("Execution: %v", err)
 	}
 	if got.KeyID != "primary" || got.EventID != "evt-1" || got.Nonce != "nonce-abcdefghijklmnop" ||
-		got.BodyDigest != "digest-1" || got.TurnID != "turn_1" || got.SessionID != "sess_1" || got.State != WebhookExecutionStateAccepted {
+		got.BodyDigest != "digest-1" || got.TurnID != "turn_1" || got.SessionID != "sess_1" || got.State != StateAccepted {
 		t.Errorf("identity mismatch: %+v", got)
 	}
 	if !got.CreatedAt.Equal(now) || !got.UpdatedAt.Equal(now) || !got.ExpiresAt.Equal(now.Add(24*time.Hour)) {
@@ -74,8 +87,8 @@ func TestWebhookExecutionStore_InsertAndRead(t *testing.T) {
 }
 
 func TestWebhookExecutionStore_Conflicts(t *testing.T) {
-	db := newTestDB(t)
-	s := NewWebhookExecutionStore(db)
+	db := storetest.OpenMigrated(t)
+	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
@@ -89,8 +102,8 @@ func TestWebhookExecutionStore_Conflicts(t *testing.T) {
 	duplicateNonce.TurnID = "turn_2"
 	if err := s.InsertExecution(ctx, duplicateNonce); err == nil {
 		t.Fatal("expected conflict on duplicate nonce, got nil")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionConflict {
-		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionConflict)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeExecutionConflict {
+		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeExecutionConflict)
 	}
 
 	duplicateEvent := webhookFixture(now)
@@ -99,20 +112,20 @@ func TestWebhookExecutionStore_Conflicts(t *testing.T) {
 	duplicateEvent.TurnID = "turn_3"
 	if err := s.InsertExecution(ctx, duplicateEvent); err == nil {
 		t.Fatal("expected conflict on duplicate event, got nil")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionConflict {
-		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionConflict)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeExecutionConflict {
+		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeExecutionConflict)
 	}
 
 	if _, err := s.Execution(ctx, "whex-missing"); err == nil {
 		t.Fatal("expected not found, got nil")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionNotFound {
-		t.Fatalf("not-found code = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionNotFound)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeExecutionNotFound {
+		t.Fatalf("not-found code = %v (ok=%v), want %s", code, ok, ErrorCodeExecutionNotFound)
 	}
 }
 
 func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
-	db := newTestDB(t)
-	s := NewWebhookExecutionStore(db)
+	db := storetest.OpenMigrated(t)
+	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 
@@ -138,15 +151,15 @@ func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
 	if err != nil || advanced {
 		t.Fatalf("running→running = %v, %v; want false, nil", advanced, err)
 	}
-	advanced, err = s.MarkTerminal(ctx, "whex_1", WebhookExecutionStateCompleted, "evt_r1", "", now.Add(3*time.Minute))
+	advanced, err = s.MarkTerminal(ctx, "whex_1", StateCompleted, "evt_r1", "", now.Add(3*time.Minute))
 	if err != nil || !advanced {
 		t.Fatalf("running→completed = %v, %v; want true, nil", advanced, err)
 	}
-	advanced, err = s.MarkTerminal(ctx, "whex_1", WebhookExecutionStateFailed, "", "runtime_internal", now.Add(4*time.Minute))
+	advanced, err = s.MarkTerminal(ctx, "whex_1", StateFailed, "", "runtime_internal", now.Add(4*time.Minute))
 	if err != nil || advanced {
 		t.Fatalf("completed→failed = %v, %v; want false, nil", advanced, err)
 	}
-	if _, err := s.MarkTerminal(ctx, "whex_1", WebhookExecutionStateRunning, "", "", now.Add(5*time.Minute)); err == nil {
+	if _, err := s.MarkTerminal(ctx, "whex_1", StateRunning, "", "", now.Add(5*time.Minute)); err == nil {
 		t.Fatal("expected invalid terminal state to fail, got nil")
 	}
 
@@ -154,7 +167,7 @@ func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execution: %v", err)
 	}
-	if got.State != WebhookExecutionStateCompleted || got.ResultEventID != "evt_r1" || got.ErrorCode != "" {
+	if got.State != StateCompleted || got.ResultEventID != "evt_r1" || got.ErrorCode != "" {
 		t.Errorf("terminal row = %+v; want completed/evt_r1/empty", got)
 	}
 	if !got.UpdatedAt.Equal(now.Add(3 * time.Minute)) {
@@ -170,21 +183,21 @@ func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
 }
 
 func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
-	db := newTestDB(t)
-	s := NewWebhookExecutionStore(db)
+	db := storetest.OpenMigrated(t)
+	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
 	rows := []struct {
 		id, state string
 		expiresAt time.Time
 	}{
-		{"whex_a", WebhookExecutionStateAccepted, now.Add(time.Hour)},
-		{"whex_b", WebhookExecutionStateCompleted, now.Add(time.Hour)},
-		{"whex_c", WebhookExecutionStateRunning, now.Add(time.Hour)},
-		{"whex_d", WebhookExecutionStateFailed, now.Add(time.Hour)},
-		{"whex_e", WebhookExecutionStateCancelled, now.Add(time.Hour)},
-		{"whex_f", WebhookExecutionStateAccepted, now},
-		{"whex_g", WebhookExecutionStateRunning, now.Add(2 * time.Hour)},
+		{"whex_a", StateAccepted, now.Add(time.Hour)},
+		{"whex_b", StateCompleted, now.Add(time.Hour)},
+		{"whex_c", StateRunning, now.Add(time.Hour)},
+		{"whex_d", StateFailed, now.Add(time.Hour)},
+		{"whex_e", StateCancelled, now.Add(time.Hour)},
+		{"whex_f", StateAccepted, now},
+		{"whex_g", StateRunning, now.Add(2 * time.Hour)},
 	}
 	for _, row := range rows {
 		execution := webhookFixture(now)
@@ -194,7 +207,7 @@ func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
 			t.Fatalf("InsertExecution %s: %v", row.id, err)
 		}
 	}
-	listed := func(query *UnfinishedExecutionQuery) []string {
+	listed := func(query *UnfinishedQuery) []string {
 		t.Helper()
 		executions, err := s.ListUnfinished(ctx, query)
 		if err != nil {
@@ -209,13 +222,13 @@ func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
 		}
 		return ids
 	}
-	if got := listed(&UnfinishedExecutionQuery{Now: now, Limit: 10}); !slices.Equal(got, []string{"whex_a", "whex_c", "whex_g"}) {
+	if got := listed(&UnfinishedQuery{Now: now, Limit: 10}); !slices.Equal(got, []string{"whex_a", "whex_c", "whex_g"}) {
 		t.Fatalf("unfinished = %v, want the unexpired accepted and running rows in id order", got)
 	}
-	if got := listed(&UnfinishedExecutionQuery{Now: now, AfterID: "whex_a", Limit: 1}); !slices.Equal(got, []string{"whex_c"}) {
+	if got := listed(&UnfinishedQuery{Now: now, AfterID: "whex_a", Limit: 1}); !slices.Equal(got, []string{"whex_c"}) {
 		t.Fatalf("one after whex_a = %v, want whex_c", got)
 	}
-	if _, err := s.ListUnfinished(ctx, &UnfinishedExecutionQuery{Now: now}); err == nil {
+	if _, err := s.ListUnfinished(ctx, &UnfinishedQuery{Now: now}); err == nil {
 		t.Fatal("a list without a limit succeeded")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("list without a limit = %v (ok=%v), want %s", code, ok, ErrorCodeInvalidArgument)
@@ -242,7 +255,11 @@ type seededTurnEvent struct {
 
 func seedTurnEventAtVersion42(t *testing.T, db *sql.DB, event seededTurnEvent) {
 	t.Helper()
-	seedMemorySession(t, db, event.sessionID, "webhook:primary")
+	if _, err := db.ExecContext(t.Context(),
+		`INSERT OR IGNORE INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?, ?, '{}', '2026-09-07T12:00:00Z', '2026-09-07T12:00:00Z')`,
+		event.sessionID, "webhook:primary"); err != nil {
+		t.Fatalf("seed session %s: %v", event.sessionID, err)
+	}
 	if _, err := db.ExecContext(t.Context(),
 		`INSERT INTO runtime_event (id, session_id, sequence, turn_id, invocation_id, branch, author, kind, schema_version, payload_json, created_at)
 		 VALUES (?, ?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM runtime_event WHERE session_id = ?), ?, 'inv', '', 'webhook:primary', ?, 1, '{}', '2026-09-07T12:00:00Z')`,
@@ -253,20 +270,35 @@ func seedTurnEventAtVersion42(t *testing.T, db *sql.DB, event seededTurnEvent) {
 
 func TestWebhookExecutionSessionMigration(t *testing.T) {
 	ctx := t.Context()
-	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), 42)
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_completed", state: WebhookExecutionStateCompleted})
+	path := filepath.Join(t.TempDir(), "aura.db")
+	db, err := sqlite.Open(ctx, path, sqlite.Options{})
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	var upTo42 []sqlite.Migration
+	for _, m := range history.Migrations() {
+		if m.Version <= 42 {
+			upTo42 = append(upTo42, m)
+		}
+	}
+	if err := sqlite.Migrate(ctx, db, upTo42); err != nil {
+		t.Fatalf("Migrate(<=42): %v", err)
+	}
+
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_completed", state: StateCompleted})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-other", turnID: "turn-other", kind: "turn.accepted"})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-completed", turnID: "turn-whex_completed", kind: "turn.accepted"})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-completed", turnID: "turn-whex_completed", kind: "turn.completed"})
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_running", state: WebhookExecutionStateRunning})
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_running", state: StateRunning})
 	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-running", turnID: "turn-whex_running", kind: "turn.accepted"})
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_never_admitted", state: WebhookExecutionStateAccepted})
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_events_gone", state: WebhookExecutionStateCompleted})
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_never_admitted", state: StateAccepted})
+	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_events_gone", state: StateCompleted})
 
 	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	s := NewWebhookExecutionStore(db)
+	s := mustNewSQLiteStore(t, db)
 	for id, want := range map[string]string{"whex_completed": "sess-completed", "whex_running": "sess-running", "whex_events_gone": ""} {
 		got, err := s.Execution(ctx, id)
 		if err != nil || got.SessionID != want {
@@ -275,8 +307,8 @@ func TestWebhookExecutionSessionMigration(t *testing.T) {
 	}
 	if _, err := s.Execution(ctx, "whex_never_admitted"); err == nil {
 		t.Error("an unfinished execution without an admitted turn survived the migration")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeWebhookExecutionNotFound {
-		t.Errorf("never admitted execution = %v (ok=%v), want %s", code, ok, ErrorCodeWebhookExecutionNotFound)
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeExecutionNotFound {
+		t.Errorf("never admitted execution = %v (ok=%v), want %s", code, ok, ErrorCodeExecutionNotFound)
 	}
 	var index string
 	if err := db.QueryRowContext(ctx,

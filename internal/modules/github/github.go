@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"strings"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 const Source = "github"
