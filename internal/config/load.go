@@ -726,44 +726,6 @@ func ValidateSkills(skillsConfig *Skills) error {
 	return errors.Join(problems...)
 }
 
-func ValidateContext(contextConfig *Context) error {
-	if contextConfig == nil {
-		return nil
-	}
-	var problems []error
-	if contextConfig.RecentCompleteTurns <= 0 {
-		problems = append(problems, configkit.Invalid("context.recent_complete_turns", "must be positive"))
-	}
-	if contextConfig.SafetyMarginTokens <= 0 {
-		problems = append(problems, configkit.Invalid("context.safety_margin_tokens", "must be positive"))
-	}
-	if contextConfig.ConservativeEstimatorRatio <= 0 || contextConfig.ConservativeEstimatorRatio >= 1 {
-		problems = append(problems, configkit.Invalid("context.conservative_estimator_ratio", "must be in (0,1)"))
-	}
-	if contextConfig.HighWaterRatio <= 0 || contextConfig.HighWaterRatio >= 1 {
-		problems = append(problems, configkit.Invalid("context.high_water_ratio", "must be in (0,1)"))
-	}
-	if contextConfig.ConservativeEstimatorRatio > contextConfig.HighWaterRatio {
-		problems = append(problems, configkit.Invalid("context.conservative_estimator_ratio", "must not exceed context.high_water_ratio"))
-	}
-	if contextConfig.MaxToolExcerptBytes <= 0 {
-		problems = append(problems, configkit.Invalid("context.max_tool_excerpt_bytes", "must be positive"))
-	}
-	if strings.TrimSpace(contextConfig.Summary.Task) == "" {
-		problems = append(problems, configkit.Invalid("context.summary.task", "must not be empty"))
-	}
-	if contextConfig.Summary.MaxSourceTokens <= 0 {
-		problems = append(problems, configkit.Invalid("context.summary.max_source_tokens", "must be positive"))
-	}
-	if contextConfig.Summary.MaxOutputTokens <= 0 {
-		problems = append(problems, configkit.Invalid("context.summary.max_output_tokens", "must be positive"))
-	}
-	if strings.TrimSpace(contextConfig.Summary.PromptVersion) == "" {
-		problems = append(problems, configkit.Invalid("context.summary.prompt_version", "must not be empty"))
-	}
-	return errors.Join(problems...)
-}
-
 func validHourMinute(value string) bool {
 	if len(value) != 5 || value[2] != ':' {
 		return false

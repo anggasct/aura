@@ -1,9 +1,12 @@
 package compaction
 
 import (
+	"fmt"
 	"math"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type AccountingClass string
@@ -50,10 +53,10 @@ func (ConservativeEstimator) Count(text string) int {
 
 func checkedAdd(a, b int) (int, error) {
 	if b > 0 && a > math.MaxInt-b {
-		return 0, Errorf(ErrorCodeInvalidArgument, "token total overflows")
+		return 0, fault.New(ErrorCodeInvalidArgument, "token total overflows")
 	}
 	if b < 0 && a < math.MinInt-b {
-		return 0, Errorf(ErrorCodeInvalidArgument, "token total underflows")
+		return 0, fault.New(ErrorCodeInvalidArgument, "token total underflows")
 	}
 	return a + b, nil
 }
@@ -63,7 +66,7 @@ func sumCounts(counter TokenCounter, texts []string) (int, error) {
 	for _, text := range texts {
 		count := counter.Count(text)
 		if count < 0 {
-			return 0, Errorf(ErrorCodeInvalidArgument, "counter %q returned a negative count", counter.Name())
+			return 0, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("counter %q returned a negative count", counter.Name()))
 		}
 		next, err := checkedAdd(total, count)
 		if err != nil {
