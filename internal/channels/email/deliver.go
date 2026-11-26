@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -39,10 +40,10 @@ type sendReceipt struct {
 
 func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
 	if req == nil {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request must not be nil")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
 	}
 	if req.Channel == "" || req.ConversationID == "" {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
 	}
 	var texts []string
 	for _, part := range req.Parts {
@@ -52,11 +53,11 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	}
 	body := replyBody(texts)
 	if body == "" {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request carries no text")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request carries no text")
 	}
 	var target replyReference
 	if err := json.Unmarshal(req.ReplyContext, &target); err != nil || !a.recipientAllowed(target.Sender) {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery reply context carries no usable recipient")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery reply context carries no usable recipient")
 	}
 	select {
 	case a.deliverSem <- struct{}{}:
@@ -102,7 +103,7 @@ type sendAttempt struct {
 func (a *Adapter) executeSend(ctx context.Context, attempt *sendAttempt, operation *sendOperation) (string, error) {
 	request, err := json.Marshal(operation)
 	if err != nil {
-		return "", Errorf(ErrorCodeMessageInvalid, "send request is not serializable")
+		return "", fault.New(ErrorCodeMessageInvalid, "send request is not serializable")
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      attempt.session,
@@ -142,19 +143,19 @@ func idempotencyKey(base, session, bind string, operation *sendOperation) string
 
 func receiptMessageID(intent *effect.Intent) (string, error) {
 	if intent == nil {
-		return "", Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return "", deliveryAmbiguous("delivery outcome is unknown", nil)
 	}
 	switch intent.State {
 	case effect.StateSucceeded:
 		var receipt sendReceipt
 		if err := json.Unmarshal(intent.ProviderReceipt, &receipt); err != nil || receipt.MessageID == "" {
-			return "", Errorf(ErrorCodeDeliveryAmbiguous, "delivery receipt is missing the message id")
+			return "", deliveryAmbiguous("delivery receipt is missing the message id", nil)
 		}
 		return receipt.MessageID, nil
 	case effect.StateUnknown, effect.StateStarted:
-		return "", Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return "", deliveryAmbiguous("delivery outcome is unknown", nil)
 	default:
-		return "", Errorf(ErrorCodeDeliveryFailed, "delivery settled without success")
+		return "", fault.New(ErrorCodeDeliveryFailed, "delivery settled without success")
 	}
 }
 
@@ -164,14 +165,14 @@ func (a *Adapter) SupportsIdempotency() bool {
 
 func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	if invocation == nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
 	if invocation.Operation != OpSendReply && invocation.Operation != OpSendMessage {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "unsupported effect operation")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
 	var operation sendOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is not decodable")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "send request is not decodable")
 	}
 	raw, err := a.renderOperation(&operation, invocation.Operation == OpSendMessage)
 	if err != nil {
@@ -183,7 +184,7 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 
 func (a *Adapter) renderOperation(operation *sendOperation, fresh bool) ([]byte, error) {
 	if !a.recipientAllowed(operation.To) {
-		return nil, Errorf(ErrorCodeMessageInvalid, "recipient is not usable")
+		return nil, fault.New(ErrorCodeMessageInvalid, "recipient is not usable")
 	}
 	message := outboundMessage{
 		From:       a.account.Address,
@@ -253,7 +254,7 @@ func successOutcome(messageID string) effect.Outcome {
 }
 
 func failureOutcome(err error) (effect.Outcome, ErrorCode) {
-	code, coded := CodeOf(err)
+	code, coded := fault.CodeOf[ErrorCode](err)
 	if !coded || code == ErrorCodeDeliveryAmbiguous {
 		return effect.Outcome{Ambiguous: true}, ErrorCodeDeliveryAmbiguous
 	}

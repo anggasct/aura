@@ -9,11 +9,12 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/modules/handoff"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func telegramHandoffUnavailable() error {
-	return telegram.Errorf(telegram.ErrorCodeHandoffUnavailable, "owner has no telegram identity")
+	return fault.New(telegram.ErrorCodeHandoffUnavailable, "owner has no telegram identity")
 }
 
 func TestOwnerHandoffRouterOrdersAndFallsThrough(t *testing.T) {

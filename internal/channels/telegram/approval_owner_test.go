@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	policy "github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -95,8 +96,7 @@ func TestDecideForOwnerTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
 		outcome, done := settled(result)
-		code, coded := CodeOf(outcome.err)
-		if !done || outcome.accepted || !coded || code != ErrorCodeApprovalTimeout {
+		if !done || outcome.accepted || !fault.HasCode(outcome.err, ErrorCodeApprovalTimeout) {
 			t.Fatalf("decision = %+v (settled %v), want a denial with approval_timeout", outcome, done)
 		}
 		if got := rig.routed.recorded(); !slices.Equal(got, []string{approval.RoutedTimeout}) {
@@ -234,15 +234,14 @@ func TestOwnerCardOffersNoStandingGrantForPerCallOnlyTools(t *testing.T) {
 }
 
 func TestDecideForOwnerWithoutATelegramOwnerIsUnavailable(t *testing.T) {
-	rig := newApprovalRig(t, accessOpts{definition: routedDefinition()})
 	owners, err := principal.NewResolver([]string{"discord:123456789012345678"})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	rig.adapter.SetPrincipalResolver(owners)
+	rig := newApprovalRig(t, accessOpts{definition: routedDefinition(), owners: owners})
 	synctest.Test(t, func(t *testing.T) {
 		accepted, err := rig.adapter.DecideForOwner(t.Context(), approvalPrompt("http-session", httpPrincipal), httpRequester(principal.ClassPublic))
-		if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalUnavailable {
+		if accepted || !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
 			t.Fatalf("DecideForOwner() = %v, %v; want a denial with approval_unavailable", accepted, err)
 		}
 		if got := rig.routed.recorded(); !slices.Equal(got, []string{approval.RoutedUnavailable}) {
@@ -280,8 +279,7 @@ func TestDecideForOwnerRejectsInvalidArguments(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			accepted, err := tc.decide()
-			code, ok := CodeOf(err)
-			if accepted || !ok || code != ErrorCodeInvalidArgument {
+			if accepted || !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("DecideForOwner() = %v, %v; want a denial with invalid_argument", accepted, err)
 			}
 		})

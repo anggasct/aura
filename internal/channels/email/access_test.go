@@ -16,8 +16,8 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -622,7 +622,7 @@ func TestAttachments_AreBoundedAndLandAsArtifacts(t *testing.T) {
 			if store == nil {
 				store = &recordingMedia{}
 			}
-			h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, media: store, email: func(cfg *config.Email) { cfg.MaxAttachmentBytes = limit }})
+			h := newHarness(t, harnessOptions{audience: auraagent.AudiencePublic, media: store, email: func(cfg *Config) { cfg.MaxAttachmentBytes = limit }})
 			h.start()
 			h.deliver(mailWithAttachments(mailSpec{from: friendAddress, subject: "Docs", messageID: "att@example.com"}, tc.text, tc.attachments...))
 			if tc.wantDrop != "" {
@@ -675,7 +675,7 @@ func TestAttachments_AttachmentOnlyMailGetsAPlaceholderTurn(t *testing.T) {
 
 func TestAttachments_OversizedMessagesAreRefusedBeforeAnyDownload(t *testing.T) {
 	store := &recordingMedia{}
-	h := newHarness(t, harnessOptions{media: store, email: func(cfg *config.Email) { cfg.MaxAttachmentBytes = 2048 }})
+	h := newHarness(t, harnessOptions{media: store, email: func(cfg *Config) { cfg.MaxAttachmentBytes = 2048 }})
 	h.start()
 	uid := h.mailbox.add(mailWithAttachments(mailSpec{from: friendAddress, messageID: "huge@example.com"}, "x", testAttachment{filename: "a.png", mediaType: "image/png", content: []byte("png")}))
 	h.mailbox.setSize(uid, 2048+messageOverhead+1)
@@ -747,8 +747,7 @@ func TestNotifyHandoff(t *testing.T) {
 		{name: "unknown session has no target", from: strangerAddr, notifier: func() *recordingNotifier { return &recordingNotifier{} }, session: "main/email:work/thread:none", wantErr: func(err error) bool { return errors.Is(err, access.ErrNoHandoffTarget) }},
 		{name: "unreachable owner fails the handoff", from: strangerAddr, notifier: func() *recordingNotifier { return &recordingNotifier{fail: errBoom} }, wantErr: func(err error) bool { return errors.Is(err, errBoom) }},
 		{name: "owner sessions never hand off", from: ownerAddress, notifier: func() *recordingNotifier { return &recordingNotifier{} }, wantErr: func(err error) bool {
-			code, ok := CodeOf(err)
-			return ok && code == ErrorCodeHandoffUnavailable
+			return fault.HasCode(err, ErrorCodeHandoffUnavailable)
 		}},
 	}
 	for _, tc := range cases {

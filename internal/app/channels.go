@@ -19,10 +19,12 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
@@ -257,80 +259,213 @@ func buildDiscordAdapters(bc *channelBuildContext) ([]runtimechannelhost.Channel
 	return ports, checks, approvers, nil
 }
 
+const telegramWebhookDrainDivisor = 2
+
 func buildTelegramAdapters(bc *channelBuildContext) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if !bc.cfg.Channels.Telegram.Enabled {
 		return nil, nil, nil, nil
 	}
-	adapters := make(telegramAdapters, 0, len(bc.cfg.Channels.Telegram.Accounts))
+	cursors, err := telegram.NewSQLiteCursorStore(bc.db)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	executor, err := toolsbuiltin.NewChannelEffects(bc.db, bc.logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(bc.db))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	resolver, err := access.NewConversationResolver(turnstore.NewConversationSessionStore(bc.db))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(bc.db, bc.artifactRoot, int64(bc.cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	vault := buildSecretVault(bc.cfg)
+	ledger := turnstore.NewDedupeStore(bc.db)
+	visionSvc := newVisionService(bc.cfg, bc.db, bc.artifactRoot)
+	settings := channelAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
+	adapters := make(telegram.Adapters, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	approvers := make([]approvalAdapter, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	for i := range bc.cfg.Channels.Telegram.Accounts {
-		adapter, err := newTelegramAdapter(bc.cfg, &bc.cfg.Channels.Telegram.Accounts[i], bc.db, bc.artifactRoot, bc.logger)
+		adapter, err := telegram.New(&telegram.Deps{
+			Config:            &bc.cfg.Channels.Telegram,
+			Account:           &bc.cfg.Channels.Telegram.Accounts[i],
+			Cursors:           cursors,
+			Effects:           executor,
+			Sessions:          sessions,
+			Logger:            bc.logger,
+			SessionResolver:   resolver,
+			PersonaRouter:     bc.router,
+			PrincipalResolver: bc.owners,
+			Commands:          bc.commands,
+			SecretVault:       vault,
+			Media:             mediaStore,
+			Vision:            visionSvc,
+			UpdateLedger:      ledger,
+			Access:            &settings,
+			OnAdmitted: func(ctx context.Context, class principal.Class) {
+				bc.principalRec.Admitted(ctx, string(class), principal.ChannelTelegram)
+			},
+			OnDropped: func(ctx context.Context, reason string) {
+				bc.ingressRec.Dropped(ctx, principal.ChannelTelegram, reason)
+			},
+		})
 		if err != nil {
 			return nil, nil, nil, err
-		}
-		adapter.SetPrincipalResolver(bc.owners)
-		adapter.SetPersonaRouter(bc.router)
-		settings := telegramAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
-		adapter.SetAccess(&settings)
-		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-			bc.principalRec.Admitted(ctx, string(class), principal.ChannelTelegram)
-		})
-		adapter.SetDenialObserver(bc.accessRec.Denied)
-		adapter.SetDropObserver(func(ctx context.Context, reason string) {
-			bc.ingressRec.Dropped(ctx, principal.ChannelTelegram, reason)
-		})
-		if bc.commands != nil {
-			adapter.SetCommands(bc.commands)
 		}
 		adapters = append(adapters, adapter)
 		ports = append(ports, adapter)
 		approvers = append(approvers, adapter)
 	}
-	checks := []health.RegisteredCheck{
-		{
-			ID:          "telegram",
-			Checker:     adapters,
-			Timeout:     time.Duration(bc.cfg.Health.CheckTimeout),
-			Remediation: telegram.RemediationReviewBot,
-		},
+	checks := adapters.HealthChecks()
+	for i := range checks {
+		if checks[i].Timeout == 0 {
+			checks[i].Timeout = time.Duration(bc.cfg.Health.CheckTimeout)
+		}
 	}
 	return ports, checks, approvers, nil
+}
+
+func buildTelegramWebhookServer(cfg *appconfig.Config, ports []runtimechannelhost.ChannelPort) (*telegram.WebhookServer, error) {
+	adapters := make([]*telegram.Adapter, 0, len(ports))
+	for _, port := range ports {
+		if adapter, ok := port.(*telegram.Adapter); ok {
+			adapters = append(adapters, adapter)
+		}
+	}
+	handler, err := telegram.NewWebhookHandler(adapters)
+	if err != nil {
+		return nil, err
+	}
+	return telegram.NewWebhookServer(handler, cfg.Channels.Telegram.Webhook.ListenAddress, time.Duration(cfg.Runtime.ShutdownTimeout)/telegramWebhookDrainDivisor)
 }
 
 func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute, handoffs email.HandoffNotifier) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []*email.Adapter, error) {
 	if !bc.cfg.Channels.Email.Enabled {
 		return nil, nil, nil, nil
 	}
-	adapters := make(emailAdapters, 0, len(bc.cfg.Channels.Email.Accounts))
+	cursors, err := email.NewSQLiteCursorStore(bc.db)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(bc.db))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(bc.db, bc.artifactRoot, int64(bc.cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	visionSvc := newVisionService(bc.cfg, bc.db, bc.artifactRoot)
+	adapters := make(email.Adapters, 0, len(bc.cfg.Channels.Email.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Email.Accounts))
 	for i := range bc.cfg.Channels.Email.Accounts {
-		adapter, err := newEmailAdapter(bc.cfg, &bc.cfg.Channels.Email.Accounts[i], bc.db, bc.artifactRoot, bc.logger)
+		account := &bc.cfg.Channels.Email.Accounts[i]
+		connector, err := email.NewIMAPConnector(account)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		adapter.SetPrincipalResolver(bc.owners)
-		adapter.SetPersonaRouter(bc.router)
+		mailer, err := email.NewSMTPMailer(account)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		executor, err := toolsbuiltin.NewChannelEffects(bc.db, bc.logger)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		settings := channelAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
-		adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-			bc.principalRec.Admitted(ctx, string(class), principal.ChannelEmail)
+		adapter, err := email.New(&email.Deps{
+			Config:            &bc.cfg.Channels.Email,
+			Account:           account,
+			Connector:         connector,
+			Mailer:            mailer,
+			Cursors:           cursors,
+			Effects:           executor,
+			Sessions:          sessions,
+			Logger:            bc.logger,
+			PrincipalResolver: bc.owners,
+			PersonaRouter:     bc.router,
+			Access:            &email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure},
+			OwnerRoute:        ownerRoute,
+			HandoffNotifier:   handoffs,
+			Media:             mediaStore,
+			Vision:            visionSvc,
+			OnAdmitted: func(ctx context.Context, class principal.Class) {
+				bc.principalRec.Admitted(ctx, string(class), principal.ChannelEmail)
+			},
+			OnDropped: func(ctx context.Context, reason string) {
+				bc.ingressRec.Dropped(ctx, principal.ChannelEmail, reason)
+			},
 		})
-		adapter.SetDropObserver(func(ctx context.Context, reason string) {
-			bc.ingressRec.Dropped(ctx, principal.ChannelEmail, reason)
-		})
-		adapter.SetOwnerRoute(ownerRoute)
-		adapter.SetHandoffNotifier(handoffs)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		adapters = append(adapters, adapter)
 		ports = append(ports, adapter)
 	}
-	checks := []health.RegisteredCheck{
-		{
-			ID:          "email",
-			Checker:     adapters,
-			Timeout:     time.Duration(bc.cfg.Health.CheckTimeout),
-			Remediation: email.RemediationReviewMailbox,
-		},
+	checks := adapters.HealthChecks()
+	for i := range checks {
+		if checks[i].Timeout == 0 {
+			checks[i].Timeout = time.Duration(bc.cfg.Health.CheckTimeout)
+		}
 	}
 	return ports, checks, []*email.Adapter(adapters), nil
+}
+
+type emailOutboxBridge struct {
+	outbox *email.Outbox
+}
+
+var _ toolsbuiltin.EmailOutbox = (*emailOutboxBridge)(nil)
+
+func (b *emailOutboxBridge) RouteOf(sessionID string) (toolsbuiltin.EmailRoute, bool) {
+	route, ok := b.outbox.RouteOf(sessionID)
+	return toolsbuiltin.EmailRoute{Account: route.Account, Sender: route.Sender}, ok
+}
+
+func (b *emailOutboxBridge) Send(ctx context.Context, message *toolsbuiltin.EmailMessage) (string, error) {
+	if message == nil {
+		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "the message cannot be sent as written")
+	}
+	messageID, err := b.outbox.Send(ctx, &email.Outgoing{
+		SessionID:      message.SessionID,
+		IdempotencyKey: message.IdempotencyKey,
+		To:             message.To,
+		Subject:        message.Subject,
+		Body:           message.Body,
+	})
+	if err == nil {
+		return messageID, nil
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if errors.Is(err, email.ErrNoRoute) {
+		return "", toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "this session has no email account to send from")
+	}
+	switch code, _ := fault.CodeOf[email.ErrorCode](err); code {
+	case email.ErrorCodeMessageInvalid, email.ErrorCodeInvalidArgument:
+		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "the message cannot be sent as written")
+	case email.ErrorCodeDeliveryAmbiguous:
+		return "", toolbroker.Errorf(toolbroker.ResultExecutionFailed, "the delivery outcome is unknown and the message was not resent")
+	default:
+		return "", toolbroker.Errorf(toolbroker.ResultExecutionFailed, "email could not be sent")
+	}
+}
+
+func recoverEmailEffects(ctx context.Context, cfg *appconfig.Config, db *sql.DB, logger *slog.Logger) error {
+	if !cfg.Channels.Email.Enabled {
+		return nil
+	}
+	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if err != nil {
+		return err
+	}
+	return email.RecoverEffects(ctx, executor.Journal(), logger)
 }

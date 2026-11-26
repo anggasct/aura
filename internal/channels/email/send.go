@@ -7,7 +7,7 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -26,14 +26,14 @@ type Outgoing struct {
 
 func (a *Adapter) Send(ctx context.Context, outgoing *Outgoing) (string, error) {
 	if outgoing == nil {
-		return "", Errorf(ErrorCodeInvalidArgument, "outgoing message must not be nil")
+		return "", fault.New(ErrorCodeInvalidArgument, "outgoing message must not be nil")
 	}
 	if outgoing.SessionID == "" || outgoing.IdempotencyKey == "" {
-		return "", Errorf(ErrorCodeInvalidArgument, "outgoing message is missing its session or idempotency key")
+		return "", fault.New(ErrorCodeInvalidArgument, "outgoing message is missing its session or idempotency key")
 	}
 	body := cleanBody(outgoing.Body)
 	if !a.recipientAllowed(outgoing.To) || body == "" || len(body) > MaxReplyBodyBytes {
-		return "", Errorf(ErrorCodeMessageInvalid, "outgoing recipient or body is not usable")
+		return "", fault.New(ErrorCodeMessageInvalid, "outgoing recipient or body is not usable")
 	}
 	select {
 	case a.deliverSem <- struct{}{}:
@@ -62,9 +62,9 @@ type TextReply struct {
 	Text   string
 }
 
-func DeliverText(ctx context.Context, account *config.EmailAccount, reply *TextReply) error {
+func DeliverText(ctx context.Context, account *Account, reply *TextReply) error {
 	if account == nil || reply == nil {
-		return Errorf(ErrorCodeInvalidArgument, "email account and reply must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "email account and reply must not be nil")
 	}
 	mailer, err := NewSMTPMailer(account)
 	if err != nil {
@@ -76,11 +76,11 @@ func DeliverText(ctx context.Context, account *config.EmailAccount, reply *TextR
 func deliverText(ctx context.Context, mailer Mailer, from string, reply *TextReply, now func() time.Time) error {
 	body := cleanBody(reply.Text)
 	if !principal.IsPlainEmailAddress(reply.To) || reply.To == from || body == "" || len(body) > MaxReplyBodyBytes {
-		return Errorf(ErrorCodeMessageInvalid, "reply recipient or body is not usable")
+		return fault.New(ErrorCodeMessageInvalid, "reply recipient or body is not usable")
 	}
 	var raw [randomIDBytes]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return &Error{Code: ErrorCodeDeliveryFailed, Detail: "message id is not generatable", Cause: err}
+		return fault.Wrap(ErrorCodeDeliveryFailed, "message id is not generatable", err)
 	}
 	message := outboundMessage{
 		From:      from,
@@ -105,11 +105,11 @@ func deliverText(ctx context.Context, mailer Mailer, from string, reply *TextRep
 	case outcome.Succeeded:
 		return nil
 	case outcome.Ambiguous:
-		return Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return deliveryAmbiguous("delivery outcome is unknown", nil)
 	case failed != "":
-		return Errorf(failed, "reply was not delivered")
+		return fault.New(failed, "reply was not delivered")
 	default:
-		return Errorf(ErrorCodeDeliveryFailed, "reply was not delivered")
+		return fault.New(ErrorCodeDeliveryFailed, "reply was not delivered")
 	}
 }
 

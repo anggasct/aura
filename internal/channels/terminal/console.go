@@ -48,39 +48,83 @@ type Console struct {
 	turnCancel   context.CancelFunc
 }
 
-func NewConsole(runner Runner, sessions Sessions, render Renderer, in io.Reader, out, diag io.Writer, config Config, principal string) *Console {
-	return &Console{
-		runner:    runner,
-		sessions:  sessions,
-		render:    render,
-		in:        in,
-		out:       out,
-		diag:      diag,
-		config:    config,
-		principal: principal,
-		now:       time.Now,
-	}
+type Deps struct {
+	Runner          Runner
+	Sessions        Sessions
+	Renderer        Renderer
+	In              io.Reader
+	Out             io.Writer
+	Diag            io.Writer
+	Config          Config
+	Principal       string
+	SessionID       string
+	AgentID         string
+	Skills          command.Skills
+	CommandRecorder command.Recorder
+	CloseInput      func()
+	TTY             *TTYRenderer
+	Approvals       *ApprovalBridge
+	Clock           func() time.Time
+	Interrupts      <-chan struct{}
 }
 
-func (c *Console) SetClock(now func() time.Time) { c.now = now }
-
-func (c *Console) SetInterrupts(ch <-chan struct{}) { c.interrupts = ch }
-
-func (c *Console) SetSessionID(id string) { c.sessionID = id }
-
-func (c *Console) SetAgentID(id string) { c.agentID = id }
-
-func (c *Console) SetSkills(skills command.Skills) { c.skills = skills }
-
-func (c *Console) SetCommandRecorder(recorder command.Recorder) { c.recorder = recorder }
-
-func (c *Console) SetInputCloser(closeInput func()) { c.closeInput = closeInput }
-
-func (c *Console) SetTTY(r *TTYRenderer) { c.tty = r }
-
-func (c *Console) SetApprovalBridge(b *ApprovalBridge) { c.approvals = b }
+func New(deps *Deps) (*Console, error) {
+	if deps == nil {
+		return nil, errNilArgument("deps")
+	}
+	if deps.Runner == nil {
+		return nil, errNilArgument("runner")
+	}
+	if deps.Sessions == nil {
+		return nil, errNilArgument("sessions")
+	}
+	if deps.In == nil {
+		return nil, errNilArgument("in")
+	}
+	if deps.Out == nil {
+		return nil, errNilArgument("out")
+	}
+	if deps.Diag == nil {
+		return nil, errNilArgument("diag")
+	}
+	render := deps.Renderer
+	if render == nil {
+		render = PlainRenderer{}
+	}
+	now := deps.Clock
+	if now == nil {
+		now = time.Now
+	}
+	return &Console{
+		runner:     deps.Runner,
+		sessions:   deps.Sessions,
+		render:     render,
+		in:         deps.In,
+		out:        deps.Out,
+		diag:       deps.Diag,
+		config:     deps.Config,
+		principal:  deps.Principal,
+		sessionID:  deps.SessionID,
+		agentID:    deps.AgentID,
+		skills:     deps.Skills,
+		recorder:   deps.CommandRecorder,
+		closeInput: deps.CloseInput,
+		tty:        deps.TTY,
+		approvals:  deps.Approvals,
+		interrupts: deps.Interrupts,
+		now:        now,
+	}, nil
+}
 
 func (c *Console) Run(ctx context.Context) error {
+	return c.run(ctx, c.interrupts)
+}
+
+func (c *Console) RunWithInterrupts(ctx context.Context, interrupts <-chan struct{}) error {
+	return c.run(ctx, interrupts)
+}
+
+func (c *Console) run(ctx context.Context, interrupts <-chan struct{}) error {
 	if ctx == nil {
 		return errors.New("terminal: context must not be nil")
 	}
@@ -113,8 +157,8 @@ func (c *Console) Run(ctx context.Context) error {
 	c.escalated = make(chan struct{})
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	defer stopWatch()
-	if c.interrupts != nil {
-		go c.watchInterrupts(watchCtx)
+	if interrupts != nil {
+		go c.watchInterrupts(watchCtx, interrupts)
 	}
 
 	lines, pauseReading, resumeReading, stopReading := readLines(ctx, c.in, c.config.MaxInputBytes, c.closeInput)
@@ -440,12 +484,12 @@ func (c *Console) batchTurn(turnCtx context.Context, req *Request, failed, cance
 	return nil
 }
 
-func (c *Console) watchInterrupts(ctx context.Context) {
+func (c *Console) watchInterrupts(ctx context.Context, interrupts <-chan struct{}) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case _, ok := <-c.interrupts:
+		case _, ok := <-interrupts:
 			if !ok {
 				return
 			}
@@ -464,7 +508,7 @@ func (c *Console) watchInterrupts(ctx context.Context) {
 func (c *Console) observeInterrupt() bool {
 	c.mu.Lock()
 	now := c.now()
-	armed := !c.lastCancelAt.IsZero() && now.Sub(c.lastCancelAt) < c.config.SecondInterruptTime
+	armed := !c.lastCancelAt.IsZero() && now.Sub(c.lastCancelAt) < time.Duration(c.config.SecondInterruptTime)
 	c.lastCancelAt = now
 	c.mu.Unlock()
 	if armed {

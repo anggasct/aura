@@ -1,10 +1,11 @@
 package config
 
 import (
-	"time"
-
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/httpchat"
+	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
@@ -21,7 +22,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
-	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -36,10 +36,10 @@ import (
 )
 
 type Channels struct {
-	Discord  discord.Config        `json:"discord"`
-	Telegram legacyconfig.Telegram `json:"telegram"`
-	Email    legacyconfig.Email    `json:"email"`
-	HTTP     httpchat.Config       `json:"http"`
+	Discord  discord.Config  `json:"discord"`
+	Telegram telegram.Config `json:"telegram"`
+	Email    email.Config    `json:"email"`
+	HTTP     httpchat.Config `json:"http"`
 }
 
 type Config struct {
@@ -59,7 +59,7 @@ type Config struct {
 	Telemetry    telemetry.Config            `json:"telemetry"`
 	Usage        usage.Config                `json:"usage"`
 	Health       health.Config               `json:"health"`
-	Terminal     legacyconfig.Terminal       `json:"terminal"`
+	Terminal     terminal.Config             `json:"terminal"`
 	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    broadcast.Config            `json:"broadcast"`
 	Scheduler    schedule.Config             `json:"scheduler"`
@@ -100,27 +100,13 @@ func Default() Config {
 		Telemetry:    telemetry.Default(),
 		Usage:        usage.Default(),
 		Health:       health.Default(),
-		Terminal:     legacyconfig.DefaultTerminal(),
+		Terminal:     terminal.Default(),
 		Webhook:      platformwebhook.Default(),
 		Channels: Channels{
-			Discord: discord.Default(),
-			Telegram: legacyconfig.Telegram{
-				Polling: legacyconfig.TelegramPolling{
-					Timeout:    configkit.Duration(30 * time.Second),
-					MaxBackoff: configkit.Duration(time.Minute),
-				},
-				MinEditInterval:    configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes: legacyconfig.TelegramMaxAttachmentBytes,
-				Webhook: legacyconfig.TelegramWebhook{
-					ListenAddress:  legacyconfig.TelegramWebhookListenAddress,
-					MaxBodyBytes:   legacyconfig.TelegramWebhookMaxBodyBytes,
-					MaxConnections: legacyconfig.TelegramWebhookMaxConnections,
-				},
-			},
-			Email: legacyconfig.Email{
-				MaxAttachmentBytes: legacyconfig.EmailMaxAttachmentBytes,
-			},
-			HTTP: httpchat.Default(),
+			Discord:  discord.Default(),
+			Telegram: telegram.Default(),
+			Email:    email.Default(),
+			HTTP:     httpchat.Default(),
 		},
 		Broadcast:   broadcast.Default(),
 		Scheduler:   schedule.Default(),

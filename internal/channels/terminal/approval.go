@@ -11,10 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 )
 
-func errNilArgument(name string) error {
-	return fmt.Errorf("invalid_argument: %s must not be nil", name)
-}
-
 type ApprovalCard struct {
 	ToolName       string
 	ToolVersion    string

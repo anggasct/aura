@@ -1,2 +1,0 @@
-internal/channels/email  # until this channel's errors move to platform/fault with the channels
-internal/channels/telegram  # until this channel's errors move to platform/fault with the channels

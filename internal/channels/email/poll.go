@@ -4,6 +4,8 @@ import (
 	"context"
 	"slices"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func (a *Adapter) run(ctx context.Context) {
@@ -50,7 +52,7 @@ func (a *Adapter) cycle(ctx context.Context, session Session) error {
 		return err
 	}
 	if status.UIDValidity == 0 || status.UIDNext == 0 {
-		return Errorf(ErrorCodeProtocolInvalid, "mailbox did not report its identity")
+		return fault.New(ErrorCodeProtocolInvalid, "mailbox did not report its identity")
 	}
 	cursor, err := a.syncCursor(ctx, &status)
 	if err != nil {
@@ -74,7 +76,7 @@ func (a *Adapter) cycle(ctx context.Context, session Session) error {
 func (a *Adapter) syncCursor(ctx context.Context, status *MailboxStatus) (Cursor, error) {
 	stored, found, err := a.cursors.Load(ctx, a.source())
 	if err != nil {
-		return Cursor{}, &Error{Code: ErrorCodeIntakeFailed, Detail: "email cursor is not readable", Cause: err}
+		return Cursor{}, fault.Wrap(ErrorCodeIntakeFailed, "email cursor is not readable", err)
 	}
 	if found && stored.UIDValidity == status.UIDValidity {
 		return stored, nil
@@ -92,7 +94,7 @@ func (a *Adapter) syncCursor(ctx context.Context, status *MailboxStatus) (Cursor
 
 func (a *Adapter) saveCursor(ctx context.Context, cursor Cursor) error {
 	if err := a.cursors.Save(ctx, a.source(), cursor, time.Now().UTC()); err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "email cursor is not writable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "email cursor is not writable", err)
 	}
 	return nil
 }
@@ -123,7 +125,7 @@ func (a *Adapter) ingestWindow(ctx context.Context, session Session, cursor *Cur
 }
 
 func classifyFault(err error) string {
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		return faultUnreachable
 	}

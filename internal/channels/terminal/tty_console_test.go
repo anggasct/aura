@@ -12,25 +12,40 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
 func newTTYConsole(runner Runner, sess *fakeSessions, in string, width int) (console *Console, out, diag *bytes.Buffer, cleanup func()) {
 	out = &bytes.Buffer{}
 	diag = &bytes.Buffer{}
 	_, cancel := context.WithCancel(context.Background())
-	console = NewConsole(runner, sess, PlainRenderer{}, bytes.NewBufferString(in), out, diag, Config{
-		MaxInputBytes:       1000,
-		InMemoryHistory:     100,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{
-		Out:     testWriteCloser{Writer: out},
-		Width:   func() int { return width },
-		Hz:      500,
-		Styling: false,
-		Stdin:   os.Stdin,
-		Stdout:  os.Stdout,
-	}))
+	var err error
+	console, err = New(&Deps{
+		Runner:   runner,
+		Sessions: sess,
+		Renderer: PlainRenderer{},
+		In:       bytes.NewBufferString(in),
+		Out:      out,
+		Diag:     diag,
+		Config: Config{
+			MaxInputBytes:       1000,
+			InMemoryHistory:     100,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		},
+		Principal: "owner",
+		TTY: NewTTYRenderer(TTYOptions{
+			Out:     testWriteCloser{Writer: out},
+			Width:   func() int { return width },
+			Hz:      500,
+			Styling: false,
+			Stdin:   os.Stdin,
+			Stdout:  os.Stdout,
+		}),
+	})
+	if err != nil {
+		panic(err)
+	}
 	return console, out, diag, cancel
 }
 
@@ -96,17 +111,34 @@ func TestTTYCancelledTurnReplacesPartials(t *testing.T) {
 func TestTTYCancelledActiveTurnFinalizesAfterContextCancellation(t *testing.T) {
 	runner := &cancellationTTYRunner{started: make(chan struct{}), cancelled: make(chan struct{})}
 	pr, pw := io.Pipe()
-	console, out, _, cancel := newConsolePipeTest(runner, newFakeSessions(), pr)
-	defer cancel()
-	defer func() { _ = pw.Close() }()
-	console.SetTTY(NewTTYRenderer(TTYOptions{
-		Out:     testWriteCloser{Writer: out},
-		Width:   func() int { return 80 },
-		Hz:      500,
-		Styling: false,
-	}))
+	out := &bytes.Buffer{}
+	diag := &bytes.Buffer{}
 	interrupts := make(chan struct{}, 1)
-	console.SetInterrupts(interrupts)
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       pr,
+		Out:      out,
+		Diag:     diag,
+		Config: Config{
+			MaxInputBytes:       1000,
+			InMemoryHistory:     100,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		},
+		Principal: "owner",
+		TTY: NewTTYRenderer(TTYOptions{
+			Out:     testWriteCloser{Writer: out},
+			Width:   func() int { return 80 },
+			Hz:      500,
+			Styling: false,
+		}),
+		Interrupts: interrupts,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer func() { _ = pw.Close() }()
 
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()
@@ -278,11 +310,23 @@ func (r *blockingTTYRunner) Run(ctx context.Context, _ *Request) iter.Seq2[Event
 
 func TestTTYClosedOutputCancelsProducer(t *testing.T) {
 	runner := &blockingTTYRunner{cancelled: make(chan struct{})}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("x\n"), failingWriter{}, &bytes.Buffer{}, Config{
-		MaxInputBytes:       100,
-		SecondInterruptTime: time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: failingWriter{}}, Width: func() int { return 80 }, Hz: 500}))
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       bytes.NewBufferString("x\n"),
+		Out:      failingWriter{},
+		Diag:     &bytes.Buffer{},
+		Config: Config{
+			MaxInputBytes:       100,
+			SecondInterruptTime: configkit.Duration(time.Second),
+		},
+		Principal: "owner",
+		TTY:       NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: failingWriter{}}, Width: func() int { return 80 }, Hz: 500}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()
 	select {
@@ -344,11 +388,23 @@ func TestTTYSlowOutputDoesNotHangConsole(t *testing.T) {
 		release:  make(chan struct{}),
 		finished: make(chan struct{}),
 	}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("x\n"), out, &bytes.Buffer{}, Config{
-		MaxInputBytes:       100,
-		SecondInterruptTime: time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500}))
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       bytes.NewBufferString("x\n"),
+		Out:      out,
+		Diag:     &bytes.Buffer{},
+		Config: Config{
+			MaxInputBytes:       100,
+			SecondInterruptTime: configkit.Duration(time.Second),
+		},
+		Principal: "owner",
+		TTY:       NewTTYRenderer(TTYOptions{Out: out, Width: func() int { return 80 }, Hz: 500}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- console.Run(ctx) }()
@@ -391,11 +447,23 @@ func TestEditorGetsExclusiveStdin(t *testing.T) {
 	pr, pw := io.Pipe()
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, pr, out, diag, Config{
-		MaxInputBytes:       1000,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: out}, Width: func() int { return 80 }, Hz: 500, Stdin: os.Stdin, Stdout: os.Stdout}))
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       pr,
+		Out:      out,
+		Diag:     diag,
+		Config: Config{
+			MaxInputBytes:       1000,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		},
+		Principal: "owner",
+		TTY:       NewTTYRenderer(TTYOptions{Out: testWriteCloser{Writer: out}, Width: func() int { return 80 }, Hz: 500, Stdin: os.Stdin, Stdout: os.Stdout}),
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()
 	if _, err := pw.Write([]byte(".\n")); err != nil {

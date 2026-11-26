@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
@@ -139,35 +140,14 @@ func (a *Adapter) visionService() *vision.Service {
 	if a == nil {
 		return nil
 	}
-	return a.images.Load()
-}
-
-func (a *Adapter) SetMediaStore(store MediaStore) {
-	if a == nil {
-		return
-	}
-	a.artifacts = store
-}
-
-func (a *Adapter) SetVisionService(svc *vision.Service) {
-	if a == nil {
-		return
-	}
-	a.images.Store(svc)
-}
-
-func (a *Adapter) SetUpdateLedger(ledger UpdateLedger) {
-	if a == nil {
-		return
-	}
-	a.ledger = ledger
+	return a.images
 }
 
 func (a *Adapter) stageMedia(ctx context.Context, msg *message, envelope *runtimeingress.IngressEnvelope) (bool, error) {
 	if a.ledger != nil {
 		claimed, err := a.ledger.Claimed(ctx, envelope.Source, envelope.ExternalID)
 		if err != nil {
-			return false, &Error{Code: ErrorCodeIntakeFailed, Detail: "update ledger is not readable", Cause: err}
+			return false, fault.Wrap(ErrorCodeIntakeFailed, "update ledger is not readable", err)
 		}
 		if claimed {
 			return false, nil
@@ -188,10 +168,10 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 	limit := a.cfg.MaxAttachmentBytes
 	item, ok := msg.attachment(limit)
 	if !ok || item.fileID == "" || item.declared > limit || !media.Eligible(item.mediaType) {
-		return Errorf(ErrorCodeAttachmentRejected, "attachment is not eligible")
+		return fault.New(ErrorCodeAttachmentRejected, "attachment is not eligible")
 	}
 	if a.artifacts == nil {
-		return Errorf(ErrorCodeAttachmentRejected, "media storage is not configured")
+		return fault.New(ErrorCodeAttachmentRejected, "media storage is not configured")
 	}
 	token, ok := a.botToken()
 	if !ok {
@@ -204,7 +184,7 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 		return err
 	}
 	if info.FileSize > limit {
-		return Errorf(ErrorCodeAttachmentRejected, "attachment exceeds the size bound")
+		return fault.New(ErrorCodeAttachmentRejected, "attachment exceeds the size bound")
 	}
 	file, err := a.bot.download(call, token, info.FilePath, limit)
 	if err != nil {
@@ -241,17 +221,17 @@ func (a *Adapter) storeAttachment(ctx context.Context, item *attachment, content
 			},
 		})
 		if err != nil {
-			return media.ArtifactSummary{}, nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "image intake failed", Cause: err}
+			return media.ArtifactSummary{}, nil, fault.Wrap(ErrorCodeAttachmentRejected, "image intake failed", err)
 		}
 		raw, err := vision.MarshalPart(&part)
 		if err != nil {
-			return media.ArtifactSummary{}, nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "image reference is not serializable", Cause: err}
+			return media.ArtifactSummary{}, nil, fault.Wrap(ErrorCodeAttachmentRejected, "image reference is not serializable", err)
 		}
 		return media.ArtifactSummary{RefID: part.ArtifactID, Digest: part.DerivedDigest, SizeBytes: part.EncodedBytes, Filename: item.filename}, raw, nil
 	}
 	extra, err := json.Marshal(map[string]string{"message_id": origin, "kind": item.kind})
 	if err != nil {
-		return media.ArtifactSummary{}, nil, Errorf(ErrorCodeProtocolInvalid, "artifact metadata is not serializable")
+		return media.ArtifactSummary{}, nil, fault.New(ErrorCodeProtocolInvalid, "artifact metadata is not serializable")
 	}
 	receipt, err := a.artifacts.Put(ctx, content, &media.Meta{
 		SessionID: envelope.ConversationID,
@@ -260,7 +240,7 @@ func (a *Adapter) storeAttachment(ctx context.Context, item *attachment, content
 		Extra:     extra,
 	})
 	if err != nil {
-		return media.ArtifactSummary{}, nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "artifact storage failed", Cause: err}
+		return media.ArtifactSummary{}, nil, fault.Wrap(ErrorCodeAttachmentRejected, "artifact storage failed", err)
 	}
 	return media.ArtifactSummary{RefID: receipt.RefID, Digest: receipt.Digest, SizeBytes: receipt.SizeBytes, Filename: item.filename}, nil, nil
 }
@@ -268,12 +248,12 @@ func (a *Adapter) storeAttachment(ctx context.Context, item *attachment, content
 func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []media.ArtifactSummary) error {
 	var reference replyReference
 	if err := json.Unmarshal(envelope.ReplyContext, &reference); err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply context is not decodable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply context is not decodable")
 	}
 	reference.Artifacts = summaries
 	raw, err := json.Marshal(reference)
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply context is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply context is not serializable")
 	}
 	envelope.ReplyContext = raw
 	return nil

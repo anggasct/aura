@@ -27,7 +27,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -40,7 +39,6 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -250,13 +248,6 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}
-	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], h.mail, h.submissions,
-		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		sessions, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatalf("email.New: %v", err)
-	}
-	h.adapter = adapter
 	router, err := auraagent.NewRouter(registry, channelAccounts(&cfg.Channels), cfg.Bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -265,14 +256,32 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	if err != nil {
 		t.Fatalf("ownerResolver: %v", err)
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(router)
+	cursors, err := email.NewSQLiteCursorStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
 	settings := channelAccessSettings(cfg, db, nil, nil)
-	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-	adapter.SetMediaStore(mediaStore)
-	adapter.SetOwnerRoute(route)
-	adapter.SetHandoffNotifier(newEmailHandoffNotifier(approvers))
-	builtin.SetEmailOutbox(&emailOutbox{adapters: []*email.Adapter{adapter}})
+	adapter, err := email.New(&email.Deps{
+		Config:            &cfg.Channels.Email,
+		Account:           &cfg.Channels.Email.Accounts[0],
+		Connector:         h.mail,
+		Mailer:            h.submissions,
+		Cursors:           cursors,
+		Effects:           effects,
+		Sessions:          sessions,
+		Logger:            slog.New(slog.DiscardHandler),
+		PrincipalResolver: owners,
+		PersonaRouter:     router,
+		Access:            &email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure},
+		Media:             mediaStore,
+		OwnerRoute:        route,
+		HandoffNotifier:   newEmailHandoffNotifier(approvers),
+	})
+	if err != nil {
+		t.Fatalf("email.New: %v", err)
+	}
+	h.adapter = adapter
+	builtin.SetEmailOutbox(&emailOutboxBridge{outbox: email.NewOutbox([]*email.Adapter{adapter})})
 	handoffService := mustHandoffService(t, db, []handoff.Notifier{&channelHandoffNotifier{target: adapter}})
 	if err := builtin.Broker().RegisterProvider(handoff.NewToolProvider(handoffService)); err != nil {
 		t.Fatalf("RegisterProvider(handoff): %v", err)
@@ -602,7 +611,7 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 	h := newEmailAccessHarness(t, emailAccessOptions{approvers: acceptingOwner(true, nil)})
 	var delivered []email.TextReply
 	previous := deliverEmailText
-	deliverEmailText = func(_ context.Context, account *config.EmailAccount, reply *email.TextReply) error {
+	deliverEmailText = func(_ context.Context, account *email.Account, reply *email.TextReply) error {
 		if account.Name != "work" {
 			t.Errorf("handoff delivery used account %q", account.Name)
 		}

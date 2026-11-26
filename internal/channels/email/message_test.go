@@ -13,6 +13,8 @@ import (
 	"unicode/utf8"
 
 	mimepkg "mime"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 var replyDate = time.Date(2026, time.November, 5, 9, 30, 0, 0, time.UTC)
@@ -176,7 +178,7 @@ func TestRender_RejectsUnsafeEnvelopeAndIdentifiers(t *testing.T) {
 			reply := baseReply()
 			mutate(&reply)
 			raw, err := reply.render()
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeMessageInvalid || raw != nil {
+			if !fault.HasCode(err, ErrorCodeMessageInvalid) || raw != nil {
 				t.Fatalf("render = %q, %v; want message_invalid", raw, err)
 			}
 		})
