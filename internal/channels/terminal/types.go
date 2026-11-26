@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"iter"
-	"time"
 
 	"github.com/anggasct/aura/internal/platform/command"
 )
@@ -52,10 +51,4 @@ type Sessions interface {
 	Create(ctx context.Context, owner, agentID string) (Session, error)
 	Get(ctx context.Context, id string) (Session, error)
 	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]Event, error)
-}
-
-type Config struct {
-	MaxInputBytes       int
-	InMemoryHistory     int
-	SecondInterruptTime time.Duration
 }

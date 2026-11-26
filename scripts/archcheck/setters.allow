@@ -19,11 +19,4 @@ internal/channels/telegram Adapter.SetSecretVault  # the adapter takes this coll
 internal/channels/telegram Adapter.SetSessionResolver  # the adapter takes this collaborator at construction when the channels move
 internal/channels/telegram Adapter.SetUpdateLedger  # the adapter takes this collaborator at construction when the channels move
 internal/channels/telegram Adapter.SetVisionService  # the adapter takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetApprovalBridge  # the console takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetClock  # the console takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetCommandRecorder  # the console takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetInputCloser  # the console takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetInterrupts  # the console takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetSkills  # the console takes this collaborator at construction when the channels move
-internal/channels/terminal Console.SetTTY  # the console takes this collaborator at construction when the channels move
 internal/modules/builtin Executor.SetEmailOutbox  # builtin assembles tool adapters until each module provides its tools

@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -153,7 +154,7 @@ agents:
 	}
 	name := "knowledge-capturing-model"
 	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, sessions, terminalBroker{}, nil, slog.New(slog.DiscardHandler),
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, sessions, terminal.DenyPolicy{}, nil, slog.New(slog.DiscardHandler),
 		runtimeadk.WithContextProvider(mod))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)

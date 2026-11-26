@@ -21,7 +21,10 @@ func (c *captureEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[
 
 func TestTerminalRunnerPreservesImageParts(t *testing.T) {
 	engine := &captureEngine{}
-	runner := &terminalRunner{engine: engine}
+	runner, err := terminal.NewRuntimeRunner(engine, "")
+	if err != nil {
+		t.Fatalf("NewRuntimeRunner: %v", err)
+	}
 	envelope := json.RawMessage(`{"kind":"image_ref.v1"}`)
 	req := &terminal.Request{
 		SessionID:   "sess-1",

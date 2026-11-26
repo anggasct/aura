@@ -160,14 +160,6 @@ type HTTP struct {
 	KeepaliveInterval   configkit.Duration `json:"keepalive_interval"`
 }
 
-type Terminal struct {
-	RenderHz            int                `json:"render_hz"`
-	MaxInputBytes       int                `json:"max_input_bytes"`
-	InMemoryHistory     int                `json:"in_memory_history"`
-	SecondInterruptTime configkit.Duration `json:"second_interrupt_window"`
-	PlainApproval       string             `json:"plain_approval"`
-}
-
 type Tools struct {
 	Workspace            string           `json:"workspace"`
 	MaxInlineResultBytes int64            `json:"max_inline_result_bytes"`
@@ -188,16 +180,6 @@ func DefaultTools() *Tools {
 		Exec:                 shellexec.Default(),
 		Fetch:                fetch.Default(),
 		WebSearch:            search.Default(),
-	}
-}
-
-func DefaultTerminal() Terminal {
-	return Terminal{
-		RenderHz:            20,
-		MaxInputBytes:       262144,
-		InMemoryHistory:     100,
-		SecondInterruptTime: configkit.Duration(2 * time.Second),
-		PlainApproval:       "deny",
 	}
 }
 

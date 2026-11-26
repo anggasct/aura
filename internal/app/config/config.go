@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
@@ -57,7 +58,7 @@ type Config struct {
 	Telemetry    telemetry.Config            `json:"telemetry"`
 	Usage        usage.Config                `json:"usage"`
 	Health       health.Config               `json:"health"`
-	Terminal     legacyconfig.Terminal       `json:"terminal"`
+	Terminal     terminal.Config             `json:"terminal"`
 	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    broadcast.Config            `json:"broadcast"`
 	Scheduler    schedule.Config             `json:"scheduler"`
@@ -98,7 +99,7 @@ func Default() Config {
 		Telemetry:    telemetry.Default(),
 		Usage:        usage.Default(),
 		Health:       health.Default(),
-		Terminal:     legacyconfig.DefaultTerminal(),
+		Terminal:     terminal.Default(),
 		Webhook:      platformwebhook.Default(),
 		Channels: Channels{
 			Discord: discord.Default(),
