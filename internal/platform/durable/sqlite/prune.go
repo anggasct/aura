@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const pruneSecondLayout = "2006-01-02T15:04:05"
@@ -33,7 +35,7 @@ func (r *Runtime) PruneEnded(ctx context.Context, req PruneRequest) (int, error)
 	if err != nil {
 		return 0, fmt.Errorf("durable prune: encode handler names: %w", err)
 	}
-	res, err := r.db.ExecContext(ctx, pruneEndedSQL, string(names), req.Before.UTC().Format(pruneSecondLayout), req.Limit)
+	res, err := dbsqlite.Conn(ctx, r.db).ExecContext(ctx, pruneEndedSQL, string(names), req.Before.UTC().Format(pruneSecondLayout), req.Limit)
 	if err != nil {
 		return 0, fmt.Errorf("durable prune: %w", err)
 	}
