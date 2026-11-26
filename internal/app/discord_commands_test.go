@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -152,7 +152,10 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 		}
 	}
 	port := &discordCommandSessions{sessions: sessions, events: events, pointers: pointers}
-	resolver := &discordConversationResolver{pointers: pointers}
+	resolver, err := access.NewConversationResolver(pointers)
+	if err != nil {
+		t.Fatalf("NewConversationResolver: %v", err)
+	}
 	if n, err := port.EventCount(t.Context(), key); err != nil || n != 2 {
 		t.Errorf("EventCount = %d %v, want 2", n, err)
 	}
@@ -220,7 +223,10 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 	if _, found, _ := pointers.Resolve(t.Context(), key); found {
 		t.Fatal("switching to the base key with the base row absent kept the pointer")
 	}
-	ensurer := &discordSessionEnsurer{sessions: sessions}
+	ensurer, err := access.NewSessionEnsurer(sessions)
+	if err != nil {
+		t.Fatalf("NewSessionEnsurer: %v", err)
+	}
 	if err := ensurer.EnsureSession(t.Context(), key, principal.OwnerID, "main"); err != nil {
 		t.Fatalf("next message re-ensures the base session: %v", err)
 	}
@@ -237,15 +243,40 @@ func isNotSwitchable(err error) bool {
 func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	activity := &stubActivity{}
 	recorder := &wireRecorder{}
-	if err := wireChatCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, nil, recorder); err != nil {
-		t.Fatalf("wire without adapters: %v", err)
+	turns := &deferredCommandTurns{}
+	skills := &deferredCommandSkills{}
+	dispatcher, err := newChatCommandDispatcher(nil, nil, nil, turns, skills, recorder)
+	if err != nil || dispatcher == nil {
+		t.Fatalf("newChatCommandDispatcher() = %v, %v", dispatcher, err)
 	}
-	turns := engineCommandTurns{engine: activity}
+
+	if id, cancelled, err := turns.CancelActive(t.Context(), "s"); cancelled || id != "" || !fault.HasCode(err, command.ErrorCodeUnavailable) {
+		t.Errorf("unbound CancelActive = %q %v %v, want command_unavailable", id, cancelled, err)
+	}
+	if active, queued := turns.Activity("s"); active != "" || queued != 0 {
+		t.Errorf("unbound Activity = %q %d, want zero", active, queued)
+	}
+
+	turns.bind(activity)
 	if id, cancelled, err := turns.CancelActive(t.Context(), "s"); err != nil || !cancelled || id != "turn-1" || !slices.Equal(activity.cancelled, []string{"s"}) {
 		t.Errorf("CancelActive = %q %v %v", id, cancelled, err)
 	}
 	if active, queued := turns.Activity("s"); active != "turn-1" || queued != 3 {
 		t.Errorf("Activity = %q %d", active, queued)
+	}
+
+	if _, err := skills.Activate(t.Context(), "pdf"); err == nil || err.Error() != "skill support is not available" {
+		t.Errorf("unbound Activate error = %v, want skill support is not available", err)
+	}
+	if _, err := skills.StageDraft(t.Context(), "notes", "body"); err == nil || err.Error() != "skill support is not available" {
+		t.Errorf("unbound StageDraft error = %v, want skill support is not available", err)
+	}
+	skills.bind(parityPorts{})
+	if pin, err := skills.Activate(t.Context(), "pdf"); err != nil || pin.SkillID != "local/pdf@0123456789ab" {
+		t.Errorf("bound Activate = %+v, %v", pin, err)
+	}
+	if draft, err := skills.StageDraft(t.Context(), "notes", "body"); err != nil || draft.ID != "local/notes@0123456789ab" {
+		t.Errorf("bound StageDraft = %+v, %v", draft, err)
 	}
 }
 

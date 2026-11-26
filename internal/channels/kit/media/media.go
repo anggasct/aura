@@ -6,6 +6,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const maxFilenameRunes = 128
@@ -80,7 +82,7 @@ func SanitizeFilename(name string) string {
 func Spool(body io.Reader, limit int64) (*os.File, error) {
 	tmp, err := os.CreateTemp("", "aura-media-*")
 	if err != nil {
-		return nil, &Error{Code: ErrorCodeSpoolFailed, Detail: "temporary file is not creatable", Cause: err}
+		return nil, fault.Wrap(ErrorCodeSpoolFailed, "temporary file is not creatable", err)
 	}
 	discard := func() {
 		_ = tmp.Close()
@@ -89,15 +91,15 @@ func Spool(body io.Reader, limit int64) (*os.File, error) {
 	written, err := io.Copy(tmp, io.LimitReader(body, limit+1))
 	if err != nil {
 		discard()
-		return nil, &Error{Code: ErrorCodeIncomplete, Detail: "content did not arrive completely", Cause: err}
+		return nil, fault.Wrap(ErrorCodeIncomplete, "content did not arrive completely", err)
 	}
 	if written > limit {
 		discard()
-		return nil, &Error{Code: ErrorCodeSizeExceeded, Detail: "content exceeds the size bound"}
+		return nil, fault.New(ErrorCodeSizeExceeded, "content exceeds the size bound")
 	}
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		discard()
-		return nil, &Error{Code: ErrorCodeSpoolFailed, Detail: "temporary file is not rewindable", Cause: err}
+		return nil, fault.Wrap(ErrorCodeSpoolFailed, "temporary file is not rewindable", err)
 	}
 	return tmp, nil
 }

@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -98,7 +99,7 @@ func TestOwnerRouteRejectsInvalidArguments(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			accepted, err := tc.decide()
-			if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); accepted || !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("Decide() = %v, %v; want a denial with invalid_argument", accepted, err)
 			}
 		})

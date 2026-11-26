@@ -3,12 +3,12 @@ package telegram
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/anggasct/aura/internal/channels/kit/chatcommand"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -90,9 +90,8 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 		EffectSession:  active,
 	})
 	if err != nil {
-		var rejected *chatcommand.Error
-		if errors.As(err, &rejected) {
-			a.logger.WarnContext(ctx, "chat command rejected", "component", "command", "account", a.account.Name, "code", string(rejected.Code))
+		if code, ok := fault.CodeOf[chatcommand.ErrorCode](err); ok {
+			a.logger.WarnContext(ctx, "chat command rejected", "component", "command", "account", a.account.Name, "code", string(code))
 			return true, nil
 		}
 		return false, &Error{Code: ErrorCodeIntakeFailed, Detail: "command could not run", Cause: err}

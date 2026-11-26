@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
@@ -17,8 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type sessionActivity interface {
@@ -26,16 +26,70 @@ type sessionActivity interface {
 	SessionActivity(sessionID string) (activeTurnID string, queued int)
 }
 
-type engineCommandTurns struct {
-	engine sessionActivity
+type deferredCommandTurns struct {
+	engine atomic.Pointer[sessionActivity]
 }
 
-func (t engineCommandTurns) CancelActive(ctx context.Context, sessionID string) (turnID string, cancelled bool, err error) {
-	return t.engine.CancelActive(ctx, sessionID)
+func (t *deferredCommandTurns) bind(engine sessionActivity) {
+	if t != nil && engine != nil {
+		t.engine.Store(&engine)
+	}
 }
 
-func (t engineCommandTurns) Activity(sessionID string) (activeTurnID string, queued int) {
-	return t.engine.SessionActivity(sessionID)
+func (t *deferredCommandTurns) CancelActive(ctx context.Context, sessionID string) (turnID string, cancelled bool, err error) {
+	var engine *sessionActivity
+	if t != nil {
+		engine = t.engine.Load()
+	}
+	if engine == nil {
+		return "", false, command.Errorf(command.ErrorCodeUnavailable, "turn engine is not ready")
+	}
+	return (*engine).CancelActive(ctx, sessionID)
+}
+
+func (t *deferredCommandTurns) Activity(sessionID string) (activeTurnID string, queued int) {
+	var engine *sessionActivity
+	if t != nil {
+		engine = t.engine.Load()
+	}
+	if engine == nil {
+		return "", 0
+	}
+	return (*engine).SessionActivity(sessionID)
+}
+
+var errCommandSkillsUnavailable = errors.New("skill support is not available")
+
+type deferredCommandSkills struct {
+	skills atomic.Pointer[command.Skills]
+}
+
+func (s *deferredCommandSkills) bind(skills command.Skills) {
+	if s != nil && skills != nil {
+		s.skills.Store(&skills)
+	}
+}
+
+func (s *deferredCommandSkills) Activate(ctx context.Context, name string) (command.SkillPin, error) {
+	var skills *command.Skills
+	if s != nil {
+		skills = s.skills.Load()
+	}
+	if skills == nil {
+		return command.SkillPin{}, errCommandSkillsUnavailable
+	}
+	return (*skills).Activate(ctx, name)
+}
+
+func (s *deferredCommandSkills) StageDraft(ctx context.Context, name, body string) (command.Draft, error) {
+	var skills *command.Skills
+	if s != nil {
+		skills = s.skills.Load()
+	}
+	if skills == nil {
+		return command.Draft{}, errCommandSkillsUnavailable
+	}
+	return (*skills).StageDraft(ctx, name, body)
 }
 
 type sequenceReader interface {
@@ -139,41 +193,14 @@ func missingSession(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || (ok && code == turnstore.ErrorCodeSessionNotFound)
 }
 
-type discordConversationResolver struct {
-	pointers turnstore.ConversationSessionStore
-}
-
-func (r *discordConversationResolver) ActiveSession(ctx context.Context, conversationKey string) (string, error) {
-	id, found, err := r.pointers.Resolve(ctx, conversationKey)
-	if err != nil {
-		return "", err
-	}
-	if !found {
-		return conversationKey, nil
-	}
-	return id, nil
-}
-
-func wireChatCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions turnstore.SessionService, events sequenceReader, pointers turnstore.ConversationSessionStore, skills command.Skills, recorder command.Recorder) error {
+func newChatCommandDispatcher(sessions turnstore.SessionService, events sequenceReader, pointers turnstore.ConversationSessionStore, turns command.Turns, skills command.Skills, recorder command.Recorder) (*command.Dispatcher, error) {
 	registry, err := command.New(discord.CommandBinding(), telegram.CommandBinding())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{
+	return command.NewDispatcher(registry, command.Ports{
 		Sessions: &discordCommandSessions{sessions: sessions, events: events, pointers: pointers},
-		Turns:    engineCommandTurns{engine: engine},
+		Turns:    turns,
 		Skills:   skills,
 	}, recorder)
-	if err != nil {
-		return err
-	}
-	for _, port := range ports {
-		switch adapter := port.(type) {
-		case *discord.Adapter:
-			adapter.SetCommands(dispatcher)
-		case *telegram.Adapter:
-			adapter.SetCommands(dispatcher)
-		}
-	}
-	return nil
 }

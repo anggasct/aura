@@ -24,6 +24,9 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/handoff"
@@ -230,7 +233,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	name := "email-access"
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	decider := channelApprovalDecider(approvalChannels(approvers, route))
+	decider := approval.Decider(approvalChannels(approvers, route))
 	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil), toolsbuiltin.WithLiveEvents(liveEvents))
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
@@ -239,9 +242,17 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSessionEnsurer: %v", err)
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
 	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], h.mail, h.submissions,
 		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		&emailSessions{discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}}, slog.New(slog.DiscardHandler))
+		sessions, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("email.New: %v", err)
 	}
@@ -256,11 +267,12 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	adapter.SetPrincipalResolver(owners)
 	adapter.SetPersonaRouter(router)
-	settings := discordAccessSettings(cfg, db, nil, nil)
+	settings := channelAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota))})
-	mailboxes := wireEmailOwnerAccess([]runtimechannelhost.ChannelPort{adapter}, route, approvers)
-	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
+	adapter.SetMediaStore(mediaStore)
+	adapter.SetOwnerRoute(route)
+	adapter.SetHandoffNotifier(newEmailHandoffNotifier(approvers))
+	builtin.SetEmailOutbox(&emailOutbox{adapters: []*email.Adapter{adapter}})
 	handoffService := mustHandoffService(t, db, []handoff.Notifier{&channelHandoffNotifier{target: adapter}})
 	if err := builtin.Broker().RegisterProvider(handoff.NewToolProvider(handoffService)); err != nil {
 		t.Fatalf("RegisterProvider(handoff): %v", err)

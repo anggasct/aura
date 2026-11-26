@@ -68,6 +68,8 @@ type serverBuild struct {
 	ownerRoute         *approval.OwnerRoute
 	workflowRoute      *approval.OwnerRoute
 	accessRecorder     *telemetry.AccessRecorder
+	commandTurns       *deferredCommandTurns
+	commandSkills      *deferredCommandSkills
 	mcp                *mcpRuntime
 	personaRecorder    *telemetry.PersonaRecorder
 	durableConfig      *runtimeengine.DurableConfig
@@ -137,40 +139,29 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 	if err := recoverEmailEffects(ctx, cfg, db, b.logger); err != nil {
 		return toolWiring{}, err
 	}
-	channelAdapters, channelChecks, approvalAdapters, err := buildChannelAdapters(cfg, personaRouter, db, b.artifactRoot, meters, s.erasureRuns, b.logger)
+	commandRecorder, err := telemetry.NewCommandRecorder(b.pipeline.TracerProvider(), meters)
 	if err != nil {
 		return toolWiring{}, err
 	}
-	accessRecorder, err := telemetry.NewAccessRecorder(meters)
+	s.commandTurns = &deferredCommandTurns{}
+	s.commandSkills = &deferredCommandSkills{}
+	dispatcher, err := newChatCommandDispatcher(b.sessions, b.events, turnstore.NewConversationSessionStore(db), s.commandTurns, s.commandSkills, commandRecorder)
 	if err != nil {
 		return toolWiring{}, err
 	}
-	var ownerRoute *approval.OwnerRoute
-	if cfg.Channels.HTTP.Enabled || cfg.Channels.Email.Enabled {
-		ownerRoute, err = newOwnerRoute(approvalAdapters, accessRecorder.ApprovalRouted)
-		if err != nil {
-			return toolWiring{}, err
-		}
+	built, err := buildServerChannels(cfg, personaRouter, db, b.artifactRoot, meters, s.erasureRuns, dispatcher, b.logger)
+	if err != nil {
+		return toolWiring{}, err
 	}
-	var workflowRoute *approval.OwnerRoute
-	if len(approvalAdapters) > 0 {
-		workflowRoute, err = newWorkflowRoute(approvalAdapters, accessRecorder.ApprovalRouted)
-		if err != nil {
-			return toolWiring{}, err
-		}
-	}
-	s.channels, s.checks, s.approvalAdapters = channelAdapters, channelChecks, approvalAdapters
-	s.ownerRoute, s.workflowRoute, s.accessRecorder = ownerRoute, workflowRoute, accessRecorder
-	s.emailMailboxes = wireEmailOwnerAccess(channelAdapters, ownerRoute, approvalAdapters)
-	approvalTargets := approvalChannels(approvalAdapters, ownerRoute)
-	if workflowRoute != nil {
-		approvalTargets = append(approvalTargets, workflowRoute)
-	}
+	s.channels, s.checks, s.approvalAdapters = built.ports, built.checks, built.approvers
+	s.ownerRoute, s.workflowRoute, s.accessRecorder = built.ownerRoute, built.workflowRoute, built.accessRecorder
+	s.emailMailboxes = built.emailMailboxes
+	approvalTargets := approvalChannels(built.approvers, built.ownerRoute, built.workflowRoute)
 	return toolWiring{
 		observer:  toolObserver(toolRecorder),
-		decider:   channelApprovalDecider(approvalTargets),
-		access:    newAccessPolicy(b.registry, db, accessRecorder),
-		reachable: channelApprovalReachable(approvalTargets),
+		decider:   approval.Decider(approvalTargets),
+		access:    newAccessPolicy(b.registry, db, built.accessRecorder),
+		reachable: approval.Reachable(approvalTargets),
 	}, nil
 }
 
@@ -305,15 +296,8 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 }
 
 func (b *build) buildChannelHost() error {
-	s, meters := b.server, b.meters()
-	commandRecorder, err := telemetry.NewCommandRecorder(b.pipeline.TracerProvider(), meters)
-	if err != nil {
-		return err
-	}
-	if err := wireChatCommands(s.channels, b.engine, b.sessions, b.events, turnstore.NewConversationSessionStore(b.db), b.modules.skills, commandRecorder); err != nil {
-		return err
-	}
-	s.host, err = runtimeengine.NewHost(b.engine, b.logger)
+	var err error
+	b.server.host, err = runtimeengine.NewHost(b.engine, b.logger)
 	return err
 }
 
