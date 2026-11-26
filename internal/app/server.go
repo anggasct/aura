@@ -394,11 +394,22 @@ func (b *build) buildSchedule() error {
 	s.hostedHandlers = append(s.hostedHandlers, schedule.HandlerName)
 	s.childLedger = child.NewLedger(nil, 0)
 	if cfg.Children != nil && cfg.Children.Enabled {
-		childHandler, err := buildChildHandler(db, s.childLedger, &runtimeSignaler{runtime: s.broadcastRuntime}, b.executor, b.primaryModel())
+		var turns child.TurnRunner
+		if b.executor != nil {
+			turns = b.executor
+		}
+		childMod, err := child.New(&child.ModuleDeps{
+			DB:        db,
+			Sessions:  b.sessions,
+			Turns:     turns,
+			Runtime:   s.broadcastRuntime,
+			Ledger:    s.childLedger,
+			ModelName: b.primaryModel(),
+		})
 		if err != nil {
 			return err
 		}
-		if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
+		if err := childMod.Register(registrar); err != nil {
 			return err
 		}
 		s.hostedHandlers = append(s.hostedHandlers, child.HandlerName)

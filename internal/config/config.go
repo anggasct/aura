@@ -31,16 +31,6 @@ type Sync struct {
 	Include            []string           `json:"include"`
 }
 
-type Children struct {
-	Enabled            bool               `json:"enabled"`
-	MaxDepth           int                `json:"max_depth"`
-	MaxActivePerParent int                `json:"max_active_per_parent"`
-	MaxActiveGlobal    int                `json:"max_active_global"`
-	DefaultTimeout     configkit.Duration `json:"default_timeout"`
-	MaxTimeout         configkit.Duration `json:"max_timeout"`
-	Recovery           string             `json:"recovery"`
-}
-
 type Discord struct {
 	Enabled                  bool               `json:"enabled"`
 	Accounts                 []DiscordAccount   `json:"accounts"`
@@ -295,18 +285,6 @@ func DefaultSync() *Sync {
 		GitBinary:          "/usr/bin/git",
 		SSHBinary:          "/usr/bin/ssh",
 		Include:            []string{"skills/**", "config-templates/**"},
-	}
-}
-
-func DefaultChildren() *Children {
-	return &Children{
-		Enabled:            true,
-		MaxDepth:           1,
-		MaxActivePerParent: 2,
-		MaxActiveGlobal:    4,
-		DefaultTimeout:     configkit.Duration(5 * time.Minute),
-		MaxTimeout:         configkit.Duration(30 * time.Minute),
-		Recovery:           "interrupt",
 	}
 }
 

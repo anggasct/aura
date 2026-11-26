@@ -15,7 +15,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/effect"
 	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestDurableRunFirstLife(t *testing.T) {
@@ -201,7 +200,11 @@ func TestDurableChildResumesAfterAKilledProcess(t *testing.T) {
 	suite.release(t, "tool-b")
 
 	suite.requireRunSucceeded(t)
-	run, found, err := store.NewChildStore(suite.db).GetRun(t.Context(), suite.plan.Run)
+	childStore, err := child.NewSQLiteStore(suite.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	run, found, err := childStore.GetRun(t.Context(), suite.plan.Run)
 	if err != nil || !found {
 		t.Fatalf("GetRun = %+v, %v, %v", run, found, err)
 	}

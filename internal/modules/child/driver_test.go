@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeLauncher struct {
@@ -138,7 +140,7 @@ func TestDriverRejectsKeyMismatch(t *testing.T) {
 	}
 	if _, _, err := driver.RunChild(t.Context(), testSpec(), time.Now().UTC()); err == nil {
 		t.Fatal("durable key mismatch must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildInvalid {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }

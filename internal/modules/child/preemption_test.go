@@ -135,12 +135,11 @@ func newChildHost(t *testing.T, sessions *scriptedSessions) *childHost {
 	t.Helper()
 	runs := &recordingRuns{run: HandlerRun{ID: "ch-1", SessionID: "sess-child", State: StatusQueued, Deadline: time.Now().UTC().Add(time.Hour), ContextDigest: "digest-ch-1", DurableKey: hostedChild, ParentInvocation: "inv-1"}}
 	ledger := &fakeHandlerLedger{}
-	handler, err := NewHandlerWithLedger(runs, sessions, ledger)
-	if err != nil {
-		t.Fatalf("NewHandlerWithLedger: %v", err)
-	}
 	signaler := &recordingSignaler{}
-	handler.SetSignaler(signaler)
+	handler, err := NewHandler(&HandlerDeps{Runs: runs, Exec: sessions, Ledger: ledger, Signaler: signaler})
+	if err != nil {
+		t.Fatalf("NewHandler: %v", err)
+	}
 	host := &childHost{t: t, db: storetest.OpenMigrated(t), runs: runs, ledger: ledger, signaler: signaler, handler: handler}
 	host.startHost()
 	t.Cleanup(host.stopHost)
