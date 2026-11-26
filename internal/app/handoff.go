@@ -153,7 +153,7 @@ func telegramAccount(cfg *appconfig.Config, name string) (*config.TelegramAccoun
 	return nil, false
 }
 
-func emailAccount(cfg *appconfig.Config, name string) (*config.EmailAccount, bool) {
+func emailAccount(cfg *appconfig.Config, name string) (*email.Account, bool) {
 	for i := range cfg.Channels.Email.Accounts {
 		if cfg.Channels.Email.Accounts[i].Name == name {
 			return &cfg.Channels.Email.Accounts[i], true

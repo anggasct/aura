@@ -7,6 +7,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -81,14 +82,14 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 		return access.HandoffTarget{}, access.ErrNoHandoffTarget
 	}
 	if a.notifier == nil || target.requester.Class == principal.ClassOwner {
-		return access.HandoffTarget{}, Errorf(ErrorCodeHandoffUnavailable, "no owner route can reach the owner")
+		return access.HandoffTarget{}, fault.New(ErrorCodeHandoffUnavailable, "no owner route can reach the owner")
 	}
 	if err := a.notifier.NotifyOwner(ctx, &target.requester, sessionID, reason); err != nil {
 		return access.HandoffTarget{}, err
 	}
 	thread, err := json.Marshal(ThreadReference{MessageID: target.reply.MessageID, Subject: target.reply.Subject})
 	if err != nil {
-		return access.HandoffTarget{}, Errorf(ErrorCodeMessageInvalid, "thread reference is not encodable")
+		return access.HandoffTarget{}, fault.New(ErrorCodeMessageInvalid, "thread reference is not encodable")
 	}
 	return access.HandoffTarget{
 		Channel:   principal.ChannelEmail,

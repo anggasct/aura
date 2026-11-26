@@ -10,7 +10,6 @@ import (
 	"testing/synctest"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -25,39 +24,39 @@ func wantDigest(text string) string {
 }
 
 func TestNew_RejectsMissingDependencies(t *testing.T) {
-	cfg := &config.Email{}
-	account := &config.EmailAccount{Name: testAccount}
+	TestEmailNewRefusesMissingRequiredDeps(t)
+}
+
+func TestEmailNewRefusesMissingRequiredDeps(t *testing.T) {
+	cfg := &Config{}
+	account := &Account{Name: testAccount}
 	effects := newEffects(t, storetest.OpenMigrated(t))
-	cases := map[string]func() (*Adapter, error){
-		"nil config": func() (*Adapter, error) {
-			return New(nil, account, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
-		},
-		"nil account": func() (*Adapter, error) {
-			return New(cfg, nil, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
-		},
-		"unnamed": func() (*Adapter, error) {
-			return New(cfg, &config.EmailAccount{}, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
-		},
-		"nil connector": func() (*Adapter, error) {
-			return New(cfg, account, nil, &fakeMailer{}, newMemoryCursors(), effects, newMemorySessions(), nil)
-		},
-		"nil mailer": func() (*Adapter, error) {
-			return New(cfg, account, newFakeMailbox(), nil, newMemoryCursors(), effects, newMemorySessions(), nil)
-		},
-		"nil cursors": func() (*Adapter, error) {
-			return New(cfg, account, newFakeMailbox(), &fakeMailer{}, nil, effects, newMemorySessions(), nil)
-		},
-		"nil effects": func() (*Adapter, error) {
-			return New(cfg, account, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), nil, newMemorySessions(), nil)
-		},
-		"nil sessions": func() (*Adapter, error) {
-			return New(cfg, account, newFakeMailbox(), &fakeMailer{}, newMemoryCursors(), effects, nil, nil)
-		},
+	validDeps := func() *Deps {
+		return &Deps{
+			Config:    cfg,
+			Account:   account,
+			Connector: newFakeMailbox(),
+			Mailer:    &fakeMailer{},
+			Cursors:   newMemoryCursors(),
+			Effects:   effects,
+			Sessions:  newMemorySessions(),
+		}
+	}
+	cases := map[string]func() *Deps{
+		"nil deps":      func() *Deps { return nil },
+		"nil config":    func() *Deps { d := validDeps(); d.Config = nil; return d },
+		"nil account":   func() *Deps { d := validDeps(); d.Account = nil; return d },
+		"unnamed":       func() *Deps { d := validDeps(); d.Account = &Account{}; return d },
+		"nil connector": func() *Deps { d := validDeps(); d.Connector = nil; return d },
+		"nil mailer":    func() *Deps { d := validDeps(); d.Mailer = nil; return d },
+		"nil cursors":   func() *Deps { d := validDeps(); d.Cursors = nil; return d },
+		"nil effects":   func() *Deps { d := validDeps(); d.Effects = nil; return d },
+		"nil sessions":  func() *Deps { d := validDeps(); d.Sessions = nil; return d },
 	}
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
-			adapter, err := build()
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument || adapter != nil {
+			adapter, err := New(build())
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) || adapter != nil {
 				t.Fatalf("New() = %v, %v; want invalid_argument and no adapter", adapter, err)
 			}
 		})
@@ -66,8 +65,8 @@ func TestNew_RejectsMissingDependencies(t *testing.T) {
 
 func TestStart_RejectsNilSink(t *testing.T) {
 	h := newHarness(t, harnessOptions{})
-	if code, ok := CodeOf(h.adapter.Start(t.Context(), nil)); !ok || code != ErrorCodeInvalidArgument {
-		t.Fatalf("Start(nil) code = %q, want invalid_argument", code)
+	if !fault.HasCode(h.adapter.Start(t.Context(), nil), ErrorCodeInvalidArgument) {
+		t.Fatalf("Start(nil) error = %v, want invalid_argument", h.adapter.Start(t.Context(), nil))
 	}
 }
 
@@ -264,10 +263,9 @@ func TestIngest_InvalidSendersDropWithTheirReason(t *testing.T) {
 
 func TestIngest_DropReasons(t *testing.T) {
 	cases := map[string]struct {
-		opts   harnessOptions
-		mutate func(h *harness)
-		spec   mailSpec
-		want   string
+		opts harnessOptions
+		spec mailSpec
+		want string
 	}{
 		"authenticated stranger": {
 			spec: mailSpec{from: strangerAddr, auth: testAuthserv + "; dmarc=pass header.from=example.net"},
@@ -279,9 +277,9 @@ func TestIngest_DropReasons(t *testing.T) {
 			want: "audience",
 		},
 		"no persona routed": {
-			mutate: func(h *harness) { h.adapter.SetPersonaRouter(nil) },
-			spec:   mailSpec{},
-			want:   "persona_unrouted",
+			opts: harnessOptions{noRouter: true},
+			spec: mailSpec{},
+			want: "persona_unrouted",
 		},
 		"persona never evaluated": {
 			opts: harnessOptions{evals: staticEvals{}},
@@ -320,9 +318,6 @@ func TestIngest_DropReasons(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			h := newHarness(t, tc.opts)
-			if tc.mutate != nil {
-				tc.mutate(h)
-			}
 			h.start()
 			tc.spec.messageID = "reason@example.com"
 			h.deliver(tc.spec.raw())
@@ -352,7 +347,7 @@ func TestIngest_BudgetsAndEvalsPassForTrustedSenders(t *testing.T) {
 
 func TestIngest_SizeBoundsDropBeforeFetching(t *testing.T) {
 	t.Run("oversized message", func(t *testing.T) {
-		h := newHarness(t, harnessOptions{email: func(c *config.Email) { c.MaxAttachmentBytes = 1 }})
+		h := newHarness(t, harnessOptions{email: func(c *Config) { c.MaxAttachmentBytes = 1 }})
 		h.start()
 		uid := h.mailbox.add(mailSpec{messageID: "big@example.com"}.raw())
 		h.mailbox.setSize(uid, 1+messageOverhead+1)
@@ -364,7 +359,7 @@ func TestIngest_SizeBoundsDropBeforeFetching(t *testing.T) {
 		}
 	})
 	t.Run("message at the bound", func(t *testing.T) {
-		h := newHarness(t, harnessOptions{email: func(c *config.Email) { c.MaxAttachmentBytes = 1 }})
+		h := newHarness(t, harnessOptions{email: func(c *Config) { c.MaxAttachmentBytes = 1 }})
 		h.start()
 		uid := h.mailbox.add(mailSpec{messageID: "edge@example.com"}.raw())
 		h.mailbox.setSize(uid, 1+messageOverhead)
@@ -382,7 +377,7 @@ func TestIngest_SizeBoundsDropBeforeFetching(t *testing.T) {
 		}
 	})
 	t.Run("body past the bound", func(t *testing.T) {
-		h := newHarness(t, harnessOptions{email: func(c *config.Email) { c.MaxAttachmentBytes = 1 }})
+		h := newHarness(t, harnessOptions{email: func(c *Config) { c.MaxAttachmentBytes = 1 }})
 		h.start()
 		raw := mailSpec{messageID: "grew@example.com", body: strings.Repeat("a", messageOverhead+64)}.raw()
 		uid := h.mailbox.add(raw)
@@ -622,10 +617,10 @@ func TestHealth_ReportsMailboxFaultsAndRecovers(t *testing.T) {
 		err  error
 		code string
 	}{
-		"password unavailable": {err: Errorf(ErrorCodeCredentialsUnavailable, "x"), code: "email_password_unavailable"},
-		"login rejected":       {err: Errorf(ErrorCodeLoginRejected, "x"), code: "email_login_rejected"},
-		"unreachable":          {err: Errorf(ErrorCodeConnectionFailed, "x"), code: "email_unreachable"},
-		"protocol":             {err: Errorf(ErrorCodeProtocolInvalid, "x"), code: "email_protocol_invalid"},
+		"password unavailable": {err: fault.New(ErrorCodeCredentialsUnavailable, "x"), code: "email_password_unavailable"},
+		"login rejected":       {err: fault.New(ErrorCodeLoginRejected, "x"), code: "email_login_rejected"},
+		"unreachable":          {err: fault.New(ErrorCodeConnectionFailed, "x"), code: "email_unreachable"},
+		"protocol":             {err: fault.New(ErrorCodeProtocolInvalid, "x"), code: "email_protocol_invalid"},
 		"untyped":              {err: errBoom, code: "email_unreachable"},
 	}
 	for name, tc := range cases {

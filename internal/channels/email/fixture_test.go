@@ -14,10 +14,10 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -233,7 +233,7 @@ func (s *fakeSession) Header(_ context.Context, uid uint32, limit int64) ([]byte
 	s.mailbox.headers = append(s.mailbox.headers, uid)
 	stored, ok := s.mailbox.mail[uid]
 	if !ok || stored.ghost {
-		return nil, Errorf(ErrorCodeMessageUnavailable, "gone")
+		return nil, fault.New(ErrorCodeMessageUnavailable, "gone")
 	}
 	end := bytes.Index(stored.raw, []byte("\r\n\r\n"))
 	header := stored.raw[:end+4]
@@ -249,7 +249,7 @@ func (s *fakeSession) Message(_ context.Context, uid uint32, limit int64) ([]byt
 	s.mailbox.bodies = append(s.mailbox.bodies, uid)
 	stored, ok := s.mailbox.mail[uid]
 	if !ok {
-		return nil, Errorf(ErrorCodeMessageUnavailable, "gone")
+		return nil, fault.New(ErrorCodeMessageUnavailable, "gone")
 	}
 	raw := stored.raw
 	if int64(len(raw)) > limit+1 {
@@ -471,8 +471,8 @@ func newEffects(t *testing.T, db *sql.DB) *effect.Executor {
 
 type harness struct {
 	t        *testing.T
-	cfg      *config.Email
-	account  *config.EmailAccount
+	cfg      *Config
+	account  *Account
 	logger   *slog.Logger
 	adapter  *Adapter
 	mailer   Mailer
@@ -490,9 +490,10 @@ type harness struct {
 }
 
 type harnessOptions struct {
-	account  func(*config.EmailAccount)
-	email    func(*config.Email)
+	account  func(*Account)
+	email    func(*Config)
 	audience string
+	noRouter bool
 	budgets  access.BudgetGate
 	evals    access.EvalGate
 	handoffs access.HandoffGate
@@ -511,14 +512,14 @@ type harnessOptions struct {
 
 func newHarness(t *testing.T, opts harnessOptions) *harness {
 	t.Helper()
-	cfg := &config.Email{Enabled: true, MaxAttachmentBytes: config.EmailMaxAttachmentBytes}
-	account := &config.EmailAccount{
+	cfg := &Config{Enabled: true, MaxAttachmentBytes: MaxAttachmentBytes}
+	account := &Account{
 		Name:           testAccount,
 		Persona:        testPersona,
 		Address:        testAddress,
 		AuthservID:     testAuthserv,
 		AllowedSenders: []string{friendAddress},
-		IMAP: config.EmailIMAP{
+		IMAP: IMAPConfig{
 			Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: secrettest.Ref("env://AURA_TEST_EMAIL_PASSWORD"),
 			Folder: "INBOX", PollInterval: configkit.Duration(time.Minute),
 		},
@@ -551,10 +552,6 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	if db == nil {
 		db = storetest.OpenMigrated(t)
 	}
-	adapter, err := New(cfg, account, mailbox, mailer, cursors, newEffects(t, db), sessions, logger)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	identities := opts.owners
 	if identities == nil {
 		identities = []string{"email:" + ownerAddress}
@@ -567,30 +564,44 @@ func newHarness(t *testing.T, opts harnessOptions) *harness {
 	if audience == "" {
 		audience = auraagent.AudienceTrusted
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(fakeRouter{definition: auraagent.Definition{ID: testPersona, Audience: audience}})
-	adapter.SetAccess(&AccessSettings{Budgets: opts.budgets, Evals: opts.evals, Handoffs: opts.handoffs, Erasure: opts.erasure})
-	adapter.SetOwnerRoute(opts.route)
-	adapter.SetHandoffNotifier(opts.notifier)
-	if opts.vision != nil {
-		adapter.SetVisionService(opts.vision)
+	var router PersonaRouter
+	if !opts.noRouter {
+		router = fakeRouter{definition: auraagent.Definition{ID: testPersona, Audience: audience}}
 	}
-	if opts.media != nil {
-		adapter.SetMediaStore(opts.media)
+	h := &harness{t: t, cfg: cfg, account: account, logger: logger, mailer: mailer, db: db, mailbox: mailbox, sink: newCaptureSink(), cursors: cursors, sessions: sessions, logs: logs, done: make(chan struct{})}
+	adapter, err := New(&Deps{
+		Config:            cfg,
+		Account:           account,
+		Connector:         mailbox,
+		Mailer:            mailer,
+		Cursors:           cursors,
+		Effects:           newEffects(t, db),
+		Sessions:          sessions,
+		Logger:            logger,
+		PrincipalResolver: owners,
+		PersonaRouter:     router,
+		Access:            &AccessSettings{Budgets: opts.budgets, Evals: opts.evals, Handoffs: opts.handoffs, Erasure: opts.erasure},
+		OwnerRoute:        opts.route,
+		HandoffNotifier:   opts.notifier,
+		Media:             opts.media,
+		Vision:            opts.vision,
+		OnDropped: func(_ context.Context, reason string) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.drops = append(h.drops, reason)
+		},
+		OnAdmitted: func(_ context.Context, class principal.Class) {
+			h.mu.Lock()
+			defer h.mu.Unlock()
+			h.admitted = append(h.admitted, class)
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
 	}
 	adapter.retryBase = time.Millisecond
 	adapter.retryCap = 5 * time.Millisecond
-	h := &harness{t: t, cfg: cfg, account: account, logger: logger, adapter: adapter, mailer: mailer, db: db, mailbox: mailbox, sink: newCaptureSink(), cursors: cursors, sessions: sessions, logs: logs, done: make(chan struct{})}
-	adapter.SetDropObserver(func(_ context.Context, reason string) {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		h.drops = append(h.drops, reason)
-	})
-	adapter.SetAdmissionObserver(func(_ context.Context, class principal.Class) {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		h.admitted = append(h.admitted, class)
-	})
+	h.adapter = adapter
 	return h
 }
 

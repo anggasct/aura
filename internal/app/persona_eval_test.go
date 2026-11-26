@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/store"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 )
 
 func writePersonaEvalConfig(t *testing.T, instructions, publicTools string) string {
@@ -47,7 +47,7 @@ func writeEvalCases(t *testing.T, configPath, persona, content string) {
 	}
 }
 
-func evalGateFor(t *testing.T, configPath string) *personaEvalGate {
+func evalGateFor(t *testing.T, configPath string) *personaeval.Gate {
 	t.Helper()
 	loaded, err := appconfig.Load(configPath)
 	if err != nil {
@@ -57,7 +57,15 @@ func evalGateFor(t *testing.T, configPath string) *personaEvalGate {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &personaEvalGate{registry: registry, results: store.NewPersonaEvalStore(openAccessDB(t, configPath))}
+	evalStore, err := personaeval.NewSQLiteStore(openAccessDB(t, configPath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate, err := personaeval.NewGate(registry, evalStore)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return gate
 }
 
 func TestPersonaEvalRecordsResultsBoundToTheDigest(t *testing.T) {

@@ -10,7 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -123,8 +122,8 @@ func TestStartPushRejectsDigestChange(t *testing.T) {
 	}
 	if _, err := StartPush(t.Context(), runner, "session-1", "ssh://git@example.com/owner/repo.git", "main", "digest-2", "ref-abc123", "turn-1", "call-1", 1, nil); err == nil {
 		t.Fatal("changed digest must conflict")
-	} else if code, ok := fault.CodeOf[store.ErrorCode](err); !ok && code == "" {
-		t.Fatalf("expected a classified conflict, got %v", err)
+	} else if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeEventSequenceConflict {
+		t.Fatalf("expected %q, got %v", turnstore.ErrorCodeEventSequenceConflict, err)
 	}
 }
 

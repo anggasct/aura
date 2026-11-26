@@ -1,8 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/fetch"
@@ -12,18 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
-
-type Sync struct {
-	Enabled            bool               `json:"enabled"`
-	Remote             string             `json:"remote"`
-	Branch             string             `json:"branch"`
-	Interval           configkit.Duration `json:"interval"`
-	TransportSecretRef secret.Ref         `json:"transport_secret_ref"`
-	KnownHostsRef      secret.Ref         `json:"known_hosts_ref"`
-	GitBinary          string             `json:"git_binary"`
-	SSHBinary          string             `json:"ssh_binary"`
-	Include            []string           `json:"include"`
-}
 
 type Telegram struct {
 	Enabled            bool               `json:"enabled"`
@@ -91,48 +77,6 @@ type TelegramPolling struct {
 }
 
 const (
-	EmailMaxAttachmentBytes  int64 = 20971520
-	EmailDefaultIMAPPort           = 993
-	EmailDefaultSMTPPort           = 587
-	EmailDefaultFolder             = "INBOX"
-	EmailDefaultPollInterval       = time.Minute
-	EmailMinPollInterval           = 10 * time.Second
-	EmailMaxPollInterval           = time.Hour
-)
-
-type Email struct {
-	Enabled            bool           `json:"enabled"`
-	Accounts           []EmailAccount `json:"accounts"`
-	MaxAttachmentBytes int64          `json:"max_attachment_bytes"`
-}
-
-type EmailAccount struct {
-	Name           string    `json:"name"`
-	Persona        string    `json:"persona"`
-	Address        string    `json:"address"`
-	IMAP           EmailIMAP `json:"imap"`
-	SMTP           EmailSMTP `json:"smtp"`
-	AuthservID     string    `json:"authserv_id"`
-	AllowedSenders []string  `json:"allowed_senders"`
-}
-
-type EmailSMTP struct {
-	Host        string     `json:"host"`
-	Port        int        `json:"port"`
-	Username    string     `json:"username"`
-	PasswordRef secret.Ref `json:"password_ref"`
-}
-
-type EmailIMAP struct {
-	Host         string             `json:"host"`
-	Port         int                `json:"port"`
-	Username     string             `json:"username"`
-	PasswordRef  secret.Ref         `json:"password_ref"`
-	Folder       string             `json:"folder"`
-	PollInterval configkit.Duration `json:"poll_interval"`
-}
-
-const (
 	HTTPListenAddress            = "127.0.0.1:8284"
 	HTTPMaxBodyBytes             = 1048576
 	HTTPMaxBodyCeiling           = 10485760
@@ -169,10 +113,6 @@ type Tools struct {
 	GitHub               github.Config    `json:"github,omitzero"`
 }
 
-var (
-	syncBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
-)
-
 func DefaultTools() *Tools {
 	return &Tools{
 		Workspace:            "/srv/aura/workspace",
@@ -181,33 +121,4 @@ func DefaultTools() *Tools {
 		Fetch:                fetch.Default(),
 		WebSearch:            search.Default(),
 	}
-}
-
-func DefaultSync() *Sync {
-	return &Sync{
-		Enabled:            false,
-		Branch:             "main",
-		Interval:           configkit.Duration(15 * time.Minute),
-		TransportSecretRef: defaultSyncTransportSecretRef(),
-		KnownHostsRef:      defaultSyncKnownHostsRef(),
-		GitBinary:          "/usr/bin/git",
-		SSHBinary:          "/usr/bin/ssh",
-		Include:            []string{"skills/**", "config-templates/**"},
-	}
-}
-
-func defaultSyncTransportSecretRef() secret.Ref {
-	return mustRef(fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "TRANSPORT_SECRET"))
-}
-
-func defaultSyncKnownHostsRef() secret.Ref {
-	return mustRef(fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "KNOWN_HOSTS"))
-}
-
-func mustRef(text string) secret.Ref {
-	ref, err := secret.ParseRef(text)
-	if err != nil {
-		panic(err)
-	}
-	return ref
 }

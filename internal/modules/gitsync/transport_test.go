@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
@@ -23,8 +23,8 @@ func (loopbackResolver) LookupIP(_ context.Context, _ string) ([]net.IP, error) 
 	return []net.IP{net.ParseIP("127.0.0.1")}, nil
 }
 
-func transportConfig(remote string) *config.Sync {
-	return &config.Sync{
+func transportConfig(remote string) *Config {
+	return &Config{
 		Enabled:            true,
 		Remote:             remote,
 		Branch:             "main",
@@ -96,7 +96,7 @@ func TestResolveTransportRejectsSecretScheme(t *testing.T) {
 	cfg.TransportSecretRef = secret.Ref{}
 	if _, err := ResolveTransport(t.Context(), cfg, denyResolver{}); err == nil {
 		t.Fatal("ResolveTransport with no secret reference = nil, want error")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCredentialInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeCredentialInvalid {
 		t.Fatalf("code = %v,%v want sync_secret_invalid", code, ok)
 	}
 }
