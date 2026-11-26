@@ -11,6 +11,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -242,7 +243,7 @@ func filterSources(records []SourceRecord, uri string) []SourceRecord {
 func (s *Service) ingest(ctx context.Context, action, collection, source string, isURL bool) (IngestResult, error) {
 	screen, err := s.secrets.Snapshot(ctx)
 	if err != nil {
-		return IngestResult{}, fmt.Errorf("%w: %w", &Error{Code: ErrorCodeSecretUnavailable, Detail: "a configured secret reference could not be resolved"}, err)
+		return IngestResult{}, fault.Wrap(ErrorCodeSecretUnavailable, "a configured secret reference could not be resolved", err)
 	}
 	loaded, err := s.load(ctx, source, isURL)
 	if err != nil {

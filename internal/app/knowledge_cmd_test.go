@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -40,7 +41,7 @@ func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 
 func requireKBCode(t *testing.T, err error, want knowledge.ErrorCode) {
 	t.Helper()
-	code, ok := knowledge.CodeOf(err)
+	code, ok := fault.CodeOf[knowledge.ErrorCode](err)
 	if !ok || code != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}
