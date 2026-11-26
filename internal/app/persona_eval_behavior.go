@@ -21,7 +21,6 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const judgeMaxOutputTokens = 512
@@ -129,33 +128,4 @@ func (m behaviorModels) judge(route string) personaeval.Judge {
 		}
 		return collected.String(), nil
 	}
-}
-
-func runPersonaBehaviorEval(ctx context.Context, db *sql.DB, configPath string, definition *auraagent.Definition, models behaviorModels) (store.PersonaEvalResult, personaeval.BehaviorReport, error) {
-	if definition.EvalBehavior == nil {
-		return store.PersonaEvalResult{}, personaeval.BehaviorReport{}, fmt.Errorf("%s: persona %q does not enable behavior evaluation", personaeval.ErrorCodeInvalid, definition.ID)
-	}
-	cases, err := personaeval.LoadCases(personaEvalDir(configPath, definition))
-	if err != nil {
-		return store.PersonaEvalResult{}, personaeval.BehaviorReport{}, err
-	}
-	report, err := personaeval.RunBehavior(ctx, definition, cases, models.converse, models.judge(definition.EvalBehavior.JudgeRoute))
-	if err != nil {
-		return store.PersonaEvalResult{}, personaeval.BehaviorReport{}, err
-	}
-	score := report.Score
-	recorded, err := store.NewPersonaEvalStore(db).Record(ctx, &store.PersonaEvalResult{
-		AgentID: definition.ID, Digest: definition.EvalDigest(), Layer: store.EvalLayerBehavior, Passed: report.Passed(), Score: &score,
-		CasesTotal: len(report.Cases), CasesFailed: len(report.FailedCases), FailedCases: report.FailedCases, CreatedAt: time.Now().UTC(),
-	})
-	return recorded, report, err
-}
-
-func behaviorLines(report *personaeval.BehaviorReport) []string {
-	lines := make([]string, 0, 1+len(report.Cases))
-	lines = append(lines, fmt.Sprintf("behavior score: %.2f (min %.2f)", report.Score, report.MinScore))
-	for _, scored := range report.Cases {
-		lines = append(lines, fmt.Sprintf("case %s: %.2f — %s", scored.Name, scored.Score, scored.Reason))
-	}
-	return lines
 }
