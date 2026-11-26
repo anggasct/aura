@@ -100,7 +100,7 @@ func TestConnectorErrorCodeIsTheOnlyTextTheCallerSees(t *testing.T) {
 	h := newTestHost(t, nil, starter, &bearerAuth{})
 	_, fail := invokeTool(t, h, readTool(h))
 	mustCode(t, fail, ErrConnector)
-	if fail.Public() != "plugin_connector_error: not_found" || fail.Reported != "not_found" {
+	if fail.Public() != "plugin_connector_error: not_found" || fail.reported != "not_found" {
 		t.Fatalf("public text = %q", fail.Public())
 	}
 	if starter.openSessions() != 1 {
@@ -243,7 +243,7 @@ func TestAWaitingCallStopsWhenItsContextEnds(t *testing.T) {
 		}
 	})
 	h := newTestHost(t, nil, starter, &bearerAuth{})
-	done := make(chan *Error, 1)
+	done := make(chan *callFailure, 1)
 	go func() {
 		_, fail := invokeTool(t, h, readTool(h))
 		done <- fail
@@ -300,7 +300,7 @@ func TestAuthFailureEndsTheCallBeforeAnyRequestLeaves(t *testing.T) {
 			h := newTestHost(t, api, starter, &bearerAuth{err: tc.err})
 			_, fail := invokeTool(t, h, effectTool(h))
 			mustCode(t, fail, tc.want)
-			if fail.RequestSent || api.count() != 0 || strings.Contains(fail.Error(), "secret") {
+			if fail.requestSent || api.count() != 0 || strings.Contains(fail.Error(), "secret") {
 				t.Fatalf("failure = %v, api requests = %d", fail, api.count())
 			}
 		})

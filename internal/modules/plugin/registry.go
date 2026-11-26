@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -73,7 +75,7 @@ func encodeStored(manifest *Manifest, bundleSHA256 string) (string, error) {
 	normalized := manifest.normalized()
 	data, err := json.Marshal(&storedManifest{Manifest: &normalized, BundleSHA256: bundleSHA256})
 	if err != nil {
-		return "", Wrap(ErrManifestInvalid, err, "the manifest cannot be encoded")
+		return "", fault.New(ErrManifestInvalid, "the manifest cannot be encoded")
 	}
 	return string(data), nil
 }
@@ -86,7 +88,7 @@ func decodeStored(raw string) (*Manifest, string, error) {
 		return nil, "", Errorf(ErrStorage, "a stored manifest is unreadable")
 	}
 	if err := stored.Manifest.Validate(); err != nil {
-		return nil, "", Wrap(ErrStorage, err, "a stored manifest no longer validates")
+		return nil, "", fault.New(ErrStorage, "a stored manifest no longer validates")
 	}
 	return stored.Manifest, stored.BundleSHA256, nil
 }

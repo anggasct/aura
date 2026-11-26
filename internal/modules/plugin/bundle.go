@@ -13,6 +13,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -149,7 +151,7 @@ func copyTree(src, dst *os.Root) error {
 	}
 	for _, dir := range found.Dirs {
 		if err := dst.Mkdir(dir, dirMode); err != nil {
-			return Wrap(ErrStorage, err, "a bundle directory cannot be created")
+			return fault.New(ErrStorage, "a bundle directory cannot be created")
 		}
 	}
 	var copied int64
@@ -182,7 +184,7 @@ func copyFile(src, dst *os.Root, file treeFile) (int64, error) {
 	}
 	out, err := dst.OpenFile(file.Path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
-		return 0, Wrap(ErrStorage, err, "a bundle file cannot be created")
+		return 0, fault.New(ErrStorage, "a bundle file cannot be created")
 	}
 	written, copyErr := io.Copy(out, io.LimitReader(in, MaxBundleFileBytes+1))
 	if copyErr == nil && written > MaxBundleFileBytes {
@@ -193,14 +195,14 @@ func copyFile(src, dst *os.Root, file treeFile) (int64, error) {
 	}
 	closeErr := out.Close()
 	if copyErr != nil {
-		var coded *Error
+		var coded *fault.Error[ErrorCode]
 		if errors.As(copyErr, &coded) {
 			return 0, copyErr
 		}
-		return 0, Wrap(ErrStorage, copyErr, "a bundle file cannot be written")
+		return 0, fault.New(ErrStorage, "a bundle file cannot be written")
 	}
 	if closeErr != nil {
-		return 0, Wrap(ErrStorage, closeErr, "a bundle file cannot be written")
+		return 0, fault.New(ErrStorage, "a bundle file cannot be written")
 	}
 	return written, nil
 }

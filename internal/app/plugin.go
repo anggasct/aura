@@ -10,6 +10,7 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -43,7 +44,7 @@ func pluginDirectory(cfg *appconfig.Config, name string) (string, error) {
 	}
 	absolute, err := filepath.Abs(dataRoot)
 	if err != nil {
-		return "", plugin.Wrap(plugin.ErrStorage, err, "the data directory cannot be resolved")
+		return "", fault.New(plugin.ErrStorage, "the data directory cannot be resolved")
 	}
 	return filepath.Join(absolute, name), nil
 }
@@ -102,17 +103,17 @@ func pluginStoreError(err error, conflict plugin.ErrorCode) error {
 	}
 	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
-		return plugin.Wrap(plugin.ErrStorage, err, "the plugin registry is unavailable")
+		return fault.New(plugin.ErrStorage, "the plugin registry is unavailable")
 	}
 	switch code {
 	case store.ErrorCodePluginNotFound:
-		return plugin.Wrap(plugin.ErrNotFound, err, "the plugin or version is not installed")
+		return fault.New(plugin.ErrNotFound, "the plugin or version is not installed")
 	case store.ErrorCodePluginConflict:
-		return plugin.Wrap(conflict, err, "the plugin registry rejected the change")
+		return fault.New(conflict, "the plugin registry rejected the change")
 	case store.ErrorCodePluginInvalid:
-		return plugin.Wrap(plugin.ErrInvalidArgument, err, "the plugin registry rejected the record")
+		return fault.New(plugin.ErrInvalidArgument, "the plugin registry rejected the record")
 	default:
-		return plugin.Wrap(plugin.ErrStorage, err, "the plugin registry is unavailable")
+		return fault.New(plugin.ErrStorage, "the plugin registry is unavailable")
 	}
 }
 
@@ -220,6 +221,21 @@ func planPlugins(ctx context.Context, cfg *appconfig.Config, db *sql.DB, redacto
 	return &pluginRuntime{service: service, plan: plan, installed: len(summaries)}, nil
 }
 
+func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
+	return legacyconfig.MCPServer{
+		Name:           s.Name,
+		Transport:      s.Transport,
+		Command:        s.Command,
+		Args:           slices.Clone(s.Args),
+		URL:            s.URL,
+		StartupTimeout: s.StartupTimeout,
+		RequestTimeout: s.RequestTimeout,
+		ConnectTimeout: s.ConnectTimeout,
+		MaxMessageSize: s.MaxMessageSize,
+		Capabilities:   slices.Clone(s.Capabilities),
+	}
+}
+
 func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 	if r == nil {
 		return nil
@@ -230,7 +246,7 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 		if active.Kind != plugin.BackendMCP {
 			continue
 		}
-		server := mcp.PluginServer{ID: active.ID, Server: active.Server, Authorizer: active.Auth}
+		server := mcp.PluginServer{ID: active.ID, Server: mcpServerFromBackend(&active.Server), Authorizer: active.Auth}
 		for _, tool := range active.Tools {
 			server.Tools = append(server.Tools, mcp.PluginTool{Name: tool.Name, Description: tool.Description, Display: slices.Clone(tool.Display)})
 		}

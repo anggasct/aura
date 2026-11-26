@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/plugin"
 )
 
 func writePluginsConfig(t *testing.T, plugins string) string {
@@ -58,7 +58,7 @@ func TestLoad_PluginsDesiredIsParsed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := legacyconfig.PluginDesired{ID: "weather", Version: "1.2.3", Enabled: true}
+	want := plugin.Desired{ID: "weather", Version: "1.2.3", Enabled: true}
 	if result.Config.Plugins == nil || len(result.Config.Plugins.Desired) != 1 || result.Config.Plugins.Desired[0] != want {
 		t.Fatalf("Plugins = %+v, want %+v", result.Config.Plugins, want)
 	}

@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -31,7 +30,7 @@ type DriftItem struct {
 	Reason string
 }
 
-func Drift(desired *config.Plugins, installed []Record) []DriftItem {
+func Drift(desired *Config, installed []Record) []DriftItem {
 	if desired == nil {
 		return nil
 	}
@@ -67,7 +66,7 @@ func Drift(desired *config.Plugins, installed []Record) []DriftItem {
 
 type CheckerOptions struct {
 	Registry Registry
-	Desired  *config.Plugins
+	Desired  *Config
 	Held     []Held
 	Runtime  func(ctx context.Context) []RuntimeStatus
 	Now      func() time.Time
@@ -75,7 +74,7 @@ type CheckerOptions struct {
 
 type Checker struct {
 	registry Registry
-	desired  *config.Plugins
+	desired  *Config
 	held     []Held
 	runtime  func(ctx context.Context) []RuntimeStatus
 	now      func() time.Time

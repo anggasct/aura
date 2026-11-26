@@ -203,8 +203,8 @@ func TestRequestSentTracksWhetherAStateChangingRequestLeftTheHost(t *testing.T) 
 				}
 			} else {
 				mustCode(t, fail, tc.wantCode)
-				if fail.RequestSent != tc.wantSent {
-					t.Fatalf("RequestSent = %v, want %v (%v)", fail.RequestSent, tc.wantSent, fail)
+				if fail.requestSent != tc.wantSent {
+					t.Fatalf("requestSent = %v, want %v (%v)", fail.requestSent, tc.wantSent, fail)
 				}
 			}
 			if api.count() != tc.apiCalls {
@@ -230,8 +230,8 @@ func TestEgressClientGuardStillAppliesToAnApprovedHost(t *testing.T) {
 	h := newHost(&cfg, starter, egress.NewAPIClient(nil), slog.New(slog.DiscardHandler))
 	_, fail := invokeTool(t, h, effectTool(h))
 	mustCode(t, fail, ErrConnector)
-	if fail.RequestSent || told != "egress_denied" {
-		t.Fatalf("sent = %v, connector was told %v, want egress_denied from the egress client", fail.RequestSent, told)
+	if fail.requestSent || told != "egress_denied" {
+		t.Fatalf("sent = %v, connector was told %v, want egress_denied from the egress client", fail.requestSent, told)
 	}
 	if api.count() != 0 {
 		t.Fatalf("the api saw %d requests through a guarded client", api.count())

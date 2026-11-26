@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -101,7 +102,7 @@ func SecretFingerprint(secret *Secret) string {
 func jsonFingerprint(kind string, value any) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
-		return "", Wrap(ErrManifestInvalid, err, "the manifest cannot be encoded")
+		return "", fault.New(ErrManifestInvalid, "the manifest cannot be encoded")
 	}
 	return fingerprint(kind, string(data)), nil
 }
