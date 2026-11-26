@@ -13,6 +13,7 @@ const (
 	ErrorCodeAPIKeyConflict  ErrorCode = "apikey_conflict"
 	ErrorCodeAPIKeyNotFound  ErrorCode = "apikey_not_found"
 	ErrorCodeAPIKeyInvalid   ErrorCode = "apikey_invalid"
+	ErrorCodeErasureBlocked  ErrorCode = "erasure_blocked_by_live_runs"
 )
 
 func errNilArgument(name string) error {

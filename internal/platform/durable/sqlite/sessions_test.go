@@ -16,11 +16,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 var _ runtimeengine.SessionStore = (*SessionStore)(nil)
@@ -828,12 +828,14 @@ func TestErasingASessionDropsItsTurns(t *testing.T) {
 	f := newSessionFixture(t)
 	f.admit(t, turnSpec{turnID: "turn-1", key: "key-1"})
 	f.admit(t, turnSpec{turnID: "turn-2"})
-	counts, err := store.ErasePrincipal(t.Context(), f.db, testSessionOwner, true, store.ErasureOptions{})
+	report, err := principal.Erase(t.Context(), f.db, principal.ErasureScope{PrincipalID: testSessionOwner, Apply: true}, []principal.Eraser{
+		turnstore.NewSessionEraser(f.db, false),
+	})
 	if err != nil {
-		t.Fatalf("ErasePrincipal: %v", err)
+		t.Fatalf("Erase: %v", err)
 	}
-	if counts.Sessions != 1 {
-		t.Fatalf("erased sessions = %d, want 1", counts.Sessions)
+	if report.Count(principal.ErasureLineSessions) != 1 {
+		t.Fatalf("erased sessions = %d, want 1", report.Count(principal.ErasureLineSessions))
 	}
 	if n := countRows(t, f.db, `SELECT COUNT(*) FROM durable_session_turn`); n != 0 {
 		t.Fatalf("turn rows after erasure = %d, want 0", n)

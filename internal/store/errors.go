@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -42,7 +40,6 @@ const (
 	ErrorCodeKBCapExceeded            ErrorCode = "kb_cap_exceeded"
 	ErrorCodeKBSourceNotFound         ErrorCode = "kb_source_not_found"
 	ErrorCodeKBEmbeddingStale         ErrorCode = "kb_embedding_stale"
-	ErrorCodeErasureBlocked           ErrorCode = "erasure_blocked_by_live_runs"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {
@@ -76,13 +73,4 @@ func isConstraintForeignKey(err error) bool {
 
 func isConstraintCheck(err error) bool {
 	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck)
-}
-
-type rowChecker interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func rowExists(ctx context.Context, q rowChecker, query string, args ...any) bool {
-	var one int
-	return q.QueryRowContext(ctx, query, args...).Scan(&one) == nil
 }
