@@ -90,7 +90,7 @@ func (s *sqlitePersonaEvalStore) Latest(ctx context.Context, agentID, digest, la
 		return PersonaEvalResult{}, false, nil
 	}
 	if err != nil {
-		return PersonaEvalResult{}, false, err
+		return PersonaEvalResult{}, false, classify(err)
 	}
 	return result, true, nil
 }

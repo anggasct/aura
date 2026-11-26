@@ -92,7 +92,7 @@ func (s *sqliteHandoffStore) Get(ctx context.Context, sessionID string) (Handoff
 		return Handoff{}, false, nil
 	}
 	if err != nil {
-		return Handoff{}, false, err
+		return Handoff{}, false, classify(err)
 	}
 	return handoff, true, nil
 }

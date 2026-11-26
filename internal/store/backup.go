@@ -57,7 +57,7 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 	}
 	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, tmpDest); err != nil {
 		_ = os.Remove(tmpDest)
-		return BackupManifest{}, backupFail("create backup snapshot", err, tmpDest)
+		return BackupManifest{}, classify(backupFail("create backup snapshot", err, tmpDest))
 	}
 	if err := syncPath(tmpDest); err != nil {
 		_ = os.Remove(tmpDest)
