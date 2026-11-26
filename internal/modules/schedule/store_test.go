@@ -1,6 +1,8 @@
-package store
+package schedule
 
 import (
+	"context"
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -8,9 +10,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
-func occurrenceIDs(items []ScheduledOccurrence) []string {
+func occurrenceIDs(items []Occurrence) []string {
 	ids := make([]string, 0, len(items))
 	for i := range items {
 		ids = append(ids, items[i].ID)
@@ -18,19 +21,34 @@ func occurrenceIDs(items []ScheduledOccurrence) []string {
 	return ids
 }
 
-func testScheduledJob(id string) *ScheduledJob {
+func testScheduledJob(id string) *Job {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	return &ScheduledJob{
+	return &Job{
 		ID: id, Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC",
 		Prompt: "summarize", OriginChannel: "discord", OriginDestination: "default",
-		OverlapPolicy: ScheduleOverlapSkip, CatchUpGraceSeconds: 900,
-		State: ScheduleJobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
+		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900,
+		State: JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
+	}
+}
+
+func mustNewSQLiteStore(t *testing.T) *SQLiteStore {
+	t.Helper()
+	db := storetest.OpenMigrated(t)
+	s, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
+	return s
+}
+
+func TestNewSQLiteStoreRefusesNilDB(t *testing.T) {
+	if _, err := NewSQLiteStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteStore(nil) = %v, want invalid_argument", err)
 	}
 }
 
 func TestScheduleStore_JobLifecycle(t *testing.T) {
-	db := newTestDB(t)
-	s := NewScheduleStore(db)
+	s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err != nil {
@@ -38,28 +56,26 @@ func TestScheduleStore_JobLifecycle(t *testing.T) {
 	}
 	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err == nil {
 		t.Fatal("duplicate job accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeOccurrenceConflict {
 		t.Errorf("duplicate code = %v, %v", code, ok)
 	}
-	job, err := s.Job(ctx, "job-1")
-	if err != nil {
-		t.Fatalf("Job(): %v", err)
+	job, found, err := s.Job(ctx, "job-1")
+	if err != nil || !found {
+		t.Fatalf("Job(): found=%v err=%v", found, err)
 	}
-	if job.Name != "nightly" || job.Version != 1 || job.State != ScheduleJobActive {
+	if job.Name != "nightly" || job.Version != 1 || job.State != JobActive {
 		t.Errorf("job mismatch: %+v", job)
 	}
-	if _, err := s.Job(ctx, "missing"); err == nil {
-		t.Error("missing job accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleNotFound {
-		t.Errorf("missing code = %v, %v", code, ok)
+	if _, found, err := s.Job(ctx, "missing"); err != nil || found {
+		t.Errorf("missing job = found=%v err=%v, want false, nil", found, err)
 	}
 
 	now := time.Date(2026, 9, 13, 12, 0, 0, 0, time.UTC)
 	edited, err := s.EditJob(ctx, "job-1", &JobEdit{
 		Name: "renamed", CronExpression: "30 22 * * *", Timezone: "UTC",
 		Prompt: "summarize", OriginChannel: "discord", OriginDestination: "default",
-		OverlapPolicy: ScheduleOverlapQueueOne, CatchUpGraceSeconds: 300, ExpectedVersion: 1,
-	}, now)
+		OverlapPolicy: OverlapQueueOne, CatchUpGraceSeconds: 300,
+	}, 1, now)
 	if err != nil {
 		t.Fatalf("EditJob(): %v", err)
 	}
@@ -69,31 +85,33 @@ func TestScheduleStore_JobLifecycle(t *testing.T) {
 	if _, err := s.EditJob(ctx, "job-1", &JobEdit{
 		Name: "stale", CronExpression: "0 21 * * *", Timezone: "UTC",
 		Prompt: "summarize", OriginChannel: "discord", OriginDestination: "default",
-		OverlapPolicy: ScheduleOverlapSkip, CatchUpGraceSeconds: 900, ExpectedVersion: 1,
-	}, now); err == nil {
-		t.Error("stale edit accepted")
+		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900,
+	}, 1, now); !fault.HasCode(err, ErrorCodeOccurrenceConflict) {
+		t.Errorf("stale edit err = %v, want conflict", err)
 	}
 
-	if err := s.SetJobState(ctx, "job-1", ScheduleJobPaused, now); err != nil {
+	if err := s.SetJobState(ctx, "job-1", JobPaused, now); err != nil {
 		t.Fatalf("pause: %v", err)
 	}
-	if err := s.SetJobState(ctx, "job-1", ScheduleJobActive, now); err != nil {
+	if err := s.SetJobState(ctx, "job-1", JobActive, now); err != nil {
 		t.Fatalf("resume: %v", err)
 	}
-	if err := s.SetJobState(ctx, "job-1", ScheduleJobDeleted, now); err != nil {
+	if err := s.SetJobState(ctx, "job-1", JobDeleted, now); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
-	if err := s.SetJobState(ctx, "job-1", ScheduleJobActive, now); err == nil {
-		t.Error("resurrect accepted")
+	if err := s.SetJobState(ctx, "job-1", JobActive, now); !fault.HasCode(err, ErrorCodeOccurrenceConflict) {
+		t.Errorf("resurrect err = %v, want conflict", err)
 	}
-	if err := s.SetJobState(ctx, "job-1", "flying", now); err == nil {
-		t.Error("invalid state accepted")
+	if err := s.SetJobState(ctx, "missing", JobPaused, now); !fault.HasCode(err, ErrorCodeJobNotFound) {
+		t.Errorf("missing state err = %v, want not found", err)
+	}
+	if err := s.SetJobState(ctx, "job-1", "flying", now); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("invalid state err = %v, want invalid_argument", err)
 	}
 }
 
 func TestScheduleStore_OccurrenceFireAndSettle(t *testing.T) {
-	db := newTestDB(t)
-	s := NewScheduleStore(db)
+	s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err != nil {
@@ -101,7 +119,7 @@ func TestScheduleStore_OccurrenceFireAndSettle(t *testing.T) {
 	}
 	fire := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 9, 12, 21, 0, 5, 0, time.UTC)
-	occurrence := &ScheduledOccurrence{
+	occurrence := &Occurrence{
 		ID: "cron-job-1-1", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire,
 		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
 	}
@@ -110,7 +128,7 @@ func TestScheduleStore_OccurrenceFireAndSettle(t *testing.T) {
 	}
 	if err := s.RecordFire(ctx, occurrence); err == nil {
 		t.Fatal("duplicate fire accepted")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeOccurrenceConflict {
 		t.Errorf("duplicate code = %v, %v", code, ok)
 	}
 	found, ok, err := s.OccurrenceByFire(ctx, "job-1", fire)
@@ -137,8 +155,7 @@ func TestScheduleStore_OccurrenceFireAndSettle(t *testing.T) {
 }
 
 func TestScheduleStore_RejectsInvalidRows(t *testing.T) {
-	db := newTestDB(t)
-	s := NewScheduleStore(db)
+	s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	badPolicy := testScheduledJob("job-1")
@@ -157,15 +174,14 @@ func TestScheduleStore_RejectsInvalidRows(t *testing.T) {
 	if _, err := s.EditJob(ctx, "missing", &JobEdit{
 		Name: "x", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p",
 		OriginChannel: "discord", OriginDestination: "default",
-		OverlapPolicy: ScheduleOverlapSkip, ExpectedVersion: 1,
-	}, time.Now().UTC()); err == nil {
-		t.Error("edit of missing job accepted")
+		OverlapPolicy: OverlapSkip,
+	}, 1, time.Now().UTC()); !fault.HasCode(err, ErrorCodeJobNotFound) {
+		t.Errorf("edit of missing job err = %v, want job not found", err)
 	}
 }
 
 func TestScheduleStore_FiredOccurrencesAndPrune(t *testing.T) {
-	db := newTestDB(t)
-	s := NewScheduleStore(db)
+	s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	for _, id := range []string{"job-1", "job-2"} {
@@ -175,7 +191,7 @@ func TestScheduleStore_FiredOccurrencesAndPrune(t *testing.T) {
 	}
 	fire := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
 	now := fire.Add(3 * time.Hour)
-	seeded := []*ScheduledOccurrence{
+	seeded := []*Occurrence{
 		{ID: "cron-newest", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire.Add(2 * time.Hour), State: OccurrenceFired, CreatedAt: now, UpdatedAt: now},
 		{ID: "cron-attached", JobID: "job-1", JobVersion: 1, ScheduledForUTC: fire.Add(time.Hour), State: OccurrenceFired, CreatedAt: now, UpdatedAt: now},
 		{ID: "cron-oldest", JobID: "job-2", JobVersion: 1, ScheduledForUTC: fire, State: OccurrenceFired, CreatedAt: now, UpdatedAt: now},
@@ -208,7 +224,7 @@ func TestScheduleStore_FiredOccurrencesAndPrune(t *testing.T) {
 	}
 
 	old := now.Add(-1000 * time.Hour)
-	terminal := &ScheduledOccurrence{
+	terminal := &Occurrence{
 		ID: "cron-old", JobID: "job-1", JobVersion: 1, ScheduledForUTC: old,
 		State: OccurrenceCompleted, CreatedAt: old, UpdatedAt: old,
 	}
@@ -237,15 +253,14 @@ func TestScheduleStore_FiredOccurrencesAndPrune(t *testing.T) {
 }
 
 func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
-	db := newTestDB(t)
-	s := NewScheduleStore(db)
+	s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	if err := s.InsertJob(ctx, testScheduledJob("job-1")); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	paused := testScheduledJob("job-2")
-	paused.State = ScheduleJobPaused
+	paused.State = JobPaused
 	if err := s.InsertJob(ctx, paused); err != nil {
 		t.Fatalf("seed paused: %v", err)
 	}
@@ -269,7 +284,7 @@ func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
 }
 
 func TestScheduleStore_SchemaAppliesCleanly(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
@@ -284,20 +299,45 @@ func TestScheduleStore_SchemaAppliesCleanly(t *testing.T) {
 }
 
 func TestScheduleStore_RecordFireMissingJob(t *testing.T) {
-	db := newTestDB(t)
-	s := NewScheduleStore(db)
+	s := mustNewSQLiteStore(t)
 	ctx := t.Context()
 
 	fire := time.Date(2026, 9, 12, 21, 0, 0, 0, time.UTC)
 	now := time.Date(2026, 9, 12, 21, 0, 5, 0, time.UTC)
-	err := s.RecordFire(ctx, &ScheduledOccurrence{
+	err := s.RecordFire(ctx, &Occurrence{
 		ID: "cron-missing-1", JobID: "missing-job", JobVersion: 1, ScheduledForUTC: fire,
 		State: OccurrenceFired, CreatedAt: now, UpdatedAt: now,
 	})
 	if err == nil {
 		t.Fatal("fire for missing job accepted")
 	}
-	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeScheduleNotFound {
-		t.Errorf("missing-job code = %v, %v; want %v", code, ok, ErrorCodeScheduleNotFound)
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeJobNotFound {
+		t.Errorf("missing-job code = %v, %v; want %v", code, ok, ErrorCodeJobNotFound)
+	}
+}
+
+func TestScheduleStoreJoinsCallersTransaction(t *testing.T) {
+	db := storetest.OpenMigrated(t)
+	s, err := NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
+	ctx := t.Context()
+	rollbackErr := errors.New("abort outer transaction")
+
+	err = sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		if err := s.InsertJob(txCtx, testScheduledJob("job-tx")); err != nil {
+			return err
+		}
+		if _, found, err := s.Job(txCtx, "job-tx"); err != nil || !found {
+			t.Fatalf("Job inside tx = found=%v err=%v", found, err)
+		}
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx err = %v, want %v", err, rollbackErr)
+	}
+	if _, found, err := s.Job(ctx, "job-tx"); err != nil || found {
+		t.Fatalf("job survived rolled-back tx: found=%v err=%v", found, err)
 	}
 }

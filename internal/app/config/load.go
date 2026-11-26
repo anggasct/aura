@@ -153,7 +153,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateEmail(&cfg.Channels.Email),
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
 		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
-		legacyconfig.ValidateScheduler(&cfg.Scheduler),
+		configkit.Under("scheduler", cfg.Scheduler.Validate()),
 		legacyconfig.ValidateMemory(&cfg.Memory),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),

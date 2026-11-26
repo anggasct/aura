@@ -561,25 +561,6 @@ func ValidateBroadcast(broadcast *Broadcast) error {
 	return errors.Join(problems...)
 }
 
-func ValidateScheduler(scheduler *Scheduler) error {
-	if scheduler == nil {
-		return configkit.Invalid("scheduler", "must not be nil")
-	}
-	var problems []error
-	if scheduler.DefaultTimezone == "" {
-		problems = append(problems, configkit.Invalid("scheduler.default_timezone", "must not be empty"))
-	} else if _, err := time.LoadLocation(scheduler.DefaultTimezone); err != nil {
-		problems = append(problems, configkit.Invalid("scheduler.default_timezone", "is not a valid IANA timezone"))
-	}
-	if scheduler.DefaultCatchUpGrace < 0 {
-		problems = append(problems, configkit.Invalid("scheduler.default_catch_up_grace", "must not be negative"))
-	}
-	if scheduler.OccurrenceRetention <= 0 {
-		problems = append(problems, configkit.Invalid("scheduler.occurrence_retention", "must be positive"))
-	}
-	return errors.Join(problems...)
-}
-
 func ValidateMemory(memory *Memory) error {
 	if memory == nil {
 		return configkit.Invalid("memory", "must not be nil")

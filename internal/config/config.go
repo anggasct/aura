@@ -28,13 +28,6 @@ type Broadcast struct {
 	Fallback       map[string]string  `json:"fallback"`
 }
 
-type Scheduler struct {
-	Enabled             bool               `json:"enabled"`
-	DefaultTimezone     string             `json:"default_timezone"`
-	DefaultCatchUpGrace configkit.Duration `json:"default_catch_up_grace"`
-	OccurrenceRetention configkit.Duration `json:"occurrence_retention"`
-}
-
 type Memory struct {
 	Enabled              bool               `json:"enabled"`
 	MaxDocuments         int                `json:"max_documents"`
@@ -433,15 +426,6 @@ func DefaultBroadcast() Broadcast {
 		MinDispatchGap: configkit.Duration(5 * time.Second),
 		Destinations:   map[string]string{},
 		Fallback:       map[string]string{},
-	}
-}
-
-func DefaultScheduler() Scheduler {
-	return Scheduler{
-		Enabled:             true,
-		DefaultTimezone:     "UTC",
-		DefaultCatchUpGrace: configkit.Duration(15 * time.Minute),
-		OccurrenceRetention: configkit.Duration(720 * time.Hour),
 	}
 }
 
