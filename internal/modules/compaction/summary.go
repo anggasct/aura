@@ -12,6 +12,8 @@ import (
 	"time"
 
 	stdcontext "context"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -106,16 +108,16 @@ type Service struct {
 
 func NewService(summarizer Summarizer, store SummaryStore, task, promptVersion string, maxSourceTokens, maxOutputTokens int, counter TokenCounter, logger *slog.Logger) (*Service, error) {
 	if summarizer == nil {
-		return nil, errNilArgument("summarizer")
+		return nil, fault.New(ErrorCodeInvalidArgument, "summarizer must not be nil")
 	}
 	if store == nil {
-		return nil, errNilArgument("store")
+		return nil, fault.New(ErrorCodeInvalidArgument, "store must not be nil")
 	}
 	if strings.TrimSpace(task) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "summary task must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary task must not be empty")
 	}
 	if maxSourceTokens <= 0 || maxOutputTokens <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "summary token bounds must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary token bounds must be positive")
 	}
 	if counter == nil {
 		counter = ConservativeEstimator{}
@@ -149,7 +151,7 @@ func (s *Service) WithObserver(observer Observer) *Service {
 
 func PromptText(promptVersion string, maxOutputTokens int) (string, error) {
 	if promptVersion != summaryPromptV1 {
-		return "", Errorf(ErrorCodeSummaryStale, "unsupported summary prompt version")
+		return "", fault.New(ErrorCodeSummaryStale, "unsupported summary prompt version")
 	}
 	return "Summarize the source session events as a JSON object with exactly these keys: " +
 		"goals, decisions, constraints, open_work, facts. " +
@@ -160,17 +162,17 @@ func PromptText(promptVersion string, maxOutputTokens int) (string, error) {
 
 func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target SummaryRange, groups []Group) (*Summary, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(sessionID) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "session must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "session must not be empty")
 	}
 	events := RangeEvents(target, groups)
 	if len(events) == 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "summary range matches no events")
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary range matches no events")
 	}
 	digest := sourceDigest(events)
 	sourceTokens, err := sumCounts(s.counter, eventTexts(events))
@@ -178,7 +180,7 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 		return nil, err
 	}
 	if sourceTokens > s.maxSourceTokens {
-		return nil, Errorf(ErrorCodeInvalidArgument, "summary source exceeds the token bound")
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary source exceeds the token bound")
 	}
 	cached, found, err := s.cached(ctx, sessionID, target, digest)
 	if err != nil {
@@ -212,10 +214,10 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 		return nil, err
 	}
 	if result == nil {
-		return nil, Errorf(ErrorCodeSummaryUnavailable, "summarizer returned no result")
+		return nil, fault.New(ErrorCodeSummaryUnavailable, "summarizer returned no result")
 	}
 	if strings.TrimSpace(result.Producer.Provider) == "" || strings.TrimSpace(result.Producer.Model) == "" {
-		return nil, Errorf(ErrorCodeSummaryInvalid, "summary producer is not identified")
+		return nil, fault.New(ErrorCodeSummaryInvalid, "summary producer is not identified")
 	}
 	content, err := ValidateContent(result.Text, s.maxOutputTokens)
 	if err != nil {

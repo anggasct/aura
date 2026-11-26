@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const forgottenPrincipal = "discord:601"
@@ -63,8 +62,8 @@ func TestForgetMeCancelsThroughTheLateBoundInterpreter(t *testing.T) {
 	if !errors.Is(err, access.ErrForgetRunsStopping) {
 		t.Fatalf("Forget with no interpreter = %v, want the runs-stopping refusal", err)
 	}
-	if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeErasureBlocked {
-		t.Fatalf("Forget with no interpreter = %v, want %s", err, store.ErrorCodeErasureBlocked)
+	if code, ok := fault.CodeOf[principal.ErrorCode](err); !ok || code != principal.ErrorCodeErasureBlocked {
+		t.Fatalf("Forget with no interpreter = %v, want %s", err, principal.ErrorCodeErasureBlocked)
 	}
 	if n := countRows(t, app.db, `SELECT COUNT(*) FROM workflow_run WHERE id = ?`, summary.ID); n != 1 {
 		t.Fatal("a refused forget deleted the run")

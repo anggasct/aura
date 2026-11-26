@@ -26,7 +26,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
@@ -458,10 +457,13 @@ func TestKBCommandsRejectBadArguments(t *testing.T) {
 func TestKnowledgeStoreAdapterTranslatesStoreErrors(t *testing.T) {
 	cfgPath := writeMemoryCLIConfig(t)
 	_, db, _ := kbTestStorage(t, cfgPath)
-	adapter := &knowledgeStore{store: store.NewKBStore(db)}
-	_, err := adapter.RemoveSource(t.Context(), "support", "/missing.md", false)
+	kbStore, err := knowledge.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	_, err = kbStore.RemoveSource(t.Context(), "support", "/missing.md", false)
 	requireKBCode(t, err, knowledge.ErrorCodeSourceNotFound)
-	if _, err := adapter.ReplaceSource(t.Context(), nil); err == nil {
+	if _, err := kbStore.ReplaceSource(t.Context(), nil); err == nil {
 		t.Fatal("ReplaceSource accepted nil")
 	}
 }

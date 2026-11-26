@@ -1,4 +1,4 @@
-package store
+package knowledge
 
 import (
 	"database/sql"
@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-func embedCollection(t *testing.T, embeddings KBEmbeddingStore, collection, fingerprint string, dimensions int) []KBPendingChunk {
+func embedCollection(t *testing.T, embeddings EmbeddingStore, collection, fingerprint string, dimensions int) []PendingChunk {
 	t.Helper()
 	if err := embeddings.StartEmbedding(t.Context(), collection, fingerprint); err != nil {
 		t.Fatalf("StartEmbedding: %v", err)
@@ -21,17 +21,17 @@ func embedCollection(t *testing.T, embeddings KBEmbeddingStore, collection, fing
 }
 
 func TestKBVectorReaderReportsGenerationAndFingerprintPerCollection(t *testing.T) {
-	db, kb, embeddings := newEmbeddingStore(t)
-	reader := NewKBVectorReader(db)
+	db, kb := newEmbeddingStore(t)
+	reader := mustNewSQLiteVectorSource(t, db)
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha text")
 	writeKBSource(t, kb, "faq", "/docs/b.md", "beta text")
-	embedCollection(t, embeddings, "support", embedFingerprintA, 4)
+	embedCollection(t, kb, "support", embedFingerprintA, 4)
 
-	versions, err := reader.CollectionVersions(t.Context(), []string{"support", "faq", "missing"})
+	versions, err := reader.Versions(t.Context(), []string{"support", "faq", "missing"})
 	if err != nil {
-		t.Fatalf("CollectionVersions: %v", err)
+		t.Fatalf("Versions: %v", err)
 	}
-	byCollection := map[string]KBCollectionVersion{}
+	byCollection := map[string]CollectionVersion{}
 	for _, version := range versions {
 		byCollection[version.Collection] = version
 	}
@@ -43,43 +43,43 @@ func TestKBVectorReaderReportsGenerationAndFingerprintPerCollection(t *testing.T
 	}
 
 	before := byCollection["support"].Generation
-	if _, err := embeddings.DisableEmbedding(t.Context(), "support", true); err != nil {
+	if _, err := kb.DisableEmbedding(t.Context(), "support", true); err != nil {
 		t.Fatalf("DisableEmbedding: %v", err)
 	}
-	after, err := reader.CollectionVersions(t.Context(), []string{"support"})
+	after, err := reader.Versions(t.Context(), []string{"support"})
 	if err != nil || len(after) != 1 || after[0].Generation <= before || after[0].Fingerprint != "" {
 		t.Fatalf("versions after --off = %+v, %v; want a newer generation and no fingerprint", after, err)
 	}
 }
 
 func TestKBVectorReaderRejectsAnInvalidScope(t *testing.T) {
-	reader := NewKBVectorReader(newTestDB(t))
-	if _, err := reader.CollectionVersions(t.Context(), nil); err == nil {
+	reader := mustNewSQLiteVectorSource(t, newKBTestDB(t))
+	if _, err := reader.Versions(t.Context(), nil); err == nil {
 		t.Error("empty scope accepted")
 	}
-	if _, err := reader.CollectionVersions(t.Context(), []string{""}); err == nil {
+	if _, err := reader.Versions(t.Context(), []string{""}); err == nil {
 		t.Error("empty collection accepted")
 	}
-	if _, err := NewKBVectorReader(nil).CollectionVersions(t.Context(), []string{"a"}); err == nil {
+	if _, err := (&SQLiteVectorSource{}).Versions(t.Context(), []string{"a"}); err == nil {
 		t.Error("nil database accepted")
 	}
 }
 
 func TestKBVectorReaderPagesVectorsOfOneFingerprintOfOneCollection(t *testing.T) {
-	db, kb, embeddings := newEmbeddingStore(t)
-	reader := NewKBVectorReader(db)
+	db, kb := newEmbeddingStore(t)
+	reader := mustNewSQLiteVectorSource(t, db)
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha", "beta", "gamma", "delta", "epsilon")
 	writeKBSource(t, kb, "faq", "/docs/b.md", "zeta")
-	support := embedCollection(t, embeddings, "support", embedFingerprintA, 4)
-	embedCollection(t, embeddings, "faq", embedFingerprintA, 4)
+	support := embedCollection(t, kb, "support", embedFingerprintA, 4)
+	embedCollection(t, kb, "faq", embedFingerprintA, 4)
 
 	var rowIDs []int64
 	var values []float32
 	var after int64
 	for {
-		page, err := reader.VectorPage(t.Context(), "support", embedFingerprintA, 4, after, 2)
+		page, err := reader.Page(t.Context(), "support", embedFingerprintA, 4, after, 2)
 		if err != nil {
-			t.Fatalf("VectorPage: %v", err)
+			t.Fatalf("Page: %v", err)
 		}
 		if len(page.RowIDs) == 0 {
 			break
@@ -103,31 +103,31 @@ func TestKBVectorReaderPagesVectorsOfOneFingerprintOfOneCollection(t *testing.T)
 		}
 	}
 
-	other, err := reader.VectorPage(t.Context(), "support", embedFingerprintB, 4, 0, 10)
+	other, err := reader.Page(t.Context(), "support", embedFingerprintB, 4, 0, 10)
 	if err != nil || len(other.RowIDs) != 0 {
 		t.Fatalf("another fingerprint returned %d rows, %v", len(other.RowIDs), err)
 	}
 }
 
 func TestKBVectorReaderSkipsVectorsWhoseChunkChanged(t *testing.T) {
-	db, kb, embeddings := newEmbeddingStore(t)
-	reader := NewKBVectorReader(db)
+	db, kb := newEmbeddingStore(t)
+	reader := mustNewSQLiteVectorSource(t, db)
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha", "beta")
-	embedCollection(t, embeddings, "support", embedFingerprintA, 4)
+	embedCollection(t, kb, "support", embedFingerprintA, 4)
 	if _, err := db.ExecContext(t.Context(), `UPDATE kb_chunk SET content_sha256 = ? WHERE ordinal = 0`, "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"); err != nil {
 		t.Fatalf("rewrite digest: %v", err)
 	}
-	page, err := reader.VectorPage(t.Context(), "support", embedFingerprintA, 4, 0, 10)
+	page, err := reader.Page(t.Context(), "support", embedFingerprintA, 4, 0, 10)
 	if err != nil || len(page.RowIDs) != 1 {
 		t.Fatalf("page = %d rows, %v, want only the unchanged chunk", len(page.RowIDs), err)
 	}
 }
 
 func TestKBVectorReaderRejectsAMisshapenRequestAndABlobOfAnotherWidth(t *testing.T) {
-	db, kb, embeddings := newEmbeddingStore(t)
-	reader := NewKBVectorReader(db)
+	db, kb := newEmbeddingStore(t)
+	reader := mustNewSQLiteVectorSource(t, db)
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha")
-	embedCollection(t, embeddings, "support", embedFingerprintA, 4)
+	embedCollection(t, kb, "support", embedFingerprintA, 4)
 
 	tests := map[string]struct {
 		collection, fingerprint string
@@ -137,12 +137,12 @@ func TestKBVectorReaderRejectsAMisshapenRequestAndABlobOfAnotherWidth(t *testing
 		"no fingerprint":  {collection: "support", dimensions: 4, limit: 1},
 		"no dimensions":   {collection: "support", fingerprint: embedFingerprintA, limit: 1},
 		"no limit":        {collection: "support", fingerprint: embedFingerprintA, dimensions: 4},
-		"limit too large": {collection: "support", fingerprint: embedFingerprintA, dimensions: 4, limit: KBMaxVectorPage + 1},
+		"limit too large": {collection: "support", fingerprint: embedFingerprintA, dimensions: 4, limit: MaxVectorPage + 1},
 		"wrong width":     {collection: "support", fingerprint: embedFingerprintA, dimensions: 8, limit: 1},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			if _, err := reader.VectorPage(t.Context(), test.collection, test.fingerprint, test.dimensions, 0, test.limit); err == nil {
+			if _, err := reader.Page(t.Context(), test.collection, test.fingerprint, test.dimensions, 0, test.limit); err == nil {
 				t.Error("request accepted")
 			}
 		})
@@ -150,40 +150,40 @@ func TestKBVectorReaderRejectsAMisshapenRequestAndABlobOfAnotherWidth(t *testing
 }
 
 func TestKBVectorReaderReadsChunksByRowIDWithTheirDigest(t *testing.T) {
-	db, kb, _ := newEmbeddingStore(t)
-	reader := NewKBVectorReader(db)
+	db, kb := newEmbeddingStore(t)
+	reader := mustNewSQLiteVectorSource(t, db)
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha", "beta")
 	writeKBSource(t, kb, "faq", "/docs/b.md", "gamma")
 	rowIDs := chunkRowIDs(t, db)
 
-	chunks, err := reader.ChunksByRowID(t.Context(), append(slices.Clone(rowIDs), 99999))
+	chunks, err := reader.Chunks(t.Context(), append(slices.Clone(rowIDs), 99999))
 	if err != nil || len(chunks) != 3 {
 		t.Fatalf("chunks = %d, %v, want the three that exist", len(chunks), err)
 	}
-	byRow := map[int64]KBVectorChunk{}
+	byRow := map[int64]VectorChunk{}
 	for _, chunk := range chunks {
 		byRow[chunk.RowID] = chunk
 	}
 	first := byRow[rowIDs[0]]
-	if first.Collection != "support" || first.Content != "alpha" || first.SHA256 != kbDigest("alpha") || first.Label != "notes.md" || first.Heading != "Section" || first.ChunkID == "" {
+	if first.Hit.Collection != "support" || first.Hit.Content != "alpha" || first.SHA256 != kbDigest("alpha") || first.Hit.Label != "notes.md" || first.Hit.Heading != "Section" || first.Hit.ChunkID == "" {
 		t.Errorf("first = %+v", first)
 	}
-	if byRow[rowIDs[2]].Collection != "faq" {
+	if byRow[rowIDs[2]].Hit.Collection != "faq" {
 		t.Errorf("third = %+v, want the faq chunk", byRow[rowIDs[2]])
 	}
 
-	if _, err := reader.ChunksByRowID(t.Context(), nil); err == nil {
+	if _, err := reader.Chunks(t.Context(), nil); err == nil {
 		t.Error("an empty lookup was accepted")
 	}
-	if _, err := reader.ChunksByRowID(t.Context(), make([]int64, KBMaxVectorChunks+1)); err == nil {
+	if _, err := reader.Chunks(t.Context(), make([]int64, MaxVectorChunks+1)); err == nil {
 		t.Error("an oversized lookup was accepted")
 	}
 }
 
 func TestKBVectorPageQueryWalksTheVectorKeyWithoutASort(t *testing.T) {
-	db, kb, embeddings := newEmbeddingStore(t)
+	db, kb := newEmbeddingStore(t)
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha", "beta")
-	embedCollection(t, embeddings, "support", embedFingerprintA, 4)
+	embedCollection(t, kb, "support", embedFingerprintA, 4)
 	plan := queryPlan(t, db, kbVectorPageSQL, 0, "support", embedFingerprintA, 10)
 	if len(plan) == 0 || !strings.Contains(plan[0], "SEARCH e USING INTEGER PRIMARY KEY") || strings.Contains(strings.Join(plan, "\n"), "TEMP B-TREE") {
 		t.Fatalf("plan = %q, want a walk of the vector table by key without a sort", plan)

@@ -1,4 +1,4 @@
-package store
+package knowledge
 
 import (
 	"context"
@@ -6,42 +6,33 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
-	KBMaxSearchCollections = 64
-	KBMaxSearchTerms       = 16
-	KBMaxSearchDepth       = 200
+	MaxSearchCollections = 64
+	MaxSearchTerms       = 16
+	MaxSearchDepth       = 200
 )
 
-type KBHit struct {
-	ChunkID    string
-	SourceID   string
-	Collection string
-	Label      string
-	Heading    string
-	Ordinal    int
-	Content    string
-	Score      float64
-}
-
-type KBIndex interface {
-	ScopeChunks(ctx context.Context, collections []string) (int, error)
-	TermFrequency(ctx context.Context, collections []string, term string, limit int) (int, error)
-	Search(ctx context.Context, collections []string, terms []string, depth int) ([]KBHit, error)
-}
-
-type sqliteKBIndex struct {
+type SQLiteIndex struct {
 	db *sql.DB
 }
 
-func NewKBIndex(db *sql.DB) KBIndex {
-	return &sqliteKBIndex{db: db}
+var _ Index = (*SQLiteIndex)(nil)
+
+func NewSQLiteIndex(db *sql.DB) (*SQLiteIndex, error) {
+	if db == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
+	}
+	return &SQLiteIndex{db: db}, nil
 }
 
-func validateKBCollections(collections []string) error {
-	if len(collections) == 0 || len(collections) > KBMaxSearchCollections {
-		return Errorf(ErrorCodeInvalidArgument, "knowledge search needs between 1 and %d collections", KBMaxSearchCollections)
+func validateSearchCollections(collections []string) error {
+	if len(collections) == 0 || len(collections) > MaxSearchCollections {
+		return Errorf(ErrorCodeInvalidArgument, "knowledge search needs between 1 and %d collections", MaxSearchCollections)
 	}
 	for _, collection := range collections {
 		if collection == "" {
@@ -58,7 +49,7 @@ func quoteFTSTerm(term string) string {
 func kbScopeFilter(collections []string) string {
 	scopes := make([]string, 0, len(collections))
 	for _, collection := range collections {
-		scopes = append(scopes, quoteFTSTerm(KBScope(collection)))
+		scopes = append(scopes, quoteFTSTerm(ScopeToken(collection)))
 	}
 	return "scope:(" + strings.Join(scopes, " OR ") + ")"
 }
@@ -83,54 +74,54 @@ func stringArgs(values []string) []any {
 	return args
 }
 
-func (s *sqliteKBIndex) ScopeChunks(ctx context.Context, collections []string) (int, error) {
-	if s.db == nil {
-		return 0, errNilArgument("db")
+func (s *SQLiteIndex) ScopeChunks(ctx context.Context, collections []string) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
-	if err := validateKBCollections(collections); err != nil {
+	if err := validateSearchCollections(collections); err != nil {
 		return 0, err
 	}
 	var count int
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT count(*) FROM kb_source s JOIN kb_chunk c ON c.source_id = s.id WHERE s.collection IN (`+placeholders(len(collections))+`)`,
 		stringArgs(collections)...).Scan(&count)
 	if err != nil {
-		return 0, classify(fmt.Errorf("count knowledge scope: %w", err))
+		return 0, sqlite.Classify(fmt.Errorf("count knowledge scope: %w", err))
 	}
 	return count, nil
 }
 
-func (s *sqliteKBIndex) TermFrequency(ctx context.Context, collections []string, term string, limit int) (int, error) {
-	if s.db == nil {
-		return 0, errNilArgument("db")
+func (s *SQLiteIndex) TermFrequency(ctx context.Context, collections []string, term string, limit int) (int, error) {
+	if s == nil || s.db == nil {
+		return 0, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
-	if err := validateKBCollections(collections); err != nil {
+	if err := validateSearchCollections(collections); err != nil {
 		return 0, err
 	}
 	if term == "" || limit <= 0 {
 		return 0, Errorf(ErrorCodeInvalidArgument, "knowledge term and limit are required")
 	}
 	var count int
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT count(*) FROM (SELECT 1 FROM kb_chunk_fts WHERE kb_chunk_fts MATCH ? LIMIT ?)`,
 		kbScopeFilter(collections)+" AND {content heading}:"+quoteFTSTerm(term), limit).Scan(&count)
 	if err != nil {
-		return 0, classify(fmt.Errorf("count knowledge term: %w", err))
+		return 0, sqlite.Classify(fmt.Errorf("count knowledge term: %w", err))
 	}
 	return count, nil
 }
 
-func (s *sqliteKBIndex) Search(ctx context.Context, collections, terms []string, depth int) ([]KBHit, error) {
-	if s.db == nil {
-		return nil, errNilArgument("db")
+func (s *SQLiteIndex) Search(ctx context.Context, collections, terms []string, depth int) ([]Hit, error) {
+	if s == nil || s.db == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
-	if err := validateKBCollections(collections); err != nil {
+	if err := validateSearchCollections(collections); err != nil {
 		return nil, err
 	}
-	if len(terms) == 0 || len(terms) > KBMaxSearchTerms || depth <= 0 || depth > KBMaxSearchDepth {
-		return nil, Errorf(ErrorCodeInvalidArgument, "knowledge search needs 1 to %d terms and a depth up to %d", KBMaxSearchTerms, KBMaxSearchDepth)
+	if len(terms) == 0 || len(terms) > MaxSearchTerms || depth <= 0 || depth > MaxSearchDepth {
+		return nil, Errorf(ErrorCodeInvalidArgument, "knowledge search needs 1 to %d terms and a depth up to %d", MaxSearchTerms, MaxSearchDepth)
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`WITH ranked AS (
 		   SELECT rowid AS rid, bm25(kb_chunk_fts, 1.0, 1.0, 0.0) AS score
 		   FROM kb_chunk_fts WHERE kb_chunk_fts MATCH ? ORDER BY score LIMIT ?
@@ -141,34 +132,34 @@ func (s *sqliteKBIndex) Search(ctx context.Context, collections, terms []string,
 		 JOIN kb_source s ON s.id = k.source_id
 		 ORDER BY r.score, k.id`, kbMatch(collections, terms), depth)
 	if err != nil {
-		return nil, classify(fmt.Errorf("search knowledge: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("search knowledge: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
-	var hits []KBHit
+	var hits []Hit
 	for rows.Next() {
-		var hit KBHit
+		var hit Hit
 		if err := rows.Scan(&hit.ChunkID, &hit.SourceID, &hit.Collection, &hit.Label, &hit.Heading, &hit.Ordinal, &hit.Content, &hit.Score); err != nil {
-			return nil, classify(fmt.Errorf("scan knowledge hit: %w", err))
+			return nil, sqlite.Classify(fmt.Errorf("scan knowledge hit: %w", err))
 		}
 		if slices.Contains(collections, hit.Collection) {
 			hits = append(hits, hit)
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classify(fmt.Errorf("search knowledge: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("search knowledge: %w", err))
 	}
 	return hits, nil
 }
 
-func KBIndexPresent(ctx context.Context, db *sql.DB) (bool, error) {
+func IndexPresent(ctx context.Context, db *sql.DB) (bool, error) {
 	if db == nil {
-		return false, errNilArgument("db")
+		return false, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
 	var tables int
-	err := db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, db).QueryRowContext(ctx,
 		`SELECT count(*) FROM sqlite_master WHERE name IN ('kb_collection', 'kb_source', 'kb_chunk', 'kb_chunk_fts')`).Scan(&tables)
 	if err != nil {
-		return false, classify(fmt.Errorf("probe knowledge tables: %w", err))
+		return false, sqlite.Classify(fmt.Errorf("probe knowledge tables: %w", err))
 	}
 	return tables == 4, nil
 }

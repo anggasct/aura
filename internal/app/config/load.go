@@ -13,6 +13,7 @@ import (
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
@@ -125,7 +126,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		configkit.Under("model_routes", model.ValidateRoutes(cfg.ModelRoutes)),
 		legacyconfig.ValidateTools(cfg.Tools),
 		legacyconfig.ValidateSkills(cfg.Skills),
-		legacyconfig.ValidateContext(cfg.Context),
+		validateContext(cfg.Context),
 		legacyconfig.ValidateProfile(cfg.Profile),
 		legacyconfig.ValidateChildren(cfg.Children),
 		validateAccess(cfg.Access),
@@ -421,4 +422,11 @@ func validateKnowledge(section *knowledge.Config) error {
 		return nil
 	}
 	return configkit.Under("knowledge", section.Validate())
+}
+
+func validateContext(section *compaction.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("context", section.Validate())
 }
