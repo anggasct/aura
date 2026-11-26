@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -38,7 +39,7 @@ func (d *apiKeyDirectory) GetByID(ctx context.Context, id string) (httpchat.Key,
 	}
 	class, ok := apiKeyClass(key.Class)
 	if !ok {
-		return httpchat.Key{}, false, httpchat.Errorf(httpchat.ErrorCodeInvalidArgument, "api key %s has an unknown class", key.ID)
+		return httpchat.Key{}, false, fault.New(httpchat.ErrorCodeInvalidArgument, fmt.Sprintf("api key %s has an unknown class", key.ID))
 	}
 	return httpchat.Key{
 		ID: key.ID, Digest: key.KeySHA256, PersonaID: key.PersonaID, Class: class,
@@ -93,60 +94,31 @@ func buildHTTPChat(cfg *appconfig.Config, db *sql.DB, backend turn.AgentRuntime,
 	if !settings.Enabled {
 		return nil, nil, nil
 	}
-	gates := channelAccessSettings(cfg, db, recorder, nil)
-	sessions := &httpSessionStore{sessions: turnstore.NewSessionService(db)}
-	chat, err := httpchat.NewChat(&httpchat.ChatOptions{
-		Runtime:            backend,
-		Sessions:           sessions,
-		Personas:           registry,
-		Budgets:            gates.Budgets,
-		Evals:              gates.Evals,
-		Handoffs:           gates.Handoffs,
-		Approvals:          approvals,
-		Denied:             gates.Denied,
-		AnswerTexts:        runtimeengine.DeliveryTexts,
-		MaxHistoryMessages: settings.MaxHistoryMessages,
-		MaxHistoryBytes:    settings.MaxHistoryBytes,
-		KeepaliveInterval:  time.Duration(settings.KeepaliveInterval),
-		Logger:             logger,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
 	replyStore, err := handoff.NewReplyStore(turnstore.NewTurnStore(db))
 	if err != nil {
 		return nil, nil, err
 	}
-	replies, err := httpchat.NewReplies(&httpchat.RepliesOptions{
-		Sessions: sessions,
-		Handoffs: gates.Handoffs,
-		Replies:  &httpHandoffReplies{replies: replyStore},
-		Logger:   logger,
+	server, err := httpchat.New(&httpchat.Deps{
+		Config:        settings,
+		Keys:          &apiKeyDirectory{keys: principal.NewAPIKeyStore(db)},
+		Sessions:      &httpSessionStore{sessions: turnstore.NewSessionService(db)},
+		Replies:       &httpHandoffReplies{replies: replyStore},
+		Personas:      registry,
+		Runtime:       backend,
+		Access:        channelAccessSettings(cfg, db, recorder, nil),
+		Approvals:     approvals,
+		AnswerTexts:   runtimeengine.DeliveryTexts,
+		ShutdownGrace: time.Duration(cfg.Runtime.ShutdownTimeout) / httpChatDrainDivisor,
+		Logger:        logger,
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	handler, err := httpchat.NewHandler(&httpchat.Options{
-		Keys:                &apiKeyDirectory{keys: principal.NewAPIKeyStore(db)},
-		Chat:                chat,
-		Replies:             replies,
-		MaxBodyBytes:        settings.MaxBodyBytes,
-		RequestsPerMinute:   settings.RequestsPerMinute,
-		MaxConcurrentPerKey: settings.MaxConcurrentPerKey,
-		Logger:              logger,
-	})
-	if err != nil {
-		return nil, nil, err
+	checks := server.HealthChecks()
+	for i := range checks {
+		if checks[i].Timeout == 0 {
+			checks[i].Timeout = time.Duration(cfg.Health.CheckTimeout)
+		}
 	}
-	server, err := httpchat.NewServer(handler, settings.ListenAddress, time.Duration(cfg.Runtime.ShutdownTimeout)/httpChatDrainDivisor, logger)
-	if err != nil {
-		return nil, nil, err
-	}
-	check := health.RegisteredCheck{
-		ID:          "http",
-		Checker:     server,
-		Timeout:     time.Duration(cfg.Health.CheckTimeout),
-		Remediation: httpchat.RemediationReviewListener,
-	}
-	return server, []health.RegisteredCheck{check}, nil
+	return server, checks, nil
 }

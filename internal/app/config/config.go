@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/httpchat"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
@@ -38,7 +39,7 @@ type Channels struct {
 	Discord  discord.Config        `json:"discord"`
 	Telegram legacyconfig.Telegram `json:"telegram"`
 	Email    legacyconfig.Email    `json:"email"`
-	HTTP     legacyconfig.HTTP     `json:"http"`
+	HTTP     httpchat.Config       `json:"http"`
 }
 
 type Config struct {
@@ -119,15 +120,7 @@ func Default() Config {
 			Email: legacyconfig.Email{
 				MaxAttachmentBytes: legacyconfig.EmailMaxAttachmentBytes,
 			},
-			HTTP: legacyconfig.HTTP{
-				ListenAddress:       legacyconfig.HTTPListenAddress,
-				MaxBodyBytes:        legacyconfig.HTTPMaxBodyBytes,
-				RequestsPerMinute:   legacyconfig.HTTPRequestsPerMinute,
-				MaxConcurrentPerKey: legacyconfig.HTTPMaxConcurrentPerKey,
-				MaxHistoryMessages:  legacyconfig.HTTPMaxHistoryMessages,
-				MaxHistoryBytes:     legacyconfig.HTTPMaxHistoryBytes,
-				KeepaliveInterval:   configkit.Duration(legacyconfig.HTTPKeepaliveInterval),
-			},
+			HTTP: httpchat.Default(),
 		},
 		Broadcast:   broadcast.Default(),
 		Scheduler:   schedule.Default(),
