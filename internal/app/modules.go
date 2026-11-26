@@ -226,63 +226,46 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 
 func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	cfg, db := b.cfg, b.db
-	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
-	if err != nil {
-		return err
-	}
 	deps, err := workflowValidationDeps(cfg)
 	if err != nil {
 		return err
-	}
-	options := &workflow.Options{
-		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
-		Logger:             b.logger,
-	}
-	if cfg.Workflows != nil {
-		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
-	}
-	runs, err := workflow.NewStore(db, b.turns)
-	if err != nil {
-		return err
-	}
-	if host && b.builtin != nil {
-		input := &workflowToolRunnerInput{
-			Executor: b.builtin, Sessions: b.sessions, Registry: b.registry, Runs: runs, Logger: b.logger,
-		}
-		if b.server != nil {
-			input.Route = b.server.workflowRoute
-		}
-		tools, err := newWorkflowToolRunner(input)
-		if err != nil {
-			return err
-		}
-		options.Tools = tools
 	}
 	runtime, err := b.durableRuntime()
 	if err != nil {
 		return err
 	}
-	built := workflow.NewInterpreter(runs, runtime, options)
-	routines, err := runs.Routines(ctx)
+	modDeps := &workflow.ModuleDeps{
+		DB:             db,
+		Sessions:       b.turns,
+		Durable:        runtime,
+		Config:         cfg.Workflows,
+		ValidationDeps: deps,
+		Logger:         b.logger,
+	}
+	if host && b.builtin != nil {
+		modDeps.Broker = b.builtin.Broker()
+		modDeps.RunSessions = b.sessions
+		modDeps.Registry = b.registry
+		modDeps.Appender = &workflowSessionTextAppender{db: db}
+		modDeps.Deliver = &workflowCompletionDeliverer{cfg: cfg, deliver: deliverText}
+		modDeps.CheckTimeout = time.Duration(cfg.Health.CheckTimeout)
+		if b.server != nil {
+			modDeps.Route = newWorkflowOwnerRoute(b.server.workflowRoute)
+			modDeps.Targets = workflowReplyTargeters(b.server.channels)
+			modDeps.Offerers = workflowProposalOfferers(b.server.channels)
+		}
+	}
+	mod, err := workflow.New(ctx, modDeps)
 	if err != nil {
 		return err
 	}
-	if err := built.Install(ctx, specs, deps); err != nil {
-		return err
+	b.workflowMod = mod
+	b.quarantined = mod.Quarantined()
+	b.interpreter = mod.Interpreter()
+	if host && b.onServer() {
+		if err := b.registerModule("workflow", mod); err != nil {
+			return err
+		}
 	}
-	quarantined, err := built.LoadRoutines(ctx, routines, deps)
-	if err != nil {
-		return err
-	}
-	for i := range quarantined {
-		b.logger.WarnContext(ctx, "workflow routine does not compile and is quarantined", "component", "workflow",
-			"definition_id", quarantined[i].ID, "version", quarantined[i].Version, "error", quarantined[i].Err)
-	}
-	b.quarantined = quarantined
-	if b.onServer() {
-		check := workflowDefinitionsCheck(b.cfg, b.registry, quarantined)
-		b.addHealthCheck(&check)
-	}
-	b.interpreter = built
 	return nil
 }

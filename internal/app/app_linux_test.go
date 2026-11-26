@@ -182,7 +182,7 @@ func TestCompositionServerRefusesABrokenWorkflowDefinition(t *testing.T) {
 	extra := fmt.Sprintf("workflows:\n  definitions_dir: %s\n", definitions)
 	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
 	_, err := Build(t.Context(), serverCompositionOptions(result, &syncBuffer{}))
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 		t.Fatalf("Build error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 	}
 }

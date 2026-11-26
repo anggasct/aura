@@ -330,6 +330,7 @@ type build struct {
 	prices       *usage.PriceRegistry
 	models       *model.Registry
 	runtime      durable.Runtime
+	workflowMod  *workflow.Module
 	interpreter  *workflow.Interpreter
 	knowledge    *knowledge.Service
 	quarantined  []workflow.Quarantined

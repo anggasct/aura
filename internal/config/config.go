@@ -282,18 +282,6 @@ type ToolWebSearch struct {
 	MaxResults    int        `json:"max_results"`
 }
 
-type Workflows struct {
-	DefinitionsDir     string             `json:"definitions_dir"`
-	MaxConcurrentSteps int                `json:"max_concurrent_steps"`
-	DefaultStepTimeout configkit.Duration `json:"default_step_timeout"`
-	Generated          GeneratedWorkflows `json:"generated"`
-}
-
-type GeneratedWorkflows struct {
-	MaxSteps  int   `json:"max_steps"`
-	MaxTokens int64 `json:"max_tokens"`
-}
-
 const (
 	MCPTransportStdio          = "stdio"
 	MCPTransportStreamableHTTP = "streamable_http"
@@ -367,14 +355,6 @@ func DefaultTools() *Tools {
 			Provider:   WebSearchProviderDuckDuckGo,
 			MaxResults: 5,
 		},
-	}
-}
-
-func DefaultWorkflows() *Workflows {
-	return &Workflows{
-		MaxConcurrentSteps: 4,
-		DefaultStepTimeout: configkit.Duration(15 * time.Minute),
-		Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
 	}
 }
 

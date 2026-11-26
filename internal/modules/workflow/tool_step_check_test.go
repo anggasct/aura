@@ -24,7 +24,7 @@ func specWithPath(id, path string) *Spec {
 
 func freshInterpreter(t *testing.T) *Interpreter {
 	t.Helper()
-	return NewInterpreter(newTestStore(t), durabletest.NewFake(), &Options{})
+	return mustNewInterpreter(t, newTestStore(t), durabletest.NewFake(), &Options{})
 }
 
 func TestCompileChecksEveryToolStepsArguments(t *testing.T) {
@@ -84,7 +84,7 @@ func TestCompileChecksEveryToolStepsArguments(t *testing.T) {
 func TestBootQuarantinesARoutineThatNoLongerCompiles(t *testing.T) {
 	disk := newTestStore(t)
 	good, broken := specWithPath("good_routine", "a"), specWithPath("broken_routine", "bad")
-	author := NewInterpreter(disk, durabletest.NewFake(), &Options{})
+	author := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{})
 	if err := author.LoadAll(t.Context(), []*Spec{good, broken}, testValidationDeps()); err != nil {
 		t.Fatalf("LoadAll: %v", err)
 	}
@@ -92,7 +92,7 @@ func TestBootQuarantinesARoutineThatNoLongerCompiles(t *testing.T) {
 	refusing.CheckToolCall = refuseBadPath
 
 	t.Run("LoadRoutines loads the rest and returns the failing routine", func(t *testing.T) {
-		interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{})
+		interpreter := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{})
 		quarantined, err := interpreter.LoadRoutines(t.Context(), []*Spec{good, broken}, refusing)
 		if err != nil {
 			t.Fatalf("LoadRoutines: %v", err)

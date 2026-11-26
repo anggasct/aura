@@ -9,11 +9,13 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/workflow"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
+	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {

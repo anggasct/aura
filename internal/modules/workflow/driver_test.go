@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"slices"
 	"sync"
 	"testing"
@@ -79,7 +80,7 @@ func TestSerialDriverRegistersTheJournaledHandler(t *testing.T) {
 			ctx := t.Context()
 			disk := newTestStore(t)
 			runtime := &recordingRegistrar{Fake: durabletest.NewFake()}
-			interpreter := NewInterpreter(disk, runtime, tc.options)
+			interpreter := mustNewInterpreter(t, disk, runtime, tc.options)
 			if err := interpreter.Install(ctx, []*Spec{twoToolStepSpec("driver-two-steps")}, testValidationDeps()); err != nil {
 				t.Fatalf("Load: %v", err)
 			}
@@ -138,7 +139,7 @@ func TestToolStepCarriesItsStepCall(t *testing.T) {
 	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, fake, &Options{AgentResolver: registry, Tools: tools})
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{AgentResolver: registry, Tools: tools})
 	spec := twoToolStepSpec("step-call")
 	spec.Steps[1].Retry = RetryPolicy{Attempts: 1, Backoff: time.Millisecond}
 	runID := startSerialRun(t, interpreter, disk, spec, nil)
@@ -177,7 +178,7 @@ func TestToolStepCarriesItsApproval(t *testing.T) {
 	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, fake, &Options{AgentResolver: registry, Tools: tools})
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{AgentResolver: registry, Tools: tools})
 	spec := twoToolStepSpec("step-approval")
 	runID := startSerialRun(t, interpreter, disk, spec, nil)
 	inv, _ := holdInvocation(t, fake, "holder-step-approval")
@@ -228,10 +229,10 @@ func TestSerialHandlerRefusesAPayloadWithoutARunID(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			disk := newTestStore(t)
-			interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{Tools: &fakeToolRunner{}})
+			interpreter := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{Tools: &fakeToolRunner{}})
 			inv := &payloadInvocation{payload: tc.payload}
 			err := interpreter.HandleSerial(t.Context(), inv)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeStepFailed {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeStepFailed {
 				t.Fatalf("HandleSerial error = %v, want code %s", err, ErrorCodeStepFailed)
 			}
 			if inv.actions != 0 {
@@ -240,8 +241,8 @@ func TestSerialHandlerRefusesAPayloadWithoutARunID(t *testing.T) {
 		})
 	}
 	t.Run("no invocation", func(t *testing.T) {
-		interpreter := NewInterpreter(newTestStore(t), durabletest.NewFake(), &Options{Tools: &fakeToolRunner{}})
-		if code, ok := CodeOf(interpreter.HandleSerial(t.Context(), nil)); !ok || code != ErrorCodeStepFailed {
+		interpreter := mustNewInterpreter(t, newTestStore(t), durabletest.NewFake(), &Options{Tools: &fakeToolRunner{}})
+		if code, ok := fault.CodeOf[ErrorCode](interpreter.HandleSerial(t.Context(), nil)); !ok || code != ErrorCodeStepFailed {
 			t.Fatalf("HandleSerial without an invocation, want code %s", ErrorCodeStepFailed)
 		}
 	})

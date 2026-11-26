@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -144,7 +145,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),
 		legacyconfig.ValidateTerminal(cfg.Terminal),
-		legacyconfig.ValidateWorkflows(cfg.Workflows),
+		validateWorkflows(cfg.Workflows),
 		legacyconfig.ValidateMCP(cfg.MCP),
 		validatePlugins(cfg.Plugins),
 		configkit.Under("webhook", cfg.Webhook.Validate()),
@@ -445,4 +446,11 @@ func validateSkills(section *skills.Config) error {
 		return nil
 	}
 	return configkit.Under("skills", section.Validate())
+}
+
+func validateWorkflows(section *workflow.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("workflows", section.Validate())
 }

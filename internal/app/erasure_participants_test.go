@@ -388,7 +388,7 @@ func TestErasureRefusesWhileARunItTouchesIsLive(t *testing.T) {
 			tc.seed(t, db)
 			before := workflowDataRows(t, db)
 
-			live, err := store.LiveWorkflowRuns(t.Context(), db, principalID)
+			live, err := liveWorkflowRuns(t.Context(), db, principalID)
 			if err != nil || !slices.Equal(live, tc.wantLive) {
 				t.Fatalf("LiveWorkflowRuns = %v, %v; want %v", live, err, tc.wantLive)
 			}
@@ -444,7 +444,7 @@ func TestErasureReconcilesStaleRunRows(t *testing.T) {
 			seedWorkflowRun(t, db, &seededRun{id: "run-child", definition: "own", principal: principalID, status: "running", parent: "run-root"})
 			seedWorkflowRun(t, db, &seededRun{id: "run-child-done", definition: "own", principal: principalID, status: "succeeded", parent: "run-root"})
 
-			live, err := store.LiveWorkflowRuns(t.Context(), db, principalID)
+			live, err := liveWorkflowRuns(t.Context(), db, principalID)
 			if err != nil || len(live) != 0 {
 				t.Fatalf("LiveWorkflowRuns = %v, %v; want none", live, err)
 			}

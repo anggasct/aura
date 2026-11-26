@@ -6,6 +6,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -27,7 +28,7 @@ type Config struct {
 	Capabilities capability.Config           `json:"capabilities"`
 	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
 	Agents       *auraagent.Config           `json:"agents,omitempty"`
-	Workflows    *legacyconfig.Workflows     `json:"workflows,omitempty"`
+	Workflows    *workflow.Config            `json:"workflows,omitempty"`
 	MCP          *legacyconfig.MCP           `json:"mcp,omitempty"`
 	Plugins      *plugin.Config              `json:"plugins,omitempty"`
 	Server       server.Config               `json:"server"`
@@ -63,12 +64,13 @@ func Default() Config {
 	defaultVision := vision.Default()
 	defaultSkills := skills.Default()
 	defaultContext := compaction.Default()
+	defaultWorkflows := workflow.Default()
 	return Config{
 		Version:      1,
 		Runtime:      runtimeengine.Default(),
 		Capabilities: capability.Default(),
 		Agents:       &defaultAgents,
-		Workflows:    legacyconfig.DefaultWorkflows(),
+		Workflows:    &defaultWorkflows,
 		Tools:        legacyconfig.DefaultTools(),
 		Server:       server.Default(),
 		Logging:      logging.Default(),

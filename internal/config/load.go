@@ -99,19 +99,6 @@ func validateSyncRemote(raw string) error {
 	return nil
 }
 
-func ValidateWorkflows(workflows *Workflows) error {
-	if workflows == nil {
-		return nil
-	}
-	if workflows.MaxConcurrentSteps < 1 {
-		return configkit.Invalid("workflows.max_concurrent_steps", "must be at least 1")
-	}
-	if workflows.Generated.MaxSteps < 1 || workflows.Generated.MaxTokens < 1 {
-		return configkit.Invalid("workflows.generated", "max_steps and max_tokens must be positive")
-	}
-	return nil
-}
-
 func ValidateMCP(m *MCP) error {
 	if m == nil {
 		return nil

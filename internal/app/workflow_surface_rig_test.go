@@ -18,6 +18,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -69,7 +70,7 @@ type surfaceInput struct {
 }
 
 type surfaceRig struct {
-	runner       *workflowToolRunner
+	runner       *workflow.ToolStepRunner
 	executor     *toolsbuiltin.Executor
 	db           *sql.DB
 	workspace    string
@@ -149,16 +150,12 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
 	registerGitHubModule(t, executor, result.Config)
-	built, err := newWorkflowToolRunner(&workflowToolRunnerInput{
-		Executor: executor, Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: mustWorkflowStore(t, in.db),
-		Route: route, Logger: logger,
+	runner, err := workflow.NewToolStepRunner(&workflow.ToolStepRunnerDeps{
+		Broker: executor.Broker(), Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: mustWorkflowStore(t, in.db),
+		Route: newWorkflowOwnerRoute(route), Logger: logger,
 	})
 	if err != nil {
-		t.Fatalf("newWorkflowToolRunner: %v", err)
-	}
-	runner, ok := built.(*workflowToolRunner)
-	if !ok {
-		t.Fatalf("newWorkflowToolRunner returned %T, want *workflowToolRunner", built)
+		t.Fatalf("NewToolStepRunner: %v", err)
 	}
 	rig.runner, rig.executor, rig.route, rig.workspace = runner, executor, route, result.Config.Tools.Workspace
 	return rig

@@ -4,7 +4,6 @@ package app
 
 import (
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -44,11 +43,11 @@ func TestPlanRendersCallsExactlyOrNotAtAll(t *testing.T) {
 			h := githubProposalFixture(t)
 			h.secrets(secret)
 			spec := toolPlanSpec(t, tc.tool, tc.args)
-			graph, err := workflow.Compile(spec, h.controller.interpreter.ValidationDeps())
+			graph, err := workflow.Compile(spec, h.interpreter.ValidationDeps())
 			if err != nil {
 				t.Fatal(err)
 			}
-			plan, err := workflow.RenderPlan(spec, graph, h.controller.showCall)
+			plan, err := workflow.RenderPlan(spec, graph, h.showCall)
 			if !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) || plan != "" {
 				t.Fatalf("RenderPlan = %q, %v, want no plan and %s", plan, err, workflow.ErrorCodePlanUnshowable)
 			}
@@ -62,8 +61,8 @@ func TestApproveRefusesAnUnshowablePlan(t *testing.T) {
 		t.Run(via, func(t *testing.T) {
 			h := githubProposalFixture(t)
 			bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-			h.controller.enableProposalCards(h.cfg, []proposalOfferer{bound}, slog.New(slog.DiscardHandler))
-			go h.controller.runProposalCards(t.Context())
+			h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+			go h.controller.RunProposalCards(t.Context())
 			proposed, err := h.controller.Propose(t.Context(), h.owner, commentProposal(t, body))
 			if err != nil {
 				t.Fatal(err)
@@ -71,7 +70,7 @@ func TestApproveRefusesAnUnshowablePlan(t *testing.T) {
 			bound.waitAttempts(t, 1)
 			h.secrets(body)
 			if via == "cli" {
-				_, err = approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+				_, err = workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposed.ProposalID, h.showCall, time.Now())
 			} else {
 				_, err = bound.decide(t.Context(), true)
 			}
