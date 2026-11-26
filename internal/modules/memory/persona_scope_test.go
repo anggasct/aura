@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"github.com/anggasct/aura/internal/platform/fault"
 	"slices"
 	"testing"
 	"time"
@@ -101,7 +102,7 @@ func TestRecallFailsClosedForUnregisteredPersona(t *testing.T) {
 	req := turnRequest("ghost/discord:home/dm:1", "nightly backup")
 	req.AgentID = "ghost"
 	evidence, err := provider.RecallTurn(t.Context(), req)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeQueryInvalid || evidence != nil {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeQueryInvalid || evidence != nil {
 		t.Fatalf("RecallTurn = %+v, %v; want %s and no evidence", evidence, err, ErrorCodeQueryInvalid)
 	}
 	if _, err := service.Recall(t.Context(), &RecallRequest{OwnerID: principal.OwnerID, SessionID: "main/discord:home/dm:1", Query: "nightly backup"}); err == nil {

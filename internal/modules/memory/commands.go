@@ -1,8 +1,7 @@
-package app
+package memory
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -10,32 +9,44 @@ import (
 
 	"github.com/spf13/cobra"
 
-	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-func newMemoryCmd(gf *globalFlags) *cobra.Command {
+type Opener func(cmd *cobra.Command, fn func(ctx context.Context, logger *slog.Logger, service *Service) error) error
+
+func Commands(open Opener) []*cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "memory",
 		Short: "Inspect and forget projected session memory",
 	}
 	cmd.AddCommand(
-		newMemoryInspectCmd(gf),
-		newMemoryForgetCmd(gf),
-		newMemoryPurgeCmd(gf),
+		newInspectCmd(open),
+		newForgetCmd(open),
+		newPurgeCmd(open),
 	)
-	return cmd
+	return []*cobra.Command{cmd}
 }
 
-func openMemoryServiceForCLI(db *sql.DB, cfg *appconfig.Config) (*memory.Service, error) {
-	if db == nil {
-		return nil, errors.New("memory database must not be nil")
+func runWithOpener(cmd *cobra.Command, open Opener, fn func(ctx context.Context, logger *slog.Logger, service *Service) error) error {
+	if open == nil {
+		return fault.New(ErrorCodeInvalidArgument, "memory command opener must not be nil")
 	}
-	return buildMemoryService(cfg, db, nil)
+	return open(cmd, fn)
 }
 
-func memoryInspectLines(documents []memory.StoredDocument) []string {
+func writeLines(cmd *cobra.Command, lines []string) error {
+	out := cmd.OutOrStdout()
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func memoryInspectLines(documents []StoredDocument) []string {
 	if len(documents) == 0 {
 		return []string{"no documents"}
 	}
@@ -66,7 +77,7 @@ func truncateMemoryText(text string, limit int) string {
 	return string(runes[:limit]) + "..."
 }
 
-func newMemoryInspectCmd(gf *globalFlags) *cobra.Command {
+func newInspectCmd(open Opener) *cobra.Command {
 	var session, query string
 	var limit int
 	cmd := &cobra.Command{
@@ -76,19 +87,12 @@ func newMemoryInspectCmd(gf *globalFlags) *cobra.Command {
 			if limit <= 0 {
 				limit = 50
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
-				if !cfg.Memory.Enabled {
-					return errors.New("memory is not enabled")
-				}
-				service, err := openMemoryServiceForCLI(opened, cfg)
-				if err != nil {
-					return err
-				}
+			return runWithOpener(cmd, open, func(ctx context.Context, _ *slog.Logger, service *Service) error {
 				documents, err := service.Inspect(ctx, principal.OwnerID, session, query, limit)
 				if err != nil {
 					return err
 				}
-				return writeProfileLines(cmd, memoryInspectLines(documents))
+				return writeLines(cmd, memoryInspectLines(documents))
 			})
 		},
 	}
@@ -98,7 +102,7 @@ func newMemoryInspectCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func newMemoryForgetCmd(gf *globalFlags) *cobra.Command {
+func newForgetCmd(open Opener) *cobra.Command {
 	var session, docID, query string
 	var limit int
 	var apply bool
@@ -117,22 +121,16 @@ func newMemoryForgetCmd(gf *globalFlags) *cobra.Command {
 				scopes++
 			}
 			if scopes != 1 {
-				return &usageError{err: errors.New("forget requires exactly one of --session, --id, --query")}
+				return command.NewUsageError(errors.New("forget requires exactly one of --session, --id, --query"))
 			}
 			if limit <= 0 {
 				limit = 100
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
-				if !cfg.Memory.Enabled {
-					return errors.New("memory is not enabled")
-				}
-				service, err := openMemoryServiceForCLI(opened, cfg)
-				if err != nil {
-					return err
-				}
-				var preview []memory.StoredDocument
+			return runWithOpener(cmd, open, func(ctx context.Context, logger *slog.Logger, service *Service) error {
+				var preview []StoredDocument
 				var deleted int
 				var scope string
+				var err error
 				switch {
 				case session != "":
 					scope = "session=" + session
@@ -149,20 +147,22 @@ func newMemoryForgetCmd(gf *globalFlags) *cobra.Command {
 				}
 				if !apply {
 					if len(preview) == 0 {
-						return writeProfileLines(cmd, []string{"dry-run: 0 would be deleted", "no documents"})
+						return writeLines(cmd, []string{"dry-run: 0 would be deleted", "no documents"})
 					}
 					lines := make([]string, 0, len(preview)+1)
 					lines = append(lines, fmt.Sprintf("dry-run: %d would be deleted", len(preview)))
 					lines = append(lines, memoryInspectLines(preview)...)
-					return writeProfileLines(cmd, lines)
+					return writeLines(cmd, lines)
 				}
-				logger.InfoContext(ctx, "memory forget applied",
-					"component", "memory",
-					"operation", "forget",
-					"scope", scope,
-					"deleted", deleted,
-				)
-				return writeProfileLines(cmd, []string{fmt.Sprintf("deleted: %d", deleted)})
+				if logger != nil {
+					logger.InfoContext(ctx, "memory forget applied",
+						"component", "memory",
+						"operation", "forget",
+						"scope", scope,
+						"deleted", deleted,
+					)
+				}
+				return writeLines(cmd, []string{fmt.Sprintf("deleted: %d", deleted)})
 			})
 		},
 	}
@@ -174,7 +174,7 @@ func newMemoryForgetCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func newMemoryPurgeCmd(gf *globalFlags) *cobra.Command {
+func newPurgeCmd(open Opener) *cobra.Command {
 	var limit int
 	cmd := &cobra.Command{
 		Use:   "purge",
@@ -183,23 +183,18 @@ func newMemoryPurgeCmd(gf *globalFlags) *cobra.Command {
 			if limit <= 0 {
 				limit = 100
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, opened *sql.DB) error {
-				if !cfg.Memory.Enabled {
-					return errors.New("memory is not enabled")
-				}
-				service, err := openMemoryServiceForCLI(opened, cfg)
-				if err != nil {
-					return err
-				}
+			return runWithOpener(cmd, open, func(ctx context.Context, logger *slog.Logger, service *Service) error {
 				pruned, err := service.PurgeExpired(ctx, time.Now().UTC(), limit)
 				if err != nil {
 					return err
 				}
-				logger.InfoContext(ctx, "memory purge complete",
-					"component", "memory",
-					"operation", "purge",
-					"pruned", pruned,
-				)
+				if logger != nil {
+					logger.InfoContext(ctx, "memory purge complete",
+						"component", "memory",
+						"operation", "purge",
+						"pruned", pruned,
+					)
+				}
 				_, err = fmt.Fprintf(cmd.OutOrStdout(), "purged: %d\n", pruned)
 				return err
 			})

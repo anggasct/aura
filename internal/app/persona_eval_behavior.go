@@ -50,7 +50,7 @@ func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Defi
 			runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
 			runtimeadk.WithContextProvider(profileMarkerProvider{text: personaeval.MarkerProfile}),
 			runtimeadk.WithContextProvider(markerProvider{text: personaeval.MarkerSkill}),
-			runtimeadk.WithRecallProvider(markerProvider{text: personaeval.MarkerRecall}),
+			runtimeadk.WithContextProvider(recallMarkerProvider{text: personaeval.MarkerRecall}),
 		)
 		if err != nil {
 			return nil, err

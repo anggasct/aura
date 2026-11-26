@@ -1,12 +1,10 @@
-package store
+package memory
 
-import (
-	"testing"
-)
+import "testing"
 
-func seedOwnedDocument(t *testing.T, s MemoryStore, id, owner, session, content string, seq int64) {
+func seedOwnedDocument(t *testing.T, s *SQLiteStore, id, owner, session, content string, seq int64) {
 	t.Helper()
-	document := testMemoryDocument(id, session, MemoryKindEventText)
+	document := testMemoryDocument(id, session, KindEventText)
 	document.OwnerID = owner
 	document.Content = content
 	document.FromSequence = seq
@@ -17,8 +15,7 @@ func seedOwnedDocument(t *testing.T, s MemoryStore, id, owner, session, content 
 }
 
 func TestMemoryStore_OwnedDeletesAreFTSConsistent(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-a", "owner-1")
 	seedMemorySession(t, db, "sess-b", "owner-1")
@@ -47,26 +44,25 @@ func TestMemoryStore_OwnedDeletesAreFTSConsistent(t *testing.T) {
 	if err != nil || deleted != 2 {
 		t.Fatalf("owned delete = %d, %v; want 2", deleted, err)
 	}
-	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "alpha", Limit: 10})
+	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "alpha", Limit: 10})
 	if err != nil {
 		t.Fatalf("search alpha: %v", err)
 	}
 	if len(hits) != 0 {
 		t.Errorf("ghost hits after owned delete: %+v", hits)
 	}
-	kept, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "beta", Limit: 10})
+	kept, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "beta", Limit: 10})
 	if err != nil || len(kept) != 1 || kept[0].ID != "mem-b1" {
 		t.Errorf("sess-b untouched = %+v, %v; want mem-b1", kept, err)
 	}
-	foreign, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-2", Terms: "alpha", Limit: 10})
+	foreign, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-2", Terms: "alpha", Limit: 10})
 	if err != nil || len(foreign) != 1 || foreign[0].ID != "mem-c1" {
 		t.Errorf("foreign untouched = %+v, %v; want mem-c1", foreign, err)
 	}
 }
 
 func TestMemoryStore_OwnedDeletesLeaveForeignInSameSession(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-mixed", "owner-1")
 	seedOwnedDocument(t, s, "mem-own", "owner-1", "sess-mixed", "alpha owned recording", 1)
@@ -97,8 +93,7 @@ func TestMemoryStore_OwnedDeletesLeaveForeignInSameSession(t *testing.T) {
 }
 
 func TestMemoryStore_GetListOwnerAndDeleteByIDs(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-a", "owner-1")
 	seedMemorySession(t, db, "sess-b", "owner-1")
@@ -120,11 +115,11 @@ func TestMemoryStore_GetListOwnerAndDeleteByIDs(t *testing.T) {
 	if err != nil || deleted != 1 {
 		t.Fatalf("delete by ids = %d, %v; want 1", deleted, err)
 	}
-	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "alpha", Limit: 10})
+	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "alpha", Limit: 10})
 	if err != nil || len(hits) != 0 {
 		t.Errorf("ghost after id delete: %+v, %v", hits, err)
 	}
-	kept, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "beta", Limit: 10})
+	kept, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "beta", Limit: 10})
 	if err != nil || len(kept) != 1 {
 		t.Errorf("beta hits = %d, %v; want 1", len(kept), err)
 	}
@@ -134,8 +129,7 @@ func TestMemoryStore_GetListOwnerAndDeleteByIDs(t *testing.T) {
 }
 
 func TestMemoryStore_RejectsBadOwnedArguments(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	_, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	if _, err := s.ListSessionDocuments(ctx, "", "sess-a", 10); err == nil {
 		t.Error("empty owner accepted")

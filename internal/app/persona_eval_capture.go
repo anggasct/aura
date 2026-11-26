@@ -86,14 +86,29 @@ func (p markerProvider) Required(_ *turn.TurnRequest) bool {
 	return false
 }
 
-func (p markerProvider) RecallTurn(_ context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error) {
-	if req.PrincipalID != principal.OwnerID {
-		return &turn.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal}, nil
+type recallMarkerProvider struct {
+	text string
+}
+
+func (p recallMarkerProvider) TurnContext(_ context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req != nil && req.UntrustedContext != nil {
+		return nil, nil
 	}
-	return &turn.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal, Documents: []turn.UntrustedDocument{
-		{ID: "doc-eval", SessionID: personaeval.SessionID, FromSequence: 1, ToSequence: 1, Trust: approval.TrustUntrustedExternal, Content: p.text},
+	recall := &turn.UntrustedRecall{Query: "eval", Trust: approval.TrustUntrustedExternal}
+	if req != nil && req.PrincipalID == principal.OwnerID {
+		recall.Documents = []turn.UntrustedDocument{
+			{ID: "doc-eval", SessionID: personaeval.SessionID, FromSequence: 1, ToSequence: 1, Trust: approval.TrustUntrustedExternal, Content: p.text},
+		}
+	}
+	return []turn.ContextBlock{{
+		Order:     turn.ContextOrderRecall,
+		Placement: turn.ContextPlacementUserPart,
+		Content:   turn.RenderUntrustedRecall(recall),
+		Caveat:    turn.RecallEvidenceCaveat,
 	}}, nil
 }
+
+func (recallMarkerProvider) Required(*turn.TurnRequest) bool { return false }
 
 type catalogExecutor struct{}
 
@@ -133,7 +148,7 @@ func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definiti
 		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
 		runtimeadk.WithContextProvider(profileMarkerProvider{text: personaeval.MarkerProfile}),
 		runtimeadk.WithContextProvider(markerProvider{text: personaeval.MarkerSkill}),
-		runtimeadk.WithRecallProvider(markerProvider{text: personaeval.MarkerRecall}),
+		runtimeadk.WithContextProvider(recallMarkerProvider{text: personaeval.MarkerRecall}),
 	)
 	if err != nil {
 		return personaeval.Capture{}, err

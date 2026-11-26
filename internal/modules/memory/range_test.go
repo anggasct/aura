@@ -2,12 +2,13 @@ package memory
 
 import (
 	"context"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"testing"
 	"time"
 )
 
 func rangeServiceWithStore(store *fakeDocumentStore) *Service {
-	service, err := NewService(store, &fakeSecrets{known: map[string]bool{}}, &Config{RangeThreshold: 6, RangeLiveWindow: 2})
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{}}, &ServiceOptions{RangeThreshold: 6, RangeLiveWindow: 2})
 	if err != nil {
 		panic(err)
 	}
@@ -379,7 +380,7 @@ func seedRangeSessionWithGap(t *testing.T, service *Service, session string, cou
 func TestRangeCapabilitySkipLeavesZeroDocs(t *testing.T) {
 	store := newFakeDocumentStore()
 	sink := &observationSink{}
-	service, err := NewService(store, &fakeSecrets{known: map[string]bool{}}, &Config{
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{}}, &ServiceOptions{
 		RangeThreshold:  6,
 		RangeLiveWindow: 2,
 		Observer:        sink.observe,
@@ -438,10 +439,10 @@ func TestRangeValidation(t *testing.T) {
 	if _, _, err := nilService.SummarizeClosedRange(t.Context(), "owner-1", "sess-1", capableModel(), summarizer); err == nil {
 		t.Error("nil service accepted")
 	}
-	for _, config := range []Config{{RangeThreshold: -1}, {RangeThreshold: maxRangeThreshold + 1}, {RangeLiveWindow: -1}, {RangeLiveWindow: maxRangeLiveWindow + 1}} {
+	for _, config := range []ServiceOptions{{RangeThreshold: -1}, {RangeThreshold: maxRangeThreshold + 1}, {RangeLiveWindow: -1}, {RangeLiveWindow: maxRangeLiveWindow + 1}} {
 		if _, err := NewService(newFakeDocumentStore(), nil, &config); err == nil {
 			t.Errorf("invalid range config accepted: %+v", config)
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetInvalid {
+		} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBudgetInvalid {
 			t.Errorf("code = %v, %v; want budget invalid", code, ok)
 		}
 	}

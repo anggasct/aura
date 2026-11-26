@@ -73,7 +73,7 @@ func TestOwnerContextAttachOrder(t *testing.T) {
 			executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 				WithAgentResolver(resolver, nil),
 				WithOwnerContext(block),
-				WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),
+				WithContextProvider(&stubRecallProvider{evidence: corpusEvidence()}),
 			)
 			if err != nil {
 				t.Fatalf("NewADKExecutor: %v", err)
@@ -92,7 +92,7 @@ func TestOwnerContextAttachOrder(t *testing.T) {
 			}
 			ownerAt := strings.Index(system, ownerContextHeader)
 			soulAt := strings.Index(system, "SOUL: inspect before editing")
-			caveatAt := strings.Index(system, recallEvidenceCaveat)
+			caveatAt := strings.Index(system, turn.RecallEvidenceCaveat)
 			if ownerAt < 0 || soulAt < 0 || caveatAt < 0 {
 				t.Fatalf("attach parts missing (owner=%d soul=%d caveat=%d):\n%s", ownerAt, soulAt, caveatAt, system)
 			}
@@ -111,7 +111,7 @@ func TestOwnerContextAbsentLeavesInstructionUnchanged(t *testing.T) {
 	modelName, models := capturingModelSet(model)
 	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
-		WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),
+		WithContextProvider(&stubRecallProvider{evidence: corpusEvidence()}),
 	)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -123,7 +123,7 @@ func TestOwnerContextAbsentLeavesInstructionUnchanged(t *testing.T) {
 	if strings.Contains(system, ownerContextHeader) || strings.Contains(system, ownerContextFooter) {
 		t.Fatalf("owner block attached without configuration:\n%s", system)
 	}
-	want := "SOUL: inspect before editing\n\n" + recallEvidenceCaveat
+	want := "SOUL: inspect before editing\n\n" + turn.RecallEvidenceCaveat
 	if !strings.HasPrefix(system, want) {
 		t.Fatalf("system instruction = %q, want prefix %q", system, want)
 	}
@@ -150,7 +150,7 @@ func TestOwnerContextWithoutRecall(t *testing.T) {
 	if want := block + "\n\nSOUL"; !strings.HasPrefix(system, want) {
 		t.Fatalf("system instruction = %q, want prefix %q", system, want)
 	}
-	if strings.Contains(system, recallEvidenceCaveat) {
+	if strings.Contains(system, turn.RecallEvidenceCaveat) {
 		t.Fatal("recall caveat present without recall evidence")
 	}
 }

@@ -1,4 +1,4 @@
-package store
+package memory
 
 import (
 	"database/sql"
@@ -8,8 +8,20 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
+
+func newTestSQLiteStore(t *testing.T) (*sql.DB, *SQLiteStore) {
+	t.Helper()
+	db := storetest.OpenMigrated(t)
+	s, err := NewSQLiteStore(db, turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
+	return db, s
+}
 
 func seedMemorySession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
 	t.Helper()
@@ -19,9 +31,9 @@ func seedMemorySession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
 	}
 }
 
-func testMemoryDocument(id, session, kind string) *MemoryDocument {
+func testMemoryDocument(id, session, kind string) *StoredDocument {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	return &MemoryDocument{
+	return &StoredDocument{
 		ID: id, OwnerID: "owner-1", SessionID: session, Kind: kind,
 		FromSequence: 1, ToSequence: 1, Content: "the nightly backup finished",
 		TrustLabel: "owner_input", CreatedAt: now,
@@ -29,26 +41,25 @@ func testMemoryDocument(id, session, kind string) *MemoryDocument {
 }
 
 func TestMemoryStore_UpsertSearchRoundTrip(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-1", "owner-1")
 
-	inserted, err := s.UpsertDocument(ctx, testMemoryDocument("mem-1", "sess-1", MemoryKindEventText))
+	inserted, err := s.UpsertDocument(ctx, testMemoryDocument("mem-1", "sess-1", KindEventText))
 	if err != nil {
 		t.Fatalf("UpsertDocument(): %v", err)
 	}
 	if !inserted {
 		t.Error("first upsert reported present")
 	}
-	inserted, err = s.UpsertDocument(ctx, testMemoryDocument("mem-1", "sess-1", MemoryKindEventText))
+	inserted, err = s.UpsertDocument(ctx, testMemoryDocument("mem-1", "sess-1", KindEventText))
 	if err != nil {
 		t.Fatalf("re-upsert: %v", err)
 	}
 	if inserted {
 		t.Error("identical re-projection reported insert")
 	}
-	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
+	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search(): %v", err)
 	}
@@ -58,24 +69,23 @@ func TestMemoryStore_UpsertSearchRoundTrip(t *testing.T) {
 	if hits[0].Rank >= 0 {
 		t.Errorf("bm25 rank = %v, want negative", hits[0].Rank)
 	}
-	if _, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-2", Terms: "backup", Limit: 10}); err != nil {
+	if _, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-2", Terms: "backup", Limit: 10}); err != nil {
 		t.Fatalf("foreign owner search: %v", err)
 	}
-	foreign, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-2", Terms: "backup", Limit: 10})
+	foreign, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-2", Terms: "backup", Limit: 10})
 	if err != nil || len(foreign) != 0 {
 		t.Errorf("foreign owner hits = %d, %v; want none", len(foreign), err)
 	}
 }
 
 func TestMemoryStore_SearchRankingAndBounds(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-1", "owner-1")
 
 	ids := []string{"mem-a", "mem-b", "mem-c"}
 	for i, text := range []string{"backup finished nightly", "backup failed nightly", "unrelated weather chat"} {
-		document := testMemoryDocument(ids[i], "sess-1", MemoryKindEventText)
+		document := testMemoryDocument(ids[i], "sess-1", KindEventText)
 		document.Content = text
 		document.FromSequence = int64(i + 1)
 		document.ToSequence = int64(i + 1)
@@ -83,7 +93,7 @@ func TestMemoryStore_SearchRankingAndBounds(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 	}
-	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup nightly", Limit: 10})
+	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup nightly", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search(): %v", err)
 	}
@@ -96,15 +106,15 @@ func TestMemoryStore_SearchRankingAndBounds(t *testing.T) {
 	if hits[0].ID == hits[1].ID {
 		t.Error("duplicate hit ids")
 	}
-	limited, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup nightly", Limit: 1})
+	limited, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup nightly", Limit: 1})
 	if err != nil || len(limited) != 1 || limited[0].ID != hits[0].ID {
 		t.Errorf("limited search = %+v, %v", limited, err)
 	}
-	noisy, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: `backup* (nightly)`, Limit: 10})
+	noisy, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: `backup* (nightly)`, Limit: 10})
 	if err != nil || len(noisy) != 2 {
 		t.Errorf("syntax-neutralized search = %d, %v; want 2", len(noisy), err)
 	}
-	if _, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "(((", Limit: 10}); err == nil {
+	if _, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "(((", Limit: 10}); err == nil {
 		t.Error("term-less query accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Errorf("term-less query code = %v, %v", code, ok)
@@ -112,31 +122,30 @@ func TestMemoryStore_SearchRankingAndBounds(t *testing.T) {
 }
 
 func TestMemoryStore_SearchFilters(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	seedMemorySession(t, db, "sess-1", "owner-1")
 
-	fresh := testMemoryDocument("mem-fresh", "sess-1", MemoryKindEventText)
+	fresh := testMemoryDocument("mem-fresh", "sess-1", KindEventText)
 	fresh.CreatedAt = now
 	if _, err := s.UpsertDocument(ctx, fresh); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	stale := testMemoryDocument("mem-stale", "sess-1", MemoryKindEventText)
+	stale := testMemoryDocument("mem-stale", "sess-1", KindEventText)
 	stale.CreatedAt = now.Add(-time.Hour)
 	if _, err := s.UpsertDocument(ctx, stale); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 	expiredAt := now.Add(-time.Minute)
-	expired := testMemoryDocument("mem-expired", "sess-1", MemoryKindEventText)
+	expired := testMemoryDocument("mem-expired", "sess-1", KindEventText)
 	expired.Content = "backup finished nightly"
 	expired.ExpiresAt = &expiredAt
 	if _, err := s.UpsertDocument(ctx, expired); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
 
-	before, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Before: now.Add(-30 * time.Minute), Limit: 10})
+	before, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup", Before: now.Add(-30 * time.Minute), Limit: 10})
 	if err != nil {
 		t.Fatalf("Search(): %v", err)
 	}
@@ -145,7 +154,7 @@ func TestMemoryStore_SearchFilters(t *testing.T) {
 			t.Errorf("before-filter leaked fresh row: %+v", hit.ID)
 		}
 	}
-	current, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
+	current, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search(): %v", err)
 	}
@@ -160,19 +169,18 @@ func TestMemoryStore_SearchFilters(t *testing.T) {
 }
 
 func TestMemoryStore_WatermarkDeleteAndExpiry(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-1", "owner-1")
 
 	if _, found, err := s.ProjectionWatermark(ctx, "sess-1"); err != nil || found {
 		t.Errorf("empty watermark = %v, %v", found, err)
 	}
-	first := testMemoryDocument("mem-1", "sess-1", MemoryKindEventText)
+	first := testMemoryDocument("mem-1", "sess-1", KindEventText)
 	first.FromSequence, first.ToSequence = 1, 3
-	second := testMemoryDocument("mem-2", "sess-1", MemoryKindEventText)
+	second := testMemoryDocument("mem-2", "sess-1", KindEventText)
 	second.FromSequence, second.ToSequence = 4, 7
-	for _, document := range []*MemoryDocument{first, second} {
+	for _, document := range []*StoredDocument{first, second} {
 		if _, err := s.UpsertDocument(ctx, document); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
@@ -183,7 +191,7 @@ func TestMemoryStore_WatermarkDeleteAndExpiry(t *testing.T) {
 	}
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	past := now.Add(-time.Hour)
-	summary := testMemoryDocument("mem-sum", "sess-1", MemoryKindSummary)
+	summary := testMemoryDocument("mem-sum", "sess-1", KindSummary)
 	summary.FromSequence, summary.ToSequence = 1, 7
 	summary.ExpiresAt = &past
 	if _, err := s.UpsertDocument(ctx, summary); err != nil {
@@ -196,7 +204,7 @@ func TestMemoryStore_WatermarkDeleteAndExpiry(t *testing.T) {
 	if pruned != 1 {
 		t.Errorf("pruned = %d, want 1", pruned)
 	}
-	event := testMemoryDocument("mem-event-old", "sess-1", MemoryKindEventText)
+	event := testMemoryDocument("mem-event-old", "sess-1", KindEventText)
 	event.FromSequence, event.ToSequence = 8, 8
 	old := now.Add(-1000 * time.Hour)
 	event.CreatedAt = old
@@ -209,29 +217,28 @@ func TestMemoryStore_WatermarkDeleteAndExpiry(t *testing.T) {
 	if err := s.DeleteSessionDocuments(ctx, "sess-1"); err != nil {
 		t.Fatalf("DeleteSessionDocuments(): %v", err)
 	}
-	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
+	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
 	if err != nil || len(hits) != 0 {
 		t.Errorf("rows survive session delete: %+v, %v", len(hits), err)
 	}
 }
 
 func TestMemoryStore_RejectsInvalidRows(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	_, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 
-	valid := func() *MemoryDocument { return testMemoryDocument("mem-1", "sess-1", MemoryKindEventText) }
+	valid := func() *StoredDocument { return testMemoryDocument("mem-1", "sess-1", KindEventText) }
 	cases := []struct {
 		name   string
-		mutate func(*MemoryDocument)
+		mutate func(*StoredDocument)
 	}{
-		{"empty id", func(document *MemoryDocument) { document.ID = "" }},
-		{"empty owner", func(document *MemoryDocument) { document.OwnerID = "" }},
-		{"bad kind", func(document *MemoryDocument) { document.Kind = "note" }},
-		{"zero from", func(document *MemoryDocument) { document.FromSequence = 0 }},
-		{"inverted range", func(document *MemoryDocument) { document.ToSequence = 0 }},
-		{"empty content", func(document *MemoryDocument) { document.Content = "" }},
-		{"empty trust", func(document *MemoryDocument) { document.TrustLabel = "" }},
+		{"empty id", func(document *StoredDocument) { document.ID = "" }},
+		{"empty owner", func(document *StoredDocument) { document.OwnerID = "" }},
+		{"bad kind", func(document *StoredDocument) { document.Kind = "note" }},
+		{"zero from", func(document *StoredDocument) { document.FromSequence = 0 }},
+		{"inverted range", func(document *StoredDocument) { document.ToSequence = 0 }},
+		{"empty content", func(document *StoredDocument) { document.Content = "" }},
+		{"empty trust", func(document *StoredDocument) { document.TrustLabel = "" }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -248,16 +255,16 @@ func TestMemoryStore_RejectsInvalidRows(t *testing.T) {
 	if _, err := s.Search(ctx, nil); err == nil {
 		t.Error("nil query accepted")
 	}
-	if _, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "!!!", Limit: 10}); err == nil {
+	if _, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "!!!", Limit: 10}); err == nil {
 		t.Error("term-less query accepted")
 	}
-	if _, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Limit: 0}); err == nil {
+	if _, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup", Limit: 0}); err == nil {
 		t.Error("non-positive limit accepted")
 	}
 }
 
 func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
@@ -275,8 +282,7 @@ func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
 }
 
 func TestMemoryStore_MultilingualRetrieval(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-1", "owner-1")
 
@@ -291,7 +297,7 @@ func TestMemoryStore_MultilingualRetrieval(t *testing.T) {
 		{"mem-ar", "اجتماع الفريق غدا", "اجتماع"},
 	}
 	for i, tc := range documents {
-		document := testMemoryDocument(tc.id, "sess-1", MemoryKindEventText)
+		document := testMemoryDocument(tc.id, "sess-1", KindEventText)
 		document.Content = tc.content
 		document.FromSequence = int64(i + 1)
 		document.ToSequence = int64(i + 1)
@@ -300,7 +306,7 @@ func TestMemoryStore_MultilingualRetrieval(t *testing.T) {
 		}
 	}
 	for _, tc := range documents {
-		hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: tc.query, Limit: 10})
+		hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: tc.query, Limit: 10})
 		if err != nil {
 			t.Fatalf("Search(%q): %v", tc.query, err)
 		}
@@ -317,21 +323,20 @@ func TestMemoryStore_MultilingualRetrieval(t *testing.T) {
 }
 
 func TestMemoryStore_SearchDoesNotStemByDefault(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedMemorySession(t, db, "sess-1", "owner-1")
 
-	document := testMemoryDocument("mem-1", "sess-1", MemoryKindEventText)
+	document := testMemoryDocument("mem-1", "sess-1", KindEventText)
 	document.Content = "the nightly backup finished"
 	if _, err := s.UpsertDocument(ctx, document); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	exact, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
+	exact, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backup", Limit: 10})
 	if err != nil || len(exact) != 1 {
 		t.Fatalf("exact search = %d, %v; want 1", len(exact), err)
 	}
-	inflected, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", Terms: "backups", Limit: 10})
+	inflected, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", Terms: "backups", Limit: 10})
 	if err != nil {
 		t.Fatalf("inflected search: %v", err)
 	}

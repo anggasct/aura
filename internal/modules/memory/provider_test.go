@@ -25,7 +25,7 @@ func (s *observationSink) observe(_ context.Context, observation *Observation) {
 
 func providerService(t *testing.T, store *fakeDocumentStore, sink *observationSink) *Service {
 	t.Helper()
-	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, &Config{Observer: sink.observe})
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, &ServiceOptions{Observer: sink.observe})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -205,5 +205,58 @@ func TestEvidenceConverterCarriesProvenance(t *testing.T) {
 	}
 	if len(evidence.Documents) != 1 || evidence.Documents[0].ID != "mem_a" || evidence.Documents[0].FromSequence != 2 || evidence.Documents[0].ToSequence != 4 {
 		t.Errorf("documents = %+v", evidence.Documents)
+	}
+}
+
+func TestProviderSkipsWhenUntrustedContextPreAttached(t *testing.T) {
+	store := newFakeDocumentStore()
+	sink := &observationSink{}
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{}}, &ServiceOptions{Observer: sink.observe})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	if _, err := store.UpsertDocument(t.Context(), &StoredDocument{
+		ID: "mem-1", OwnerID: principal.OwnerID, SessionID: "sess-1", AgentID: "main",
+		Kind: KindEventText, FromSequence: 1, ToSequence: 1,
+		Content: "nightly backup finished", TrustLabel: string(approval.TrustOwnerInput),
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	provider, err := NewProvider(service, ProviderConfig{Scopes: testScopes})
+	if err != nil {
+		t.Fatalf("NewProvider(): %v", err)
+	}
+	req := turnRequest("sess-1", "nightly backup")
+	req.UntrustedContext = &turn.UntrustedRecall{Query: "pre-attached"}
+	blocks, err := provider.TurnContext(t.Context(), req)
+	if err != nil {
+		t.Fatalf("TurnContext(): %v", err)
+	}
+	if len(blocks) != 0 {
+		t.Fatalf("blocks = %+v, want none when UntrustedContext is pre-attached", blocks)
+	}
+	if len(sink.observations) != 0 {
+		t.Fatalf("observations = %d, want 0 when skipped", len(sink.observations))
+	}
+}
+
+func TestProviderRequiredFollowsRequireRecall(t *testing.T) {
+	service, err := NewService(newFakeDocumentStore(), nil, &ServiceOptions{})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	provider, err := NewProvider(service, ProviderConfig{Scopes: testScopes})
+	if err != nil {
+		t.Fatalf("NewProvider(): %v", err)
+	}
+	if provider.Required(nil) {
+		t.Error("Required(nil) = true, want false")
+	}
+	if provider.Required(&turn.TurnRequest{RequireRecall: false}) {
+		t.Error("Required(RequireRecall=false) = true, want false")
+	}
+	if !provider.Required(&turn.TurnRequest{RequireRecall: true}) {
+		t.Error("Required(RequireRecall=true) = false, want true")
 	}
 }

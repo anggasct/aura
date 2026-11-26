@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"slices"
 	"strconv"
 	"strings"
@@ -361,7 +362,7 @@ func testService() *Service {
 }
 
 func testServiceWithStore(store *fakeDocumentStore) *Service {
-	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, &Config{})
+	service, err := NewService(store, &fakeSecrets{known: map[string]bool{"sk-live-canary": true}}, &ServiceOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -377,7 +378,7 @@ func (s *failingDocumentStore) Search(_ context.Context, _ *StoredQuery) ([]Stor
 }
 
 func NewServiceWithStoreError() *Service {
-	service, err := NewService(&failingDocumentStore{fakeDocumentStore: newFakeDocumentStore()}, nil, &Config{})
+	service, err := NewService(&failingDocumentStore{fakeDocumentStore: newFakeDocumentStore()}, nil, &ServiceOptions{})
 	if err != nil {
 		panic(err)
 	}
@@ -689,7 +690,7 @@ func TestRecallFiltersBudgetsAndDeterminism(t *testing.T) {
 		OwnerID: principal.OwnerID, SessionID: "sess-1", Query: "nightly backup", MaxDocuments: 51,
 	}); err == nil {
 		t.Error("over-max documents accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBudgetInvalid {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 	if _, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona,
@@ -815,6 +816,65 @@ func TestProjectEventIgnoresSkillActivations(t *testing.T) {
 		}
 		if indexed {
 			t.Fatalf("skill activation indexed as %+v", document)
+		}
+	}
+}
+
+func TestRecallTwoDistinctSessionsStayIsolated(t *testing.T) {
+	store := newFakeDocumentStore()
+	svc, err := NewService(store, nil, &ServiceOptions{MaxDocuments: 2})
+	if err != nil {
+		t.Fatalf("NewService(): %v", err)
+	}
+	firstConv := "thread:777011"
+	secondConv := "thread:777012"
+	now := time.Now().UTC()
+	firstDocs := []StoredDocument{
+		{ID: "doc-a1", OwnerID: "111", SessionID: firstConv, AgentID: "main", Kind: KindEventText, FromSequence: 1, ToSequence: 1, Content: "alpha project secret", CreatedAt: now},
+		{ID: "doc-a2", OwnerID: "111", SessionID: firstConv, AgentID: "main", Kind: KindEventText, FromSequence: 2, ToSequence: 2, Content: "alpha project notes", CreatedAt: now},
+	}
+	secondDocs := []StoredDocument{
+		{ID: "doc-b1", OwnerID: "111", SessionID: secondConv, AgentID: "main", Kind: KindEventText, FromSequence: 1, ToSequence: 1, Content: "beta project secret", CreatedAt: now},
+		{ID: "doc-b2", OwnerID: "111", SessionID: secondConv, AgentID: "main", Kind: KindEventText, FromSequence: 2, ToSequence: 2, Content: "beta project notes", CreatedAt: now},
+	}
+	for i := range firstDocs {
+		if _, err := store.UpsertDocument(t.Context(), &firstDocs[i]); err != nil {
+			t.Fatalf("seed first doc: %v", err)
+		}
+	}
+	for i := range secondDocs {
+		if _, err := store.UpsertDocument(t.Context(), &secondDocs[i]); err != nil {
+			t.Fatalf("seed second doc: %v", err)
+		}
+	}
+	firstResults, err := svc.Recall(t.Context(), &RecallRequest{OwnerID: "111", AgentIDs: mainPersona, SessionID: firstConv, Query: "project"})
+	if err != nil {
+		t.Fatalf("first recall: %v", err)
+	}
+	if len(firstResults) != 2 {
+		t.Fatalf("first recall = %d docs, want 2", len(firstResults))
+	}
+	for _, doc := range firstResults {
+		if doc.SessionID != firstConv {
+			t.Errorf("first recall returned doc from session %q, want %q", doc.SessionID, firstConv)
+		}
+		if doc.ID == "doc-b1" || doc.ID == "doc-b2" {
+			t.Errorf("first recall leaked beta doc %q", doc.ID)
+		}
+	}
+	secondResults, err := svc.Recall(t.Context(), &RecallRequest{OwnerID: "111", AgentIDs: mainPersona, SessionID: secondConv, Query: "project"})
+	if err != nil {
+		t.Fatalf("second recall: %v", err)
+	}
+	if len(secondResults) != 2 {
+		t.Fatalf("second recall = %d docs, want 2", len(secondResults))
+	}
+	for _, doc := range secondResults {
+		if doc.SessionID != secondConv {
+			t.Errorf("second recall returned doc from session %q, want %q", doc.SessionID, secondConv)
+		}
+		if doc.ID == "doc-a1" || doc.ID == "doc-a2" {
+			t.Errorf("second recall leaked alpha doc %q", doc.ID)
 		}
 	}
 }
