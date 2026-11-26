@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -131,7 +132,7 @@ func newCommandStore(t *testing.T) (store.SessionService, store.EventStore, stor
 func seedCommandSession(t *testing.T, sessions store.SessionService, id, owner, agent string) {
 	t.Helper()
 	now := time.Now().UTC()
-	sess := store.Session{ID: id, OwnerID: owner, AgentID: agent, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
+	sess := turn.Session{ID: id, OwnerID: owner, AgentID: agent, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
 	if err := sessions.Create(t.Context(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
@@ -146,7 +147,7 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 	seedCommandSession(t, sessions, key+"~foreign", "discord:222", "main")
 	now := time.Now().UTC()
 	for i := range 2 {
-		if _, err := events.AppendSequenced(t.Context(), key, &store.RuntimeEvent{ID: "ev-" + strconv.Itoa(i), SessionID: key, Kind: "message.completed", SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
+		if _, err := events.AppendSequenced(t.Context(), key, &turn.Event{ID: "ev-" + strconv.Itoa(i), SessionID: key, Kind: "message.completed", SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}

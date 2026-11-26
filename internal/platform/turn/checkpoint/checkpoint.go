@@ -1,10 +1,6 @@
 package runtimecheckpoint
 
-import (
-	"context"
-
-	"github.com/anggasct/aura/internal/store"
-)
+import "context"
 
 const EventKindRunCheckpoint = "run.checkpoint.v1"
 
@@ -24,8 +20,4 @@ type ResumeValidation struct {
 
 type EffectResumeValidator interface {
 	ValidateResumeEffects(context.Context, string, string, []string) error
-}
-
-type CheckpointAppender interface {
-	AppendCheckpoint(context.Context, *store.RuntimeEvent) error
 }

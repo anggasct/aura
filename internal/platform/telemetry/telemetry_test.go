@@ -14,18 +14,17 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type fakeRuntime struct {
-	events []store.RuntimeEvent
+	events []turn.Event
 	err    error
 }
 
-func (f *fakeRuntime) Run(_ context.Context, _ *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (f *fakeRuntime) Run(_ context.Context, _ *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		if f.err != nil {
-			yield(store.RuntimeEvent{}, f.err)
+			yield(turn.Event{}, f.err)
 			return
 		}
 		for i := range f.events {
@@ -42,7 +41,7 @@ func newTestProviders(t *testing.T) (*tracetest.InMemoryExporter, *sdkmetric.Man
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{
+	fr := &fakeRuntime{events: []turn.Event{
 		{Kind: turn.EventKindTurnAccepted},
 		{Kind: turn.EventKindTurnCompleted},
 	}}
@@ -60,7 +59,7 @@ func sampleTurnRequest() *turn.TurnRequest {
 func TestInstrumentEmitsOneTraceWithoutContent(t *testing.T) {
 	exporter, _, inst := newTestProviders(t)
 
-	var got []store.RuntimeEvent
+	var got []turn.Event
 	for ev, err := range inst.Run(context.Background(), sampleTurnRequest()) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -144,7 +143,7 @@ func TestInstrumentErrorPathMarksFailed(t *testing.T) {
 }
 
 func TestInstrumentNilProvidersFallBackToNoOp(t *testing.T) {
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, nil, nil, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime with nil providers: %v", err)
@@ -188,7 +187,7 @@ func TestModelSpanHierarchy(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, mp, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -212,7 +211,7 @@ func TestModelSpanExplicit(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	reader := sdkmetric.NewManualReader()
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, mp, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -256,7 +255,7 @@ func TestToolSpanExplicit(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	mp := sdkmetric.NewMeterProvider(sdkmetric.WithReader(sdkmetric.NewManualReader()))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, mp, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -286,7 +285,7 @@ func TestToolSpanExplicit(t *testing.T) {
 func TestDroppedCounterShared(t *testing.T) {
 	dropped := &atomic.Int64{}
 	dropped.Store(42)
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, nil, nil, dropped)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)

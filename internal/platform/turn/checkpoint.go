@@ -9,7 +9,6 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/turn/checkpoint"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const checkpointSchemaVersion uint16 = 1
@@ -117,7 +116,7 @@ func (c *Checkpoint) MarshalPayload() (json.RawMessage, error) {
 	return payload, nil
 }
 
-func ParseCheckpoint(event *store.RuntimeEvent) (Checkpoint, error) {
+func ParseCheckpoint(event *Event) (Checkpoint, error) {
 	if event == nil {
 		return Checkpoint{}, invalidArgument("checkpoint event must not be nil")
 	}

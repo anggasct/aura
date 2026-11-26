@@ -60,7 +60,7 @@ func newSessionStore(t *testing.T, db *sql.DB, clock durable.Clock) *SessionStor
 
 func createSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: id, OwnerID: testSessionOwner}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: testSessionOwner}); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }

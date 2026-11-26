@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -62,7 +63,7 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
-	if err := sessions.Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	artifacts := store.NewArtifactStore(db, root, store.DefaultArtifactQuotaBytes)
@@ -127,7 +128,7 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.NewSessionService(db).Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	artifacts := store.NewArtifactStore(db, root, 16)
@@ -159,7 +160,7 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.NewSessionService(db).Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	artifacts := store.NewArtifactStore(db, root, store.DefaultArtifactQuotaBytes)

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type blockingProvider struct {
@@ -28,10 +28,10 @@ func (p *blockingProvider) Invoke(ctx context.Context, inv *Invocation) (Outcome
 }
 
 type channelPublisher struct {
-	events chan *store.RuntimeEvent
+	events chan *turn.Event
 }
 
-func (p *channelPublisher) Publish(ev *store.RuntimeEvent) {
+func (p *channelPublisher) Publish(ev *turn.Event) {
 	select {
 	case p.events <- ev:
 	default:
@@ -39,7 +39,7 @@ func (p *channelPublisher) Publish(ev *store.RuntimeEvent) {
 }
 
 func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
-	published := make(chan *store.RuntimeEvent, 1)
+	published := make(chan *turn.Event, 1)
 	journal, _ := newTestJournalWithEvents(t, &channelPublisher{events: published})
 	executor, err := NewExecutor(journal)
 	if err != nil {
@@ -87,10 +87,10 @@ func TestPreparePublishesToolRequestBeforeProviderInvocation(t *testing.T) {
 
 type recordingPublisher struct {
 	mu     sync.Mutex
-	events []store.RuntimeEvent
+	events []turn.Event
 }
 
-func (p *recordingPublisher) Publish(ev *store.RuntimeEvent) {
+func (p *recordingPublisher) Publish(ev *turn.Event) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.events = append(p.events, *ev)

@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -41,7 +42,7 @@ func newGateFixture(t *testing.T, report capability.Report, approve bool) *gateF
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	session := store.Session{ID: "session-1", OwnerID: "owner-1"}
+	session := turn.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(context.Background(), &session); err != nil {
 		t.Fatalf("create session: %v", err)
 	}

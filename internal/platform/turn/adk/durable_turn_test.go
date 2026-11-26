@@ -378,7 +378,7 @@ func (r *durableTurnRig) runClaim(t *testing.T) int {
 	return claim
 }
 
-func (r *durableTurnRig) turnEvents(t *testing.T) []store.RuntimeEvent {
+func (r *durableTurnRig) turnEvents(t *testing.T) []turn.Event {
 	t.Helper()
 	events, err := store.NewDedupeStore(r.db).ListTurnEvents(t.Context(), "session-1", "turn-1")
 	if err != nil {
@@ -428,8 +428,8 @@ func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
 	awaitStream(t, done)
 
 	events := rig.turnEvents(t)
-	var terminals []store.RuntimeEvent
-	var adk []store.RuntimeEvent
+	var terminals []turn.Event
+	var adk []turn.Event
 	for i := range events {
 		switch events[i].Kind {
 		case turn.EventKindTurnCompleted, turn.EventKindTurnFailed, turn.EventKindTurnCancelled:

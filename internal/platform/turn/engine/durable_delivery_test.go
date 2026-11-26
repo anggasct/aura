@@ -17,7 +17,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const ghostHostOwner = "ghost-host"
@@ -90,7 +89,7 @@ type invocationContextExecutor struct {
 	contexts chan context.Context
 }
 
-func (x *invocationContextExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (x *invocationContextExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	select {
 	case x.contexts <- ctx:
 	default:
@@ -198,7 +197,7 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 		var hooks atomic.Int32
 		cfg := Deps{
 			Config: testLimits(4, 16),
-			PostTurnHook: func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
+			PostTurnHook: func(context.Context, *turn.TurnRequest, []turn.Event) error {
 				hooks.Add(1)
 				return nil
 			},
@@ -287,7 +286,7 @@ type crashAfterDelivery struct {
 	err     error
 }
 
-func (c *crashAfterDelivery) hook(ctx context.Context, req *turn.TurnRequest, _ []store.RuntimeEvent) error {
+func (c *crashAfterDelivery) hook(ctx context.Context, req *turn.TurnRequest, _ []turn.Event) error {
 	c.handOff(ctx, req.TurnID)
 	return nil
 }

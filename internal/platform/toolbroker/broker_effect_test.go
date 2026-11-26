@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -19,7 +20,7 @@ func newBrokerEffectExecutor(t *testing.T) *effect.Executor {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(context.Background(), &store.Session{
+	if err := store.NewSessionService(db).Create(context.Background(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)

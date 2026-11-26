@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store/history"
 )
 
@@ -87,9 +88,9 @@ func TestArtifactPutMaxInt64Quota(t *testing.T) {
 	}
 }
 
-func newSession(id string) Session {
+func newSession(id string) turn.Session {
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	return Session{
+	return turn.Session{
 		ID:        id,
 		OwnerID:   "owner-1",
 		CreatedAt: now,
@@ -131,7 +132,7 @@ func TestSessionRecordsPersona(t *testing.T) {
 	kuma := newSession("kuma/discord:home/channel:1")
 	kuma.AgentID = "kuma"
 	legacy := newSession("channel:1")
-	for _, sess := range []*Session{&kuma, &legacy} {
+	for _, sess := range []*turn.Session{&kuma, &legacy} {
 		if err := sessions.Create(ctx, sess); err != nil {
 			t.Fatalf("Create %s: %v", sess.ID, err)
 		}
@@ -157,8 +158,8 @@ func TestSessionGetMissing(t *testing.T) {
 	}
 }
 
-func newEvent(sessionID string, sequence uint64) RuntimeEvent {
-	return RuntimeEvent{
+func newEvent(sessionID string, sequence uint64) turn.Event {
+	return turn.Event{
 		ID:            fmt.Sprintf("%s-event-%d", sessionID, sequence),
 		SessionID:     sessionID,
 		Sequence:      sequence,
@@ -238,7 +239,7 @@ func TestEventAppendBatchAtomicity(t *testing.T) {
 		t.Fatalf("seed conflicting event: %v", err)
 	}
 
-	batch := []RuntimeEvent{newEvent("session-1", 2), newEvent("session-1", 1)}
+	batch := []turn.Event{newEvent("session-1", 2), newEvent("session-1", 1)}
 	if err := events.AppendBatch(ctx, batch); err == nil {
 		t.Fatal("expected AppendBatch to fail on sequence conflict")
 	}
@@ -305,9 +306,9 @@ func TestEventAppendConcurrentSequenceCollision(t *testing.T) {
 
 	var wg sync.WaitGroup
 	results := make([]error, 2)
-	for i, e := range []RuntimeEvent{a, b} {
+	for i, e := range []turn.Event{a, b} {
 		wg.Add(1)
-		go func(idx int, ev RuntimeEvent) {
+		go func(idx int, ev turn.Event) {
 			defer wg.Done()
 			results[idx] = events.Append(ctx, &ev)
 		}(i, e)

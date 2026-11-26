@@ -8,6 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -66,7 +67,7 @@ func TestNewCodeRunnerRequiresItsOptions(t *testing.T) {
 
 func TestCodeArtifactsMapStoreFailuresToCodes(t *testing.T) {
 	db := storetest.OpenMigrated(t)
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -437,7 +438,7 @@ func TestRefuseInfoJudgesTheOpenDescriptor(t *testing.T) {
 
 func TestImportQuotaExhaustionLeavesNoPartialArtifactInTheStore(t *testing.T) {
 	db := storetest.OpenMigrated(t)
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)

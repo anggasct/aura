@@ -48,7 +48,7 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	sess := store.Session{ID: "session-1", OwnerID: "owner-1"}
+	sess := turn.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 
 type countingPublisher struct{ count int }
 
-func (p *countingPublisher) Publish(*store.RuntimeEvent) { p.count++ }
+func (p *countingPublisher) Publish(*turn.Event) { p.count++ }
 
 func TestNewRefusesANilLiveEventsPublisher(t *testing.T) {
 	dataRoot := t.TempDir()

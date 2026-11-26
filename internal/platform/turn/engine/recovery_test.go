@@ -51,8 +51,8 @@ func (x *holdingExecutor) setOnEnter(fn func(turnID string, othersInside int)) {
 	x.onEnter = fn
 }
 
-func (x *holdingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x *holdingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		x.mu.Lock()
 		x.starts = append(x.starts, req.TurnID)
 		others := x.inside
@@ -68,18 +68,18 @@ func (x *holdingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) it
 		if onEnter != nil {
 			onEnter(req.TurnID, others)
 		}
-		if !yield(store.RuntimeEvent{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)}, nil) {
+		if !yield(turn.Event{Kind: turn.EventKindModelStarted, Payload: []byte(`{}`)}, nil) {
 			return
 		}
 		if gate != nil {
 			select {
 			case <-gate:
 			case <-ctx.Done():
-				yield(store.RuntimeEvent{}, ctx.Err())
+				yield(turn.Event{}, ctx.Err())
 				return
 			}
 		}
-		yield(store.RuntimeEvent{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}, nil)
+		yield(turn.Event{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}, nil)
 	}
 }
 
@@ -122,7 +122,7 @@ func (x *holdingExecutor) waitEntered(t *testing.T, turnID string) {
 }
 
 type turnOutcome struct {
-	events []store.RuntimeEvent
+	events []turn.Event
 	err    error
 }
 
@@ -659,7 +659,7 @@ func TestTurnRunWithATerminalEventOnlyReleases(t *testing.T) {
 			done := sampleRequest("session-a", "turn-1")
 			admitThroughStore(t, rig.sessions, done)
 			admitThroughStore(t, rig.sessions, sampleRequest("session-a", "turn-2"))
-			completed := &store.RuntimeEvent{
+			completed := &turn.Event{
 				ID:            "turn-1-done",
 				SessionID:     "session-a",
 				TurnID:        "turn-1",
@@ -1116,7 +1116,7 @@ type budgetedTurnEvents struct {
 	readsLeft atomic.Int64
 }
 
-func (d *budgetedTurnEvents) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]store.RuntimeEvent, error) {
+func (d *budgetedTurnEvents) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]turn.Event, error) {
 	if d.readsLeft.Add(-1) < 0 {
 		return nil, errors.New("turn events are unreadable")
 	}

@@ -78,7 +78,7 @@ func (e *Engine) currentPresence(req *turn.TurnRequest) (runtimechannelhost.Pres
 	return presenceAdapterFor(req, e.adapters)
 }
 
-func extractPresenceActivity(ev *store.RuntimeEvent) (text, args string, ok bool) {
+func extractPresenceActivity(ev *turn.Event) (text, args string, ok bool) {
 	if ev == nil {
 		return "", "", false
 	}
@@ -154,7 +154,7 @@ func hasToolActivity(payload json.RawMessage) bool {
 	return false
 }
 
-func isPresenceFailureEvent(ev *store.RuntimeEvent) bool {
+func isPresenceFailureEvent(ev *turn.Event) bool {
 	if ev == nil || ev.Kind != store.EventKindADK {
 		return false
 	}

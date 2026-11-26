@@ -16,11 +16,12 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
-func contextRow(kind, payload string) *store.RuntimeEvent {
-	return &store.RuntimeEvent{
+func contextRow(kind, payload string) *turn.Event {
+	return &turn.Event{
 		ID: "evt-1", SessionID: "sess-1", Sequence: 4, TurnID: "t1",
 		InvocationID: "inv-1", Author: "owner", Kind: kind, SchemaVersion: 1,
 		Payload: json.RawMessage(payload), CreatedAt: time.Now().UTC(),
@@ -146,12 +147,12 @@ func openContextTestDB(t *testing.T, cfgPath string) *sql.DB {
 func seedContextSession(t *testing.T, db *sql.DB) {
 	t.Helper()
 	sessions := store.NewSessionService(db)
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), Metadata: json.RawMessage(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(), Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	events := store.NewEventStore(db)
 	for i, text := range []string{"first", "second"} {
-		if _, err := events.AppendSequenced(t.Context(), "sess-1", &store.RuntimeEvent{
+		if _, err := events.AppendSequenced(t.Context(), "sess-1", &turn.Event{
 			ID: "evt-" + string(rune('a'+i)), SessionID: "sess-1", TurnID: "t1",
 			InvocationID: "inv-old", Author: "owner", Kind: "message.completed",
 			SchemaVersion: 1, Payload: json.RawMessage(`{"text":"` + text + `"}`), CreatedAt: time.Now().UTC(),

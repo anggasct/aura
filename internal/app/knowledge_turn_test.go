@@ -167,13 +167,13 @@ agents:
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_kb", OwnerID: principal.OwnerID, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess_kb", OwnerID: principal.OwnerID, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	return rig
 }
 
-func (r *knowledgeTurnRig) turn(t *testing.T, agent string, class principal.Class, text string) []store.RuntimeEvent {
+func (r *knowledgeTurnRig) turn(t *testing.T, agent string, class principal.Class, text string) []turn.Event {
 	t.Helper()
 	req := &turn.TurnRequest{
 		SessionID:      "sess_kb",
@@ -183,7 +183,7 @@ func (r *knowledgeTurnRig) turn(t *testing.T, agent string, class principal.Clas
 		AgentID:        agent,
 		Parts:          []runtimeingress.InputPart{{Text: text}},
 	}
-	var seen []store.RuntimeEvent
+	var seen []turn.Event
 	for ev, err := range r.engine.Run(t.Context(), req) {
 		if err != nil {
 			t.Fatalf("run %q: %v", text, err)

@@ -9,6 +9,8 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
+
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const EventKindADK = "adk_event"
@@ -23,9 +25,9 @@ type adkEventPayload struct {
 	FinishReason       genai.FinishReason   `json:"finishReason,omitempty"`
 }
 
-func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEvent, error) {
+func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (turn.Event, error) {
 	if ev == nil {
-		return RuntimeEvent{}, errNilArgument("event")
+		return turn.Event{}, errNilArgument("event")
 	}
 	payloadJSON, err := json.Marshal(adkEventPayload{
 		Content:            ev.Content,
@@ -35,18 +37,18 @@ func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEv
 		FinishReason:       ev.FinishReason,
 	})
 	if err != nil {
-		return RuntimeEvent{}, fmt.Errorf("marshal adk event %s payload: %w", ev.ID, err)
+		return turn.Event{}, fmt.Errorf("marshal adk event %s payload: %w", ev.ID, err)
 	}
 
 	var usageJSON json.RawMessage
 	if ev.UsageMetadata != nil {
 		usageJSON, err = json.Marshal(ev.UsageMetadata)
 		if err != nil {
-			return RuntimeEvent{}, fmt.Errorf("marshal adk event %s usage: %w", ev.ID, err)
+			return turn.Event{}, fmt.Errorf("marshal adk event %s usage: %w", ev.ID, err)
 		}
 	}
 
-	return RuntimeEvent{
+	return turn.Event{
 		ID:            ev.ID,
 		SessionID:     sessionID,
 		TurnID:        turnID,
@@ -61,7 +63,7 @@ func RuntimeEventFromADK(sessionID, turnID string, ev *session.Event) (RuntimeEv
 	}, nil
 }
 
-func RuntimeEventToADK(e *RuntimeEvent) (*session.Event, error) {
+func RuntimeEventToADK(e *turn.Event) (*session.Event, error) {
 	if e == nil {
 		return nil, errNilArgument("event")
 	}

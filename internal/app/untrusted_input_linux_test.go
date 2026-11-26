@@ -155,7 +155,7 @@ func (r *untrustedInputRig) grant(principalID, tool string) {
 func (r *untrustedInputRig) run(req *turn.TurnRequest) {
 	r.t.Helper()
 	now := time.Now().UTC()
-	err := store.NewSessionService(r.db).Create(r.t.Context(), &store.Session{ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
+	err := store.NewSessionService(r.db).Create(r.t.Context(), &turn.Session{ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		r.t.Fatalf("create session: %v", err)
 	}

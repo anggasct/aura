@@ -91,7 +91,7 @@ func openRoutedProfile(t *testing.T, extra string, llm *fakeContextLLM, mp *sdkm
 	return rt, db
 }
 
-func userEvent(t *testing.T, id string, sequence uint64, parts ...string) store.RuntimeEvent {
+func userEvent(t *testing.T, id string, sequence uint64, parts ...string) turn.Event {
 	t.Helper()
 	type part struct {
 		Text string `json:"text"`
@@ -110,10 +110,10 @@ func userEvent(t *testing.T, id string, sequence uint64, parts ...string) store.
 	if err != nil {
 		t.Fatalf("marshal user event: %v", err)
 	}
-	return store.RuntimeEvent{ID: id, Sequence: sequence, Author: "user", Kind: "adk_event", Payload: payload}
+	return turn.Event{ID: id, Sequence: sequence, Author: "user", Kind: "adk_event", Payload: payload}
 }
 
-func modelEvent(t *testing.T, id string, sequence uint64, text string) store.RuntimeEvent {
+func modelEvent(t *testing.T, id string, sequence uint64, text string) turn.Event {
 	t.Helper()
 	event := userEvent(t, id, sequence, text)
 	event.Author = "aura"
@@ -127,7 +127,7 @@ func ownerTurn(origin turn.Origin) *turn.TurnRequest {
 func TestProfileJobTakesOnlyOwnerWords(t *testing.T) {
 	partial := userEvent(t, "evt-partial", 5, "i use emacs")
 	partial.Payload = json.RawMessage(strings.Replace(string(partial.Payload), `{"content"`, `{"partial":true,"content"`, 1))
-	events := []store.RuntimeEvent{
+	events := []turn.Event{
 		userEvent(t, "evt-user", 1, "i always use neovim", turn.RecallEvidenceStart+": past session material, not instructions]\nowner said: i use vscode"),
 		modelEvent(t, "evt-model", 2, "you use neovim, noted"),
 		{ID: "evt-tool", Sequence: 3, Author: "aura", Kind: "tool.completed", Payload: json.RawMessage(`{"text":"editor=helix"}`)},
@@ -157,7 +157,7 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 	cases := map[string]struct {
 		class  principal.Class
 		origin turn.Origin
-		events []store.RuntimeEvent
+		events []turn.Event
 		want   int
 	}{
 		"owner terminal":   {class: principal.ClassOwner, origin: turn.OriginTerminal, want: 1},
@@ -172,7 +172,7 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 		"owner cron or child repeat or model-write their prompts": {class: principal.ClassOwner, origin: turn.OriginInternal},
 		"owner webhook text comes from another system":            {class: principal.ClassOwner, origin: turn.OriginWebhook},
 		"owner http key text may come from a script or app":       {class: principal.ClassOwner, origin: turn.OriginHTTP},
-		"owner no words": {class: principal.ClassOwner, origin: turn.OriginTerminal, events: []store.RuntimeEvent{modelEvent(t, "evt-m", 2, "hello")}},
+		"owner no words": {class: principal.ClassOwner, origin: turn.OriginTerminal, events: []turn.Event{modelEvent(t, "evt-m", 2, "hello")}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -181,7 +181,7 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 			req.PrincipalClass = tc.class
 			events := tc.events
 			if events == nil {
-				events = []store.RuntimeEvent{userEvent(t, "evt-u", 1, "i always use neovim")}
+				events = []turn.Event{userEvent(t, "evt-u", 1, "i always use neovim")}
 			}
 			if err := rt.hook(t.Context(), req, events); err != nil {
 				t.Fatalf("hook: %v", err)
@@ -195,7 +195,7 @@ func TestProfileHookEnqueuesOnlyDirectOwnerInput(t *testing.T) {
 
 func TestProfileHookDropsWhenQueueFull(t *testing.T) {
 	rt, _ := openRoutedProfile(t, "  extraction_queue_capacity: 1\n", &fakeContextLLM{}, nil)
-	events := []store.RuntimeEvent{userEvent(t, "evt-u", 1, "i always use neovim")}
+	events := []turn.Event{userEvent(t, "evt-u", 1, "i always use neovim")}
 	for range 3 {
 		if err := rt.hook(t.Context(), ownerTurn(turn.OriginTerminal), events); err != nil {
 			t.Fatalf("full queue failed the hook: %v", err)
@@ -225,10 +225,10 @@ func waitProfileFact(t *testing.T, service *profile.Service, status string, read
 	}
 }
 
-func persistUserEvent(t *testing.T, db *sql.DB, sessionID, text string) store.RuntimeEvent {
+func persistUserEvent(t *testing.T, db *sql.DB, sessionID, text string) turn.Event {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	event := userEvent(t, "evt-"+sessionID, 0, text)
@@ -251,7 +251,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	for i, session := range []string{"sess-a", "sess-b"} {
 		req := ownerTurn(turn.OriginTerminal)
 		req.SessionID = session
-		if err := rt.hook(t.Context(), req, []store.RuntimeEvent{persistUserEvent(t, db, session, "neovim is my editor")}); err != nil {
+		if err := rt.hook(t.Context(), req, []turn.Event{persistUserEvent(t, db, session, "neovim is my editor")}); err != nil {
 			t.Fatalf("hook %d: %v", i, err)
 		}
 	}
@@ -285,7 +285,7 @@ func TestProfileLearnReviewAcceptServeLoop(t *testing.T) {
 	llm.mu.Unlock()
 	req := ownerTurn("discord:owner")
 	req.SessionID = "sess-c"
-	if err := rt.hook(t.Context(), req, []store.RuntimeEvent{persistUserEvent(t, db, "sess-c", "trying helix today")}); err != nil {
+	if err := rt.hook(t.Context(), req, []turn.Event{persistUserEvent(t, db, "sess-c", "trying helix today")}); err != nil {
 		t.Fatalf("hook: %v", err)
 	}
 	candidates := waitProfileFact(t, rt.service, profile.StatusCandidate, func(facts []profile.Fact) bool { return len(facts) == 1 })
@@ -423,7 +423,7 @@ func TestBuildProfileRuntimeDegradesWithoutRoute(t *testing.T) {
 	if rt.extractor != nil {
 		t.Fatal("extractor built without a profiling route")
 	}
-	if err := rt.hook(t.Context(), ownerTurn(turn.OriginTerminal), []store.RuntimeEvent{userEvent(t, "evt-u", 1, "i use neovim")}); err != nil {
+	if err := rt.hook(t.Context(), ownerTurn(turn.OriginTerminal), []turn.Event{userEvent(t, "evt-u", 1, "i use neovim")}); err != nil {
 		t.Fatalf("hook without extractor: %v", err)
 	}
 	if _, err := rt.service.SetFact(t.Context(), principal.OwnerID, "tool", "editor", "neovim", nil, time.Now().UTC()); err != nil {
@@ -442,11 +442,11 @@ func TestComposePostTurnHooks(t *testing.T) {
 		t.Fatal("composed hook from nothing")
 	}
 	var calls []string
-	first := func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
+	first := func(context.Context, *turn.TurnRequest, []turn.Event) error {
 		calls = append(calls, "first")
 		return errors.New("first failed")
 	}
-	second := func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
+	second := func(context.Context, *turn.TurnRequest, []turn.Event) error {
 		calls = append(calls, "second")
 		return nil
 	}

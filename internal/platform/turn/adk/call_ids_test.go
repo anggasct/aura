@@ -370,7 +370,7 @@ func TestRepeatedProviderCallIDsReachTheModelAsDistinctPairs(t *testing.T) {
 	}
 }
 
-func adkEventParts(t *testing.T, events []store.RuntimeEvent) requestParts {
+func adkEventParts(t *testing.T, events []turn.Event) requestParts {
 	t.Helper()
 	var stored requestParts
 	for i := range events {

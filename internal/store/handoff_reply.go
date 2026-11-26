@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const HandoffReplyEventPrefix = "handoff-reply-"
@@ -73,7 +74,7 @@ func (s *sqliteHandoffReplyStore) List(ctx context.Context, sessionID string, af
 	return replies, nil
 }
 
-func handoffReplyOf(event *RuntimeEvent) (HandoffReply, error) {
+func handoffReplyOf(event *turn.Event) (HandoffReply, error) {
 	decoded, err := RuntimeEventToADK(event)
 	if err != nil {
 		return HandoffReply{}, fmt.Errorf("list handoff replies: %w", err)

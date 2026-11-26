@@ -2,38 +2,14 @@ package store
 
 import (
 	"context"
-	"encoding/json"
-	"time"
+
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
-type Session struct {
-	ID        string
-	OwnerID   string
-	AgentID   string
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	Metadata  json.RawMessage
-}
-
-type RuntimeEvent struct {
-	ID            string
-	SessionID     string
-	Sequence      uint64
-	TurnID        string
-	InvocationID  string
-	Branch        string
-	Author        string
-	Kind          string
-	SchemaVersion uint16
-	Payload       json.RawMessage
-	ProviderUsage json.RawMessage
-	CreatedAt     time.Time
-}
-
 type SessionService interface {
-	Create(ctx context.Context, sess *Session) error
-	Get(ctx context.Context, sessionID string) (Session, error)
-	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error)
+	Create(ctx context.Context, sess *turn.Session) error
+	Get(ctx context.Context, sessionID string) (turn.Session, error)
+	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]turn.Event, error)
 }
 
 type rowScanner interface {
@@ -41,9 +17,9 @@ type rowScanner interface {
 }
 
 type EventStore interface {
-	Append(ctx context.Context, e *RuntimeEvent) error
-	AppendBatch(ctx context.Context, events []RuntimeEvent) error
+	Append(ctx context.Context, e *turn.Event) error
+	AppendBatch(ctx context.Context, events []turn.Event) error
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
-	AppendSequenced(ctx context.Context, sessionID string, e *RuntimeEvent) (uint64, error)
-	UpsertEvent(ctx context.Context, e *RuntimeEvent) (uint64, bool, error)
+	AppendSequenced(ctx context.Context, sessionID string, e *turn.Event) (uint64, error)
+	UpsertEvent(ctx context.Context, e *turn.Event) (uint64, bool, error)
 }

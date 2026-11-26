@@ -16,7 +16,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const ScopeName = "aura"
@@ -123,8 +122,8 @@ func InstrumentRuntime(inner turn.AgentRuntime, tp trace.TracerProvider, mp metr
 	return instrument, nil
 }
 
-func (i *Instrument) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (i *Instrument) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		spanAttrs := Redact(map[string]any{
 			AttrSessionID:      req.SessionID,
 			AttrTurnID:         req.TurnID,

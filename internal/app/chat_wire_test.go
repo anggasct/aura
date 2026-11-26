@@ -11,27 +11,28 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
 type fakeTerminalSessionService struct {
-	created *store.Session
+	created *turn.Session
 	getErr  error
 }
 
-func (f *fakeTerminalSessionService) Create(_ context.Context, sess *store.Session) error {
+func (f *fakeTerminalSessionService) Create(_ context.Context, sess *turn.Session) error {
 	f.created = sess
 	return nil
 }
 
-func (f *fakeTerminalSessionService) Get(context.Context, string) (store.Session, error) {
+func (f *fakeTerminalSessionService) Get(context.Context, string) (turn.Session, error) {
 	if f.getErr != nil {
-		return store.Session{}, f.getErr
+		return turn.Session{}, f.getErr
 	}
-	return store.Session{}, errors.New("not implemented")
+	return turn.Session{}, errors.New("not implemented")
 }
 
-func (f *fakeTerminalSessionService) ListEvents(context.Context, string, uint64, int) ([]store.RuntimeEvent, error) {
+func (f *fakeTerminalSessionService) ListEvents(context.Context, string, uint64, int) ([]turn.Event, error) {
 	return nil, nil
 }
 

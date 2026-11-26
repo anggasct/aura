@@ -78,8 +78,8 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	}
 }
 
-func collectStream(engine *runtimeengine.Engine, req *turn.TurnRequest) (eventsCh <-chan store.RuntimeEvent, errCh <-chan error) {
-	events := make(chan store.RuntimeEvent, 64)
+func collectStream(engine *runtimeengine.Engine, req *turn.TurnRequest) (eventsCh <-chan turn.Event, errCh <-chan error) {
+	events := make(chan turn.Event, 64)
 	errs := make(chan error, 1)
 	go func() {
 		for ev, err := range engine.Run(context.Background(), req) {
@@ -115,7 +115,7 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: turn.OriginTerminal,
 		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}
-	var streamed []store.RuntimeEvent
+	var streamed []turn.Event
 	for ev, err := range engine.Run(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)

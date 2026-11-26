@@ -15,7 +15,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func newSDKClient(server *httptest.Server, key string, extra ...option.RequestOption) openai.Client {
@@ -238,7 +237,7 @@ func TestSDKStreamingGateErrorsArriveAsAPIErrors(t *testing.T) {
 
 func TestSDKStreamingClientLeavingCancelsTheTurn(t *testing.T) {
 	observed := make(chan error, 1)
-	script := scriptRuntime(func(ctx context.Context, yield func(store.RuntimeEvent, error) bool) {
+	script := scriptRuntime(func(ctx context.Context, yield func(turn.Event, error) bool) {
 		if !emit(yield, turnEvent(turn.EventKindTurnAccepted), answerEvent("first")) {
 			return
 		}

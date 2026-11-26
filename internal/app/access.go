@@ -17,6 +17,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -121,7 +122,7 @@ func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, s
 	if err != nil {
 		return fmt.Errorf("cli: marshal access owner action: %w", err)
 	}
-	_, _, err = store.NewEventStore(db).UpsertEvent(ctx, &store.RuntimeEvent{
+	_, _, err = store.NewEventStore(db).UpsertEvent(ctx, &turn.Event{
 		ID:            "access-owner-action-" + action.Action + "-" + subject + "-" + action.At,
 		SessionID:     sessionID,
 		TurnID:        "owner-action",

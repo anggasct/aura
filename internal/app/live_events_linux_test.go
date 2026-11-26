@@ -42,7 +42,7 @@ func TestBuildRelaysAnEffectfulToolRequestToTheTurnSubscriber(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	if err := store.NewSessionService(b.db).Create(t.Context(), &store.Session{
+	if err := store.NewSessionService(b.db).Create(t.Context(), &turn.Session{
 		ID: liveEventsSession, OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)
@@ -58,7 +58,7 @@ func TestBuildRelaysAnEffectfulToolRequestToTheTurnSubscriber(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	kinds := make(chan store.RuntimeEvent, 64)
+	kinds := make(chan turn.Event, 64)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() {

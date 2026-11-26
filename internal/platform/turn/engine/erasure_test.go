@@ -25,7 +25,7 @@ func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
 		{principal: "discord:602", session: "lobby/discord:owner/dm:602", turnID: "turn-kept"},
 	}
 	for _, tc := range turns {
-		sess := store.Session{ID: tc.session, OwnerID: tc.principal}
+		sess := turn.Session{ID: tc.session, OwnerID: tc.principal}
 		if err := store.NewSessionService(rig.db).Create(t.Context(), &sess); err != nil {
 			t.Fatalf("create session %s: %v", tc.session, err)
 		}

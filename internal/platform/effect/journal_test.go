@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -486,7 +487,7 @@ func TestPrepare_EventPayloadIsSafe(t *testing.T) {
 
 func TestStorePackageContract(t *testing.T) {
 	t.Parallel()
-	err := store.AppendEventTx(context.Background(), nil, &store.RuntimeEvent{})
+	err := store.AppendEventTx(context.Background(), nil, &turn.Event{})
 	if err == nil {
 		t.Fatal("expected nil-tx error")
 	}

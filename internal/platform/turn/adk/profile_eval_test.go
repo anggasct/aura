@@ -8,7 +8,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/genai"
 )
@@ -57,7 +56,7 @@ func TestProfileContextStaysUntrustedUserData(t *testing.T) {
 		Origin: turn.OriginTerminal,
 		Parts:  []runtimeingress.InputPart{{Text: "what do you know about me"}, {Text: block}},
 	}
-	var collected []store.RuntimeEvent
+	var collected []turn.Event
 	for ev, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
@@ -83,7 +82,7 @@ func TestProfileContextStaysUntrustedUserData(t *testing.T) {
 	}
 }
 
-func modelUserContent(t *testing.T, events []store.RuntimeEvent) string {
+func modelUserContent(t *testing.T, events []turn.Event) string {
 	t.Helper()
 	for i := range events {
 		ev := &events[i]

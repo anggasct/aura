@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -17,7 +18,7 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	db := openAccessDB(t, gf.configPath)
 	runs := workflow.NewStore(db)
 	sessionID := "ops/term\x1b[2Jinal"
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	propose := func(id, goal string) *workflow.Proposal {

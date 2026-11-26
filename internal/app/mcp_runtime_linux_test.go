@@ -29,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -205,7 +206,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	session := store.Session{ID: "session-1", OwnerID: "owner-1"}
+	session := turn.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}

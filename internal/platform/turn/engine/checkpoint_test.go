@@ -238,8 +238,8 @@ func TestCheckpointPayloadRejectsCorruption(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarshalPayload: %v", err)
 	}
-	validEvent := func() store.RuntimeEvent {
-		return store.RuntimeEvent{
+	validEvent := func() turn.Event {
+		return turn.Event{
 			ID:            "event-1",
 			SessionID:     checkpoint.SessionID,
 			Sequence:      checkpoint.EventSequence + 1,
@@ -253,14 +253,14 @@ func TestCheckpointPayloadRejectsCorruption(t *testing.T) {
 	}
 	cases := []struct {
 		name   string
-		mutate func(*store.RuntimeEvent)
+		mutate func(*turn.Event)
 		want   turn.ErrorCode
 	}{
-		{name: "wrong kind", mutate: func(event *store.RuntimeEvent) { event.Kind = "unknown" }, want: turn.ErrorCodeCheckpointUnsupported},
-		{name: "wrong schema", mutate: func(event *store.RuntimeEvent) { event.SchemaVersion = 2 }, want: turn.ErrorCodeCheckpointUnsupported},
-		{name: "invalid json", mutate: func(event *store.RuntimeEvent) { event.Payload = json.RawMessage(`{"state":`) }, want: turn.ErrorCodeCheckpointInvalid},
-		{name: "identity mismatch", mutate: func(event *store.RuntimeEvent) { event.TurnID = "other" }, want: turn.ErrorCodeCheckpointInvalid},
-		{name: "boundary mismatch", mutate: func(event *store.RuntimeEvent) { event.Sequence = checkpoint.EventSequence }, want: turn.ErrorCodeCheckpointInvalid},
+		{name: "wrong kind", mutate: func(event *turn.Event) { event.Kind = "unknown" }, want: turn.ErrorCodeCheckpointUnsupported},
+		{name: "wrong schema", mutate: func(event *turn.Event) { event.SchemaVersion = 2 }, want: turn.ErrorCodeCheckpointUnsupported},
+		{name: "invalid json", mutate: func(event *turn.Event) { event.Payload = json.RawMessage(`{"state":`) }, want: turn.ErrorCodeCheckpointInvalid},
+		{name: "identity mismatch", mutate: func(event *turn.Event) { event.TurnID = "other" }, want: turn.ErrorCodeCheckpointInvalid},
+		{name: "boundary mismatch", mutate: func(event *turn.Event) { event.Sequence = checkpoint.EventSequence }, want: turn.ErrorCodeCheckpointInvalid},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {

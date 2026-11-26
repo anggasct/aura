@@ -10,7 +10,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -126,12 +125,12 @@ func (x *ADKExecutor) retrieveKnowledge(ctx context.Context, req *turn.TurnReque
 	return raw
 }
 
-func knowledgeRetrievedEvent(journal *knowledgeJournal) (store.RuntimeEvent, error) {
+func knowledgeRetrievedEvent(journal *knowledgeJournal) (turn.Event, error) {
 	payload, err := json.Marshal(knowledgeRetrievedPayload{
 		ChunkIDs: journal.ChunkIDs, Counts: journal.Counts, DurationMS: journal.DurationMS, Mode: journal.Mode, Outcome: journal.Outcome,
 	})
 	if err != nil {
-		return store.RuntimeEvent{}, codedError(turn.ErrorCodeRuntimeInternal, "failed to encode the knowledge retrieval event", err)
+		return turn.Event{}, codedError(turn.ErrorCodeRuntimeInternal, "failed to encode the knowledge retrieval event", err)
 	}
-	return store.RuntimeEvent{Kind: turn.EventKindKnowledgeRetrieved, Author: turn.AuthorSystem, Payload: payload}, nil
+	return turn.Event{Kind: turn.EventKindKnowledgeRetrieved, Author: turn.AuthorSystem, Payload: payload}, nil
 }
