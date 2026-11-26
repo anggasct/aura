@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -178,7 +180,7 @@ func requireCode(t testing.TB, err error, want ErrorCode) {
 	if err == nil {
 		t.Fatalf("error = nil, want %q", want)
 	}
-	got, ok := CodeOf(err)
+	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || got != want {
 		t.Fatalf("CodeOf(%v) = %q, %v; want %q", err, got, ok, want)
 	}

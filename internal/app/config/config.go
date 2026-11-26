@@ -5,6 +5,7 @@ import (
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
@@ -68,7 +69,7 @@ type Config struct {
 	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
-	Interpreter  legacyconfig.Interpreter    `json:"interpreter"`
+	Interpreter  codeexec.Config             `json:"interpreter"`
 	Channels     Channels                    `json:"channels"`
 	Bindings     auraagent.Bindings          `json:"bindings,omitempty"`
 }
@@ -132,7 +133,7 @@ func Default() Config {
 		Broadcast:   broadcast.Default(),
 		Scheduler:   schedule.Default(),
 		Memory:      memory.Default(),
-		Interpreter: legacyconfig.DefaultInterpreter(),
+		Interpreter: codeexec.Default(),
 		Skills:      &defaultSkills,
 		Sync:        legacyconfig.DefaultSync(),
 		Vision:      &defaultVision,
