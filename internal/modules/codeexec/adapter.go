@@ -11,7 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (
@@ -41,7 +40,7 @@ func (r *Runner) ArgumentCheck(raw json.RawMessage) error {
 	if int64(len(args.Stdin)) > r.limits.MaxStdinBytes {
 		return Errorf(ErrorCodeInvalidArgument, "argument %q must be at most %d bytes", "stdin", r.limits.MaxStdinBytes)
 	}
-	if err := tools.ValidateCodeOutputFiles(args.OutputFiles, int(r.limits.MaxOutputFiles)); err != nil {
+	if err := ValidateCodeOutputFiles(args.OutputFiles, int(r.limits.MaxOutputFiles)); err != nil {
 		return Errorf(ErrorCodeInvalidArgument, "%v", err)
 	}
 	return nil
@@ -64,7 +63,7 @@ func (r *Runner) adapt(ctx context.Context, request *toolbroker.ToolRequest, con
 	if request == nil {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "request must not be nil")
 	}
-	if request.ToolName != tools.CodeExecuteToolName || request.ToolVersion != toolVersion {
+	if request.ToolName != ToolName || request.ToolVersion != toolVersion {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultInvalidArgument, "unsupported tool request")
 	}
 	args, err := decodeArguments(request.Arguments)
@@ -104,7 +103,7 @@ func notPerformed(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return toolbroker.NotPerformed("cancelled", ctxErr)
 	}
-	code, _ := CodeOf(err)
+	code, _ := fault.CodeOf[ErrorCode](err)
 	if fault.HasCode(err, sandbox.ErrorCodeSandboxUnavailable) {
 		code = ErrorCodeUnavailable
 	}

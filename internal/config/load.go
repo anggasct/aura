@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -36,8 +35,6 @@ func ValidateTerminal(t Terminal) error {
 	return nil
 }
 
-var discordAccountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
-
 func ValidateDiscord(discord *Discord) error {
 	if discord == nil {
 		return configkit.Invalid("channels.discord", "must not be nil")
@@ -48,12 +45,11 @@ func ValidateDiscord(discord *Discord) error {
 	for i := range discord.Accounts {
 		account := &discord.Accounts[i]
 		field := fmt.Sprintf("channels.discord.accounts[%d]", i)
-		switch {
-		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
-		case names[account.Name]:
+		if err := configkit.ValidateAccountName(field+".name", account.Name); err != nil {
+			problems = append(problems, err)
+		} else if names[account.Name] {
 			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
-		default:
+		} else {
 			names[account.Name] = true
 		}
 		switch {
@@ -103,12 +99,11 @@ func ValidateTelegram(telegram *Telegram) error {
 	for i := range telegram.Accounts {
 		account := &telegram.Accounts[i]
 		field := fmt.Sprintf("channels.telegram.accounts[%d]", i)
-		switch {
-		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
-		case names[account.Name]:
+		if err := configkit.ValidateAccountName(field+".name", account.Name); err != nil {
+			problems = append(problems, err)
+		} else if names[account.Name] {
 			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
-		default:
+		} else {
 			names[account.Name] = true
 		}
 		switch {
@@ -313,33 +308,4 @@ func ValidateTools(toolsConfig *Tools) error {
 		return err
 	}
 	return configkit.Under("tools.web_search", toolsConfig.WebSearch.Validate())
-}
-
-func ValidateChildren(childrenConfig *Children) error {
-	if childrenConfig == nil {
-		return nil
-	}
-	var problems []error
-	if childrenConfig.MaxDepth != 1 {
-		problems = append(problems, configkit.Invalid("children.max_depth", "must be 1"))
-	}
-	if childrenConfig.MaxActivePerParent <= 0 || childrenConfig.MaxActivePerParent > 64 {
-		problems = append(problems, configkit.Invalid("children.max_active_per_parent", "must be between 1 and 64"))
-	}
-	if childrenConfig.MaxActiveGlobal <= 0 || childrenConfig.MaxActiveGlobal > 256 {
-		problems = append(problems, configkit.Invalid("children.max_active_global", "must be between 1 and 256"))
-	}
-	if time.Duration(childrenConfig.DefaultTimeout) <= 0 || time.Duration(childrenConfig.DefaultTimeout) > 24*time.Hour {
-		problems = append(problems, configkit.Invalid("children.default_timeout", "must be positive and at most 24h"))
-	}
-	if time.Duration(childrenConfig.MaxTimeout) <= 0 || time.Duration(childrenConfig.MaxTimeout) > 24*time.Hour {
-		problems = append(problems, configkit.Invalid("children.max_timeout", "must be positive and at most 24h"))
-	}
-	if time.Duration(childrenConfig.DefaultTimeout) > time.Duration(childrenConfig.MaxTimeout) {
-		problems = append(problems, configkit.Invalid("children.default_timeout", "must not exceed children.max_timeout"))
-	}
-	if childrenConfig.Recovery != "interrupt" {
-		problems = append(problems, configkit.Invalid("children.recovery", "must be \"interrupt\""))
-	}
-	return errors.Join(problems...)
 }

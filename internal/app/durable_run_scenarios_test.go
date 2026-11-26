@@ -27,8 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -365,7 +364,7 @@ func seedChild(t *testing.T, suite *runSuite) {
 			t.Fatalf("create %s: %v", id, err)
 		}
 	}
-	run := &store.ChildRun{
+	run := &child.Run{
 		ID: childID, IdempotencyKey: "key-1",
 		ParentSessionID: childParent, ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: childSession, DurableKey: child.DurableChildKey(childID),
@@ -373,7 +372,11 @@ func seedChild(t *testing.T, suite *runSuite) {
 		BudgetJSON: `{"max_tokens":1000}`, State: child.StatusQueued,
 		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
 	}
-	if err := store.NewChildStore(suite.db).InsertRun(t.Context(), run); err != nil {
+	childStore, err := child.NewSQLiteStore(suite.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := childStore.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	suite.plan.Run, suite.plan.Key = run.ID, run.DurableKey
@@ -382,12 +385,18 @@ func seedChild(t *testing.T, suite *runSuite) {
 func hostChild(t *testing.T, life *runLife) {
 	t.Helper()
 	executor := newLedgerExecutor(t, life.db, &ledgerTurn{scenario: turnScenarios["tools"], ledger: life.ledger})
-	handler, err := buildChildHandler(life.db, nil, &runtimeSignaler{runtime: life.runtime}, executor, scriptedModelName)
+	childMod, err := child.New(&child.ModuleDeps{
+		DB:        life.db,
+		Sessions:  turnstore.NewSessionService(life.db),
+		Turns:     executor,
+		Runtime:   life.runtime,
+		ModelName: scriptedModelName,
+	})
 	if err != nil {
-		t.Fatalf("buildChildHandler: %v", err)
+		t.Fatalf("child.New: %v", err)
 	}
-	if err := registerChildHandler(life.runtime, handler); err != nil {
-		t.Fatalf("registerChildHandler: %v", err)
+	if err := childMod.Register(life.runtime); err != nil {
+		t.Fatalf("childMod.Register: %v", err)
 	}
 }
 

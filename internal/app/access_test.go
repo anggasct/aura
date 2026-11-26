@@ -7,7 +7,7 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -53,7 +53,7 @@ func recordTestGrant(t *testing.T, cfg string) string {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if err := newStandingGrantRecorder(db).RecordStandingGrant(t.Context(), &discord.StandingGrantRequest{
+	if err := newStandingGrantRecorder(db).RecordStandingGrant(t.Context(), &approval.StandingGrantRequest{
 		PrincipalID: "discord:111", AgentID: "kantor", ToolName: "write_file", OwnerID: "discord:777", TTL: 168 * time.Hour,
 	}); err != nil {
 		t.Fatalf("RecordStandingGrant: %v", err)
@@ -149,7 +149,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 func TestDiscordAccessSettingsUseTheAccessSection(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Access.ApprovalTimeout = configkit.Duration(10 * time.Minute)
-	settings := discordAccessSettings(&cfg, nil, nil, nil)
+	settings := channelAccessSettings(&cfg, nil, nil, nil)
 	if settings.ApprovalTimeout != 10*time.Minute || settings.StandingGrantTTL != 168*time.Hour || settings.Grants == nil {
 		t.Fatalf("settings = %+v", settings)
 	}

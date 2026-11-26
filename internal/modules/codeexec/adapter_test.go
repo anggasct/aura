@@ -13,11 +13,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func codeRequest(arguments string) *toolbroker.ToolRequest {
-	return &toolbroker.ToolRequest{ToolName: tools.CodeExecuteToolName, ToolVersion: "v1", Arguments: json.RawMessage(arguments)}
+	return &toolbroker.ToolRequest{ToolName: ToolName, ToolVersion: "v1", Arguments: json.RawMessage(arguments)}
 }
 
 func brokerConstraints() approval.Constraints {
@@ -220,7 +219,7 @@ func TestAdapterRejectsForeignRequests(t *testing.T) {
 	}{
 		{"nil", nil},
 		{"another tool", &toolbroker.ToolRequest{ToolName: "exec", ToolVersion: "v1", Arguments: json.RawMessage(`{}`)}},
-		{"another version", &toolbroker.ToolRequest{ToolName: tools.CodeExecuteToolName, ToolVersion: "v2", Arguments: json.RawMessage(`{}`)}},
+		{"another version", &toolbroker.ToolRequest{ToolName: ToolName, ToolVersion: "v2", Arguments: json.RawMessage(`{}`)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

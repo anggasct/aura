@@ -1,4 +1,4 @@
-package app
+package approval
 
 import (
 	"context"
@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
@@ -15,14 +13,14 @@ type fakeApprovalChannel struct {
 	sessions map[string]bool
 	accept   bool
 	err      error
-	prompts  []approval.Prompt
+	prompts  []Prompt
 }
 
 func (f *fakeApprovalChannel) HoldsApprovalTarget(sessionID string) bool {
 	return f.sessions[sessionID]
 }
 
-func (f *fakeApprovalChannel) Decide(_ context.Context, prompt *approval.Prompt) (bool, error) {
+func (f *fakeApprovalChannel) Decide(_ context.Context, prompt *Prompt) (bool, error) {
 	f.prompts = append(f.prompts, *prompt)
 	return f.accept, f.err
 }
@@ -47,7 +45,7 @@ func brokerPrompt(sessionID string) *toolbroker.ApprovalPrompt {
 func TestChannelApprovalDeciderRoutesToTheChannelHoldingTheSession(t *testing.T) {
 	discordLike := &fakeApprovalChannel{sessions: map[string]bool{"main/discord:owner/dm:1": true}, accept: false}
 	telegramLike := &fakeApprovalChannel{sessions: map[string]bool{"main/telegram:pocket/chat:2": true}, accept: true}
-	decider := channelApprovalDecider([]approvalChannel{discordLike, telegramLike})
+	decider := Decider([]Channel{discordLike, telegramLike})
 	cases := []struct {
 		name       string
 		session    string
@@ -74,10 +72,10 @@ func TestChannelApprovalDeciderRoutesToTheChannelHoldingTheSession(t *testing.T)
 
 func TestChannelApprovalDeciderCarriesTheWholePrompt(t *testing.T) {
 	channel := &fakeApprovalChannel{sessions: map[string]bool{"s": true}}
-	if _, err := channelApprovalDecider([]approvalChannel{channel})(t.Context(), brokerPrompt("s")); err != nil {
+	if _, err := Decider([]Channel{channel})(t.Context(), brokerPrompt("s")); err != nil {
 		t.Fatalf("decider(): %v", err)
 	}
-	want := approval.Prompt{
+	want := Prompt{
 		ToolName: "shell.exec", ToolVersion: "1", SessionID: "s", TurnID: "turn-1", PrincipalID: "local-owner",
 		Arguments: `{"command":"ls"}`, Network: true, Timeout: time.Second, MaxOutputBytes: 64,
 		PolicyVersion: "v3", ReasonCode: "approval_required", ExpiresAt: time.Unix(1700000000, 0),
@@ -92,7 +90,7 @@ func TestChannelApprovalPromptCarriesTheStandingGrantFlag(t *testing.T) {
 		channel := &fakeApprovalChannel{sessions: map[string]bool{"s": true}}
 		prompt := brokerPrompt("s")
 		prompt.StandingGrantAllowed = allowed
-		if _, err := channelApprovalDecider([]approvalChannel{channel})(t.Context(), prompt); err != nil {
+		if _, err := Decider([]Channel{channel})(t.Context(), prompt); err != nil {
 			t.Fatalf("decider(): %v", err)
 		}
 		if len(channel.prompts) != 1 || channel.prompts[0].StandingGrantAllowed != allowed {
@@ -104,17 +102,17 @@ func TestChannelApprovalPromptCarriesTheStandingGrantFlag(t *testing.T) {
 func TestChannelApprovalDeciderPropagatesTheChannelError(t *testing.T) {
 	failure := errors.New("owner approval unavailable")
 	channel := &fakeApprovalChannel{sessions: map[string]bool{"s": true}, err: failure}
-	accepted, err := channelApprovalDecider([]approvalChannel{channel})(t.Context(), brokerPrompt("s"))
+	accepted, err := Decider([]Channel{channel})(t.Context(), brokerPrompt("s"))
 	if accepted || !errors.Is(err, failure) {
 		t.Errorf("decider() = %v, %v; want a denial carrying the channel error", accepted, err)
 	}
 }
 
 func TestChannelApprovalDeciderFailsClosed(t *testing.T) {
-	if channelApprovalDecider(nil) != nil {
+	if Decider(nil) != nil {
 		t.Error("a decider was built without channels")
 	}
-	decider := channelApprovalDecider([]approvalChannel{&fakeApprovalChannel{}})
+	decider := Decider([]Channel{&fakeApprovalChannel{}})
 	if accepted, err := decider(t.Context(), nil); accepted || err == nil {
 		t.Errorf("decider(nil) = %v, %v; want a denial with an error", accepted, err)
 	}
@@ -123,8 +121,8 @@ func TestChannelApprovalDeciderFailsClosed(t *testing.T) {
 func TestChannelApprovalReachableMirrorsTheDeciderRouting(t *testing.T) {
 	discordLike := &fakeApprovalChannel{sessions: map[string]bool{"main/discord:owner/dm:1": true}}
 	telegramLike := &fakeApprovalChannel{sessions: map[string]bool{"main/telegram:pocket/chat:2": true}}
-	channels := []approvalChannel{discordLike, telegramLike}
-	reachable := channelApprovalReachable(channels)
+	channels := []Channel{discordLike, telegramLike}
+	reachable := Reachable(channels)
 	for session, want := range map[string]bool{
 		"main/discord:owner/dm:1":     true,
 		"main/telegram:pocket/chat:2": true,
@@ -138,17 +136,7 @@ func TestChannelApprovalReachableMirrorsTheDeciderRouting(t *testing.T) {
 	if len(discordLike.prompts)+len(telegramLike.prompts) != 0 {
 		t.Error("asking whether a session is reachable must never prompt anyone")
 	}
-	if channelApprovalReachable(nil) != nil {
+	if Reachable(nil) != nil {
 		t.Error("no channels must give a nil reachability, which the broker treats as unreachable")
-	}
-}
-
-func TestTerminalApprovalReachableOnlyWhenTheBridgeExists(t *testing.T) {
-	if terminalApprovalReachable(nil) != nil {
-		t.Error("a chat without an approval bridge must be unreachable")
-	}
-	reachable := terminalApprovalReachable(terminal.NewApprovalBridge())
-	if reachable == nil || !reachable("any-session") {
-		t.Error("a TTY chat with the approval bridge must be reachable for every session")
 	}
 }

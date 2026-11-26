@@ -8,8 +8,7 @@ import (
 	"slices"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
-	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
@@ -221,6 +220,9 @@ func (b *build) buildSkills(ctx context.Context) error {
 	}
 	b.modules.skillRenderer = mod.Renderer()
 	b.modules.skills = mod.ChatCommands()
+	if b.onServer() && b.server.commandSkills != nil {
+		b.server.commandSkills.bind(b.modules.skills)
+	}
 	return nil
 }
 
@@ -298,15 +300,11 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 	if b.builtin == nil || !interpreterEnabled(b.result.CapabilityReport) {
 		return nil
 	}
-	manifest, err := interpreter.DefaultManifest()
+	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return err
 	}
-	runtime, err := newInterpreterRuntime(cfg, manifest)
-	if err != nil {
-		return err
-	}
-	var observer toolsbuiltin.CodeObserver
+	var observer codeexec.Observer
 	if b.onServer() {
 		recorder, err := telemetry.NewCodeRecorder(b.meters())
 		if err != nil {
@@ -314,15 +312,21 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 		}
 		observer = codeObserver(recorder)
 	}
-	if err := runtime.enableExecution(ctx, cfg, b.builtin.Artifacts(), observer, logger); err != nil {
+	mod, err := codeexec.New(ctx, &codeexec.ModuleDeps{
+		Config:       &cfg.Interpreter,
+		DataRoot:     dataRoot,
+		Artifacts:    b.builtin.Artifacts(),
+		Observer:     observer,
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       logger,
+	})
+	if err != nil {
 		return err
 	}
-	runtime.attach(b.builtin)
-	check := runtime.check(cfg)
-	b.addHealthCheck(&check)
-	return b.group.Add(server.Background("interpreter_verification", func(ctx context.Context) {
-		runtime.run(ctx, logger)
-	}))
+	if err := b.registerModule("interpreter", mod); err != nil {
+		return err
+	}
+	return b.group.Add(server.Background("interpreter_verification", mod.VerifyRun))
 }
 
 func (b *build) buildWorkflows(ctx context.Context, host bool) error {

@@ -701,6 +701,9 @@ func (b *build) buildTurnRuntime() error {
 		return err
 	}
 	b.engine = engine
+	if b.onServer() && b.server.commandTurns != nil {
+		b.server.commandTurns.bind(engine)
+	}
 	return nil
 }
 

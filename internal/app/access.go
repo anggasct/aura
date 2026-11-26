@@ -13,6 +13,8 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/handoff"
@@ -75,7 +77,7 @@ func newStandingGrantRecorder(db *sql.DB) *standingGrantRecorder {
 	return &standingGrantRecorder{db: db, grants: principal.NewStandingGrantStore(db), now: time.Now}
 }
 
-func (r *standingGrantRecorder) RecordStandingGrant(ctx context.Context, request *discord.StandingGrantRequest) error {
+func (r *standingGrantRecorder) RecordStandingGrant(ctx context.Context, request *approval.StandingGrantRequest) error {
 	if request == nil {
 		return errors.New("cli: standing grant request must not be nil")
 	}
@@ -160,8 +162,8 @@ func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, s
 	return err
 }
 
-func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
-	settings := discord.AccessSettings{
+func channelAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) access.Settings {
+	settings := access.Settings{
 		Grants:         newStandingGrantRecorder(db),
 		Denied:         recorder.Denied,
 		ApprovalRouted: recorder.ApprovalRouted,
@@ -199,8 +201,24 @@ func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 	return settings
 }
 
+func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
+	shared := channelAccessSettings(cfg, db, recorder, runs)
+	return discord.AccessSettings{
+		ApprovalTimeout:  shared.ApprovalTimeout,
+		StandingGrantTTL: shared.StandingGrantTTL,
+		Grants:           shared.Grants,
+		Pairing:          shared.Pairing,
+		Budgets:          shared.Budgets,
+		Erasure:          shared.Erasure,
+		Handoffs:         shared.Handoffs,
+		Evals:            shared.Evals,
+		Denied:           shared.Denied,
+		ApprovalRouted:   shared.ApprovalRouted,
+	}
+}
+
 func telegramAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) telegram.AccessSettings {
-	shared := discordAccessSettings(cfg, db, recorder, runs)
+	shared := channelAccessSettings(cfg, db, recorder, runs)
 	return telegram.AccessSettings{
 		ApprovalTimeout:  shared.ApprovalTimeout,
 		StandingGrantTTL: shared.StandingGrantTTL,

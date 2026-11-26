@@ -11,23 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-type Channels struct {
-	Discord  Discord  `json:"discord"`
-	Telegram Telegram `json:"telegram"`
-	Email    Email    `json:"email"`
-	HTTP     HTTP     `json:"http"`
-}
-
-type Children struct {
-	Enabled            bool               `json:"enabled"`
-	MaxDepth           int                `json:"max_depth"`
-	MaxActivePerParent int                `json:"max_active_per_parent"`
-	MaxActiveGlobal    int                `json:"max_active_global"`
-	DefaultTimeout     configkit.Duration `json:"default_timeout"`
-	MaxTimeout         configkit.Duration `json:"max_timeout"`
-	Recovery           string             `json:"recovery"`
-}
-
 type Discord struct {
 	Enabled                  bool               `json:"enabled"`
 	Accounts                 []DiscordAccount   `json:"accounts"`
@@ -220,52 +203,5 @@ func DefaultTerminal() Terminal {
 		InMemoryHistory:     100,
 		SecondInterruptTime: configkit.Duration(2 * time.Second),
 		PlainApproval:       "deny",
-	}
-}
-
-func DefaultChannels() Channels {
-	return Channels{
-		Discord: Discord{
-			MinEditInterval:          configkit.Duration(2 * time.Second),
-			MaxAttachmentBytes:       20971520,
-			ThreadAutoArchiveMinutes: 1440,
-		},
-		Telegram: Telegram{
-			Polling: TelegramPolling{
-				Timeout:    configkit.Duration(30 * time.Second),
-				MaxBackoff: configkit.Duration(time.Minute),
-			},
-			MinEditInterval:    configkit.Duration(2 * time.Second),
-			MaxAttachmentBytes: TelegramMaxAttachmentBytes,
-			Webhook: TelegramWebhook{
-				ListenAddress:  TelegramWebhookListenAddress,
-				MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
-				MaxConnections: TelegramWebhookMaxConnections,
-			},
-		},
-		Email: Email{
-			MaxAttachmentBytes: EmailMaxAttachmentBytes,
-		},
-		HTTP: HTTP{
-			ListenAddress:       HTTPListenAddress,
-			MaxBodyBytes:        HTTPMaxBodyBytes,
-			RequestsPerMinute:   HTTPRequestsPerMinute,
-			MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
-			MaxHistoryMessages:  HTTPMaxHistoryMessages,
-			MaxHistoryBytes:     HTTPMaxHistoryBytes,
-			KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
-		},
-	}
-}
-
-func DefaultChildren() *Children {
-	return &Children{
-		Enabled:            true,
-		MaxDepth:           1,
-		MaxActivePerParent: 2,
-		MaxActiveGlobal:    4,
-		DefaultTimeout:     configkit.Duration(5 * time.Minute),
-		MaxTimeout:         configkit.Duration(30 * time.Minute),
-		Recovery:           "interrupt",
 	}
 }

@@ -3,6 +3,8 @@ package child
 import (
 	"sync"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestLedgerChargeEnforcesCapUnderConcurrency(t *testing.T) {
@@ -22,7 +24,7 @@ func TestLedgerChargeEnforcesCapUnderConcurrency(t *testing.T) {
 			for range perWorker {
 				if err := ledger.Charge(t.Context(), reservation.ID, 1, 10); err == nil {
 					succeeded[i]++
-				} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
+				} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBudgetExceeded {
 					t.Errorf("unexpected charge error: %v", err)
 					return
 				}
@@ -45,7 +47,7 @@ func TestLedgerChargeEnforcesCapUnderConcurrency(t *testing.T) {
 	}
 	if err := ledger.Charge(t.Context(), reservation.ID, 1, 1); err == nil {
 		t.Fatal("charge past the cap must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBudgetExceeded {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -94,7 +96,7 @@ func TestLedgerReleaseEndsCharging(t *testing.T) {
 	}
 	if err := ledger.Charge(t.Context(), reservation.ID, 1, 1); err == nil {
 		t.Fatal("charge after release must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if tokens, _ := ledger.ParentUsage("inv-1"); tokens != 10 {
@@ -112,7 +114,7 @@ func TestLedgerRejectsBadInput(t *testing.T) {
 	}
 	if err := ledger.Charge(t.Context(), "missing", 1, 1); err == nil {
 		t.Error("expected unknown reservation rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildNotFound {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	reservation, err := ledger.Reserve(t.Context(), "inv-1", "owner-1", 100, 100)

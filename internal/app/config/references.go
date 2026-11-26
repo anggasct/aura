@@ -130,7 +130,7 @@ func hasOwnerChannel(owner *principal.Owner, channel string) bool {
 	return false
 }
 
-func bindingAccountProblems(bindings auraagent.Bindings, channels *legacyconfig.Channels) []error {
+func bindingAccountProblems(bindings auraagent.Bindings, channels *Channels) []error {
 	if channels == nil {
 		return []error{configkit.Invalid("channels", "must not be nil")}
 	}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeCancelRegistry struct {
@@ -125,7 +126,7 @@ func TestCancelMissingChild(t *testing.T) {
 	service, _, _ := testCancelService(t)
 	if _, err := service.Cancel(t.Context(), "missing", time.Now().UTC()); err == nil {
 		t.Fatal("expected not-found")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildNotFound {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	var nilCtx stdcontext.Context
@@ -281,7 +282,7 @@ func TestCancelTreeOverloadIsDeterministic(t *testing.T) {
 	}
 	if _, err := service.CancelTree(t.Context(), "sess-parent", time.Now().UTC(), false); err == nil {
 		t.Fatal("overload must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeRuntimeOverloaded {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeRuntimeOverloaded {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if len(runs.cancelled) != 0 {
@@ -297,7 +298,7 @@ func TestCancelTreeShutdownDrainsWithoutLeaks(t *testing.T) {
 	results, err := service.CancelTree(cancelled, "sess-parent", time.Now().UTC(), false)
 	if err == nil {
 		t.Fatal("shutdown must report interruption")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeTurnCancelled {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeTurnCancelled {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if len(results) != 2 {

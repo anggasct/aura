@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -15,7 +15,7 @@ func TestLoad_InterpreterDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := legacyconfig.Interpreter{
+	want := codeexec.Config{
 		Timeout:          configkit.Duration(30 * time.Second),
 		BuildTimeout:     configkit.Duration(time.Minute),
 		MaxSourceBytes:   262144,
@@ -31,8 +31,8 @@ func TestLoad_InterpreterDefaults(t *testing.T) {
 	if res.Config.Interpreter != want {
 		t.Errorf("Interpreter = %+v, want %+v", res.Config.Interpreter, want)
 	}
-	if res.Config.Interpreter != legacyconfig.DefaultInterpreter() {
-		t.Errorf("loaded defaults differ from DefaultInterpreter()")
+	if res.Config.Interpreter != codeexec.Default() {
+		t.Errorf("loaded defaults differ from codeexec.Default()")
 	}
 }
 
@@ -55,7 +55,7 @@ interpreter:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	want := legacyconfig.Interpreter{
+	want := codeexec.Config{
 		Timeout: configkit.Duration(2 * time.Minute), BuildTimeout: configkit.Duration(90 * time.Second), MaxSourceBytes: 1 << 10, MaxStdinBytes: 2048, MaxStdoutBytes: 4 << 10,
 		MaxStderrBytes: 8 << 10, MaxOutputFiles: 3, MaxArtifactBytes: 1 << 20, MaxMemoryBytes: 128 << 20,
 		MaxProcesses: 9, MaxRunDirBytes: 2 << 20,
@@ -72,13 +72,13 @@ func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 		min   configkit.ByteSize
 		other string
 	}{
-		{"max_source_bytes", legacyconfig.MaxInterpreterSourceBytes, 1, ""},
-		{"max_stdin_bytes", legacyconfig.MaxInterpreterStdinBytes, 1, ""},
-		{"max_stdout_bytes", legacyconfig.MaxInterpreterOutputBytes, 1, ""},
-		{"max_stderr_bytes", legacyconfig.MaxInterpreterOutputBytes, 1, ""},
-		{"max_artifact_bytes", legacyconfig.MaxInterpreterArtifactBytes, 1, "max_run_dir_bytes: 16GiB"},
-		{"max_memory_bytes", legacyconfig.MaxInterpreterMemoryBytes, legacyconfig.MinInterpreterMemoryBytes, ""},
-		{"max_run_dir_bytes", legacyconfig.MaxInterpreterRunDirBytes, 1, "max_artifact_bytes: \"1\""},
+		{"max_source_bytes", codeexec.MaxSourceBytes, 1, ""},
+		{"max_stdin_bytes", codeexec.MaxStdinBytes, 1, ""},
+		{"max_stdout_bytes", codeexec.MaxOutputBytes, 1, ""},
+		{"max_stderr_bytes", codeexec.MaxOutputBytes, 1, ""},
+		{"max_artifact_bytes", codeexec.MaxArtifactBytes, 1, "max_run_dir_bytes: 16GiB"},
+		{"max_memory_bytes", codeexec.MaxMemoryBytes, codeexec.MinMemoryBytes, ""},
+		{"max_run_dir_bytes", codeexec.MaxRunDirBytes, 1, "max_artifact_bytes: \"1\""},
 	}
 	type bound struct {
 		name    string
@@ -110,14 +110,14 @@ func TestLoad_InterpreterBoundsAreRejected(t *testing.T) {
 		bound{"build_timeout zero", "build_timeout: 0s", false},
 		bound{"build_timeout negative", "build_timeout: -5s", false},
 		bound{"max_output_files at the minimum", "max_output_files: 1", true},
-		bound{"max_output_files at the maximum", fmt.Sprintf("max_output_files: %d", legacyconfig.MaxInterpreterOutputFiles), true},
+		bound{"max_output_files at the maximum", fmt.Sprintf("max_output_files: %d", codeexec.MaxOutputFiles), true},
 		bound{"max_output_files zero", "max_output_files: 0", false},
-		bound{"max_output_files above the maximum", fmt.Sprintf("max_output_files: %d", legacyconfig.MaxInterpreterOutputFiles+1), false},
+		bound{"max_output_files above the maximum", fmt.Sprintf("max_output_files: %d", codeexec.MaxOutputFiles+1), false},
 		bound{"max_processes at the minimum", "max_processes: 1", true},
-		bound{"max_processes at the maximum", fmt.Sprintf("max_processes: %d", legacyconfig.MaxInterpreterProcesses), true},
+		bound{"max_processes at the maximum", fmt.Sprintf("max_processes: %d", codeexec.MaxProcesses), true},
 		bound{"max_processes zero", "max_processes: 0", false},
 		bound{"max_processes negative", "max_processes: -1", false},
-		bound{"max_processes above the maximum", fmt.Sprintf("max_processes: %d", legacyconfig.MaxInterpreterProcesses+1), false},
+		bound{"max_processes above the maximum", fmt.Sprintf("max_processes: %d", codeexec.MaxProcesses+1), false},
 		bound{"artifact larger than the run directory", "max_artifact_bytes: 2MiB\n  max_run_dir_bytes: 1MiB", false},
 		bound{"artifact equal to the run directory", "max_artifact_bytes: 1MiB\n  max_run_dir_bytes: 1MiB", true},
 	)

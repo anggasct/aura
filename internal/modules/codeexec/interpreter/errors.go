@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -21,48 +23,26 @@ const (
 	ErrorCodeIO                  ErrorCode = "interpreter_io_failed"
 )
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-	cause  error
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func (e *Error) Unwrap() error {
-	return e.cause
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
 func Errorf(code ErrorCode, format string, args ...any) error {
-	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
+	return fault.New(code, fmt.Sprintf(format, args...))
 }
 
 func ioError(operation string, cause error) error {
 	detail := operation + " failed"
-	if reason := pathFreeReason(cause); reason != "" {
-		detail += ": " + reason
+	if sanitized := pathFree(cause); sanitized != nil {
+		return fault.Wrap(ErrorCodeIO, detail, sanitized)
 	}
-	return &Error{Code: ErrorCodeIO, Detail: detail, cause: cause}
+	return fault.New(ErrorCodeIO, detail)
 }
 
-func pathFreeReason(err error) string {
+func pathFree(err error) error {
 	var pathErr *fs.PathError
 	if errors.As(err, &pathErr) {
-		return pathErr.Err.Error()
+		return pathErr.Err
 	}
 	var linkErr *os.LinkError
 	if errors.As(err, &linkErr) {
-		return linkErr.Err.Error()
+		return linkErr.Err
 	}
-	return ""
+	return err
 }

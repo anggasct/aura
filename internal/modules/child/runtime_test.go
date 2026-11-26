@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestStarterRoutesThroughDurableRuntime(t *testing.T) {
@@ -100,7 +101,7 @@ func TestStarterReleasesWhenRuntimeHasNoHandler(t *testing.T) {
 func TestAdaptRuntimeRejectsNil(t *testing.T) {
 	if _, err := AdaptRuntime(nil); err == nil {
 		t.Fatal("expected nil runtime rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildUnavailable {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if _, err := NewStarter(nil, &fakeLauncher{}, &fakeLedger{}, nil); err == nil {
