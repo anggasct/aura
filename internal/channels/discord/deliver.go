@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -97,13 +98,13 @@ func (g *editGate) record(key string, receipt runtimechannelhost.ProviderReceipt
 
 func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
 	if req == nil {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request must not be nil")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
 	}
 	if a.effects == nil {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeDeliveryUnavailable, "effect runner is not configured")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeDeliveryUnavailable, "effect runner is not configured")
 	}
 	if req.Channel == "" || req.ConversationID == "" {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
 	}
 	select {
 	case a.deliverSem <- struct{}{}:
@@ -118,7 +119,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 		}
 	}
 	if len(texts) == 0 {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request carries no text")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request carries no text")
 	}
 	text := neutralizeMentions(strings.Join(texts, "\n"))
 	chunks := splitMessage(text)
@@ -142,7 +143,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	if parent == "" || ctx.Err() != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryFailed {
+	if !fault.HasCode(err, ErrorCodeDeliveryFailed) {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
 	a.logger.WarnContext(ctx, "thread delivery fallback", "component", "discord", "error", err)
@@ -320,19 +321,19 @@ func deliveryError(ctx context.Context, intent *effect.Intent, err error) error 
 
 func receiptMessageID(intent *effect.Intent) (string, error) {
 	if intent == nil {
-		return "", Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return "", deliveryAmbiguous("delivery outcome is unknown")
 	}
 	switch intent.State {
 	case effect.StateSucceeded:
 		var receipt messageReceipt
 		if err := unmarshalReceipt(intent.ProviderReceipt, &receipt); err != nil || receipt.MessageID == "" {
-			return "", Errorf(ErrorCodeDeliveryAmbiguous, "delivery receipt is missing the message id")
+			return "", deliveryAmbiguous("delivery receipt is missing the message id")
 		}
 		return receipt.MessageID, nil
 	case effect.StateUnknown, effect.StateStarted:
-		return "", Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return "", deliveryAmbiguous("delivery outcome is unknown")
 	default:
-		return "", Errorf(ErrorCodeDeliveryFailed, "delivery settled without success")
+		return "", fault.New(ErrorCodeDeliveryFailed, "delivery settled without success")
 	}
 }
 

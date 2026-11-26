@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/channels/discord"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -55,16 +56,16 @@ func webhookListenProblem(webhook *platformwebhook.Config, healthListen string) 
 	return nil
 }
 
-func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discord *legacyconfig.Discord) []error {
+func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discordCfg *discord.Config) []error {
 	if telegram == nil {
 		return []error{configkit.Invalid("channels.telegram", "must not be nil")}
 	}
-	if discord == nil {
+	if discordCfg == nil {
 		return []error{configkit.Invalid("channels.discord", "must not be nil")}
 	}
-	discordRefs := make(map[secret.Ref]bool, len(discord.Accounts))
-	for i := range discord.Accounts {
-		discordRefs[discord.Accounts[i].BotTokenRef] = true
+	discordRefs := make(map[secret.Ref]bool, len(discordCfg.Accounts))
+	for i := range discordCfg.Accounts {
+		discordRefs[discordCfg.Accounts[i].BotTokenRef] = true
 	}
 	var problems []error
 	telegramRefs := make(map[secret.Ref]bool, len(telegram.Accounts))

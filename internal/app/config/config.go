@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/discord"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
@@ -34,7 +35,7 @@ import (
 )
 
 type Channels struct {
-	Discord  legacyconfig.Discord  `json:"discord"`
+	Discord  discord.Config        `json:"discord"`
 	Telegram legacyconfig.Telegram `json:"telegram"`
 	Email    legacyconfig.Email    `json:"email"`
 	HTTP     legacyconfig.HTTP     `json:"http"`
@@ -101,11 +102,7 @@ func Default() Config {
 		Terminal:     legacyconfig.DefaultTerminal(),
 		Webhook:      platformwebhook.Default(),
 		Channels: Channels{
-			Discord: legacyconfig.Discord{
-				MinEditInterval:          configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes:       20971520,
-				ThreadAutoArchiveMinutes: 1440,
-			},
+			Discord: discord.Default(),
 			Telegram: legacyconfig.Telegram{
 				Polling: legacyconfig.TelegramPolling{
 					Timeout:    configkit.Duration(30 * time.Second),

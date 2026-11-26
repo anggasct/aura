@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -17,7 +16,7 @@ const (
 	kumaToken = "kuma-bot-token-value"
 )
 
-func twoAccountConfig() config.Discord {
+func twoAccountConfig() Config {
 	cfg := testAdapterConfig()
 	home := testAdapterAccount()
 	home.Name = "home"
@@ -27,7 +26,7 @@ func twoAccountConfig() config.Discord {
 	kuma.Name = "kuma"
 	kuma.BotTokenRef = secrettest.Ref("env://AURA_TEST_KUMA_TOKEN")
 	kuma.Persona = "reviewer"
-	cfg.Accounts = []config.DiscordAccount{home, kuma}
+	cfg.Accounts = []Account{home, kuma}
 	return cfg
 }
 
@@ -37,14 +36,21 @@ type accountAdapter struct {
 	sessions *fakeSessionEnsurer
 }
 
-func newAccountAdapter(t *testing.T, cfg *config.Discord, index int, bindings []auraagent.Binding, stub *restStub, selfID string) *accountAdapter {
+func newAccountAdapter(t *testing.T, cfg *Config, index int, bindings []auraagent.Binding, stub *restStub, selfID string) *accountAdapter {
 	t.Helper()
 	sessions := &fakeSessionEnsurer{}
-	adapter, err := New(cfg, &cfg.Accounts[index], &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, sessions, nil)
+	adapter, err := New(&Deps{
+		Config:        cfg,
+		Account:       &cfg.Accounts[index],
+		Resumes:       &memoryResumeStore{},
+		Effects:       newFakeEffectRunner(),
+		Media:         &fakeMediaStore{},
+		Sessions:      sessions,
+		PersonaRouter: testPersonaRouter(t, cfg, bindings),
+	})
 	if err != nil {
 		t.Fatalf("New(%s): %v", cfg.Accounts[index].Name, err)
 	}
-	adapter.SetPersonaRouter(testPersonaRouter(t, cfg, bindings))
 	adapter.rateCap = 30 * time.Millisecond
 	adapter.restBase = stub.srv.URL
 	adapter.selfID = selfID
@@ -200,7 +206,14 @@ func TestAdapterWithoutRouterAdmitsNothing(t *testing.T) {
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
 	sessions := &fakeSessionEnsurer{}
-	adapter, err := New(&cfg, &cfg.Accounts[0], &memoryResumeStore{}, newFakeEffectRunner(), &fakeMediaStore{}, sessions, nil)
+	adapter, err := New(&Deps{
+		Config:   &cfg,
+		Account:  &cfg.Accounts[0],
+		Resumes:  &memoryResumeStore{},
+		Effects:  newFakeEffectRunner(),
+		Media:    &fakeMediaStore{},
+		Sessions: sessions,
+	})
 	if err != nil {
 		t.Fatalf("New(): %v", err)
 	}

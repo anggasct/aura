@@ -11,6 +11,7 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -351,7 +352,7 @@ func TestThreads_CreateEnsureFailurePreservesCause(t *testing.T) {
 	if !strings.Contains(err.Error(), sentinel.Error()) {
 		t.Errorf("error = %v, want the session cause rendered in the message", err)
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeThreadCreateFailed {
+	if !fault.HasCode(err, ErrorCodeThreadCreateFailed) {
 		t.Errorf("error = %v, want thread_create_failed", err)
 	}
 	if strings.Contains(err.Error(), "has no parent session") {

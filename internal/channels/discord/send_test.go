@@ -13,9 +13,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -99,7 +99,7 @@ func (s *restStub) messageSends(after int) []restCall {
 	return sends
 }
 
-func newSendTestAdapter(t *testing.T, stub *restStub, configure func(*config.Discord)) (*Adapter, *testDoubles) {
+func newSendTestAdapter(t *testing.T, stub *restStub, configure func(*Config)) (*Adapter, *testDoubles) {
 	t.Helper()
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
@@ -270,13 +270,13 @@ func TestDeliver_RejectsOversizeTotal(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "m")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MaxAttachmentBytes = 100
 	})
 
 	_, err := adapter.Deliver(t.Context(), deliverTestRequest("e4", "discord", strings.Repeat("y", 2000*3+200)))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeMessageTooLarge {
-		t.Fatalf("code = %v, %v; want message_too_large", code, ok)
+	if !fault.HasCode(err, ErrorCodeMessageTooLarge) {
+		t.Fatalf("err = %v, want message_too_large", err)
 	}
 	if stub.postCount() != 0 {
 		t.Errorf("posts = %d, want none", stub.postCount())
@@ -310,8 +310,8 @@ func TestDeliver_RateLimitExhaustionIsUnknown(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, nil)
 
 	_, err := adapter.Deliver(t.Context(), deliverTestRequest("e6", "discord", "hi"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryAmbiguous {
-		t.Fatalf("code = %v, %v; want delivery_ambiguous", code, ok)
+	if !fault.HasCode(err, ErrorCodeDeliveryAmbiguous) {
+		t.Fatalf("err = %v, want delivery_ambiguous", err)
 	}
 }
 
@@ -322,8 +322,8 @@ func TestDeliver_RejectedTokenFailsDelivery(t *testing.T) {
 	adapter, _ := newSendTestAdapter(t, stub, nil)
 
 	_, err := adapter.Deliver(t.Context(), deliverTestRequest("e7", "discord", "hi"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryFailed {
-		t.Fatalf("code = %v, %v; want delivery_failed", code, ok)
+	if !fault.HasCode(err, ErrorCodeDeliveryFailed) {
+		t.Fatalf("err = %v, want delivery_failed", err)
 	}
 }
 
@@ -340,8 +340,8 @@ func TestDeliver_CrashWindowNeverReposts(t *testing.T) {
 	}
 	doubles.effects.crashAfterInvoke = false
 	_, err = adapter.Deliver(t.Context(), deliverTestRequest("e8", "discord", "hi"))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryAmbiguous {
-		t.Fatalf("code = %v, %v; want delivery_ambiguous", code, ok)
+	if !fault.HasCode(err, ErrorCodeDeliveryAmbiguous) {
+		t.Fatalf("err = %v, want delivery_ambiguous", err)
 	}
 	if stub.postCount() != 1 {
 		t.Errorf("posts = %d, want exactly 1", stub.postCount())
@@ -380,7 +380,7 @@ func TestDeliver_CoalescesRapidEdits(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "m")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 150000000
 	})
 
@@ -491,7 +491,7 @@ func deliverLinkBodies(t *testing.T, linkPreviews bool) deliveredBodies {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "m1")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = configkit.Duration(time.Millisecond)
 		cfg.Accounts[0].LinkPreviews = linkPreviews
 	})

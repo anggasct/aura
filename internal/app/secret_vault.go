@@ -174,3 +174,13 @@ func buildStrictSecretVault(cfg *appconfig.Config) (*secret.Vault, error) {
 	}
 	return vault, nil
 }
+
+func buildSecretVault(cfg *appconfig.Config) *secret.Vault {
+	vault := secret.New()
+	for _, entry := range configuredSecrets(cfg) {
+		if value, err := entry.resolve(); err == nil && strings.TrimSpace(value) != "" {
+			vault.Set(entry.name, value)
+		}
+	}
+	return vault
+}

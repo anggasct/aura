@@ -35,53 +35,6 @@ func ValidateTerminal(t Terminal) error {
 	return nil
 }
 
-func ValidateDiscord(discord *Discord) error {
-	if discord == nil {
-		return configkit.Invalid("channels.discord", "must not be nil")
-	}
-	var problems []error
-	names := make(map[string]bool, len(discord.Accounts))
-	tokenRefs := make(map[secret.Ref]bool, len(discord.Accounts))
-	for i := range discord.Accounts {
-		account := &discord.Accounts[i]
-		field := fmt.Sprintf("channels.discord.accounts[%d]", i)
-		if err := configkit.ValidateAccountName(field+".name", account.Name); err != nil {
-			problems = append(problems, err)
-		} else if names[account.Name] {
-			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
-		} else {
-			names[account.Name] = true
-		}
-		switch {
-		case account.BotTokenRef.IsZero():
-			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "must not be empty"))
-		case tokenRefs[account.BotTokenRef]:
-			problems = append(problems, configkit.Invalid(field+".bot_token_ref", "is shared with another account"))
-		default:
-			tokenRefs[account.BotTokenRef] = true
-		}
-		problems = append(problems, snowflakeListProblems(field+".allowed_user_ids", account.AllowedUserIDs)...)
-		problems = append(problems, snowflakeListProblems(field+".allowed_guild_ids", account.AllowedGuildIDs)...)
-		problems = append(problems, snowflakeListProblems(field+".allowed_channel_ids", account.AllowedChannelIDs)...)
-		if discord.Enabled && len(account.AllowedUserIDs) == 0 {
-			problems = append(problems, configkit.Invalid(field, "requires at least one allowed_user_ids entry when channels.discord is enabled"))
-		}
-	}
-	if discord.Enabled && len(discord.Accounts) == 0 {
-		problems = append(problems, configkit.Invalid("channels.discord.enabled", "requires at least one channels.discord.accounts entry"))
-	}
-	if discord.MinEditInterval <= 0 {
-		problems = append(problems, configkit.Invalid("channels.discord.min_edit_interval", "must be positive"))
-	}
-	if discord.MaxAttachmentBytes <= 0 {
-		problems = append(problems, configkit.Invalid("channels.discord.max_attachment_bytes", "must be positive"))
-	}
-	if discord.ThreadAutoArchiveMinutes <= 0 {
-		problems = append(problems, configkit.Invalid("channels.discord.thread_auto_archive_minutes", "must be positive"))
-	}
-	return errors.Join(problems...)
-}
-
 const (
 	telegramMaxPollTimeout = 50 * time.Second
 	telegramMaxBackoffCap  = 10 * time.Minute
@@ -258,24 +211,6 @@ func telegramChatListProblems(field string, ids []string) []error {
 			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
 		case !principal.IsTelegramGroupChatID(id):
 			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a negative decimal telegram group chat id", id)))
-		case seen[id]:
-			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
-		default:
-			seen[id] = true
-		}
-	}
-	return problems
-}
-
-func snowflakeListProblems(field string, ids []string) []error {
-	var problems []error
-	seen := make(map[string]bool, len(ids))
-	for _, id := range ids {
-		switch {
-		case id == "":
-			problems = append(problems, configkit.Invalid(field, "must not contain empty ids"))
-		case !principal.IsDecimalSnowflake(id):
-			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is not a decimal snowflake", id)))
 		case seen[id]:
 			problems = append(problems, configkit.Invalid(field, fmt.Sprintf("id %q is configured more than once", id)))
 		default:

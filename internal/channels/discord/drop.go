@@ -37,13 +37,6 @@ const (
 	dropScopeThread  = "thread"
 )
 
-func (a *Adapter) SetDropObserver(observe func(ctx context.Context, reason string)) {
-	if a == nil {
-		return
-	}
-	a.dropped = observe
-}
-
 func messageScope(msg *messagePayload) string {
 	if msg.GuildID == "" {
 		return dropScopeDM
