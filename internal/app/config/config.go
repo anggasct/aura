@@ -1,13 +1,16 @@
 package config
 
 import (
-	"time"
-
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/memory"
@@ -33,10 +36,10 @@ import (
 )
 
 type Channels struct {
-	Discord  legacyconfig.Discord `json:"discord"`
-	Telegram telegram.Config      `json:"telegram"`
-	Email    legacyconfig.Email   `json:"email"`
-	HTTP     legacyconfig.HTTP    `json:"http"`
+	Discord  discord.Config    `json:"discord"`
+	Telegram telegram.Config   `json:"telegram"`
+	Email    email.Config      `json:"email"`
+	HTTP     legacyconfig.HTTP `json:"http"`
 }
 
 type Config struct {
@@ -56,7 +59,7 @@ type Config struct {
 	Telemetry    telemetry.Config            `json:"telemetry"`
 	Usage        usage.Config                `json:"usage"`
 	Health       health.Config               `json:"health"`
-	Terminal     legacyconfig.Terminal       `json:"terminal"`
+	Terminal     terminal.Config             `json:"terminal"`
 	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    broadcast.Config            `json:"broadcast"`
 	Scheduler    schedule.Config             `json:"scheduler"`
@@ -65,9 +68,9 @@ type Config struct {
 	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *profile.Config             `json:"profile,omitempty"`
 	Owner        *principal.Owner            `json:"owner,omitempty"`
-	Children     *legacyconfig.Children      `json:"children,omitempty"`
+	Children     *child.Config               `json:"children,omitempty"`
 	Access       *principal.Config           `json:"access,omitempty"`
-	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
+	Sync         *gitsync.Config             `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
 	Interpreter  codeexec.Config             `json:"interpreter"`
@@ -97,18 +100,12 @@ func Default() Config {
 		Telemetry:    telemetry.Default(),
 		Usage:        usage.Default(),
 		Health:       health.Default(),
-		Terminal:     legacyconfig.DefaultTerminal(),
+		Terminal:     terminal.Default(),
 		Webhook:      platformwebhook.Default(),
 		Channels: Channels{
-			Discord: legacyconfig.Discord{
-				MinEditInterval:          configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes:       20971520,
-				ThreadAutoArchiveMinutes: 1440,
-			},
+			Discord:  discord.Default(),
 			Telegram: telegram.Default(),
-			Email: legacyconfig.Email{
-				MaxAttachmentBytes: legacyconfig.EmailMaxAttachmentBytes,
-			},
+			Email:    email.Default(),
 			HTTP: legacyconfig.HTTP{
 				ListenAddress:       legacyconfig.HTTPListenAddress,
 				MaxBodyBytes:        legacyconfig.HTTPMaxBodyBytes,
@@ -124,11 +121,11 @@ func Default() Config {
 		Memory:      memory.Default(),
 		Interpreter: codeexec.Default(),
 		Skills:      &defaultSkills,
-		Sync:        legacyconfig.DefaultSync(),
+		Sync:        gitsync.Default(),
 		Vision:      &defaultVision,
 		Context:     &defaultContext,
 		Profile:     &defaultProfile,
-		Children:    legacyconfig.DefaultChildren(),
+		Children:    child.Default(),
 		Access:      &defaultAccess,
 	}
 }

@@ -30,13 +30,6 @@ const (
 	dropBudgetCheckFailed     dropReason = access.DropBudgetCheckFailed
 )
 
-func (a *Adapter) SetDropObserver(observe func(ctx context.Context, reason string)) {
-	if a == nil {
-		return
-	}
-	a.dropped = observe
-}
-
 func (a *Adapter) drop(ctx context.Context, uid uint32, reason dropReason, known bool) {
 	level := slog.LevelDebug
 	if known {

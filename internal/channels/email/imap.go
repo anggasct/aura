@@ -14,7 +14,7 @@ import (
 	"github.com/emersion/go-imap/v2"
 	"github.com/emersion/go-imap/v2/imapclient"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -28,13 +28,13 @@ type imapConnector struct {
 	roots    *x509.CertPool
 }
 
-func NewIMAPConnector(account *config.EmailAccount) (Connector, error) {
+func NewIMAPConnector(account *Account) (Connector, error) {
 	return newIMAPConnector(account, nil)
 }
 
-func newIMAPConnector(account *config.EmailAccount, roots *x509.CertPool) (*imapConnector, error) {
+func newIMAPConnector(account *Account, roots *x509.CertPool) (*imapConnector, error) {
 	if account == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "email account must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "email account must not be nil")
 	}
 	password, err := parsePasswordRef(account.IMAP.PasswordRef)
 	if err != nil {
@@ -52,7 +52,7 @@ func newIMAPConnector(account *config.EmailAccount, roots *x509.CertPool) (*imap
 func (c *imapConnector) Connect(ctx context.Context) (Session, error) {
 	password, err := c.password.Resolve()
 	if err != nil || strings.TrimSpace(password) == "" {
-		return nil, Errorf(ErrorCodeCredentialsUnavailable, "mailbox password is unavailable")
+		return nil, fault.New(ErrorCodeCredentialsUnavailable, "mailbox password is unavailable")
 	}
 	dialer := &tls.Dialer{
 		NetDialer: &net.Dialer{Timeout: dialTimeout},
@@ -60,7 +60,7 @@ func (c *imapConnector) Connect(ctx context.Context) (Session, error) {
 	}
 	conn, err := dialer.DialContext(ctx, "tcp", c.address)
 	if err != nil {
-		return nil, &Error{Code: ErrorCodeConnectionFailed, Detail: "mailbox server is unreachable", Cause: err}
+		return nil, fault.Wrap(ErrorCodeConnectionFailed, "mailbox server is unreachable", err)
 	}
 	updates := make(chan struct{}, 1)
 	client := imapclient.New(conn, &imapclient.Options{UnilateralDataHandler: &imapclient.UnilateralDataHandler{
@@ -83,9 +83,9 @@ func (c *imapConnector) Connect(ctx context.Context) (Session, error) {
 		}
 		var rejected *imap.Error
 		if errors.As(err, &rejected) {
-			return nil, Errorf(ErrorCodeLoginRejected, "mailbox server rejected the credentials")
+			return nil, fault.New(ErrorCodeLoginRejected, "mailbox server rejected the credentials")
 		}
-		return nil, &Error{Code: ErrorCodeConnectionFailed, Detail: "mailbox login did not complete", Cause: err}
+		return nil, fault.Wrap(ErrorCodeConnectionFailed, "mailbox login did not complete", err)
 	}
 	session.idle = supportsIdle(client.Caps())
 	return session, nil
@@ -108,9 +108,9 @@ func (s *imapSession) failure(ctx context.Context, err error) error {
 	}
 	var refused *imap.Error
 	if errors.As(err, &refused) {
-		return &Error{Code: ErrorCodeProtocolInvalid, Detail: "mailbox server refused the request", Cause: err}
+		return fault.Wrap(ErrorCodeProtocolInvalid, "mailbox server refused the request", err)
 	}
-	return &Error{Code: ErrorCodeConnectionFailed, Detail: "mailbox connection failed", Cause: err}
+	return fault.Wrap(ErrorCodeConnectionFailed, "mailbox connection failed", err)
 }
 
 func (s *imapSession) Select(ctx context.Context, folder string) (MailboxStatus, error) {
@@ -168,7 +168,7 @@ func (s *imapSession) section(ctx context.Context, uid uint32, section *imap.Fet
 		return nil, s.failure(ctx, err)
 	}
 	if !found {
-		return nil, Errorf(ErrorCodeMessageUnavailable, "message is no longer in the mailbox")
+		return nil, fault.New(ErrorCodeMessageUnavailable, "message is no longer in the mailbox")
 	}
 	return content, nil
 }

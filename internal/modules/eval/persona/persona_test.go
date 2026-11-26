@@ -108,7 +108,7 @@ func TestLoadCasesIsStrict(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(bad, name), []byte(content), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if _, err := LoadCases(bad); err == nil || !strings.Contains(err.Error(), ErrorCodeInvalid) {
+			if _, err := LoadCases(bad); err == nil || !strings.Contains(err.Error(), string(ErrorCodeInvalid)) {
 				t.Fatalf("LoadCases err = %v, want %s", err, ErrorCodeInvalid)
 			}
 		})

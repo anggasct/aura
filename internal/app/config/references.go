@@ -7,8 +7,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/telegram"
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -56,16 +57,16 @@ func webhookListenProblem(webhook *platformwebhook.Config, healthListen string) 
 	return nil
 }
 
-func telegramDiscordTokenProblems(tg *telegram.Config, discord *legacyconfig.Discord) []error {
+func telegramDiscordTokenProblems(tg *telegram.Config, discordCfg *discord.Config) []error {
 	if tg == nil {
 		return []error{configkit.Invalid("channels.telegram", "must not be nil")}
 	}
-	if discord == nil {
+	if discordCfg == nil {
 		return []error{configkit.Invalid("channels.discord", "must not be nil")}
 	}
-	discordRefs := make(map[secret.Ref]bool, len(discord.Accounts))
-	for i := range discord.Accounts {
-		discordRefs[discord.Accounts[i].BotTokenRef] = true
+	discordRefs := make(map[secret.Ref]bool, len(discordCfg.Accounts))
+	for i := range discordCfg.Accounts {
+		discordRefs[discordCfg.Accounts[i].BotTokenRef] = true
 	}
 	var problems []error
 	telegramRefs := make(map[secret.Ref]bool, len(tg.Accounts))
@@ -104,15 +105,15 @@ func telegramOwnerProblem(tg *telegram.Config, owner *principal.Owner) error {
 	return nil
 }
 
-func emailOwnerProblem(email *legacyconfig.Email, owner *principal.Owner) error {
-	if email == nil {
+func emailOwnerProblem(cfg *email.Config, owner *principal.Owner) error {
+	if cfg == nil {
 		return configkit.Invalid("channels.email", "must not be nil")
 	}
-	if !email.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
+	if !cfg.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
 		return nil
 	}
-	for i := range email.Accounts {
-		if len(email.Accounts[i].AllowedSenders) == 0 {
+	for i := range cfg.Accounts {
+		if len(cfg.Accounts[i].AllowedSenders) == 0 {
 			return configkit.Invalid("channels.email.enabled", "requires an email:<address> entry in owner.identities or an allowed_senders entry on every account")
 		}
 	}

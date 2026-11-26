@@ -26,11 +26,14 @@ func (s *commandSpy) Start(ctx context.Context, name, channel, class string) (sp
 func runCommands(t *testing.T, sessions *fakeSessions, input string) (out, diag string, runner *fakeRunner, spy *commandSpy) {
 	t.Helper()
 	runner = &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
-	console, stdout, stderr, cancel := newConsoleForTest(runner, sessions, input)
-	defer cancel()
-	console.SetAgentID("aura")
 	spy = &commandSpy{}
-	console.SetCommandRecorder(spy)
+	console, stdout, stderr, cancel := newConsoleForTestWithDeps(t, &Deps{
+		Runner:          runner,
+		Sessions:        sessions,
+		AgentID:         "aura",
+		CommandRecorder: spy,
+	}, input)
+	defer cancel()
 	if err := console.Run(t.Context()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}

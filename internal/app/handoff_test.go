@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/telegram"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -78,7 +78,7 @@ func captureDeliveries(t *testing.T) *[]deliveredText {
 	t.Helper()
 	var delivered []deliveredText
 	previous := deliverText
-	deliverText = func(_ context.Context, account *config.DiscordAccount, channelID, text string) error {
+	deliverText = func(_ context.Context, account *discord.Account, channelID, text string) error {
 		delivered = append(delivered, deliveredText{account.Name, channelID, text})
 		return nil
 	}

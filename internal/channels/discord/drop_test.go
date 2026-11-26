@@ -223,7 +223,7 @@ func TestAdmitDropsSayWhy(t *testing.T) {
 			logs := &logCapture{}
 			adapter.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: dropTimeAttr}))
 			drops := &dropRecorder{}
-			adapter.SetDropObserver(drops.observe)
+			adapter.dropped = drops.observe
 			if tc.setup != nil {
 				tc.setup(adapter)
 			}
@@ -263,7 +263,7 @@ func TestAdmittedMessagesLeaveNoDropRecord(t *testing.T) {
 	logs := &logCapture{}
 	adapter.logger = slog.New(slog.NewTextHandler(logs, &slog.HandlerOptions{Level: slog.LevelDebug, ReplaceAttr: dropTimeAttr}))
 	drops := &dropRecorder{}
-	adapter.SetDropObserver(drops.observe)
+	adapter.dropped = drops.observe
 	adapter.rememberThread("9304", "7774", threadRoute{parent: "333", persona: "owneronly"})
 	for _, msg := range []*messagePayload{
 		textMessage("9501", "4400", "", "777", "hello", nil),

@@ -3,6 +3,8 @@ package gitsync
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestNormalizeManifest(t *testing.T) {
@@ -60,7 +62,7 @@ func TestFilterExportableDenies(t *testing.T) {
 	}
 	for _, rel := range denied {
 		if err := FilterExportable(roots, rel, 64); err == nil {
-			code, ok := CodeOf(err)
+			code, ok := fault.CodeOf[ErrorCode](err)
 			if !ok {
 				t.Fatalf("FilterExportable(%q) = nil, want denial", rel)
 			}
@@ -108,7 +110,7 @@ func TestDeniedPathNeverLeaksContent(t *testing.T) {
 	if strings.Contains(err.Error(), "secret-key-material") {
 		t.Fatalf("denial must not echo the path: %v", err)
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 }

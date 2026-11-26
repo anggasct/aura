@@ -18,7 +18,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/telegram"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -135,7 +134,7 @@ func newHTTPHandoffNotifier(requesters httpRequesters, adapters []approvalAdapte
 	return handoff.NewHTTPNotifier(&httpRequesterLookupAdapter{requesters: requesters}, newOwnerHandoffRouter(notifiers))
 }
 
-func discordAccount(cfg *appconfig.Config, name string) (*config.DiscordAccount, bool) {
+func discordAccount(cfg *appconfig.Config, name string) (*discord.Account, bool) {
 	for i := range cfg.Channels.Discord.Accounts {
 		if cfg.Channels.Discord.Accounts[i].Name == name {
 			return &cfg.Channels.Discord.Accounts[i], true
@@ -153,7 +152,7 @@ func telegramAccount(cfg *appconfig.Config, name string) (*telegram.Account, boo
 	return nil, false
 }
 
-func emailAccount(cfg *appconfig.Config, name string) (*config.EmailAccount, bool) {
+func emailAccount(cfg *appconfig.Config, name string) (*email.Account, bool) {
 	for i := range cfg.Channels.Email.Accounts {
 		if cfg.Channels.Email.Accounts[i].Name == name {
 			return &cfg.Channels.Email.Accounts[i], true

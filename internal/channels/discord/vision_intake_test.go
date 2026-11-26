@@ -151,7 +151,7 @@ func TestVisionImageAdmittedAsImagePart(t *testing.T) {
 	defer tc.stop(t)
 
 	stores := newMemoryVisionStore()
-	tc.adapter.SetVisionService(testVisionService(t, stores))
+	tc.adapter.images.Store(testVisionService(t, stores))
 
 	msg := messageWithAttachments("3902", "what is this", []attachmentPayload{{
 		URL:         stub.server.URL + "/cat.png",
@@ -194,7 +194,7 @@ func TestVisionHostileImageDropped(t *testing.T) {
 	defer tc.stop(t)
 
 	stores := newMemoryVisionStore()
-	tc.adapter.SetVisionService(testVisionService(t, stores))
+	tc.adapter.images.Store(testVisionService(t, stores))
 
 	msg := messageWithAttachments("3903", "look", []attachmentPayload{{
 		URL:         stub.server.URL + "/evil.png",

@@ -11,6 +11,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -105,11 +106,11 @@ func cleanBody(text string) string {
 
 func (m *outboundMessage) render() ([]byte, error) {
 	if !principal.IsPlainEmailAddress(m.From) || !principal.IsPlainEmailAddress(m.To) || !headerSafeID(m.MessageID) {
-		return nil, Errorf(ErrorCodeMessageInvalid, "reply envelope or message id is not well formed")
+		return nil, fault.New(ErrorCodeMessageInvalid, "reply envelope or message id is not well formed")
 	}
 	body := cleanBody(m.Body)
 	if body == "" || len(body) > MaxReplyBodyBytes {
-		return nil, Errorf(ErrorCodeMessageInvalid, "reply body is empty or over the bound")
+		return nil, fault.New(ErrorCodeMessageInvalid, "reply body is empty or over the bound")
 	}
 	encoding, encoded := encodeBody(body)
 	var out bytes.Buffer

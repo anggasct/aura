@@ -3,13 +3,14 @@ package discord
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -122,7 +123,7 @@ func (a *Adapter) createThreadREST(ctx context.Context, token, parentID, message
 		"auto_archive_duration": operation.AutoArchiveMinutes,
 	})
 	if err != nil {
-		return "", Errorf(ErrorCodeProtocolInvalid, "thread payload is not serializable")
+		return "", fault.New(ErrorCodeProtocolInvalid, "thread payload is not serializable")
 	}
 	endpoint := a.restBase + "/channels/" + parentID + "/messages/" + messageID + "/threads"
 	response, outcome, err := a.requestWithRetry(ctx, http.MethodPost, endpoint, token, payload, "application/json")
@@ -130,11 +131,11 @@ func (a *Adapter) createThreadREST(ctx context.Context, token, parentID, message
 		return "", err
 	}
 	if !outcome.Succeeded {
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create did not succeed")
+		return "", fault.New(ErrorCodeThreadCreateFailed, "thread create did not succeed")
 	}
 	var created threadChannelResponse
 	if err := json.Unmarshal(response, &created); err != nil || created.ID == "" {
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create response is not decodable")
+		return "", fault.New(ErrorCodeThreadCreateFailed, "thread create response is not decodable")
 	}
 	return created.ID, nil
 }
@@ -154,15 +155,15 @@ func (a *Adapter) fetchThreadParent(ctx context.Context, token, threadID string)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return threadChannelResponse{}, Errorf(ErrorCodeThreadUnavailable, "thread lookup did not succeed")
+		return threadChannelResponse{}, fault.New(ErrorCodeThreadUnavailable, "thread lookup did not succeed")
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRestBytes))
 	if err != nil {
-		return threadChannelResponse{}, Errorf(ErrorCodeThreadUnavailable, "thread lookup response is not readable")
+		return threadChannelResponse{}, fault.New(ErrorCodeThreadUnavailable, "thread lookup response is not readable")
 	}
 	var info threadChannelResponse
 	if err := json.Unmarshal(body, &info); err != nil || info.ID == "" {
-		return threadChannelResponse{}, Errorf(ErrorCodeThreadUnavailable, "thread lookup response is not decodable")
+		return threadChannelResponse{}, fault.New(ErrorCodeThreadUnavailable, "thread lookup response is not decodable")
 	}
 	return info, nil
 }
@@ -182,7 +183,7 @@ func buildThreadEnvelope(account, principalID string, class principal.Class, msg
 		ThreadID:  threadID,
 	})
 	if err != nil {
-		return nil, Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
+		return nil, fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	return &runtimeingress.IngressEnvelope{
 		Source:         "discord:" + account,
@@ -196,7 +197,7 @@ func buildThreadEnvelope(account, principalID string, class principal.Class, msg
 	}, nil
 }
 
-func authorDrop(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) dropReason {
+func authorDrop(account *Account, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) dropReason {
 	if msg.Author.Bot || msg.Author.ID == selfID {
 		return dropAuthorBot
 	}
@@ -226,7 +227,7 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 	principalID, class, _ := resolveAuthor(a.account, a.owners, msg.Author.ID, a.authorAccess(ctx))
 	sessionID := a.sessionKey(persona, a.channelConversation(persona, parentID, principalID, class))
 	if err := a.sessions.EnsureSession(ctx, sessionID, principalID, persona); err != nil {
-		return "", ErrorWrapf(ErrorCodeThreadCreateFailed, err, "thread create for message %s: parent session could not be ensured", msg.ID)
+		return "", fault.Wrap(ErrorCodeThreadCreateFailed, fmt.Sprintf("thread create for message %s: parent session could not be ensured", msg.ID), err)
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      sessionID,
@@ -238,22 +239,22 @@ func (a *Adapter) createThreadForTrigger(ctx context.Context, msg *messagePayloa
 		EventKind:      effect.EventKindChannelRequested,
 	}, a)
 	if err != nil {
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
+		return "", fault.New(ErrorCodeThreadCreateFailed, fmt.Sprintf("thread create for message %s did not succeed", msg.ID))
 	}
 	if intent == nil {
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
+		return "", fault.New(ErrorCodeThreadCreateFailed, fmt.Sprintf("thread create for message %s did not succeed", msg.ID))
 	}
 	switch intent.State {
 	case effect.StateSucceeded:
 		var receipt threadReceipt
 		if err := json.Unmarshal(intent.ProviderReceipt, &receipt); err != nil || receipt.ThreadID == "" {
-			return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
+			return "", fault.New(ErrorCodeThreadCreateFailed, fmt.Sprintf("thread create for message %s did not succeed", msg.ID))
 		}
 		return a.commitThreadReceipt(msg.ID, receipt.ThreadID, threadRoute{parent: parentID, persona: persona})
 	case effect.StateUnknown:
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
+		return "", fault.New(ErrorCodeThreadCreateFailed, fmt.Sprintf("thread create for message %s did not succeed", msg.ID))
 	default:
-		return "", Errorf(ErrorCodeThreadCreateFailed, "thread create for message %s did not succeed", msg.ID)
+		return "", fault.New(ErrorCodeThreadCreateFailed, fmt.Sprintf("thread create for message %s did not succeed", msg.ID))
 	}
 }
 
@@ -295,7 +296,7 @@ func rewriteEnvelopeForThread(envelope *runtimeingress.IngressEnvelope, msg *mes
 		ThreadID:  threadID,
 	})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	envelope.ConversationID = "thread:" + threadID
 	envelope.ReplyContext = reference

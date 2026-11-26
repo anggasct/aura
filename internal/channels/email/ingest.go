@@ -83,19 +83,19 @@ func (a *Adapter) ingest(ctx context.Context, session Session, info MessageInfo)
 	root := threadRoot(header, messageID)
 	sessionID, err := a.threadSession(ctx, found.persona, root, found.principal)
 	if err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "thread session is not resolvable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "thread session is not resolvable", err)
 	}
 	found.session = sessionID
 	reply, err := json.Marshal(replyReference{MessageID: messageID, Sender: sender, Subject: found.subject, References: referenceIDs(header)})
 	if err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "reply reference is not encodable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "reply reference is not encodable", err)
 	}
 	found.reply = reply
 	return a.deliverToRuntime(ctx, session, info, &found)
 }
 
 func (a *Adapter) fetchFailure(ctx context.Context, uid uint32, err error) error {
-	if code, ok := CodeOf(err); ok && code == ErrorCodeMessageUnavailable {
+	if fault.HasCode(err, ErrorCodeMessageUnavailable) {
 		a.drop(ctx, uid, dropMessageUnavailable, false)
 		return nil
 	}
@@ -214,7 +214,7 @@ func (a *Adapter) deliverToRuntime(ctx context.Context, session Session, info Me
 		return nil
 	}
 	if err := a.sessions.EnsureSession(ctx, found.session, found.principal, found.persona); err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "session is not ensurable", err)
 	}
 	summaries, images, err := a.storeAttachments(ctx, stage, found)
 	if err == nil && len(summaries) > 0 {
@@ -249,7 +249,7 @@ func (a *Adapter) deliverToRuntime(ctx context.Context, session Session, info Me
 	a.rememberSession(found)
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		if retryableIntake(err) {
-			return &Error{Code: ErrorCodeIntakeFailed, Detail: "runtime did not accept the message", Cause: err}
+			return fault.Wrap(ErrorCodeIntakeFailed, "runtime did not accept the message", err)
 		}
 		a.drop(ctx, info.UID, dropIntakeRejected, true)
 		return nil

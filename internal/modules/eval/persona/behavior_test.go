@@ -110,7 +110,7 @@ func TestInvalidJudgmentScoresZero(t *testing.T) {
 
 func TestBehaviorRunRefusesWhatItCannotGrade(t *testing.T) {
 	plain := lobbyDefinition()
-	if _, err := RunBehavior(t.Context(), plain, []Case{behaviorCase("c", "r", "hi")}, echoConverser, scriptedJudge(nil)); err == nil || !strings.Contains(err.Error(), ErrorCodeInvalid) {
+	if _, err := RunBehavior(t.Context(), plain, []Case{behaviorCase("c", "r", "hi")}, echoConverser, scriptedJudge(nil)); err == nil || !strings.Contains(err.Error(), string(ErrorCodeInvalid)) {
 		t.Fatalf("persona without behavior settings: %v", err)
 	}
 	policyOnly := []Case{{Name: "fixed", Kind: KindFixedReply, Key: "budget_exhausted", Text: "x"}}
@@ -169,7 +169,7 @@ func TestLoadCasesValidatesBehaviorCases(t *testing.T) {
 				}
 				return
 			}
-			if err == nil || !strings.Contains(err.Error(), ErrorCodeInvalid) || !strings.Contains(err.Error(), tc.want) {
+			if err == nil || !strings.Contains(err.Error(), string(ErrorCodeInvalid)) || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("LoadCases error = %v, want %q", err, tc.want)
 			}
 		})

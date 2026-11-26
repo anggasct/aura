@@ -12,7 +12,6 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 type HandoffNotifier interface {
@@ -21,34 +20,6 @@ type HandoffNotifier interface {
 
 type MediaStore interface {
 	Put(ctx context.Context, content io.Reader, meta *media.Meta) (media.Receipt, error)
-}
-
-func (a *Adapter) SetOwnerRoute(route *approval.OwnerRoute) {
-	if a == nil {
-		return
-	}
-	a.approvals = route
-}
-
-func (a *Adapter) SetHandoffNotifier(notifier HandoffNotifier) {
-	if a == nil {
-		return
-	}
-	a.notifier = notifier
-}
-
-func (a *Adapter) SetMediaStore(store MediaStore) {
-	if a == nil {
-		return
-	}
-	a.artifacts = store
-}
-
-func (a *Adapter) SetVisionService(svc *vision.Service) {
-	if a == nil {
-		return
-	}
-	a.images.Store(svc)
 }
 
 func (a *Adapter) servesPublic() bool {

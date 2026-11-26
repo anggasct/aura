@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -145,14 +146,14 @@ func (a *Adapter) runSession(ctx context.Context, ws *websocket.Conn, token stri
 		return err
 	}
 	if envelope.Op != opHello {
-		return Errorf(ErrorCodeProtocolInvalid, "first gateway frame is not hello")
+		return fault.New(ErrorCodeProtocolInvalid, "first gateway frame is not hello")
 	}
 	var hello helloPayload
 	if err := json.Unmarshal(envelope.Data, &hello); err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "hello payload is not decodable")
+		return fault.New(ErrorCodeProtocolInvalid, "hello payload is not decodable")
 	}
 	if hello.HeartbeatIntervalMs <= 0 {
-		return Errorf(ErrorCodeProtocolInvalid, "hello carries no heartbeat interval")
+		return fault.New(ErrorCodeProtocolInvalid, "hello carries no heartbeat interval")
 	}
 	interval := time.Duration(hello.HeartbeatIntervalMs) * time.Millisecond
 	if !resume {
@@ -328,7 +329,7 @@ func (a *Adapter) handleInvalidSession(ctx context.Context, envelope *gatewayEnv
 	var resumable bool
 	if len(envelope.Data) > 0 {
 		if err := json.Unmarshal(envelope.Data, &resumable); err != nil {
-			return Errorf(ErrorCodeProtocolInvalid, "invalid session payload is not decodable")
+			return fault.New(ErrorCodeProtocolInvalid, "invalid session payload is not decodable")
 		}
 	}
 	if resumable {
@@ -349,10 +350,10 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 	case eventReady:
 		var ready readyPayload
 		if err := json.Unmarshal(envelope.Data, &ready); err != nil {
-			return Errorf(ErrorCodeProtocolInvalid, "ready payload is not decodable")
+			return fault.New(ErrorCodeProtocolInvalid, "ready payload is not decodable")
 		}
 		if ready.SessionID == "" || ready.User.ID == "" {
-			return Errorf(ErrorCodeProtocolInvalid, "ready payload is missing session or user")
+			return fault.New(ErrorCodeProtocolInvalid, "ready payload is missing session or user")
 		}
 		a.sessionID = ready.SessionID
 		a.selfID = ready.User.ID
@@ -365,7 +366,7 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 	case eventMessageCreate:
 		var msg messagePayload
 		if err := json.Unmarshal(envelope.Data, &msg); err != nil {
-			return Errorf(ErrorCodeProtocolInvalid, "message payload is not decodable")
+			return fault.New(ErrorCodeProtocolInvalid, "message payload is not decodable")
 		}
 		select {
 		case queue <- intakeItem{msg: &msg, seq: envelope.Seq}:
@@ -376,7 +377,7 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 	case eventInteractionCreate:
 		var interaction interactionPayload
 		if err := json.Unmarshal(envelope.Data, &interaction); err != nil {
-			return Errorf(ErrorCodeProtocolInvalid, "interaction payload is not decodable")
+			return fault.New(ErrorCodeProtocolInvalid, "interaction payload is not decodable")
 		}
 		a.resolveComponentClick(ctx, &interaction)
 		return nil
@@ -387,7 +388,7 @@ func (a *Adapter) handleDispatch(ctx context.Context, envelope *gatewayEnvelope,
 
 func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) {
 	if msg == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
+		return false, fault.New(ErrorCodeInvalidArgument, "account and message must not be nil")
 	}
 	if route, ok := a.lookupThread(msg.ChannelID); ok {
 		return a.admitThreadMessage(ctx, msg, msg.ChannelID, route)
@@ -651,12 +652,12 @@ func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, en
 func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []media.ArtifactSummary) error {
 	var reference replyReference
 	if err := json.Unmarshal(envelope.ReplyContext, &reference); err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply context is not decodable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply context is not decodable")
 	}
 	reference.Artifacts = summaries
 	raw, err := json.Marshal(reference)
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply context is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply context is not serializable")
 	}
 	envelope.ReplyContext = raw
 	return nil
@@ -691,18 +692,18 @@ func (a *Adapter) fetchSelf(ctx context.Context, token string) (userPayload, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return userPayload{}, Errorf(ErrorCodeConnectionFailed, "self lookup did not succeed")
+		return userPayload{}, fault.New(ErrorCodeConnectionFailed, "self lookup did not succeed")
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, maxRestBytes))
 	if err != nil {
-		return userPayload{}, Errorf(ErrorCodeProtocolInvalid, "self payload is not readable")
+		return userPayload{}, fault.New(ErrorCodeProtocolInvalid, "self payload is not readable")
 	}
 	var user userPayload
 	if err := json.Unmarshal(body, &user); err != nil {
-		return userPayload{}, Errorf(ErrorCodeProtocolInvalid, "self payload is not decodable")
+		return userPayload{}, fault.New(ErrorCodeProtocolInvalid, "self payload is not decodable")
 	}
 	if user.ID == "" {
-		return userPayload{}, Errorf(ErrorCodeProtocolInvalid, "self payload is missing the user id")
+		return userPayload{}, fault.New(ErrorCodeProtocolInvalid, "self payload is missing the user id")
 	}
 	return user, nil
 }
@@ -713,11 +714,11 @@ func receiveEnvelope(ws *websocket.Conn) (*gatewayEnvelope, error) {
 		return nil, err
 	}
 	if len(raw) > maxFrameBytes {
-		return nil, Errorf(ErrorCodeProtocolInvalid, "gateway frame exceeds size bound")
+		return nil, fault.New(ErrorCodeProtocolInvalid, "gateway frame exceeds size bound")
 	}
 	var envelope gatewayEnvelope
 	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return nil, Errorf(ErrorCodeProtocolInvalid, "gateway frame is not decodable")
+		return nil, fault.New(ErrorCodeProtocolInvalid, "gateway frame is not decodable")
 	}
 	return &envelope, nil
 }
@@ -725,7 +726,7 @@ func receiveEnvelope(ws *websocket.Conn) (*gatewayEnvelope, error) {
 func sendPayload(ws *websocket.Conn, op int, payload any) error {
 	raw, err := json.Marshal(sendEnvelope{Op: op, Data: payload})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "gateway payload is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "gateway payload is not serializable")
 	}
 	if err := ws.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 		return err
@@ -736,7 +737,7 @@ func sendPayload(ws *websocket.Conn, op int, payload any) error {
 func sendHeartbeat(ws *websocket.Conn, seq *int64) error {
 	raw, err := json.Marshal(sendEnvelope{Op: opHeartbeat, Data: seq})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "heartbeat is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "heartbeat is not serializable")
 	}
 	if err := ws.SetWriteDeadline(time.Now().Add(writeTimeout)); err != nil {
 		return err

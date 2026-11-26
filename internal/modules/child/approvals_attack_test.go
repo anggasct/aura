@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type stubClock struct {
@@ -33,7 +35,7 @@ func TestApprovalRejectsReplay(t *testing.T) {
 	}
 	if err := check(t.Context(), attackRequest()); err == nil {
 		t.Fatal("replayed request identity must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -48,7 +50,7 @@ func TestApprovalRejectsMutation(t *testing.T) {
 	mutatedCaps.Capabilities = []string{"search", "write"}
 	if err := check(t.Context(), mutatedCaps); err == nil {
 		t.Fatal("mutated capabilities must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildInvalid {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	mutatedArgs := attackRequest()
@@ -129,7 +131,7 @@ func TestApprovalRejectsSelfApproval(t *testing.T) {
 			t.Errorf("%s: forbidden principal must fail", name)
 			continue
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeChildForbidden {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildForbidden {
 			t.Errorf("%s: code = %v, %v (%v)", name, code, ok, err)
 		}
 	}

@@ -2,6 +2,8 @@ package gitsync
 
 import (
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type stubFetchValidator struct {
@@ -67,7 +69,7 @@ func TestValidateFetchRejects(t *testing.T) {
 	denied := []FetchEntry{{Path: "skills/state.db", Size: 4, Digest: "digest-1"}}
 	if _, _, err := ValidateFetch("ref-abc", "main", denied, map[string][]byte{"skills/state.db": []byte("data")}, []string{"skills"}, nil); err == nil {
 		t.Fatal("denied path must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 	duplicated := []FetchEntry{
@@ -76,7 +78,7 @@ func TestValidateFetchRejects(t *testing.T) {
 	}
 	if _, _, err := ValidateFetch("ref-abc", "main", duplicated, map[string][]byte{"skills/a.md": []byte("x")}, []string{"skills"}, nil); err == nil {
 		t.Fatal("duplicate path must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Fatalf("code = %v,%v want sync_conflict", code, ok)
 	}
 	mismatched := []FetchEntry{{Path: "skills/a.md", Size: 8, Digest: "d1"}}
@@ -92,7 +94,7 @@ func TestValidateFetchRejectsDigestMismatch(t *testing.T) {
 	contents := map[string][]byte{"config-templates/aura.yaml": body}
 	if _, _, err := ValidateFetch("ref-abc", "main", entries, contents, []string{"config-templates"}, nil); err == nil {
 		t.Fatal("digest mismatch must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Fatalf("code = %v,%v want sync_conflict", code, ok)
 	}
 }
@@ -104,7 +106,7 @@ func TestValidateFetchRejectsEmptyRef(t *testing.T) {
 	contents := map[string][]byte{"config-templates/aura.yaml": body}
 	if _, _, err := ValidateFetch("", "main", entries, contents, []string{"config-templates"}, nil); err == nil {
 		t.Fatal("empty ref must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("code = %v,%v want invalid_argument", code, ok)
 	}
 	if _, _, err := ValidateFetch("   ", "main", entries, contents, []string{"config-templates"}, nil); err == nil {

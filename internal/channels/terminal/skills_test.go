@@ -48,9 +48,12 @@ func runSkillTurns(t *testing.T, skills command.Skills, input string) (out, diag
 	runner := &fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "message.completed", Payload: []byte(`{"text":"done"}`)}, {Kind: "turn.completed"}}
 	}}
-	console, stdout, stderr, cancel := newConsoleForTest(runner, newFakeSessions(), input)
+	console, stdout, stderr, cancel := newConsoleForTestWithDeps(t, &Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Skills:   skills,
+	}, input)
 	defer cancel()
-	console.SetSkills(skills)
 	if err := console.Run(t.Context()); err != nil {
 		t.Fatalf("run: %v", err)
 	}

@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 var freshChildClock = regexp.MustCompile(`^\{"now":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z","journal":2\}$`)
@@ -29,7 +31,7 @@ func TestChildJournalOfAnotherVersionIsRefused(t *testing.T) {
 
 			err := handler.HandleDurable(t.Context(), inv, time.Now().UTC)
 
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeChildUnavailable || !strings.Contains(err.Error(), "child journal was written by another build") {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildUnavailable || !strings.Contains(err.Error(), "child journal was written by another build") {
 				t.Errorf("HandleDurable = %v, want %s from another build", err, ErrorCodeChildUnavailable)
 			}
 			if calls := exec.Calls(); calls != 0 {

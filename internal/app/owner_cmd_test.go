@@ -9,7 +9,7 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -192,7 +192,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 func TestOwnerRekeyMoves(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Owner = &principal.Owner{Identities: []string{"discord:" + testOwnerDiscordID}}
-	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
+	cfg.Channels.Discord.Accounts = []discord.Account{
 		{Name: "owner", AllowedUserIDs: []string{testOwnerDiscordID}},
 		{Name: "kuma", AllowedUserIDs: []string{testTrustedDiscordID, testOwnerDiscordID}},
 	}

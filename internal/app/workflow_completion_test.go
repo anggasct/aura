@@ -10,8 +10,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -67,14 +67,14 @@ func completionFixture(t *testing.T) *completionHarness {
 		t.Fatal(err)
 	}
 	harness := &completionHarness{controller: controller, db: db}
-	cfg := &appconfig.Config{Channels: appconfig.Channels{Discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "front"}}}}}
+	cfg := &appconfig.Config{Channels: appconfig.Channels{Discord: discord.Config{Accounts: []discord.Account{{Name: "front"}}}}}
 	notifier, err := workflow.NewCompletionNotifier(&workflow.CompletionNotifierDeps{
 		Runs:     runs,
 		Registry: registry,
 		Appender: &workflowSessionTextAppender{db: db},
 		Deliver: &workflowCompletionDeliverer{
 			cfg: cfg,
-			deliver: func(_ context.Context, account *config.DiscordAccount, channelID, text string) error {
+			deliver: func(_ context.Context, account *discord.Account, channelID, text string) error {
 				if harness.failWith != nil {
 					return harness.failWith
 				}

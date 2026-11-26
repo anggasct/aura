@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
-	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/spf13/cobra"
+
 	"github.com/anggasct/aura/internal/modules/gitsync"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func writeSyncCLIConfig(t *testing.T, syncSection string) string {
@@ -44,16 +46,31 @@ func disabledSyncConfig(t *testing.T) string {
 `)
 }
 
-func runSyncCommand(t *testing.T, cfg string, args ...string) (string, error) {
+func runSyncCommandWithPass(t *testing.T, cfg string, pass gitsync.RunPassFunc, args ...string) (string, error) {
 	t.Helper()
 	gf := &globalFlags{configPath: cfg}
-	cmd := newSyncCmd(gf)
+	baseOpen := syncOpener(gf)
+	open := baseOpen
+	if pass != nil {
+		open = func(cmd *cobra.Command, fn func(ctx context.Context, env gitsync.CommandEnv) error) error {
+			return baseOpen(cmd, func(ctx context.Context, env gitsync.CommandEnv) error {
+				env.Pass = pass
+				return fn(ctx, env)
+			})
+		}
+	}
+	cmd := gitsync.Commands(open)[0]
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
+}
+
+func runSyncCommand(t *testing.T, cfg string, args ...string) (string, error) {
+	t.Helper()
+	return runSyncCommandWithPass(t, cfg, nil, args...)
 }
 
 func TestSyncStatusDisabled(t *testing.T) {
@@ -88,7 +105,7 @@ func TestSyncRunRefusedWhenDisabled(t *testing.T) {
 	if err == nil {
 		t.Fatal("run without gate must fail")
 	}
-	if code, ok := gitsync.CodeOf(err); !ok || code != gitsync.ErrorCodeGateRefused {
+	if code, ok := fault.CodeOf[gitsync.ErrorCode](err); !ok || code != gitsync.ErrorCodeGateRefused {
 		t.Fatalf("run code = %v,%v want sync_unavailable", code, ok)
 	}
 }
@@ -116,7 +133,7 @@ func TestSyncReconcileWithoutUnknown(t *testing.T) {
 		if err == nil {
 			t.Fatal("reconcile without unknown must fail")
 		}
-		if code, ok := gitsync.CodeOf(err); !ok || code != gitsync.ErrorCodeNoUnknownState {
+		if code, ok := fault.CodeOf[gitsync.ErrorCode](err); !ok || code != gitsync.ErrorCodeNoUnknownState {
 			t.Fatalf("reconcile code = %v,%v want sync_no_unknown_state", code, ok)
 		}
 	} else {
@@ -178,14 +195,14 @@ sync:
 }
 
 func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" {
 		t.Skip("sync gate requires Linux")
 	}
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, _ := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n")
-	previous := syncRunPassFunc
-	syncRunPassFunc = func(_ context.Context, _ *appconfig.Config, _ *gitsync.StateStore) (gitsync.PassOutcome, error) {
+	pass := func(_ context.Context, _ *gitsync.Config, _ *gitsync.StateStore) (gitsync.PassOutcome, error) {
 		return gitsync.PassOutcome{
 			State:     gitsync.WorkerIdle,
 			LocalRef:  "local-abc123",
@@ -193,8 +210,7 @@ func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
 			Result:    "pushed",
 		}, nil
 	}
-	t.Cleanup(func() { syncRunPassFunc = previous })
-	out, err := runSyncCommand(t, cfg, "run")
+	out, err := runSyncCommandWithPass(t, cfg, pass, "run")
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
@@ -209,6 +225,7 @@ func TestSyncRunEnabledPrintsPassResult(t *testing.T) {
 }
 
 func TestSyncStatusSeesDurableCheckpoint(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" {
 		t.Skip("sync gate requires Linux")
 	}
@@ -232,6 +249,7 @@ func TestSyncStatusSeesDurableCheckpoint(t *testing.T) {
 }
 
 func TestSyncReconcileFindsDurableUnknown(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS != "linux" {
 		t.Skip("sync gate requires Linux")
 	}
@@ -253,6 +271,7 @@ func TestSyncReconcileFindsDurableUnknown(t *testing.T) {
 }
 
 func TestSyncDoctorProfileInvalidOffline(t *testing.T) {
+	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "missing-git")
 	sshBin := writeSyncExecutable(t)
 	cfg, _ := enabledSyncConfigWithBinaries(t, missing, sshBin, "    - \"skills/**\"\n")
@@ -269,6 +288,7 @@ func TestSyncDoctorProfileInvalidOffline(t *testing.T) {
 }
 
 func TestSyncDoctorManifestInvalidOffline(t *testing.T) {
+	t.Parallel()
 	gitBin := writeSyncExecutable(t)
 	sshBin := writeSyncExecutable(t)
 	cfg, _ := enabledSyncConfigWithBinaries(t, gitBin, sshBin, "    - \"skills/**\"\n    - \"skills/**\"\n")
@@ -293,7 +313,7 @@ func TestSyncMissingConfigTyped(t *testing.T) {
 	if err == nil {
 		t.Fatal("status without sync section must fail")
 	}
-	if code, ok := gitsync.CodeOf(err); !ok || code != gitsync.ErrorCodeNotConfigured {
+	if code, ok := fault.CodeOf[gitsync.ErrorCode](err); !ok || code != gitsync.ErrorCodeNotConfigured {
 		t.Fatalf("code = %v,%v want sync_not_configured", code, ok)
 	}
 }

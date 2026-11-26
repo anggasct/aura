@@ -12,8 +12,10 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -133,9 +135,9 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		validateSkills(cfg.Skills),
 		validateContext(cfg.Context),
 		validateProfile(cfg.Profile),
-		legacyconfig.ValidateChildren(cfg.Children),
+		validateChildren(cfg.Children),
 		validateAccess(cfg.Access),
-		legacyconfig.ValidateSync(cfg.Sync),
+		validateSync(cfg.Sync),
 		validateVision(cfg.Vision),
 		validateKnowledge(cfg.Knowledge),
 		configkit.Under("interpreter", cfg.Interpreter.Validate()),
@@ -146,14 +148,14 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		configkit.Under("telemetry", cfg.Telemetry.Validate()),
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),
-		legacyconfig.ValidateTerminal(cfg.Terminal),
+		configkit.Under("terminal", cfg.Terminal.Validate()),
 		validateWorkflows(cfg.Workflows),
 		validateMCP(cfg.MCP),
 		validatePlugins(cfg.Plugins),
 		configkit.Under("webhook", cfg.Webhook.Validate()),
-		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
+		configkit.Under("channels.discord", cfg.Channels.Discord.Validate()),
 		configkit.Under("channels.telegram", cfg.Channels.Telegram.Validate()),
-		legacyconfig.ValidateEmail(&cfg.Channels.Email),
+		configkit.Under("channels.email", cfg.Channels.Email.Validate()),
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
 		configkit.Under("broadcast", cfg.Broadcast.Validate()),
 		configkit.Under("scheduler", cfg.Scheduler.Validate()),
@@ -457,4 +459,18 @@ func validateWorkflows(section *workflow.Config) error {
 		return nil
 	}
 	return configkit.Under("workflows", section.Validate())
+}
+
+func validateSync(section *gitsync.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("sync", section.Validate())
+}
+
+func validateChildren(section *child.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("children", section.Validate())
 }

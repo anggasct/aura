@@ -8,8 +8,8 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -34,7 +34,7 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return access.HandoffTarget{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return access.HandoffTarget{}, fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	definition, _ := a.personaDefinition(binding.persona)
 	a.postNotice(ctx, token, binding.channelID, definition.Message(auraagent.MessageHandoffOpen))
@@ -43,14 +43,14 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 
 func (a *Adapter) NotifyOwnerHandoff(ctx context.Context, requester *approval.Requester, sessionID, reason string) error {
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if requester == nil || requester.Principal == "" || requester.Persona == "" || sessionID == "" {
-		return Errorf(ErrorCodeInvalidArgument, "handoff requester or session is missing")
+		return fault.New(ErrorCodeInvalidArgument, "handoff requester or session is missing")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	dm, err := a.ownerDM(ctx, token)
 	if err != nil {
@@ -67,7 +67,7 @@ func (a *Adapter) NotifyOwnerHandoff(ctx context.Context, requester *approval.Re
 func (a *Adapter) ownerDM(ctx context.Context, token string) (string, error) {
 	owners := a.owners.OwnerExternalIDs(principal.ChannelDiscord)
 	if len(owners) == 0 {
-		return "", Errorf(ErrorCodeApprovalUnavailable, "owner has no discord identity")
+		return "", approvalUnavailable("owner has no discord identity")
 	}
 	return a.ownerDMChannel(ctx, token, owners[0])
 }
@@ -108,9 +108,9 @@ func (a *Adapter) handoffHeld(ctx context.Context, msg *messagePayload, envelope
 	}
 }
 
-func DeliverText(ctx context.Context, account *config.DiscordAccount, channelID, text string) error {
+func DeliverText(ctx context.Context, account *Account, channelID, text string) error {
 	if account == nil {
-		return Errorf(ErrorCodeInvalidArgument, "discord account must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "discord account must not be nil")
 	}
 	tokenRef, err := parseTokenRef(account.BotTokenRef)
 	if err != nil {
@@ -118,7 +118,7 @@ func DeliverText(ctx context.Context, account *config.DiscordAccount, channelID,
 	}
 	token, err := tokenRef.Resolve()
 	if err != nil {
-		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	return sendText(ctx, &http.Client{Timeout: restTimeout}, discordRestBase, token, channelID, text)
 }

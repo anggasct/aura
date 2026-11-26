@@ -192,7 +192,7 @@ func (b *build) buildServerTools(ctx context.Context) error {
 	if err := b.registerModule("handoff", handoffMod); err != nil {
 		return err
 	}
-	b.builtin.SetEmailOutbox(&emailOutbox{adapters: s.emailMailboxes})
+	b.builtin.SetEmailOutbox(&emailOutboxBridge{outbox: email.NewOutbox(s.emailMailboxes)})
 	pluginMod, err := buildPluginModule(ctx, cfg, db, b.builtin.Broker(), b.result.CapabilityReport, b.logger)
 	if err != nil {
 		return err
@@ -378,11 +378,22 @@ func (b *build) buildSchedule() error {
 	s.hostedHandlers = append(s.hostedHandlers, schedule.HandlerName)
 	s.childLedger = child.NewLedger(nil, 0)
 	if cfg.Children != nil && cfg.Children.Enabled {
-		childHandler, err := buildChildHandler(db, s.childLedger, &runtimeSignaler{runtime: s.broadcastRuntime}, b.executor, b.primaryModel())
+		var turns child.TurnRunner
+		if b.executor != nil {
+			turns = b.executor
+		}
+		childMod, err := child.New(&child.ModuleDeps{
+			DB:        db,
+			Sessions:  b.sessions,
+			Turns:     turns,
+			Runtime:   s.broadcastRuntime,
+			Ledger:    s.childLedger,
+			ModelName: b.primaryModel(),
+		})
 		if err != nil {
 			return err
 		}
-		if err := registerChildHandler(s.broadcastRuntime, childHandler); err != nil {
+		if err := childMod.Register(registrar); err != nil {
 			return err
 		}
 		s.hostedHandlers = append(s.hostedHandlers, child.HandlerName)
@@ -438,7 +449,6 @@ func (b *build) buildDurableHost() error {
 
 func (b *build) buildProbe() error {
 	cfg, s := b.cfg, b.server
-	s.checks = append(s.checks, personaEvalCheck(cfg, b.registry, b.db))
 	httpChat, httpChatChecks, err := buildHTTPChat(cfg, b.db, b.engine, b.registry, s.accessRecorder, s.ownerRoute, b.logger)
 	if err != nil {
 		return err
@@ -520,7 +530,7 @@ func (b *build) bindErasureRuns() error {
 }
 
 func (b *build) registerSweeps() error {
-	cfg, db, registry, logger, artifactRoot := b.cfg, b.db, b.registry, b.logger, b.artifactRoot
+	cfg, db, logger, artifactRoot := b.cfg, b.db, b.logger, b.artifactRoot
 	if err := b.group.Add(server.Background("retention_sweeps", func(ctx context.Context) {
 		runRetentionSweeps(ctx, cfg, db, artifactRoot, logger)
 	})); err != nil {
@@ -536,11 +546,10 @@ func (b *build) registerSweeps() error {
 			}
 		}
 	}
-	configPath := b.result.Path
-	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}
-	return b.group.Add(server.Background("persona_eval_schedules", func(ctx context.Context) {
-		runPersonaEvalSchedules(ctx, configPath, db, registry, models, logger, wallEvalClock)
-	}))
+	if b.personaEvalMod == nil {
+		return invalidOptions("the server's persona evaluation module is not initialized")
+	}
+	return b.group.Add(server.Background("persona_eval_schedules", b.personaEvalMod.RunSchedules))
 }
 
 func (b *build) registerRunRetention() error {

@@ -14,6 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -78,13 +79,13 @@ func (a *Adapter) lookupTarget(conversationID string) (approvalBinding, bool) {
 
 func validateApprovalPrompt(ctx context.Context, prompt *ApprovalPrompt) error {
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if prompt == nil {
-		return Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "approval prompt must not be nil")
 	}
 	if strings.TrimSpace(prompt.ToolName) == "" || strings.TrimSpace(prompt.SessionID) == "" || strings.TrimSpace(prompt.PrincipalID) == "" {
-		return Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+		return fault.New(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
 	}
 	return nil
 }
@@ -113,7 +114,7 @@ func (a *Adapter) DecideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		return false, err
 	}
 	if requester == nil || requester.Principal == "" || requester.Principal != prompt.PrincipalID {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval requester is missing or does not match the prompt")
+		return false, fault.New(ErrorCodeInvalidArgument, "approval requester is missing or does not match the prompt")
 	}
 	return a.decideForOwner(ctx, prompt, &approvalBinding{principal: requester.Principal, class: requester.Class, persona: requester.Persona})
 }
@@ -164,18 +165,18 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 	owners := a.owners.OwnerExternalIDs(principal.ChannelDiscord)
 	if len(owners) == 0 {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "owner has no discord identity")
+		return false, approvalUnavailable("owner has no discord identity")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "approval token is unavailable")
+		return false, approvalUnavailable("approval token is unavailable")
 	}
 	ownerID := owners[0]
 	dmChannel, err := a.ownerDMChannel(ctx, token, ownerID)
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "owner dm channel is unavailable")
+		return false, approvalUnavailable("owner dm channel is unavailable")
 	}
 	now := time.Now()
 	expiresAt := now.Add(approval.OwnerTimeout(definition.ApprovalTimeout, a.access.ApprovalTimeout))
@@ -196,13 +197,13 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "approval token mint failed")
+		return false, approvalUnavailable("approval token mint failed")
 	}
 	cardID, err := a.postApprovalCard(ctx, token, dmChannel, renderApprovalCard(prompt, personaLabel(&definition)), tokenID, pending)
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "owner approval card delivery failed")
+		return false, approvalUnavailable("owner approval card delivery failed")
 	}
 	a.postNotice(ctx, token, requester.channelID, definition.Message(auraagent.MessageWaitingForOwner))
 	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID})
@@ -214,7 +215,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		if err != nil {
 			return false, err
 		}
-		return false, Errorf(ErrorCodeApprovalTimeout, "owner did not answer the approval in time")
+		return false, approvalTimeout("owner did not answer the approval in time")
 	case err != nil:
 		return false, err
 	case outcome.Standing:
@@ -288,7 +289,7 @@ func (a *Adapter) postApprovalCard(ctx context.Context, token, channelID, conten
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
 	if err != nil {
-		return "", Errorf(ErrorCodeProtocolInvalid, "approval card is not serializable")
+		return "", fault.New(ErrorCodeProtocolInvalid, "approval card is not serializable")
 	}
 	endpoint := a.restBase + "/channels/" + channelID + "/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
@@ -307,13 +308,13 @@ func (a *Adapter) postApprovalCard(ctx context.Context, token, channelID, conten
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", Errorf(ErrorCodeDeliveryFailed, "approval card post did not succeed")
+		return "", fault.New(ErrorCodeDeliveryFailed, "approval card post did not succeed")
 	}
 	var message struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &message); err != nil || message.ID == "" {
-		return "", Errorf(ErrorCodeDeliveryAmbiguous, "approval card post has no message id")
+		return "", deliveryAmbiguous("approval card post has no message id")
 	}
 	return message.ID, nil
 }

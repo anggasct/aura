@@ -13,6 +13,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -150,7 +151,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config)
 		t.Fatalf("tool: %v", err)
 	}
 	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminal.DenyPolicy{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
 		runtimeadk.WithContextProvider(mod))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
