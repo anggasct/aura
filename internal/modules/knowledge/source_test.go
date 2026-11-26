@@ -11,11 +11,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func requireCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || code != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}

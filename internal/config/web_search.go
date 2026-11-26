@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -32,27 +33,27 @@ func DefaultWebSearchCredentialRef(provider string) secret.Ref {
 	return secret.Ref{}
 }
 
-func (w *ToolWebSearch) SearchEndpoint() (ServiceEndpoint, error) {
+func (w *ToolWebSearch) SearchEndpoint() (egress.ServiceEndpoint, error) {
 	if w == nil {
-		return ServiceEndpoint{}, configkit.Invalid("tools.web_search", "is not configured")
+		return egress.ServiceEndpoint{}, configkit.Invalid("tools.web_search", "is not configured")
 	}
 	endpoint, err := parseSearchEndpoint(w.Endpoint)
 	if err != nil {
-		return ServiceEndpoint{}, err
+		return egress.ServiceEndpoint{}, err
 	}
 	return endpoint, nil
 }
 
-func parseSearchEndpoint(raw string) (ServiceEndpoint, error) {
-	endpoint, err := parseServiceEndpoint(webSearchEndpointField, raw)
+func parseSearchEndpoint(raw string) (egress.ServiceEndpoint, error) {
+	endpoint, err := egress.ParseServiceEndpoint(raw)
 	if err != nil {
-		return ServiceEndpoint{}, err
+		return egress.ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, err.Error())
 	}
 	if endpoint.Path == "" {
-		return ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, "must carry a non-empty path")
+		return egress.ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, "must carry a non-empty path")
 	}
 	if endpoint.Loopback && endpoint.Scheme != "http" {
-		return ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, "must use http for a loopback host")
+		return egress.ServiceEndpoint{}, configkit.Invalid(webSearchEndpointField, "must use http for a loopback host")
 	}
 	return endpoint, nil
 }

@@ -12,6 +12,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const digestPrefixLength = 12
@@ -228,7 +229,7 @@ func newKBCheckCmd(gf *globalFlags) *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withKnowledge(cmd, gf, func(ctx context.Context, _ *slog.Logger, service *knowledge.Service) error {
 				report, err := service.Check(ctx)
-				if code, coded := knowledge.CodeOf(err); err != nil && (!coded || code != knowledge.ErrorCodeIndexDamaged) {
+				if err != nil && !fault.HasCode(err, knowledge.ErrorCodeIndexDamaged) {
 					return err
 				}
 				lines := []string{fmt.Sprintf("collections=%d sources=%d chunks=%d indexed=%d",

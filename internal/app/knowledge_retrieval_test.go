@@ -11,6 +11,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -145,7 +146,7 @@ func TestKnowledgeSearchFailsClosedWhenASecretReferenceIsUnresolvable(t *testing
 	rig.add(t, "support", "policy.md", "Refunds are issued within thirty days.")
 	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_UNSET_RETRIEVAL_SECRET"}}
 	hits, err := ownerSearch(t.Context(), rig.retriever, []string{"support"}, "refund", knowledge.SearchDepth)
-	if code, ok := knowledge.CodeOf(err); !ok || code != knowledge.ErrorCodeSecretUnavailable || len(hits) != 0 {
+	if code, ok := fault.CodeOf[knowledge.ErrorCode](err); !ok || code != knowledge.ErrorCodeSecretUnavailable || len(hits) != 0 {
 		t.Fatalf("hits = %v, error = %v", hits, err)
 	}
 }

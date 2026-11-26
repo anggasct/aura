@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 )
 
 func embeddingConfig(fields string) string {
@@ -29,7 +30,7 @@ func TestLoad_KnowledgeEmbeddingAppliesDefaults(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	embedding := result.Config.Knowledge.Embedding
-	if embedding.DimensionsField != "dimensions" || embedding.RoleStyle != legacyconfig.EmbeddingRoleNone ||
+	if embedding.DimensionsField != "dimensions" || embedding.RoleStyle != knowledge.EmbeddingRoleNone ||
 		embedding.BatchSize != 96 || embedding.MaxMemory != 256<<20 || embedding.PublicQueries || !embedding.CredentialRef.IsZero() {
 		t.Fatalf("defaults = %+v", embedding)
 	}
@@ -55,7 +56,7 @@ func TestLoad_KnowledgeEmbeddingReadsEveryField(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	embedding := result.Config.Knowledge.Embedding
-	if embedding.DimensionsField != "output_dimension" || embedding.RoleStyle != legacyconfig.EmbeddingRoleInputType ||
+	if embedding.DimensionsField != "output_dimension" || embedding.RoleStyle != knowledge.EmbeddingRoleInputType ||
 		embedding.BatchSize != 128 || embedding.MaxMemory != 512<<20 || !embedding.PublicQueries ||
 		embedding.CredentialRef.String() != "env://VOYAGE_API_KEY" {
 		t.Fatalf("embedding = %+v", embedding)
@@ -134,7 +135,7 @@ func TestLoad_KnowledgeEmbeddingRejectsInvalidSettings(t *testing.T) {
 		fields string
 		detail string
 	}{
-		"missing base url":          {fields: "    model: m\n    dimensions: 8\n", detail: "base_url: config_invalid: must be set"},
+		"missing base url":          {fields: "    model: m\n    dimensions: 8\n", detail: "knowledge.embedding.base_url: config_invalid: must be set"},
 		"plain http remote":         {fields: "    base_url: http://api.example.com/v1\n    model: m\n    dimensions: 8\n", detail: "must use https"},
 		"embedded credentials":      {fields: "    base_url: https://user:pw@api.example.com/v1\n    model: m\n    dimensions: 8\n", detail: "must not embed credentials"},
 		"query string":              {fields: "    base_url: https://api.example.com/v1?key=1\n    model: m\n    dimensions: 8\n", detail: "query or fragment"},

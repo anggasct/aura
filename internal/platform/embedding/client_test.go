@@ -14,16 +14,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
-func testConfig(baseURL string) *config.KnowledgeEmbedding {
-	return &config.KnowledgeEmbedding{
+func testConfig(baseURL string) *Config {
+	return &Config{
 		BaseURL: baseURL, Model: "test-model", Dimensions: 3, DimensionsField: "dimensions",
-		RoleStyle: config.EmbeddingRoleNone, BatchSize: 96, MaxMemory: config.DefaultEmbeddingMaxMemory,
+		RoleStyle: RoleStyleNone,
 	}
 }
 
@@ -61,40 +59,40 @@ func respondJSON(body string) func(http.ResponseWriter, *http.Request) {
 
 func TestClientSendsTheConfiguredRequestShapes(t *testing.T) {
 	tests := map[string]struct {
-		mutate   func(*config.KnowledgeEmbedding)
+		mutate   func(*Config)
 		role     Role
 		wantBody map[string]any
 	}{
 		"plain document": {
-			mutate:   func(*config.KnowledgeEmbedding) {},
+			mutate:   func(*Config) {},
 			role:     RoleDocument,
 			wantBody: map[string]any{"model": "test-model", "dimensions": float64(3), "input": []any{"alpha", "beta"}},
 		},
 		"custom dimensions field": {
-			mutate:   func(c *config.KnowledgeEmbedding) { c.DimensionsField = "output_dimension" },
+			mutate:   func(c *Config) { c.DimensionsField = "output_dimension" },
 			role:     RoleDocument,
 			wantBody: map[string]any{"model": "test-model", "output_dimension": float64(3), "input": []any{"alpha", "beta"}},
 		},
 		"input type document": {
-			mutate:   func(c *config.KnowledgeEmbedding) { c.RoleStyle = config.EmbeddingRoleInputType },
+			mutate:   func(c *Config) { c.RoleStyle = RoleStyleInputType },
 			role:     RoleDocument,
 			wantBody: map[string]any{"model": "test-model", "dimensions": float64(3), "input": []any{"alpha", "beta"}, "input_type": "document"},
 		},
 		"input type query": {
-			mutate:   func(c *config.KnowledgeEmbedding) { c.RoleStyle = config.EmbeddingRoleInputType },
+			mutate:   func(c *Config) { c.RoleStyle = RoleStyleInputType },
 			role:     RoleQuery,
 			wantBody: map[string]any{"model": "test-model", "dimensions": float64(3), "input": []any{"alpha", "beta"}, "input_type": "query"},
 		},
 		"prefix document": {
-			mutate: func(c *config.KnowledgeEmbedding) {
-				c.RoleStyle, c.QueryPrefix, c.DocumentPrefix = config.EmbeddingRolePrefix, "Q: ", "D: "
+			mutate: func(c *Config) {
+				c.RoleStyle, c.QueryPrefix, c.DocumentPrefix = RoleStylePrefix, "Q: ", "D: "
 			},
 			role:     RoleDocument,
 			wantBody: map[string]any{"model": "test-model", "dimensions": float64(3), "input": []any{"D: alpha", "D: beta"}},
 		},
 		"prefix query": {
-			mutate: func(c *config.KnowledgeEmbedding) {
-				c.RoleStyle, c.QueryPrefix, c.DocumentPrefix = config.EmbeddingRolePrefix, "Q: ", "D: "
+			mutate: func(c *Config) {
+				c.RoleStyle, c.QueryPrefix, c.DocumentPrefix = RoleStylePrefix, "Q: ", "D: "
 			},
 			role:     RoleQuery,
 			wantBody: map[string]any{"model": "test-model", "dimensions": float64(3), "input": []any{"Q: alpha", "Q: beta"}},
@@ -218,7 +216,7 @@ func TestClientRejectsInvalidRequestsBeforeSending(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	tooMany := make([]string, config.MaxEmbeddingBatchSize+1)
+	tooMany := make([]string, MaxBatchSize+1)
 	for i := range tooMany {
 		tooMany[i] = "x"
 	}
@@ -395,9 +393,9 @@ func TestClientStopsWhenTheProviderIsSlow(t *testing.T) {
 }
 
 func TestFingerprintBindsEverythingThatChangesTheVectorSpace(t *testing.T) {
-	base := func() *config.KnowledgeEmbedding {
+	base := func() *Config {
 		cfg := testConfig("https://api.example.com/v1")
-		cfg.RoleStyle, cfg.QueryPrefix, cfg.DocumentPrefix = config.EmbeddingRolePrefix, "q ", "d "
+		cfg.RoleStyle, cfg.QueryPrefix, cfg.DocumentPrefix = RoleStylePrefix, "q ", "d "
 		return cfg
 	}
 	reference, err := Fingerprint(base())
@@ -407,19 +405,19 @@ func TestFingerprintBindsEverythingThatChangesTheVectorSpace(t *testing.T) {
 	if again, _ := Fingerprint(base()); again != reference {
 		t.Fatal("Fingerprint is not stable")
 	}
-	changes := map[string]func(*config.KnowledgeEmbedding){
-		"host":             func(c *config.KnowledgeEmbedding) { c.BaseURL = "https://api.other.example/v1" },
-		"port":             func(c *config.KnowledgeEmbedding) { c.BaseURL = "https://api.example.com:8443/v1" },
-		"path":             func(c *config.KnowledgeEmbedding) { c.BaseURL = "https://api.example.com/v2" },
-		"model":            func(c *config.KnowledgeEmbedding) { c.Model = "other-model" },
-		"dimensions":       func(c *config.KnowledgeEmbedding) { c.Dimensions = 4 },
-		"dimensions field": func(c *config.KnowledgeEmbedding) { c.DimensionsField = "output_dimension" },
-		"role style": func(c *config.KnowledgeEmbedding) {
-			c.RoleStyle = config.EmbeddingRoleNone
+	changes := map[string]func(*Config){
+		"host":             func(c *Config) { c.BaseURL = "https://api.other.example/v1" },
+		"port":             func(c *Config) { c.BaseURL = "https://api.example.com:8443/v1" },
+		"path":             func(c *Config) { c.BaseURL = "https://api.example.com/v2" },
+		"model":            func(c *Config) { c.Model = "other-model" },
+		"dimensions":       func(c *Config) { c.Dimensions = 4 },
+		"dimensions field": func(c *Config) { c.DimensionsField = "output_dimension" },
+		"role style": func(c *Config) {
+			c.RoleStyle = RoleStyleNone
 			c.QueryPrefix, c.DocumentPrefix = "", ""
 		},
-		"query prefix":    func(c *config.KnowledgeEmbedding) { c.QueryPrefix = "q2 " },
-		"document prefix": func(c *config.KnowledgeEmbedding) { c.DocumentPrefix = "d2 " },
+		"query prefix":    func(c *Config) { c.QueryPrefix = "q2 " },
+		"document prefix": func(c *Config) { c.DocumentPrefix = "d2 " },
 	}
 	for name, change := range changes {
 		t.Run(name, func(t *testing.T) {
@@ -431,13 +429,9 @@ func TestFingerprintBindsEverythingThatChangesTheVectorSpace(t *testing.T) {
 			}
 		})
 	}
-	same := map[string]func(*config.KnowledgeEmbedding){
-		"batch size":     func(c *config.KnowledgeEmbedding) { c.BatchSize = 7 },
-		"credential":     func(c *config.KnowledgeEmbedding) { c.CredentialRef = secrettest.Ref("env://OTHER") },
-		"memory":         func(c *config.KnowledgeEmbedding) { c.MaxMemory = 1 << 30 },
-		"public queries": func(c *config.KnowledgeEmbedding) { c.PublicQueries = true },
-		"trailing slash": func(c *config.KnowledgeEmbedding) { c.BaseURL = "https://API.example.com/v1/" },
-		"default port":   func(c *config.KnowledgeEmbedding) { c.BaseURL = "https://api.example.com:443/v1" },
+	same := map[string]func(*Config){
+		"trailing slash": func(c *Config) { c.BaseURL = "https://API.example.com/v1/" },
+		"default port":   func(c *Config) { c.BaseURL = "https://api.example.com:443/v1" },
 	}
 	for name, change := range same {
 		t.Run("keeps "+name, func(t *testing.T) {
@@ -447,6 +441,9 @@ func TestFingerprintBindsEverythingThatChangesTheVectorSpace(t *testing.T) {
 				t.Fatalf("Fingerprint after %s change differs", name)
 			}
 		})
+	}
+	if _, err := Fingerprint(nil); !fault.HasCode(err, ErrorCodeConfigInvalid) {
+		t.Fatalf("Fingerprint(nil) error = %v, want %s", err, ErrorCodeConfigInvalid)
 	}
 	if _, err := Fingerprint(testConfig("http://localhost/v1")); err == nil {
 		t.Fatal("Fingerprint accepted an invalid endpoint")

@@ -15,6 +15,8 @@ import (
 	"time"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -192,9 +194,9 @@ func loadURL(ctx context.Context, doer HTTPDoer, raw string) (*loadedSource, err
 }
 
 func classifyFetchError(ctx context.Context, err error) error {
-	var coded *Error
+	var coded *fault.Error[ErrorCode]
 	if errors.As(err, &coded) {
-		return &Error{Code: coded.Code, Detail: coded.Detail}
+		return fault.New(coded.Code, coded.Detail)
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr

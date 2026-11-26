@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/embedding"
@@ -74,7 +73,7 @@ func (v *knowledgeVectors) DisableEmbedding(ctx context.Context, collection stri
 	}, translateKnowledgeStoreError(err)
 }
 
-func configuredEmbedding(cfg *appconfig.Config) *config.KnowledgeEmbedding {
+func configuredEmbedding(cfg *appconfig.Config) *knowledge.EmbeddingConfig {
 	if cfg == nil || cfg.Knowledge == nil {
 		return nil
 	}
@@ -103,7 +102,8 @@ func newKnowledgeEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (kno
 	if embeddingConfig == nil {
 		return knowledgeEmbeddingWiring{}, nil
 	}
-	fingerprint, err := embedding.Fingerprint(embeddingConfig)
+	clientCfg := embeddingConfig.ClientConfig()
+	fingerprint, err := embedding.Fingerprint(&clientCfg)
 	if err != nil {
 		return knowledgeEmbeddingWiring{}, err
 	}
@@ -120,7 +120,7 @@ func newKnowledgeEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (kno
 	if !resolved {
 		return wiring, nil
 	}
-	client, err := embedding.New(embeddingConfig, credential, resolver)
+	client, err := embedding.New(&clientCfg, credential, resolver)
 	if err != nil {
 		return knowledgeEmbeddingWiring{}, err
 	}
@@ -134,7 +134,8 @@ func knowledgeEmbeddingReader(cfg *appconfig.Config, dbPath string) func(ctx con
 		fingerprint := ""
 		dimensions := 0
 		if embeddingConfig := configuredEmbedding(cfg); embeddingConfig != nil {
-			computed, err := embedding.Fingerprint(embeddingConfig)
+			clientCfg := embeddingConfig.ClientConfig()
+			computed, err := embedding.Fingerprint(&clientCfg)
 			if err != nil {
 				return health.KnowledgeEmbeddingState{}, err
 			}

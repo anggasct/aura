@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type EmbedRole string
@@ -298,7 +300,7 @@ func (s *Service) embedBatch(ctx context.Context, collection string, chunks []Pe
 func (s *Service) screenBeforeSend(ctx context.Context, texts []string) error {
 	screen, err := s.secrets.Snapshot(ctx)
 	if err != nil {
-		return fmt.Errorf("%w: %w", &Error{Code: ErrorCodeSecretUnavailable, Detail: "a configured secret reference could not be resolved"}, err)
+		return fault.Wrap(ErrorCodeSecretUnavailable, "a configured secret reference could not be resolved", err)
 	}
 	for _, text := range texts {
 		if err := screenText(text, screen); err != nil {
@@ -316,10 +318,10 @@ func embeddingText(chunk *PendingChunk) string {
 }
 
 func embeddingFailure(err error) error {
-	if _, coded := CodeOf(err); coded {
+	if _, coded := fault.CodeOf[ErrorCode](err); coded {
 		return err
 	}
-	return fmt.Errorf("%w: %w", &Error{Code: ErrorCodeEmbeddingFailed, Detail: "the embedding provider call failed"}, err)
+	return fault.Wrap(ErrorCodeEmbeddingFailed, "the embedding provider call failed", err)
 }
 
 func normalizeVector(vector []float32, dimensions int) ([]float32, bool) {

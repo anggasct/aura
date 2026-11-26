@@ -13,6 +13,7 @@ import (
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -130,7 +131,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		validateAccess(cfg.Access),
 		legacyconfig.ValidateSync(cfg.Sync),
 		validateVision(cfg.Vision),
-		legacyconfig.ValidateKnowledge(cfg.Knowledge),
+		validateKnowledge(cfg.Knowledge),
 		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
 		configkit.Under("runtime", cfg.Runtime.Validate()),
 		configkit.Under("server", cfg.Server.Validate()),
@@ -413,4 +414,11 @@ func checkVersion(v int) error {
 		return configkit.Field("version", fault.New(legacyconfig.ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
 	}
 	return nil
+}
+
+func validateKnowledge(section *knowledge.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("knowledge", section.Validate())
 }
