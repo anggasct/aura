@@ -21,6 +21,7 @@ import (
 type BuiltinToolDefinition struct {
 	Name                 string
 	Version              string
+	Channel              string
 	Server               string
 	Plugin               string
 	Description          string

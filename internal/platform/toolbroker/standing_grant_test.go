@@ -33,7 +33,7 @@ func newProbeRig(t *testing.T, definition *tools.Definition, guard ApprovalGuard
 	if guard != nil {
 		options.ApprovalGuards = map[string]ApprovalGuard{probeToolName: guard}
 	}
-	broker, err := New(options)
+	broker, err := newFixtureBrokerOrErr(t, options)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

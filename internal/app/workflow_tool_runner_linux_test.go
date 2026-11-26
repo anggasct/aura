@@ -20,7 +20,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -496,8 +495,8 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	}
 	deps := &workflow.ValidationDeps{
 		Agents:         registry,
-		KnownTools:     toolsbuiltin.DefinitionNames(),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     definitionNames(),
+		EffectfulTools: effectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
 		StepAllowed:    acceptStepAllowed,
 	}

@@ -25,6 +25,7 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
@@ -136,17 +137,28 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	}
 	calls := &atomic.Int32{}
 	broker, err := toolbroker.New(&toolbroker.Options{
-		Effects: effects,
-		Adapters: map[string]toolbroker.Adapter{
-			"exec@v1": func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
-				calls.Add(1)
-				return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
-			},
-		},
-		ApprovalDecider: decider,
+		Effects:          effects,
+		HostCapabilities: []string{"exec-linux"},
+		ApprovalDecider:  decider,
 	})
 	if err != nil {
 		t.Fatalf("broker: %v", err)
+	}
+	execDef := &auratools.Definition{
+		Name:                 "exec",
+		Version:              auratools.Version,
+		Schema:               json.RawMessage(`{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"}}},"required":["command"]}`),
+		RequiredCapabilities: []string{"exec-linux"},
+		RequiresApproval:     true,
+		Effectful:            true,
+		Validator:            func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil },
+	}
+	execRule := toolbroker.DefaultRule(execDef)
+	if err := broker.RegisterTool(execDef, func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+		calls.Add(1)
+		return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+	}, &execRule); err != nil {
+		t.Fatalf("RegisterTool: %v", err)
 	}
 	builtin := e2eBuiltinTools{broker: broker}
 	model := &e2eApprovalModel{toolName: "exec", answer: answer}

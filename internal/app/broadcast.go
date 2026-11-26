@@ -13,7 +13,6 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/modules/broadcast"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -150,7 +149,7 @@ func broadcastOpener(gf *globalFlags) broadcast.Opener {
 				Store:   items,
 				Runtime: app.runtime,
 				Effects: func() (broadcast.EffectReconciler, error) {
-					executor, err := toolsbuiltin.NewChannelEffects(app.db, app.logger)
+					executor, err := newChannelEffects(app.db, app.logger)
 					if err != nil {
 						return nil, err
 					}

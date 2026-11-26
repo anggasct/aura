@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	auratools "github.com/anggasct/aura/internal/platform/tools"
 )
 
 func TestValidKnowledgeCollectionID(t *testing.T) {
@@ -76,15 +77,6 @@ func TestAgentConfigValidate(t *testing.T) {
 			p.Knowledge, p.PrincipalKnowledge = []string{"docs"}, []string{"faq"}
 		}), "definitions[0].principal_knowledge: persona_invalid: lists \"faq\", which is not in agents.definitions[0].knowledge"},
 		{"public knowledge outside the owner list", definitionConfig(func(p *Persona) { p.PublicKnowledge = []string{"faq"} }), "definitions[0].public_knowledge: persona_invalid: lists \"faq\", which is not in agents.definitions[0].knowledge"},
-		{"principal tool that sends data out beside principal knowledge", definitionConfig(func(p *Persona) {
-			p.Knowledge, p.PrincipalKnowledge, p.PrincipalTools = []string{"docs"}, []string{"docs"}, []string{"web_fetch"}
-		}), "definitions[0].principal_tools: persona_invalid: lists \"web_fetch\", which sends data out, while agents.definitions[0].principal_knowledge is not empty"},
-		{"public tool that is not a known tool beside public knowledge", definitionConfig(func(p *Persona) {
-			p.Knowledge, p.PublicKnowledge, p.PublicTools = []string{"docs"}, []string{"docs"}, []string{"ghost_tool"}
-		}), "definitions[0].public_tools: persona_invalid: lists \"ghost_tool\", which is not a known tool or sends data out, while agents.definitions[0].public_knowledge is not empty"},
-		{"a local tool beside principal knowledge", definitionConfig(func(p *Persona) {
-			p.Knowledge, p.PrincipalKnowledge, p.PrincipalTools = []string{"docs"}, []string{"docs"}, []string{"read_file"}
-		}), ""},
 		{"approval timeout under the minimum", definitionConfig(func(p *Persona) { p.ApprovalTimeout = configkit.Duration(59 * time.Second) }), "definitions[0].approval_timeout: config_invalid: must be between 1m and 24h"},
 		{"approval timeout over the maximum", definitionConfig(func(p *Persona) { p.ApprovalTimeout = configkit.Duration(24*time.Hour + 1) }), "definitions[0].approval_timeout: config_invalid: must be between 1m and 24h"},
 		{"approval timeout at the maximum", definitionConfig(func(p *Persona) { p.ApprovalTimeout = configkit.Duration(24 * time.Hour) }), ""},
@@ -116,6 +108,42 @@ func TestAgentConfigValidate(t *testing.T) {
 			}
 			if strings.Contains(test.want, "config_invalid:") && !fault.HasCode(err, configkit.ErrorCodeInvalid) {
 				t.Fatalf("Validate() = %v, want the code %s", err, configkit.ErrorCodeInvalid)
+			}
+		})
+	}
+}
+
+func TestValidateKnowledgeTools(t *testing.T) {
+	catalog := []auratools.Definition{
+		{Name: "read_file", Version: auratools.Version},
+		{Name: "web_fetch", Version: auratools.Version, ExternalSink: true},
+	}
+	for _, test := range []struct {
+		name   string
+		config Config
+		want   string
+	}{
+		{"principal tool that sends data out beside principal knowledge", definitionConfig(func(p *Persona) {
+			p.Knowledge, p.PrincipalKnowledge, p.PrincipalTools = []string{"docs"}, []string{"docs"}, []string{"web_fetch"}
+		}), "definitions[0].principal_tools: persona_invalid: lists \"web_fetch\", which sends data out, while agents.definitions[0].principal_knowledge is not empty"},
+		{"public tool that is not a known tool beside public knowledge", definitionConfig(func(p *Persona) {
+			p.Knowledge, p.PublicKnowledge, p.PublicTools = []string{"docs"}, []string{"docs"}, []string{"ghost_tool"}
+		}), "definitions[0].public_tools: persona_invalid: lists \"ghost_tool\", which is not a known tool or sends data out, while agents.definitions[0].public_knowledge is not empty"},
+		{"a local tool beside principal knowledge", definitionConfig(func(p *Persona) {
+			p.Knowledge, p.PrincipalKnowledge, p.PrincipalTools = []string{"docs"}, []string{"docs"}, []string{"read_file"}
+		}), ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateKnowledgeTools(&test.config, catalog)
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if got != test.want {
+				t.Fatalf("ValidateKnowledgeTools() = %q, want %q", got, test.want)
+			}
+			if test.want != "" && !fault.HasCode(err, ErrorCodePersonaInvalid) {
+				t.Fatalf("ValidateKnowledgeTools() = %v, want %s", err, ErrorCodePersonaInvalid)
 			}
 		})
 	}

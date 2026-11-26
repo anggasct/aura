@@ -15,9 +15,21 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
+func ceilingTestCatalog() []tools.Definition {
+	return []tools.Definition{
+		{Name: "read_file", Version: tools.Version},
+		{Name: "write_file", Version: tools.Version, RequiresApproval: true, Effectful: true},
+		{Name: "exec", Version: tools.Version, RequiresApproval: true, Effectful: true},
+		{Name: "list_dir", Version: tools.Version},
+		{Name: "web_fetch", Version: tools.Version, ExternalSink: true},
+		{Name: "web_search", Version: tools.Version, ExternalSink: true},
+		{Name: "github_comment", Version: tools.Version, OptIn: true, Effectful: true},
+	}
+}
+
 func registryStepAllowed(registry *auraagent.Registry, extra ...tools.Definition) func(string, principal.Class, string) (bool, bool) {
 	catalog := map[string]*tools.Definition{}
-	builtins := tools.Builtins()
+	builtins := ceilingTestCatalog()
 	for i := range builtins {
 		catalog[builtins[i].Name] = &builtins[i]
 	}
@@ -42,7 +54,7 @@ func ceilingTestRegistry(t *testing.T) *auraagent.Registry {
 		{ID: "gh", Description: "lists github", Instructions: "work", Tools: []string{"github_comment"}},
 	}
 	known := []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search", "github_comment"}
-	registry, err := auraagent.Build(overrides, known, []string{"primary"})
+	registry, err := auraagent.Build(overrides, known, ceilingTestCatalog(), []string{"primary"})
 	if err != nil {
 		t.Fatal(err)
 	}

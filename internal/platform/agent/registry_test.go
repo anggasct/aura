@@ -12,8 +12,18 @@ import (
 
 var validTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}
 
+var validToolCatalog = []auratools.Definition{
+	{Name: "read_file", Version: auratools.Version},
+	{Name: "write_file", Version: auratools.Version, RequiresApproval: true, Effectful: true},
+	{Name: "list_dir", Version: auratools.Version},
+	{Name: "exec", Version: auratools.Version, RequiresApproval: true, Effectful: true},
+	{Name: "web_fetch", Version: auratools.Version, ExternalSink: true},
+	{Name: "web_search", Version: auratools.Version, ExternalSink: true},
+	{Name: auratools.KBSearchToolName, Version: auratools.Version},
+}
+
 func TestBuildRegistersBuiltins(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary", "auxiliary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary", "auxiliary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -130,7 +140,7 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 			if routes == nil {
 				routes = []string{"primary", "auxiliary"}
 			}
-			registry, err := Build(tc.overrides, validTools, routes)
+			registry, err := Build(tc.overrides, validTools, validToolCatalog, routes)
 			if err == nil {
 				t.Fatal("Build accepted an invalid definition")
 			}
@@ -149,7 +159,7 @@ func TestBuildRejectsInvalidOverrides(t *testing.T) {
 }
 
 func TestResolveExplicitID(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -178,7 +188,7 @@ func (r *Registry) mustResolveErr(t *testing.T, prefer *string) error {
 }
 
 func TestResolveMostSpecificMatchWins(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -227,7 +237,7 @@ func TestResolveMostSpecificMatchWins(t *testing.T) {
 }
 
 func TestResolveFailsClosedWithoutEligibleDefinition(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -252,7 +262,7 @@ func TestOverrideReplacesBuiltinWithoutDuplicates(t *testing.T) {
 		Capabilities: []string{CapabilityRepositoryRead},
 		ModelRoute:   "auxiliary",
 	}
-	registry, err := Build([]Persona{override}, validTools, []string{"primary", "auxiliary"})
+	registry, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary", "auxiliary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -288,7 +298,7 @@ func TestBuiltinOverrideKeepsDefaultInstructionsWhenOmitted(t *testing.T) {
 		t.Fatal("engineer builtin lacks default instructions")
 	}
 	override := Persona{ID: "engineer", Description: "Engineer override", Capabilities: []string{CapabilityRepositoryRead}}
-	registry, err := Build([]Persona{override}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -302,7 +312,7 @@ func TestBuiltinOverrideKeepsDefaultInstructionsWhenOmitted(t *testing.T) {
 }
 
 func TestDefaultMainKeepsPriorPromptSurface(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -320,7 +330,7 @@ func TestDefaultMainKeepsPriorPromptSurface(t *testing.T) {
 
 func TestMainOverrideWithoutInstructionsStaysUnset(t *testing.T) {
 	override := Persona{ID: DefaultID, Description: "Main override"}
-	registry, err := Build([]Persona{override}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -336,7 +346,7 @@ func TestMainOverrideWithoutInstructionsStaysUnset(t *testing.T) {
 func TestResolveTiesBreakByRegistryOrder(t *testing.T) {
 	overrideA := Persona{ID: "a-first", Description: "d", Instructions: "x", Capabilities: []string{CapabilityRepositoryRead}}
 	overrideB := Persona{ID: "b-second", Description: "d", Instructions: "x", Capabilities: []string{CapabilityRepositoryRead}}
-	registry, err := Build([]Persona{overrideA, overrideB}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{overrideA, overrideB}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -353,7 +363,7 @@ func TestSoulBecomesPersonaInstructions(t *testing.T) {
 	registry, err := Build([]Persona{
 		{ID: "kuma", Description: "Casual assistant", SoulFile: "personas/kuma.md", Soul: "You are Kuma."},
 		{ID: DefaultID, SoulFile: "personas/main.md", Soul: "You are the owner's main bot."},
-	}, validTools, []string{"primary"})
+	}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -396,7 +406,7 @@ func TestRecallScopeFollowsMemoryScope(t *testing.T) {
 		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: MemoryScopeShared},
 		{ID: "nara", Description: "Formal", Instructions: "Be formal.", MemoryScope: MemoryScopeShared},
 		{ID: "solo", Description: "Private", Instructions: "Keep to yourself."},
-	}, validTools, []string{"primary"})
+	}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -426,7 +436,7 @@ func TestRecallScopeFollowsMemoryScope(t *testing.T) {
 func TestBuildRejectsUnknownMemoryScope(t *testing.T) {
 	_, err := Build([]Persona{
 		{ID: "kuma", Description: "Casual", Instructions: "Be casual.", MemoryScope: "global"},
-	}, validTools, []string{"primary"})
+	}, validTools, validToolCatalog, []string{"primary"})
 	if !fault.HasCode(err, ErrorCodeDefinitionInvalid) {
 		t.Fatalf("Build error = %v, want %s", err, ErrorCodeDefinitionInvalid)
 	}
@@ -436,7 +446,7 @@ func TestBuildResolvesPersonaNames(t *testing.T) {
 	registry, err := Build([]Persona{
 		{ID: "kuma", Description: "d", Instructions: "i"},
 		{ID: "engineer", Name: "Eng"},
-	}, validTools, []string{"primary", "auxiliary"})
+	}, validTools, validToolCatalog, []string{"primary", "auxiliary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -446,14 +456,14 @@ func TestBuildResolvesPersonaNames(t *testing.T) {
 			t.Errorf("%s name = %q (registered %v), want %q", id, definition.Name, ok, want)
 		}
 	}
-	renamed, err := Build([]Persona{{ID: DefaultID, Name: "Mira"}}, validTools, []string{"primary"})
+	renamed, err := Build([]Persona{{ID: DefaultID, Name: "Mira"}}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build renamed main: %v", err)
 	}
 	if main, _ := renamed.Lookup(DefaultID); main.Name != "Mira" {
 		t.Fatalf("renamed main = %q, want Mira", main.Name)
 	}
-	unnamed, err := Build([]Persona{{ID: DefaultID, SoulFile: "soul.md", Soul: "You are Aura."}}, validTools, []string{"primary"})
+	unnamed, err := Build([]Persona{{ID: DefaultID, SoulFile: "soul.md", Soul: "You are Aura."}}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build main override: %v", err)
 	}
@@ -467,7 +477,7 @@ func TestEvalBehaviorDefaults(t *testing.T) {
 		{ID: "lobby", Description: "d", Instructions: "x", Evals: PersonaEvals{Behavior: &PersonaEvalBehavior{Required: true}}},
 		{ID: "desk", Description: "d", Instructions: "x", Evals: PersonaEvals{Behavior: &PersonaEvalBehavior{MinScore: 0.6, JudgeRoute: "primary", Schedule: "0 3 * * 1", EnforceOnRegression: true}}},
 		{ID: "plain", Description: "d", Instructions: "x"},
-	}, validTools, []string{"primary", "auxiliary"})
+	}, validTools, validToolCatalog, []string{"primary", "auxiliary"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -498,7 +508,7 @@ func TestEvalDigestCoversTheWorkflowAllowlist(t *testing.T) {
 	if allowed.EvalDigest() == base.EvalDigest() || allowed.EvalDigest() != reordered.EvalDigest() {
 		t.Fatal("the allowlist must re-gate the persona and its order must not")
 	}
-	registry, err := Build([]Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"book_visit"}}}, validTools, nil)
+	registry, err := Build([]Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"book_visit"}}}, validTools, validToolCatalog, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -543,7 +553,7 @@ func TestKnowledgeListsReachTheRegistryCopyAndTheEvalDigestButNotTheFingerprint(
 	registry, err := Build([]Persona{{
 		ID: "lobby", Description: "d", Instructions: "x",
 		Knowledge: []string{"support", "faq"}, PrincipalKnowledge: []string{"faq"}, PublicKnowledge: []string{"faq"},
-	}}, validTools, nil)
+	}}, validTools, validToolCatalog, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -589,15 +599,29 @@ func TestToolCeilingsTreatKBSearchAsAvailableWhenThePersonaHasKnowledge(t *testi
 	}
 	withKnowledge := base
 	withKnowledge.Knowledge, withKnowledge.PrincipalKnowledge, withKnowledge.PublicKnowledge = []string{"faq"}, []string{"faq"}, []string{"faq"}
-	if _, err := Build([]Persona{withKnowledge}, tools, nil); err != nil {
+	if _, err := Build([]Persona{withKnowledge}, tools, validToolCatalog, nil); err != nil {
 		t.Fatalf("persona with knowledge: %v", err)
 	}
-	if _, err := Build([]Persona{base}, tools, nil); err == nil {
+	if _, err := Build([]Persona{base}, tools, validToolCatalog, nil); err == nil {
 		t.Fatal("kb_search outside the tools list of a persona without knowledge accepted")
 	}
 	implicit := base
 	implicit.Tools = nil
-	if _, err := Build([]Persona{implicit}, tools, nil); err != nil {
+	if _, err := Build([]Persona{implicit}, tools, validToolCatalog, nil); err != nil {
 		t.Fatalf("implicit tool list: %v", err)
+	}
+}
+
+func TestBuildTreatsToolsAbsentFromCatalogAsEffectfulForPublicPrincipals(t *testing.T) {
+	persona := Persona{
+		ID:           "lobby",
+		Description:  "front desk",
+		Instructions: "Help visitors.",
+		Audience:     AudiencePublic,
+		Tools:        []string{"custom_tool"},
+		PublicTools:  []string{"custom_tool"},
+	}
+	if _, err := Build([]Persona{persona}, []string{"custom_tool"}, nil, nil); !fault.HasCode(err, ErrorCodePersonaInvalid) {
+		t.Fatalf("Build with absent catalog tool = %v, want %s", err, ErrorCodePersonaInvalid)
 	}
 }

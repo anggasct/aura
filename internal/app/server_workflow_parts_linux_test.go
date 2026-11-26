@@ -5,8 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -14,7 +18,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -78,7 +81,7 @@ func createTestSession(t *testing.T, db *sql.DB, id, owner string) {
 	}
 }
 
-func executeWorkflowTool(t *testing.T, executor *toolsbuiltin.Executor, tool string, caller *workflow.Caller, arguments string) json.RawMessage {
+func executeWorkflowTool(t *testing.T, executor *runtimeadk.BrokerExecutor, tool string, caller *workflow.Caller, arguments string) json.RawMessage {
 	t.Helper()
 	output, err := executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 		RequestID: "call-" + tool, TurnID: "turn-" + tool, SessionID: caller.SessionID, PrincipalID: caller.PrincipalID,
@@ -258,7 +261,7 @@ func TestServerOffersAProposalCardOnTheDefaultConfiguration(t *testing.T) {
 		}
 	})
 	phases := b.phases(t.Context())
-	for _, step := range phases[:len(phases)-1] {
+	for _, step := range phases[:5] {
 		if err := step(); err != nil {
 			t.Fatalf("build phase: %v", err)
 		}
@@ -266,8 +269,10 @@ func TestServerOffersAProposalCardOnTheDefaultConfiguration(t *testing.T) {
 	owner := &workflow.Caller{SessionID: "main/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "main"}
 	channel := newProposalChannel(owner.SessionID)
 	b.server.channels = append(b.server.channels, channel)
-	if err := phases[len(phases)-1](); err != nil {
-		t.Fatalf("surface phase: %v", err)
+	for _, step := range phases[5:] {
+		if err := step(); err != nil {
+			t.Fatalf("build phase: %v", err)
+		}
 	}
 	createTestSession(t, b.db, owner.SessionID, owner.PrincipalID)
 	if err := b.group.Start(t.Context()); err != nil {
@@ -307,7 +312,7 @@ func TestServerWorkflowPartsNeedTheirDependencies(t *testing.T) {
 	for name, strip := range map[string]func(b *build){
 		"no interpreter":   func(b *build) { b.interpreter = nil },
 		"no surface tools": func(b *build) { b.builtin = nil },
-		"no tool broker":   func(b *build) { b.builtin = &toolsbuiltin.Executor{} },
+		"no tool broker":   func(b *build) { b.builtin = &runtimeadk.BrokerExecutor{} },
 	} {
 		t.Run(name, func(t *testing.T) {
 			b := buildServerPhases(t, "")
@@ -321,5 +326,87 @@ func TestServerWorkflowPartsNeedTheirDependencies(t *testing.T) {
 				t.Fatalf("lifecycle entries %v changed to %v", before, after)
 			}
 		})
+	}
+}
+
+func TestServerADKExecutorOffersWorkflowToolsToEnabledPersona(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+
+	var mu sync.Mutex
+	var offered []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/chat/completions" {
+			http.NotFound(w, r)
+			return
+		}
+		var req struct {
+			Tools []struct {
+				Function struct {
+					Name string `json:"name"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.NewDecoder(io.LimitReader(r.Body, stubRequestLimit)).Decode(&req); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		names := make([]string, 0, len(req.Tools))
+		for _, tool := range req.Tools {
+			names = append(names, tool.Function.Name)
+		}
+		slices.Sort(names)
+		mu.Lock()
+		offered = names
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, stubChatReply)
+	}))
+	t.Cleanup(srv.Close)
+
+	definitions := t.TempDir()
+	if err := os.WriteFile(filepath.Join(definitions, "desk-reads.yaml"), []byte(deskReadsYAML), 0o600); err != nil {
+		t.Fatalf("write definition: %v", err)
+	}
+	extra := deskPersonaYAML + fmt.Sprintf("workflows:\n  definitions_dir: %s\n", definitions)
+	path := writeCompositionConfig(t, freeLoopbackAddress(t), stubModelsYAML(srv.URL), extra)
+	result := loadCompositionConfig(t, path)
+	result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
+
+	b := newBuild(serverCompositionOptions(result, &syncBuffer{}))
+	t.Cleanup(func() {
+		if b.group != nil {
+			_ = b.group.Stop(context.WithoutCancel(t.Context()))
+		}
+	})
+	for _, step := range b.phases(t.Context()) {
+		if err := step(); err != nil {
+			t.Fatalf("build phase: %v", err)
+		}
+	}
+
+	sessionID := "desk/discord:member/dm"
+	createTestSession(t, b.db, sessionID, "discord:member")
+	for _, err := range b.executor.Execute(t.Context(), &turn.TurnRequest{
+		TurnID:         "turn-workflow-offer",
+		SessionID:      sessionID,
+		PrincipalID:    "discord:member",
+		PrincipalClass: principal.ClassTrusted,
+		Origin:         "discord",
+		AgentID:        "desk",
+		Parts:          []runtimeingress.InputPart{{Text: "check workflows"}},
+	}) {
+		if err != nil {
+			t.Fatalf("executor.Execute: %v", err)
+		}
+	}
+
+	mu.Lock()
+	got := slices.Clone(offered)
+	mu.Unlock()
+	for _, want := range []string{"read_file", "workflow_start", "workflow_status"} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("ADKExecutor offered tools = %v, missing %q", got, want)
+		}
 	}
 }

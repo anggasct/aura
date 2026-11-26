@@ -2,6 +2,7 @@ package personaeval
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -9,7 +10,19 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
+
+func evalTestCatalog() []tools.Definition {
+	accept := func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }
+	return []tools.Definition{
+		{Name: "read_file", Version: tools.Version, RequiredCapabilities: []string{"workspace-read"}, Validator: accept},
+		{Name: "write_file", Version: tools.Version, RequiredCapabilities: []string{"workspace-write"}, RequiresApproval: true, Effectful: true, Validator: accept},
+		{Name: "exec", Version: tools.Version, RequiredCapabilities: []string{"exec-linux"}, RequiresApproval: true, Effectful: true, Validator: accept},
+		{Name: "web_search", Version: tools.Version, RequiredCapabilities: []string{"provider-search"}, ExternalSink: true, Validator: accept},
+		{Name: "handoff_to_owner", Version: tools.Version, OptIn: true, Orchestration: true, Validator: accept},
+	}
+}
 
 func lobbyDefinition() *auraagent.Definition {
 	return &auraagent.Definition{
@@ -51,35 +64,37 @@ func TestPolicyCaseKindsPassAndFail(t *testing.T) {
 		"fixed reply default":          {Case{Kind: KindFixedReply, Key: auraagent.MessageRateLimited, Text: auraagent.PersonaMessageDefaults()[auraagent.MessageRateLimited]}, true},
 		"fixed reply mismatch":         {Case{Kind: KindFixedReply, Key: auraagent.MessageBudgetExhausted, Text: "Quota gone."}, false},
 	}
+	catalog := evalTestCatalog()
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			tc.c.Name = name
-			got, err := runCase(t.Context(), definition, &tc.c, map[principal.Class]*Capture{}, fakeCapturer(lobbyCaptures))
+			got, err := runCaseWithCatalog(t.Context(), definition, &tc.c, map[principal.Class]*Capture{}, fakeCapturer(lobbyCaptures), catalog)
 			if err != nil || got != tc.want {
 				t.Fatalf("runCase() = %v, %v; want %v", got, err, tc.want)
 			}
 		})
 	}
 	leaked := fakeCapturer(map[principal.Class]Capture{principal.ClassPublic: {Text: "context " + MarkerOwnerContext}})
-	if got, err := runCase(t.Context(), definition, &Case{Name: "leak", Kind: KindOwnerDataAbsent, Class: principal.ClassPublic}, map[principal.Class]*Capture{}, leaked); err != nil || got {
+	if got, err := runCaseWithCatalog(t.Context(), definition, &Case{Name: "leak", Kind: KindOwnerDataAbsent, Class: principal.ClassPublic}, map[principal.Class]*Capture{}, leaked, catalog); err != nil || got {
 		t.Fatalf("leaked owner data passed: %v, %v", got, err)
 	}
 }
 
 func TestRunAddsImplicitCasesAndTheAbuseCorpus(t *testing.T) {
 	capturer := fakeCapturer(lobbyCaptures)
-	report, err := Run(t.Context(), lobbyDefinition(), []Case{{Name: "budget reply", Kind: KindFixedReply, Key: auraagent.MessageBudgetExhausted, Text: "Kuota habis."}}, capturer)
+	catalog := evalTestCatalog()
+	report, err := RunWithCatalog(t.Context(), lobbyDefinition(), []Case{{Name: "budget reply", Kind: KindFixedReply, Key: auraagent.MessageBudgetExhausted, Text: "Kuota habis."}}, capturer, catalog)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !report.Passed() || report.Total < 4 {
 		t.Fatalf("report = %+v, want a passing run with implicit and abuse cases", report)
 	}
-	failing, err := Run(t.Context(), lobbyDefinition(), []Case{{Name: "wrong reply", Kind: KindFixedReply, Key: auraagent.MessageBudgetExhausted, Text: "nope"}}, capturer)
+	failing, err := RunWithCatalog(t.Context(), lobbyDefinition(), []Case{{Name: "wrong reply", Kind: KindFixedReply, Key: auraagent.MessageBudgetExhausted, Text: "nope"}}, capturer, catalog)
 	if err != nil || failing.Passed() || len(failing.FailedCases) != 1 || failing.FailedCases[0] != "wrong reply" {
 		t.Fatalf("failing report = %+v, %v", failing, err)
 	}
-	if _, err := Run(t.Context(), &auraagent.Definition{ID: "solo", Audience: auraagent.AudienceOwner}, nil, capturer); err == nil {
+	if _, err := RunWithCatalog(t.Context(), &auraagent.Definition{ID: "solo", Audience: auraagent.AudienceOwner}, nil, capturer, catalog); err == nil {
 		t.Fatal("owner-only persona with no cases produced a result")
 	}
 }

@@ -1,7 +1,6 @@
 package filesystem
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"reflect"
@@ -22,9 +21,6 @@ func TestFilesystemToolsMatchBuiltinCatalog(t *testing.T) {
 	if len(rules) != len(definitions) {
 		t.Fatalf("ToolRules() count = %d, want %d", len(rules), len(definitions))
 	}
-
-	catalog := tools.DefinitionsByKey()
-	policy := toolbroker.DefaultPolicy()
 
 	payloads := map[string][]struct {
 		name string
@@ -77,41 +73,25 @@ func TestFilesystemToolsMatchBuiltinCatalog(t *testing.T) {
 	for i := range definitions {
 		got := definitions[i]
 		t.Run(got.Name, func(t *testing.T) {
-			wantPtr, ok := catalog[got.Key()]
-			if !ok {
-				t.Fatalf("%s missing from builtin catalog", got.Key())
-			}
 			if got.Validator == nil {
 				t.Fatalf("%s Validator must not be nil", got.Key())
 			}
-			gotCopy := got
-			gotCopy.Validator = nil
-			wantCopy := *wantPtr
-			wantCopy.Validator = nil
-			if !reflect.DeepEqual(gotCopy, wantCopy) {
-				t.Fatalf("definition mismatch:\n got: %+v\nwant: %+v", gotCopy, wantCopy)
-			}
-
-			wantRule, ok := policy.Rules[got.Name]
-			if !ok {
-				t.Fatalf("%s missing from DefaultPolicy", got.Name)
-			}
+			wantRule := toolbroker.DefaultRule(&got)
 			if !reflect.DeepEqual(rules[i], wantRule) {
 				t.Fatalf("rule mismatch:\n got: %+v\nwant: %+v", rules[i], wantRule)
+			}
+			if got.Name == WriteFileToolName && (!got.RequiresApproval || !got.Effectful) {
+				t.Fatalf("write_file must require approval and be effectful: %+v", got)
 			}
 
 			for _, tc := range payloads[got.Name] {
 				t.Run(tc.name, func(t *testing.T) {
 					gotOut, gotErr := got.Validate(json.RawMessage(tc.raw))
-					wantOut, wantErr := wantPtr.Validate(json.RawMessage(tc.raw))
 					if (gotErr == nil) != tc.ok {
 						t.Fatalf("got.Validate(%s) err = %v, want ok=%t", tc.raw, gotErr, tc.ok)
 					}
-					if (gotErr == nil) != (wantErr == nil) {
-						t.Fatalf("parity mismatch for %s: gotErr=%v wantErr=%v", tc.raw, gotErr, wantErr)
-					}
-					if tc.ok && !bytes.Equal(gotOut, wantOut) {
-						t.Fatalf("validated output mismatch: got %s, want %s", gotOut, wantOut)
+					if tc.ok && !json.Valid(gotOut) {
+						t.Fatalf("validated output is not valid JSON: %s", gotOut)
 					}
 				})
 			}

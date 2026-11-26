@@ -57,10 +57,9 @@ linters:
             - "**/plugins/**"
             - "!**/internal/app/**"
             - "!**/internal/platform/turn/adk/**"
-            - "!**/internal/modules/builtin/**"
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/turn/adk
-              desc: only the app composition root may wire the ADK executor, with the builtin tool executor adapter as the one provider-side implementation; depend on the runtime boundary types instead
+              desc: only the app composition root may wire the ADK executor; depend on the runtime boundary types instead
         # The root package is the shared contract layer. It deliberately references the ingress and
         # checkpoint contract packages — TurnRequest carries ingress InputParts and the checkpoint
         # payload is shared with the engine — but must never depend on an implementation package:
@@ -132,22 +131,6 @@ linters:
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/turn
               desc: checkpoint contracts are store-facing boundaries consumed by the engine, and must not reach back into the runtime tree
-        # Builtin tool adapters are assembled by the tools provider
-        # (internal/modules/builtin); the app composition root invokes that
-        # constructor and must not reach into the adapter packages itself.
-        # Lax mode lets the longer allow prefixes (builtin, the interpreter
-        # runtime catalog) win over the shorter deny prefixes.
-        tools-wired-only-through-builtin:
-          list-mode: lax
-          files:
-            - "**/internal/app/**"
-          allow:
-            - github.com/anggasct/aura/internal/modules/builtin
-          deny:
-            - pkg: github.com/anggasct/aura/internal/platform/tools
-              desc: the builtin adapter set is assembled in internal/modules/builtin; the app composition root calls that constructor instead
-            - pkg: github.com/anggasct/aura/internal/modules/filesystem
-              desc: the filesystem adapters are constructed by internal/modules/builtin, not by the app composition root
     errcheck:
       # A deliberate ignore is written `_ =` at the call site so the decision
       # stays visible in review; check-blank would make that idiom impossible.

@@ -23,7 +23,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -64,7 +63,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, &cfg), db: db, artifactRoot: filepath.Join(dir, "artifacts"), logger: slog.Default(),
 		wiring: &toolWiring{}, events: turn.NewEventBus(slog.Default()),
 	})
@@ -124,7 +123,7 @@ type gitHubToolRig struct {
 	access      func(db *sql.DB) toolbroker.AccessPolicy
 }
 
-func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbuiltin.Executor, *sql.DB) {
+func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*runtimeadk.BrokerExecutor, *sql.DB) {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := appconfig.Default()
@@ -145,7 +144,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 	if r.access != nil {
 		wiring.access = r.access(db)
 	}
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: &appconfig.LoadResult{Config: &cfg, CapabilityReport: report}, db: db, artifactRoot: filepath.Join(dir, "artifacts"),
 		logger: slog.New(slog.DiscardHandler), wiring: &wiring, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
@@ -235,7 +234,7 @@ func TestToolExecutorRegistersTheGitHubTools(t *testing.T) {
 	if githubCredentials(&noTools) != nil {
 		t.Errorf("githubCredentials without a tools section = %v, want nil", githubCredentials(&noTools))
 	}
-	_, err = newToolExecutor(&toolExecutorInput{result: loadResultWithAll(t, &noTools), db: nil, logger: slog.New(slog.DiscardHandler), wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler))})
+	_, err = newTestToolExecutor(&toolExecutorInput{result: loadResultWithAll(t, &noTools), db: nil, logger: slog.New(slog.DiscardHandler), wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler))})
 	if err == nil || !strings.Contains(err.Error(), "tools configuration is required") {
 		t.Errorf("newToolExecutor without a tools section err = %v, want tools configuration is required", err)
 	}
@@ -300,7 +299,7 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 		{ID: "ops", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}},
 		{ID: "plain", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"read_file"}},
 		{ID: "lobby", Description: "d", Instructions: "i", Audience: auraagent.AudiencePublic, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}, PublicTools: []string{"read_file"}},
-	}, personaToolNames(&cfg), nil)
+	}, personaToolNames(&cfg), append(appconfig.BuiltinToolDefinitions(), github.Definitions()...), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -412,7 +411,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	}
 	passEvals(t, db, registry, "ops", "plain", "open")
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	builtin, err := newToolExecutor(&toolExecutorInput{
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, cfg), db: db, artifactRoot: t.TempDir(), logger: slog.New(slog.DiscardHandler),
 		wiring: &toolWiring{decider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return false, nil }},
 		events: liveEvents,

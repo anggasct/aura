@@ -27,7 +27,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
@@ -232,11 +231,18 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	name := "email-access"
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
 	decider := approval.Decider(approvalChannels(approvers, route))
-	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil), toolsbuiltin.WithLiveEvents(liveEvents))
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: cfg, CapabilityReport: capabilitytest.All(t)},
+		db:           db,
+		artifactRoot: h.artifacts,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring:       &toolWiring{decider: decider, access: newAccessPolicy(registry, db, nil)},
+		events:       liveEvents,
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
-	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}
@@ -281,7 +287,9 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 		t.Fatalf("email.New: %v", err)
 	}
 	h.adapter = adapter
-	builtin.SetEmailOutbox(&emailOutboxBridge{outbox: email.NewOutbox([]*email.Adapter{adapter})})
+	if err := builtin.Broker().RegisterProvider(email.NewToolProvider(adapter)); err != nil {
+		t.Fatalf("RegisterProvider(email): %v", err)
+	}
 	handoffService := mustHandoffService(t, db, []handoff.Notifier{&channelHandoffNotifier{target: adapter}})
 	if err := builtin.Broker().RegisterProvider(handoff.NewToolProvider(handoffService)); err != nil {
 		t.Fatalf("RegisterProvider(handoff): %v", err)

@@ -18,6 +18,17 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
+const (
+	ListToolName        = "workflow_list"
+	StartToolName       = "workflow_start"
+	StatusToolName      = "workflow_status"
+	CancelToolName      = "workflow_cancel"
+	ProposeToolName     = "workflow_propose"
+	SaveRoutineToolName = "workflow_save_routine"
+
+	MaxObjectiveRunes = 2000
+)
+
 type ToolController interface {
 	SaveRoutine(ctx context.Context, caller *Caller, runID, name string) (RoutineSummary, error)
 	Propose(ctx context.Context, caller *Caller, spec json.RawMessage) (ProposalSummary, error)
@@ -30,7 +41,7 @@ type ToolController interface {
 func ToolDefinitions() []tools.Definition {
 	return []tools.Definition{
 		{
-			Name:          tools.WorkflowListToolName,
+			Name:          ListToolName,
 			Version:       tools.Version,
 			Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_list/v1","type":"object","properties":{},"additionalProperties":false}`),
 			OptIn:         true,
@@ -38,7 +49,7 @@ func ToolDefinitions() []tools.Definition {
 			Validator:     validateWorkflowListArgs,
 		},
 		{
-			Name:          tools.WorkflowStartToolName,
+			Name:          StartToolName,
 			Version:       tools.Version,
 			Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_start/v1","type":"object","properties":{"id":{"type":"string","minLength":1},"objective":{"type":"string","maxLength":2000}},"required":["id"],"additionalProperties":false}`),
 			OptIn:         true,
@@ -47,7 +58,7 @@ func ToolDefinitions() []tools.Definition {
 			Validator:     validateWorkflowStartArgs,
 		},
 		{
-			Name:          tools.WorkflowStatusToolName,
+			Name:          StatusToolName,
 			Version:       tools.Version,
 			Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_status/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`),
 			OptIn:         true,
@@ -55,7 +66,7 @@ func ToolDefinitions() []tools.Definition {
 			Validator:     validateWorkflowRunIDArgs,
 		},
 		{
-			Name:          tools.WorkflowProposeToolName,
+			Name:          ProposeToolName,
 			Version:       tools.Version,
 			Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_propose/v1","type":"object","properties":{"spec":{"type":"object","properties":{"goal":{"type":"string","minLength":1},"steps":{"type":"array","minItems":1}},"required":["goal","steps"]}},"required":["spec"],"additionalProperties":false}`),
 			OptIn:         true,
@@ -64,7 +75,7 @@ func ToolDefinitions() []tools.Definition {
 			Validator:     validateWorkflowProposeArgs,
 		},
 		{
-			Name:          tools.WorkflowSaveRoutineToolName,
+			Name:          SaveRoutineToolName,
 			Version:       tools.Version,
 			Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_save_routine/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1},"name":{"type":"string","minLength":1,"maxLength":64}},"required":["run_id","name"],"additionalProperties":false}`),
 			OptIn:         true,
@@ -72,7 +83,7 @@ func ToolDefinitions() []tools.Definition {
 			Validator:     validateWorkflowSaveRoutineArgs,
 		},
 		{
-			Name:          tools.WorkflowCancelToolName,
+			Name:          CancelToolName,
 			Version:       tools.Version,
 			Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/workflow_cancel/v1","type":"object","properties":{"run_id":{"type":"string","minLength":1}},"required":["run_id"],"additionalProperties":false}`),
 			OptIn:         true,
@@ -141,26 +152,26 @@ type workflowToolCall func(ctx context.Context, controller ToolController, calle
 
 func workflowToolAdapters(controller ToolController) map[string]toolbroker.Adapter {
 	return map[string]toolbroker.Adapter{
-		tools.WorkflowListToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, _ workflowToolArgs) (any, error) {
+		ListToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, _ workflowToolArgs) (any, error) {
 			workflows, err := ctrl.List(ctx, caller)
 			if workflows == nil {
 				workflows = []Info{}
 			}
 			return map[string][]Info{"workflows": workflows}, err
 		}),
-		tools.WorkflowStartToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
+		StartToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
 			return ctrl.Start(ctx, caller, args.ID, args.Objective)
 		}),
-		tools.WorkflowStatusToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
+		StatusToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
 			return ctrl.Status(ctx, caller, args.RunID)
 		}),
-		tools.WorkflowProposeToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
+		ProposeToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
 			return ctrl.Propose(ctx, caller, args.Spec)
 		}),
-		tools.WorkflowSaveRoutineToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
+		SaveRoutineToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
 			return ctrl.SaveRoutine(ctx, caller, args.RunID, args.Name)
 		}),
-		tools.WorkflowCancelToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
+		CancelToolName: workflowToolAdapter(controller, func(ctx context.Context, ctrl ToolController, caller *Caller, args workflowToolArgs) (any, error) {
 			return ctrl.Cancel(ctx, caller, args.RunID)
 		}),
 	}
@@ -275,8 +286,8 @@ func validateWorkflowStartArgs(raw json.RawMessage) (json.RawMessage, error) {
 	}
 	if objective, ok := object["objective"]; ok {
 		text, isString := objective.(string)
-		if !isString || utf8.RuneCountInString(text) > tools.MaxWorkflowObjectiveRunes {
-			return nil, fmt.Errorf("argument %q must be a string of at most %d characters", "objective", tools.MaxWorkflowObjectiveRunes)
+		if !isString || utf8.RuneCountInString(text) > MaxObjectiveRunes {
+			return nil, fmt.Errorf("argument %q must be a string of at most %d characters", "objective", MaxObjectiveRunes)
 		}
 	}
 	return json.Marshal(object)

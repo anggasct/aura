@@ -55,7 +55,7 @@ func TestApprovalGuardDecidesWhetherAnOwnerOrTrustedCallNeedsApproval(t *testing
 			if tc.guard != nil {
 				options.ApprovalGuards = map[string]ApprovalGuard{"email_send": tc.guard}
 			}
-			broker, err := New(options)
+			broker, err := newFixtureBrokerOrErr(t, options)
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -78,7 +78,7 @@ func TestApprovalGuardDecidesWhetherAnOwnerOrTrustedCallNeedsApproval(t *testing
 func TestApprovalGuardsAreCopiedAtConstruction(t *testing.T) {
 	guards := map[string]ApprovalGuard{"email_send": guardReturning(true, nil)}
 	calls := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		ApprovalGuards: guards,
 		Adapters: map[string]Adapter{

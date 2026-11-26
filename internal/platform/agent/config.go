@@ -322,10 +322,23 @@ func validateKnowledge(field string, definition *Persona) error {
 			}
 		}
 	}
-	return rejectKnowledgeSinks(field, definition)
+	return nil
 }
 
-func rejectKnowledgeSinks(field string, definition *Persona) error {
+func ValidateKnowledgeTools(cfg *Config, catalog []tools.Definition) error {
+	if cfg == nil {
+		return nil
+	}
+	var problems []error
+	for i := range cfg.Definitions {
+		if err := rejectKnowledgeSinks(fmt.Sprintf("definitions[%d]", i), &cfg.Definitions[i], catalog); err != nil {
+			problems = append(problems, err)
+		}
+	}
+	return errors.Join(problems...)
+}
+
+func rejectKnowledgeSinks(field string, definition *Persona, catalog []tools.Definition) error {
 	classes := []struct {
 		toolsField     string
 		toolList       []string
@@ -340,7 +353,7 @@ func rejectKnowledgeSinks(field string, definition *Persona) error {
 			continue
 		}
 		for _, entry := range class.toolList {
-			sink, known := isExternalSinkEntry(entry)
+			sink, known := isExternalSinkEntry(entry, catalog)
 			if !sink {
 				continue
 			}
@@ -354,14 +367,13 @@ func rejectKnowledgeSinks(field string, definition *Persona) error {
 	return nil
 }
 
-func isExternalSinkEntry(entry string) (sink, known bool) {
+func isExternalSinkEntry(entry string, catalog []tools.Definition) (sink, known bool) {
 	if tools.IsMCPEntry(entry) || tools.IsPluginEntry(entry) {
 		return true, true
 	}
-	defined := tools.Builtins()
-	for i := range defined {
-		if defined[i].Name == entry {
-			return defined[i].IsExternalSink(), true
+	for i := range catalog {
+		if catalog[i].Name == entry {
+			return catalog[i].IsExternalSink(), true
 		}
 	}
 	return true, false

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -258,7 +257,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	}
 	disk := mustWorkflowStore(t, db)
 	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
@@ -324,7 +323,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	}
 	disk := mustWorkflowStore(t, db)
 	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
@@ -514,8 +513,8 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 	}
 	deps := &workflow.ValidationDeps{
 		Agents:         builtinRegistry(t),
-		KnownTools:     toolsbuiltin.DefinitionNames(),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     definitionNames(),
+		EffectfulTools: effectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
 		StepAllowed:    acceptStepAllowed,
 	}
@@ -712,7 +711,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 		t.Fatalf("load fixture spec: %v", err)
 	}
 	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")

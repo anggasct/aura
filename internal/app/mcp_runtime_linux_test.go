@@ -16,7 +16,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -182,7 +181,7 @@ func (s *fixtureStarter) openSessions() int {
 type mcpHarness struct {
 	cfg      appconfig.Config
 	db       *sql.DB
-	executor *toolsbuiltin.Executor
+	executor *runtimeadk.BrokerExecutor
 	report   capability.Report
 	prompts  []string
 	shown    []string
@@ -217,15 +216,25 @@ func newMCPHarnessWithAccess(t *testing.T, servers []mcp.ServerConfig, access fu
 	if access != nil {
 		policy = access(db)
 	}
-	executor, err := toolsbuiltin.New(harness.cfg.Tools, harness.cfg.Storage.ArtifactQuota, db, dataRoot, harness.report, slog.New(slog.DiscardHandler), nil, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
-		harness.mu.Lock()
-		defer harness.mu.Unlock()
-		harness.prompts = append(harness.prompts, prompt.ToolName)
-		harness.shown = append(harness.shown, prompt.Arguments)
-		return harness.approve, nil
-	}, policy)
+	executor, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: &harness.cfg, CapabilityReport: harness.report},
+		db:           db,
+		artifactRoot: dataRoot,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring: &toolWiring{
+			decider: func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
+				harness.mu.Lock()
+				defer harness.mu.Unlock()
+				harness.prompts = append(harness.prompts, prompt.ToolName)
+				harness.shown = append(harness.shown, prompt.Arguments)
+				return harness.approve, nil
+			},
+			access: policy,
+		},
+		events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
 	harness.executor = executor
 	return harness
@@ -434,7 +443,7 @@ func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *t
 	registry, err := auraagent.BuildWithMCP([]auraagent.Persona{
 		{ID: "team", Description: "Team", Instructions: "Help.", Audience: auraagent.AudienceTrusted, Tools: []string{"mcp_docs"}, PrincipalTools: []string{"mcp_docs_ping"}},
 		{ID: "plain", Description: "Plain", Instructions: "Help.", Audience: auraagent.AudienceTrusted, Tools: []string{"mcp_docs"}},
-	}, []string{"read_file"}, []string{"docs"}, []string{"primary"})
+	}, []string{"read_file"}, appconfig.BuiltinToolDefinitions(), []string{"docs"}, []string{"primary"})
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)
 	}
@@ -806,7 +815,7 @@ func TestConfigsWithoutMCPServersAreUnchanged(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildAgentRegistry: %v", err)
 			}
-			baseline, err := auraagent.Build(nil, toolsbuiltin.DefinitionNames(), []string{"primary"})
+			baseline, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"})
 			if err != nil {
 				t.Fatalf("auraagent.Build: %v", err)
 			}
@@ -825,7 +834,7 @@ func TestConfigsWithoutMCPServersAreUnchanged(t *testing.T) {
 			if len(configuredMCPServers(&harness.cfg)) > 0 {
 				t.Fatal("a config without enabled servers reports mcp servers")
 			}
-			wantTools := []string{"code_execute", "email_send", "exec", "handoff_to_owner", "kb_search", "list_dir", "read_file", "web_fetch", "web_search", "workflow_cancel", "workflow_list", "workflow_propose", "workflow_save_routine", "workflow_start", "workflow_status", "write_file"}
+			wantTools := []string{"email_send", "exec", "list_dir", "read_file", "web_fetch", "web_search", "write_file"}
 			if got := harness.toolNames(); !slices.Equal(got, wantTools) {
 				t.Fatalf("broker tools = %v, want %v", got, wantTools)
 			}

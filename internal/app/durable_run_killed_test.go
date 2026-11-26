@@ -9,7 +9,6 @@ import (
 	"os"
 	"testing"
 
-	"github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -164,7 +163,7 @@ func requireCIFamily(t *testing.T, rows []workflow.Correlation) {
 
 func requireOneEffectPerOperation(t *testing.T, db *sql.DB) {
 	t.Helper()
-	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}

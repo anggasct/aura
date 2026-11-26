@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const fuzzSecretLength = 64
@@ -28,7 +26,7 @@ func FuzzCodeExecuteRequest(f *testing.F) {
 	}
 	limits := rigLimits()
 	runner := &Runner{limits: limits}
-	definition := tools.DefinitionsByKey()[auditToolKey]
+	definition := ToolDefinition()
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		checked := runner.ArgumentCheck(json.RawMessage(raw))
 		decoded, decodeErr := decodeArguments(json.RawMessage(raw))

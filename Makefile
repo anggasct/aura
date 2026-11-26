@@ -123,7 +123,7 @@ fuzz-smoke:
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzHTMLToMarkdown FUZZ_PKG=./internal/modules/fetch/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzParseManifest FUZZ_PKG=./internal/modules/codeexec/interpreter/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzExtractArchive FUZZ_PKG=./internal/modules/codeexec/interpreter/
-	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteOutputFiles FUZZ_PKG=./internal/platform/tools/
+	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteOutputFiles FUZZ_PKG=./internal/modules/codeexec/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzCodeExecuteRequest FUZZ_PKG=./internal/modules/codeexec/
 	@$(MAKE) --no-print-directory fuzz-one FUZZ_TARGET=FuzzEncodeBoundedResult FUZZ_PKG=./internal/modules/codeexec/
 

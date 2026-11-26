@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func newToolTestTracer(t *testing.T) (*tracetest.InMemoryExporter, *sdktrace.TracerProvider) {
@@ -175,15 +176,23 @@ func TestToolSpanIsChildOfTurnSpanThroughBroker(t *testing.T) {
 		})
 	})
 	broker, err := toolbroker.New(&toolbroker.Options{
-		HostCapabilities: capabilitytest.Host(t), Adapters: map[string]toolbroker.Adapter{
-			"list_dir@v1": func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
-				return toolbroker.ToolResult{Output: []byte(`{"entries":[]}`)}, nil
-			},
-		},
-		Observer: observer,
+		HostCapabilities: capabilitytest.Host(t),
+		Observer:         observer,
 	})
 	if err != nil {
 		t.Fatalf("New broker: %v", err)
+	}
+	listDirDef := &tools.Definition{
+		Name:                 "list_dir",
+		Version:              tools.Version,
+		RequiredCapabilities: []string{"workspace-read"},
+		Validator:            func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil },
+	}
+	listDirRule := toolbroker.DefaultRule(listDirDef)
+	if err := broker.RegisterTool(listDirDef, func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+		return toolbroker.ToolResult{Output: []byte(`{"entries":[]}`)}, nil
+	}, &listDirRule); err != nil {
+		t.Fatalf("RegisterTool: %v", err)
 	}
 
 	ctx, turn := tp.Tracer(ScopeName).Start(context.Background(), SpanTurn)

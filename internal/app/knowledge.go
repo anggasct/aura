@@ -9,7 +9,7 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/fetch"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/egress"
@@ -39,7 +39,7 @@ func newKnowledgeService(cfg *appconfig.Config, db *sql.DB, resolver egress.Reso
 	return knowledge.NewService(&knowledge.Deps{
 		Store:     kbStore,
 		Secrets:   &knowledgeSecrets{cfg: cfg},
-		Reducer:   toolsbuiltin.ReduceHTML,
+		Reducer:   fetch.HTMLToMarkdown,
 		HTTP:      knowledge.NewHTTPClient(resolver),
 		Actions:   &knowledgeActions{db: db},
 		Vectors:   kbStore,

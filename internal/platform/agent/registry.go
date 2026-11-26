@@ -91,11 +91,11 @@ func (r *Registry) Resolve(required []string, preferID *string) (Definition, err
 	return r.definitions[best].clone(), nil
 }
 
-func Build(overrides []Persona, knownTools, modelRoutes []string) (*Registry, error) {
-	return BuildWithMCP(overrides, knownTools, nil, modelRoutes)
+func Build(overrides []Persona, knownTools []string, catalog []tools.Definition, modelRoutes []string) (*Registry, error) {
+	return BuildWithMCP(overrides, knownTools, catalog, nil, modelRoutes)
 }
 
-func BuildWithMCP(overrides []Persona, knownTools, mcpServers, modelRoutes []string) (*Registry, error) {
+func BuildWithMCP(overrides []Persona, knownTools []string, catalog []tools.Definition, mcpServers, modelRoutes []string) (*Registry, error) {
 	registry := newRegistry()
 	for index := range builtins {
 		definition := builtins[index].clone()
@@ -107,7 +107,7 @@ func BuildWithMCP(overrides []Persona, knownTools, mcpServers, modelRoutes []str
 	}
 	seen := make(map[string]struct{}, len(overrides))
 	for index := range overrides {
-		definition, err := buildOverride(&overrides[index], index, knownTools, mcpServers, modelRoutes)
+		definition, err := buildOverride(&overrides[index], index, knownTools, catalog, mcpServers, modelRoutes)
 		if err != nil {
 			return nil, err
 		}
@@ -120,7 +120,7 @@ func BuildWithMCP(overrides []Persona, knownTools, mcpServers, modelRoutes []str
 	return registry, nil
 }
 
-func buildOverride(override *Persona, index int, knownTools, mcpServers, modelRoutes []string) (*Definition, error) {
+func buildOverride(override *Persona, index int, knownTools []string, catalog []tools.Definition, mcpServers, modelRoutes []string) (*Definition, error) {
 	field := fmt.Sprintf("agents.definitions[%d]", index)
 	if strings.TrimSpace(override.ID) == "" {
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".id must not be empty")
@@ -199,7 +199,7 @@ func buildOverride(override *Persona, index int, knownTools, mcpServers, modelRo
 			return nil, codedError(ErrorCodeUnknownTool, field+".tools: unknown tool "+fmt.Sprintf("%q", tool))
 		}
 	}
-	if err := validateToolCeilings(&definition, field, knownTools, mcpServers); err != nil {
+	if err := validateToolCeilings(&definition, field, knownTools, catalog, mcpServers); err != nil {
 		return nil, err
 	}
 	seenCapabilities := make([]string, 0, len(definition.Capabilities))
@@ -224,7 +224,7 @@ func buildOverride(override *Persona, index int, knownTools, mcpServers, modelRo
 	return &definition, nil
 }
 
-func validateToolCeilings(definition *Definition, field string, knownTools, mcpServers []string) error {
+func validateToolCeilings(definition *Definition, field string, knownTools []string, catalog []tools.Definition, mcpServers []string) error {
 	available := definition.Tools
 	if len(available) == 0 {
 		available = knownTools
@@ -252,11 +252,20 @@ func validateToolCeilings(definition *Definition, field string, knownTools, mcpS
 		if !slices.Contains(available, tool) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is not one of the persona's tools", field, tool))
 		}
-		if tools.EffectTier(tool) {
+		if isEffectful(tool, catalog) {
 			return codedError(ErrorCodePersonaInvalid, fmt.Sprintf("%s.public_tools: %q is an effect-tier tool", field, tool))
 		}
 	}
 	return nil
+}
+
+func isEffectful(name string, catalog []tools.Definition) bool {
+	for i := range catalog {
+		if catalog[i].Name == name {
+			return catalog[i].Effectful
+		}
+	}
+	return true
 }
 
 func (d *Definition) AllowsPrincipalTool(toolName, server string) bool {

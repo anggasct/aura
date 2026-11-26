@@ -8,12 +8,17 @@ import (
 	"slices"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
+	"github.com/anggasct/aura/internal/modules/fetch"
+	"github.com/anggasct/aura/internal/modules/filesystem"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/search"
+	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
@@ -58,12 +63,14 @@ type moduleParts struct {
 
 func (b *build) buildModules(ctx context.Context) error {
 	steps := []func(context.Context) error{
+		b.buildBuiltinTools,
 		b.buildMemory,
 		b.buildProfile,
 		b.buildSkills,
 		b.buildKnowledge,
 		b.buildGitHub,
 		b.buildInterpreter,
+		b.buildServerWorkflows,
 		b.buildPersonaEval,
 	}
 	for _, step := range steps {
@@ -74,6 +81,57 @@ func (b *build) buildModules(ctx context.Context) error {
 	return nil
 }
 
+func (b *build) buildBuiltinTools(context.Context) error {
+	if b.broker == nil || b.cfg.Tools == nil {
+		return nil
+	}
+	toolsCfg := b.cfg.Tools
+	shellMod, err := shellexec.New(&shellexec.Deps{
+		Workspace: toolsCfg.Workspace,
+		Config:    toolsCfg.Exec,
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.registerModule("shellexec", shellMod); err != nil {
+		return err
+	}
+	fsMod, err := filesystem.New(&filesystem.Deps{
+		Workspace: toolsCfg.Workspace,
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.registerModule("filesystem", fsMod); err != nil {
+		return err
+	}
+	fetchMod, err := fetch.New(&fetch.Deps{
+		Config: &toolsCfg.Fetch,
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.registerModule("fetch", fetchMod); err != nil {
+		return err
+	}
+	searchMod, err := search.New(&search.Deps{
+		Config:       &toolsCfg.WebSearch,
+		Timeout:      time.Duration(toolsCfg.Fetch.Timeout),
+		MaxBodyBytes: toolsCfg.Fetch.MaxDecodedBytes,
+	})
+	if err != nil {
+		return err
+	}
+	return b.registerModule("search", searchMod)
+}
+
+func (b *build) buildServerWorkflows(ctx context.Context) error {
+	if !b.onServer() {
+		return nil
+	}
+	return b.buildWorkflows(ctx, true)
+}
+
 func (b *build) addHealthCheck(check *health.RegisteredCheck) {
 	if b.onServer() {
 		b.server.checks = append(b.server.checks, *check)
@@ -81,8 +139,8 @@ func (b *build) addHealthCheck(check *health.RegisteredCheck) {
 }
 
 func (b *build) registerModule(name string, mod any) error {
-	if tp, ok := mod.(toolbroker.ToolProvider); ok && b.builtin != nil {
-		if err := b.builtin.Broker().RegisterProvider(tp); err != nil {
+	if tp, ok := mod.(toolbroker.ToolProvider); ok && b.broker != nil {
+		if err := b.broker.RegisterProvider(tp); err != nil {
 			return err
 		}
 	}
@@ -99,9 +157,6 @@ func (b *build) registerModule(name string, mod any) error {
 			}
 			b.addHealthCheck(&check)
 		}
-	}
-	if th, ok := mod.(turn.TurnHook); ok {
-		b.turnHooks = append(b.turnHooks, th)
 	}
 	switch m := mod.(type) {
 	case server.Lifecycle:
@@ -297,7 +352,7 @@ func (b *build) buildGitHub(context.Context) error {
 
 func (b *build) buildInterpreter(ctx context.Context) error {
 	cfg, logger := b.cfg, b.logger
-	if b.builtin == nil || !interpreterEnabled(b.result.CapabilityReport) {
+	if b.broker == nil || !interpreterEnabled(b.result.CapabilityReport) {
 		return nil
 	}
 	dataRoot, err := resolveDataRoot(cfg)
@@ -315,7 +370,7 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 	mod, err := codeexec.New(ctx, &codeexec.ModuleDeps{
 		Config:       &cfg.Interpreter,
 		DataRoot:     dataRoot,
-		Artifacts:    b.builtin.Artifacts(),
+		Artifacts:    b.artifacts,
 		Observer:     observer,
 		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
 		Logger:       logger,
@@ -347,8 +402,8 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 		ValidationDeps: deps,
 		Logger:         b.logger,
 	}
-	if host && b.builtin != nil {
-		modDeps.Broker = b.builtin.Broker()
+	if host && b.broker != nil {
+		modDeps.Broker = b.broker
 		modDeps.RunSessions = b.sessions
 		modDeps.Registry = b.registry
 		modDeps.Appender = &workflowSessionTextAppender{db: db}
@@ -387,6 +442,7 @@ func (b *build) buildPersonaEval(_ context.Context) error {
 		Capturer:     capturePersonaTurn,
 		Converse:     models.converse,
 		JudgeFor:     models.judge,
+		Catalog:      appconfig.BuiltinToolDefinitions(),
 		ParseCron:    parsePersonaEvalCron,
 		CheckTimeout: time.Duration(b.cfg.Health.CheckTimeout),
 		Logger:       b.logger,

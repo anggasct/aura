@@ -14,9 +14,19 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	auratools "github.com/anggasct/aura/internal/platform/tools"
 )
 
 var accessTestTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}
+
+var accessTestToolCatalog = []auratools.Definition{
+	{Name: "read_file", Version: auratools.Version},
+	{Name: "write_file", Version: auratools.Version, RequiresApproval: true, Effectful: true},
+	{Name: "list_dir", Version: auratools.Version},
+	{Name: "exec", Version: auratools.Version, RequiresApproval: true, Effectful: true},
+	{Name: "web_fetch", Version: auratools.Version, ExternalSink: true},
+	{Name: "web_search", Version: auratools.Version, ExternalSink: true},
+}
 
 func accessPersonas() []auraagent.Persona {
 	return []auraagent.Persona{
@@ -76,7 +86,7 @@ func newAccessAdapter(t *testing.T, persona string, owners []string, personas []
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
 	cfg.Accounts[0].Persona = persona
-	registry, err := auraagent.Build(personas, accessTestTools, []string{"primary"})
+	registry, err := auraagent.Build(personas, accessTestTools, accessTestToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

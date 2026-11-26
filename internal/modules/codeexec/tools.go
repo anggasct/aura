@@ -46,6 +46,27 @@ func ToolRule() approval.Rule {
 	return toolbroker.DefaultRule(&definition)
 }
 
+type toolProvider struct {
+	adapter toolbroker.Adapter
+	check   toolbroker.ArgumentCheck
+}
+
+func NewToolProvider(adapter toolbroker.Adapter, check toolbroker.ArgumentCheck) toolbroker.ToolProvider {
+	return &toolProvider{adapter: adapter, check: check}
+}
+
+func (p *toolProvider) Tools() []toolbroker.ToolRegistration {
+	if p == nil || p.adapter == nil {
+		return nil
+	}
+	return []toolbroker.ToolRegistration{{
+		Definition:    ToolDefinition(),
+		Adapter:       p.adapter,
+		Rule:          ToolRule(),
+		ArgumentCheck: p.check,
+	}}
+}
+
 func codeExecuteSchema() []byte {
 	runtimes := CodeRuntimes()
 	enum := make([]string, 0, len(runtimes))

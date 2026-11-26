@@ -28,6 +28,7 @@ func validateReferences(cfg *Config, doc *document) error {
 		telegramOwnerProblem(&cfg.Channels.Telegram, cfg.Owner),
 		emailOwnerProblem(&cfg.Channels.Email, cfg.Owner),
 		errors.Join(bindingAccountProblems(cfg.Bindings, &cfg.Channels)...),
+		configkit.Under("agents", auraagent.ValidateKnowledgeTools(cfg.Agents, BuiltinToolDefinitions())),
 		screenOwnerSecrets(cfg.Owner, cfg),
 	)
 }

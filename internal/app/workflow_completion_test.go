@@ -12,7 +12,6 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -47,7 +46,7 @@ func completionFixture(t *testing.T) *completionHarness {
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Name: "Lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Workflows: []string{"book_visit"}, Messages: map[string]string{auraagent.MessageWorkflowSucceeded: "Selesai: {goal}"},
-	}}, toolsbuiltin.DefinitionNames(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

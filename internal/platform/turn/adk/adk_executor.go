@@ -144,8 +144,8 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 			if definitions[i].OptIn {
 				e.optIn[definitions[i].Name] = true
 			}
-			if channel := auratools.ChannelOf(definitions[i].Name); channel != "" {
-				e.channelTools[definitions[i].Name] = channel
+			if definitions[i].Channel != "" {
+				e.channelTools[definitions[i].Name] = definitions[i].Channel
 			}
 			if definitions[i].Server != "" {
 				e.externalServers[definitions[i].Name] = definitions[i].Server

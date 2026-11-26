@@ -57,6 +57,7 @@ func personaEvalOpener(gf *globalFlags) personaeval.Opener {
 			deps := &personaeval.ServiceDeps{
 				Store:    evalStore,
 				Capturer: capturePersonaTurn,
+				Catalog:  appconfig.BuiltinToolDefinitions(),
 			}
 			if req.NeedBehavior && definition.EvalBehavior != nil {
 				models, err := routedBehaviorModels(result.Config, app.models)

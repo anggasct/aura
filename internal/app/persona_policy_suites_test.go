@@ -10,7 +10,7 @@ import (
 
 	yamlv3 "gopkg.in/yaml.v3"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -35,7 +35,7 @@ func TestPersonaPolicySuites(t *testing.T) {
 	if err := json.Unmarshal(encoded, &file); err != nil {
 		t.Fatal(err)
 	}
-	registry, err := auraagent.Build(file.Definitions, toolsbuiltin.DefinitionNames(), nil)
+	registry, err := auraagent.Build(file.Definitions, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -50,7 +50,7 @@ func TestPersonaPolicySuites(t *testing.T) {
 			if err != nil || len(cases) == 0 {
 				t.Fatalf("LoadCases(%s) = %d cases, %v", id, len(cases), err)
 			}
-			report, err := personaeval.Run(t.Context(), &definition, cases, capturePersonaTurn)
+			report, err := personaeval.RunWithCatalog(t.Context(), &definition, cases, capturePersonaTurn, appconfig.BuiltinToolDefinitions())
 			if err != nil {
 				t.Fatalf("Run: %v", err)
 			}

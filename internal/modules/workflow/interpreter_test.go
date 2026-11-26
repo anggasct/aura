@@ -22,7 +22,7 @@ import (
 
 func buildTestRegistry() (*auraagent.Registry, error) {
 	lobby := auraagent.Persona{ID: "lobby", Description: "front desk", Instructions: "greet", Audience: auraagent.AudiencePublic}
-	return auraagent.Build([]auraagent.Persona{lobby}, []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search"}, []string{"primary"})
+	return auraagent.Build([]auraagent.Persona{lobby}, []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search"}, ceilingTestCatalog(), []string{"primary"})
 }
 
 type fakeAgentRunner struct {

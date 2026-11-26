@@ -6,7 +6,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/channels/terminal"
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec"
@@ -46,7 +45,7 @@ type Config struct {
 	Version      int                         `json:"version"`
 	Runtime      runtimeengine.Config        `json:"runtime"`
 	Capabilities capability.Config           `json:"capabilities"`
-	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
+	Tools        *Tools                      `json:"tools,omitempty"`
 	Agents       *auraagent.Config           `json:"agents,omitempty"`
 	Workflows    *workflow.Config            `json:"workflows,omitempty"`
 	MCP          *mcp.Config                 `json:"mcp,omitempty"`
@@ -92,7 +91,7 @@ func Default() Config {
 		Capabilities: capability.Default(),
 		Agents:       &defaultAgents,
 		Workflows:    &defaultWorkflows,
-		Tools:        legacyconfig.DefaultTools(),
+		Tools:        DefaultTools(),
 		Server:       server.Default(),
 		Logging:      logging.Default(),
 		Models:       model.Default(),

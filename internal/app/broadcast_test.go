@@ -15,7 +15,6 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/modules/broadcast"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -180,7 +179,7 @@ func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 			if err := sessions.Create(t.Context(), &turn.Session{ID: "broadcast:default", OwnerID: "broadcast", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 				t.Fatalf("Create session: %v", err)
 			}
-			effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+			effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 			if err != nil {
 				t.Fatalf("NewChannelEffects: %v", err)
 			}

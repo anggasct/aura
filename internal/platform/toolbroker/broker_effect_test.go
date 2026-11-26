@@ -39,7 +39,7 @@ func newBrokerEffectExecutor(t *testing.T) *effect.Executor {
 func TestBrokerEffectfulToolUsesDurableLifecycle(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -87,7 +87,7 @@ func TestBrokerEffectfulFailureSettlesByWhetherTheEffectWasPerformed(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			executor := newBrokerEffectExecutor(t)
 			calls := 0
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t), Effects: executor,
 				Adapters: map[string]Adapter{
 					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -140,7 +140,7 @@ func TestBrokerEffectReceiptCarriesTheAdapterAudit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			executor := newBrokerEffectExecutor(t)
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t), Effects: executor,
 				Adapters: map[string]Adapter{
 					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {

@@ -1,7 +1,6 @@
 package config
 
 import (
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -51,7 +50,7 @@ func deriveModelRoutes(cfg *Config) {
 	}
 }
 
-func deriveWebSearchCredential(tools *legacyconfig.Tools) {
+func deriveWebSearchCredential(tools *Tools) {
 	if tools == nil || !tools.WebSearch.CredentialRef.IsZero() {
 		return
 	}

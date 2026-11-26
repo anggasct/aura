@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -110,9 +110,16 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 		return false, nil
 	}
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, rig.access, toolsbuiltin.WithApprovalReachable(rig.reachable), toolsbuiltin.WithLiveEvents(liveEvents))
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: cfg, CapabilityReport: capabilitytest.All(t)},
+		db:           db,
+		artifactRoot: artifacts,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring:       &toolWiring{decider: decider, access: rig.access, reachable: rig.reachable},
+		events:       liveEvents,
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
 	events := turnstore.NewEventStore(db)
 	name := "untrusted-input"
