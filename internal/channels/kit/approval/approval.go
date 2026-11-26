@@ -298,13 +298,7 @@ type StandingGrantRecorder interface {
 	RecordStandingGrant(ctx context.Context, grant *StandingGrantRequest) error
 }
 
-type StandingGrantRequest struct {
-	PrincipalID string
-	AgentID     string
-	ToolName    string
-	OwnerID     string
-	TTL         time.Duration
-}
+type StandingGrantRequest = principal.StandingGrantRequest
 
 type StandingOffer struct {
 	Grants StandingGrantRecorder

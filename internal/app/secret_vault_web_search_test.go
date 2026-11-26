@@ -8,9 +8,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
-func webSearchSecretEntry(cfg *appconfig.Config) *configuredSecret {
-	for _, entry := range additionalConfiguredSecrets(cfg) {
-		if entry.name == "web_search_credential" {
+func webSearchSecretEntry(cfg *appconfig.Config) *appconfig.ConfiguredSecret {
+	for _, entry := range appconfig.AdditionalConfiguredSecrets(cfg) {
+		if entry.Name == "web_search_credential" {
 			return &entry
 		}
 	}
@@ -40,8 +40,8 @@ func TestWebSearchCredentialIsOptionalOnlyAtTheSelectedProvidersDefaultReference
 			if (entry != nil) != test.present {
 				t.Fatalf("entry = %+v, want present %v", entry, test.present)
 			}
-			if entry != nil && entry.optional != test.optional {
-				t.Fatalf("optional = %v, want %v", entry.optional, test.optional)
+			if entry != nil && entry.Optional != test.optional {
+				t.Fatalf("optional = %v, want %v", entry.Optional, test.optional)
 			}
 		})
 	}

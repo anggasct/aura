@@ -487,7 +487,7 @@ func TestServerScheduleRunCompletesItsTurn(t *testing.T) {
 	restoreDefaultLogger(t)
 	model := newStubModel(t, stubAnswers)
 	cfg := writeTurnServerConfig(t, model, serverTurnShutdownTimeout)
-	gf := &globalFlags{configPath: cfg.path}
+	gf := &GlobalFlags{ConfigPath: cfg.path}
 	jobID := addScheduleJob(t, gf)
 	srv := buildTurnServer(t, cfg.path)
 	srv.run(t)

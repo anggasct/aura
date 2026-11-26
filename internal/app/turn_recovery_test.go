@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 )
 
 const testTurnRecoveryInterval = time.Minute
@@ -34,25 +36,21 @@ func (r *scriptedRecoverer) count() int {
 	return r.calls
 }
 
-func newTestTurnRecovery(results ...error) (*turnRecovery, *scriptedRecoverer, *syncBuffer) {
+func newTestTurnRecovery(results ...error) (*runtimeengine.Recovery, *scriptedRecoverer, *syncBuffer) {
 	recoverer := &scriptedRecoverer{results: results}
 	logs := &syncBuffer{}
-	return &turnRecovery{
-		recoverer: recoverer,
-		logger:    slog.New(slog.NewJSONHandler(logs, nil)),
-		interval:  testTurnRecoveryInterval,
-	}, recoverer, logs
+	return runtimeengine.NewRecovery(recoverer, slog.New(slog.NewJSONHandler(logs, nil)), testTurnRecoveryInterval), recoverer, logs
 }
 
-func runTurnRecoveryPasses(t *testing.T, recovery *turnRecovery, passes int) {
+func runTurnRecoveryPasses(t *testing.T, recovery *runtimeengine.Recovery, passes int) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan struct{})
 	go func() {
-		recovery.run(ctx)
+		recovery.Run(ctx)
 		close(done)
 	}()
-	time.Sleep(time.Duration(passes)*recovery.interval + recovery.interval/2)
+	time.Sleep(time.Duration(passes)*testTurnRecoveryInterval + testTurnRecoveryInterval/2)
 	synctest.Wait()
 	cancel()
 	<-done
@@ -74,7 +72,7 @@ func requireRecoveryWarnings(t *testing.T, logs *syncBuffer, want int) {
 func TestTurnRecoveryPassRepeats(t *testing.T) {
 	t.Run("a failing recovery at the start is logged once and does not fail the start", func(t *testing.T) {
 		recovery, recoverer, logs := newTestTurnRecovery(errors.New("database is locked"))
-		if err := recovery.start(t.Context()); err != nil {
+		if err := recovery.Start(t.Context()); err != nil {
 			t.Fatalf("start = %v, want nil", err)
 		}
 		if got := recoverer.count(); got != 1 {
@@ -110,10 +108,10 @@ func TestTurnRecoveryPassRepeats(t *testing.T) {
 			recovery, recoverer, logs := newTestTurnRecovery(errors.New("database is locked"))
 			ctx, cancel := context.WithCancel(t.Context())
 			cancel()
-			if err := recovery.start(ctx); err != nil {
+			if err := recovery.Start(ctx); err != nil {
 				t.Fatalf("start under an ended context = %v, want nil", err)
 			}
-			recovery.run(ctx)
+			recovery.Run(ctx)
 			if got := recoverer.count(); got != 0 {
 				t.Fatalf("recoveries under an ended context = %d, want 0", got)
 			}

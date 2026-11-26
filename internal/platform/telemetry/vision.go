@@ -8,6 +8,8 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/metric"
+
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 type VisionObservation struct {
@@ -63,4 +65,27 @@ func (r *VisionRecorder) Record(ctx context.Context, observation *VisionObservat
 	)
 	r.operations.Add(ctx, 1, attrs)
 	r.duration.Record(ctx, observation.Duration.Seconds(), attrs)
+}
+
+func (r *VisionRecorder) VisionObserver() vision.Observer {
+	if r == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *vision.Observation) {
+		if observation == nil {
+			return
+		}
+		r.Record(ctx, &VisionObservation{
+			Operation:       observation.Operation,
+			Result:          observation.Result,
+			MIME:            observation.MIME,
+			Images:          observation.Images,
+			Version:         observation.Version,
+			Protocol:        observation.Protocol,
+			SizeBucket:      observation.EncodedBytes,
+			PixelsBucket:    observation.Pixels,
+			DimensionBucket: observation.DimensionBucket,
+			Duration:        observation.Duration,
+		})
+	}
 }

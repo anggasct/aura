@@ -74,7 +74,7 @@ func TestForgetStopsLiveRunsBeforeErasing(t *testing.T) {
 		summary := startRunAs(t, command, forgottenPrincipal)
 		started := time.Now()
 
-		out, err := runAccessCommand(t, newPrincipalCmd, gf.configPath, "forget", forgottenPrincipal, "--apply")
+		out, err := runAccessCommand(t, newPrincipalCmd, gf.ConfigPath, "forget", forgottenPrincipal, "--apply")
 		if err != nil || !strings.Contains(out, "cancelled_runs: "+summary.ID) || !strings.Contains(out, "erased "+forgottenPrincipal) {
 			t.Fatalf("forget = %q, %v; want the root cancelled and the principal erased", out, err)
 		}
@@ -88,14 +88,14 @@ func TestForgetStopsLiveRunsBeforeErasing(t *testing.T) {
 
 	t.Run("a run that does not stop within the bound refuses and keeps everything", func(t *testing.T) {
 		gf := writeWorkflowFixtures(t, validWorkflowYAML)
-		db := openAccessDB(t, gf.configPath)
+		db := openAccessDB(t, gf.ConfigPath)
 		seedLiveRunRows(t, db, "run-stuck", "stuck", forgottenPrincipal)
 		seedIdleSession(t, turnstore.NewSessionService(db), "main/discord:office/dm:601", forgottenPrincipal, time.Now())
 		canceller := &recordingCanceller{}
 		runs := &erasureRuns{poll: time.Millisecond, bound: 50 * time.Millisecond}
 		runs.set(canceller)
 
-		cancelled, _, err := forgetPrincipal(t.Context(), db, runs, principal.ErasureScope{PrincipalID: forgottenPrincipal, Apply: true}, "")
+		cancelled, err := forgetPrincipal(t.Context(), db, runs, principal.ErasureScope{PrincipalID: forgottenPrincipal, Apply: true}, "")
 		if code, ok := fault.CodeOf[principal.ErrorCode](err); !ok || code != principal.ErrorCodeErasureBlocked || !strings.Contains(err.Error(), "run-stuck") {
 			t.Fatalf("forget = %v, want %s naming the run", err, principal.ErrorCodeErasureBlocked)
 		}

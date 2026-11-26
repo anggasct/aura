@@ -49,7 +49,7 @@ func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 	}
 }
 
-func runBroadcastCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func runBroadcastCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
 	cmd := broadcast.Commands(broadcastOpener(gf))[0]
@@ -65,7 +65,7 @@ func runBroadcastCommand(t *testing.T, gf *globalFlags, args ...string) (string,
 func TestBroadcastStatusHidesContentByDefault(t *testing.T) {
 	dataDir := t.TempDir()
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-1", "scheduled", `{"text":"secret plans"}`)
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "status")
 	if err != nil {
@@ -93,7 +93,7 @@ func TestBroadcastStatusFiltersState(t *testing.T) {
 	dataDir := t.TempDir()
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-1", "scheduled", `{"text":"a"}`)
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-2", "held", `{"text":"b"}`)
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "status", "--state", "held")
 	if err != nil {
@@ -111,7 +111,7 @@ func TestBroadcastReconcileReportsNoop(t *testing.T) {
 	dataDir := t.TempDir()
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-1", "scheduled", `{"text":"a"}`)
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-9", "unknown", `{"text":"b"}`)
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "reconcile", "bcst-9")
 	if err != nil {
@@ -139,7 +139,7 @@ func TestBroadcastReconcileRestartsAnEndedRun(t *testing.T) {
 		"bcst-1", "send", []byte("{}"), now); err != nil {
 		t.Fatalf("seed the journal: %v", err)
 	}
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "reconcile", "bcst-1")
 	if err != nil {

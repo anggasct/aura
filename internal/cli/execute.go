@@ -16,7 +16,7 @@ func ExecuteContext(ctx context.Context, interrupts <-chan os.Signal, args ...st
 	if len(effective) == 0 {
 		effective = os.Args[1:]
 	}
-	root := app.NewRootCommand()
+	root := NewRootCommand()
 	root.SetArgs(effective)
 	ctx = app.WithInterrupts(ctx, interrupts)
 	executionCtx, stopInterrupts := contextForCommand(ctx, root, effective, interrupts)

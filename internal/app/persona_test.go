@@ -52,7 +52,7 @@ func personaRegistry(t *testing.T, configPath string) *auraagent.Registry {
 }
 
 func TestPersonaListShowsSoulSourceAndDigest(t *testing.T) {
-	gf := &globalFlags{configPath: writePersonaCLIConfig(t, "You are Kuma.")}
+	gf := &GlobalFlags{ConfigPath: writePersonaCLIConfig(t, "You are Kuma.")}
 	cmd := newPersonaCmd(gf)
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -78,18 +78,18 @@ func TestPersonaListShowsSoulSourceAndDigest(t *testing.T) {
 
 func TestPersonaFingerprintFollowsSoulFile(t *testing.T) {
 	path := writePersonaCLIConfig(t, "You are Kuma.")
-	before, ok := registryPersonas{registry: personaRegistry(t, path)}.Fingerprint("kuma")
+	before, ok := auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}.Fingerprint("kuma")
 	if !ok {
 		t.Fatal("kuma has no fingerprint")
 	}
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "personas", "kuma.md"), []byte("You are Kuma, now formal."), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := registryPersonas{registry: personaRegistry(t, path)}.Fingerprint("kuma")
+	after, _ := auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}.Fingerprint("kuma")
 	if after.SoulSHA256 == before.SoulSHA256 || after.ToolsSHA256 != before.ToolsSHA256 || after.AgentID != "kuma" {
 		t.Fatalf("fingerprint before %+v after %+v, want only the soul digest to change", before, after)
 	}
-	if _, ok := (registryPersonas{registry: personaRegistry(t, path)}).Fingerprint("ghost"); ok {
+	if _, ok := (auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}).Fingerprint("ghost"); ok {
 		t.Fatal("unknown persona has a fingerprint")
 	}
 }

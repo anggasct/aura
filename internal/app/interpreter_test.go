@@ -155,7 +155,7 @@ func makeInterpreterTreeRemovable(t *testing.T, dataRoot string) {
 
 func (r *interpreterRig) run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	cmd := codeexec.Commands(newInterpreterOpener(&globalFlags{configPath: r.configPath}, r.deps))[0]
+	cmd := codeexec.Commands(newInterpreterOpener(&GlobalFlags{ConfigPath: r.configPath}, r.deps))[0]
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&bytes.Buffer{})

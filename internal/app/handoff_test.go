@@ -50,7 +50,7 @@ func mustHandoffService(t *testing.T, db *sql.DB, notifiers []handoff.Notifier) 
 func runHandoffSubcommand(t *testing.T, index int, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmds := handoff.Commands(handoffOpener(&globalFlags{configPath: cfg}))
+	cmds := handoff.Commands(handoffOpener(&GlobalFlags{ConfigPath: cfg}))
 	cmd := cmds[index]
 	var stdout, stderr bytes.Buffer
 	cmd.SetOut(&stdout)

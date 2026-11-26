@@ -13,27 +13,32 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func baseTime() time.Time { return time.Date(2026, 8, 25, 10, 0, 0, 0, time.UTC) }
 
+func newTestHealthEventLog(events turnstore.EventStore, sessions turnstore.SessionService) *health.EventLog {
+	adapter := healthEventStoreAdapter{events: events, sessions: sessions}
+	return health.NewEventLog(adapter, adapter)
+}
+
 func TestHealthEventLogRoundTrip(t *testing.T) {
 	ctx := context.Background()
 	db := storetest.OpenMigrated(t)
-	log := newHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	log := newTestHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
 
 	first := health.Transition{FindingID: "backup/ok", From: health.StatusNone, To: health.StatusUp, Code: "ok", At: baseTime()}
 	second := health.Transition{FindingID: "backup/ok", From: health.StatusUp, To: health.StatusDegraded, Code: "backup_stale", At: baseTime().Add(time.Hour)}
-	if err := log.sink(ctx, &first); err != nil {
+	if err := log.Sink(ctx, &first); err != nil {
 		t.Fatalf("sink first: %v", err)
 	}
-	if err := log.sink(ctx, &second); err != nil {
+	if err := log.Sink(ctx, &second); err != nil {
 		t.Fatalf("sink second: %v", err)
 	}
 
-	history, err := log.history(ctx)
+	history, err := log.History(ctx)
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
@@ -41,7 +46,7 @@ func TestHealthEventLogRoundTrip(t *testing.T) {
 		t.Fatalf("history = %+v", history)
 	}
 
-	tracker, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, log.sink, log.history)
+	tracker, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, log.Sink, log.History)
 	if err != nil {
 		t.Fatalf("rebuild tracker: %v", err)
 	}
@@ -61,20 +66,19 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	cfg := appconfig.Default()
-	cfg.Storage.Path = dataRoot
-	listener, err := buildProbeListener(&cfg, nil, turnstore.NewEventStore(db), turnstore.NewSessionService(db))
-	if err != nil {
-		t.Fatalf("buildProbeListener: %v", err)
-	}
-
 	bind, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	addr := bind.Addr().String()
 	_ = bind.Close()
-	listener.listen = addr
+	cfg := appconfig.Default()
+	cfg.Storage.Path = dataRoot
+	cfg.Health.Listen = addr
+	listener, err := buildProbeServer(&cfg, nil, turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("buildProbeServer: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -91,7 +95,7 @@ func TestShutdownFlipsDrainingBeforeSocketCloses(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("listener did not stop")
 	}
-	if !listener.readiness.Draining() {
+	if !listener.Draining() {
 		t.Fatal("drain flag not set when Start returned; ordering violated")
 	}
 	if response, err := probeGet(t.Context(), addr, "/readyz"); err == nil {
@@ -117,11 +121,11 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 		expiredOnce.Do(func() { close(expired) })
 		return []health.Finding{{ID: "backup/backup_missing", Status: health.StatusDown, Code: "backup_missing"}}
 	}
-	log := newHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	log := newTestHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
 	var persistOnce sync.Once
 	persistDone := make(chan struct{})
 	sink := func(persistCtx context.Context, transition *health.Transition) error {
-		err := log.sink(persistCtx, transition)
+		err := log.Sink(persistCtx, transition)
 		persistOnce.Do(func() { close(persistDone) })
 		return err
 	}
@@ -133,10 +137,17 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tracker: %v", err)
 	}
-	listener := &probeListener{evaluate: evaluate, tracker: tracker, interval: 10 * time.Millisecond}
+	listener, err := health.NewProbeServer(&health.ProbeServerOptions{
+		Evaluate:      evaluate,
+		Tracker:       tracker,
+		CheckInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewProbeServer: %v", err)
+	}
 
 	observerCtx, stopObserver := context.WithCancel(ctx)
-	observerDone := listener.startObserver(observerCtx)
+	observerDone := listener.StartObserver(observerCtx)
 
 	select {
 	case <-expired:
@@ -155,8 +166,8 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 	stopObserver()
 	<-observerDone
 
-	check := newHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
-	history, err := check.history(ctx)
+	check := newTestHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	history, err := check.History(ctx)
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}
@@ -164,15 +175,15 @@ func TestObserverPersistsTransitionsReplayableAfterRestart(t *testing.T) {
 		t.Fatalf("persisted history = %+v", history)
 	}
 
-	restarted := newHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
-	replayed, err := restarted.history(ctx)
+	restarted := newTestHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	replayed, err := restarted.History(ctx)
 	if err != nil {
 		t.Fatalf("history after restart: %v", err)
 	}
 	if !slices.Equal(replayed, history) {
 		t.Fatalf("replayed history drifted: %+v vs %+v", replayed, history)
 	}
-	fresh, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, restarted.sink, restarted.history)
+	fresh, err := health.NewStateTracker(health.TransitionPolicy{StableFor: time.Minute, Cooldown: time.Minute}, restarted.Sink, restarted.History)
 	if err != nil {
 		t.Fatalf("rebuild tracker: %v", err)
 	}
@@ -197,16 +208,19 @@ func TestObserverStopCancelsInFlightPersistence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("tracker: %v", err)
 	}
-	listener := &probeListener{
-		evaluate: func(context.Context) []health.Finding {
+	listener, err := health.NewProbeServer(&health.ProbeServerOptions{
+		Evaluate: func(context.Context) []health.Finding {
 			return []health.Finding{{ID: "f/one", Status: health.StatusDown, Code: "down"}}
 		},
-		tracker:  tracker,
-		interval: 10 * time.Millisecond,
+		Tracker:       tracker,
+		CheckInterval: 10 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("NewProbeServer: %v", err)
 	}
 
 	observerCtx, stop := context.WithCancel(context.Background())
-	observerDone := listener.startObserver(observerCtx)
+	observerDone := listener.StartObserver(observerCtx)
 
 	<-sinkStarted
 	stoppedAt := time.Now()
@@ -229,7 +243,7 @@ func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	log := newHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	log := newTestHealthEventLog(turnstore.NewEventStore(db), turnstore.NewSessionService(db))
 	stamp := baseTime()
 	for i := range 1200 {
 		status := health.StatusUp
@@ -237,11 +251,11 @@ func TestHistoryPagesBeyondFirstThousandEvents(t *testing.T) {
 			status = health.StatusDown
 		}
 		transition := health.Transition{FindingID: "backup/ok", From: health.StatusUp, To: status, Code: "ok", At: stamp}
-		if err := log.sink(ctx, &transition); err != nil {
+		if err := log.Sink(ctx, &transition); err != nil {
 			t.Fatalf("sink %d: %v", i, err)
 		}
 	}
-	history, err := log.history(ctx)
+	history, err := log.History(ctx)
 	if err != nil {
 		t.Fatalf("history: %v", err)
 	}

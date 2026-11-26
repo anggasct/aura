@@ -176,7 +176,7 @@ func TestApprovalBindsToTheStoredPlanText(t *testing.T) {
 	})
 	t.Run("proposal show prints the stored plan byte for byte", func(t *testing.T) {
 		gf := writeWorkflowFixtures(t, validWorkflowYAML)
-		db := openAccessDB(t, gf.configPath)
+		db := openAccessDB(t, gf.ConfigPath)
 		const plan = "1. approve — wait for owner approval\n2. write — run tool write_file (after approve)\n    path: note.md\n    content: [redacted]"
 		planned := unplannedProposal(t, mustWorkflowStore(t, db), db, plan)
 		out, err := runWorkflowCommand(t, gf, "proposal", "show", planned.ID)

@@ -189,7 +189,7 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 	})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)

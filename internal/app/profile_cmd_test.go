@@ -47,7 +47,7 @@ func writeFileForTest(path, content string) error {
 func runProfileCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &globalFlags{configPath: cfg}
+	gf := &GlobalFlags{ConfigPath: cfg}
 	cmd := profile.Commands(profileOpener(gf))[0]
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}

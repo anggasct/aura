@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -31,7 +31,7 @@ import (
 func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmds := knowledge.Commands(knowledgeOpener(&globalFlags{configPath: cfg}))
+	cmds := knowledge.Commands(knowledgeOpener(&GlobalFlags{ConfigPath: cfg}))
 	cmd := cmds[0]
 	out := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
@@ -507,8 +507,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err = cmd.RunE(cmd, nil)
-	var coded *exitCodeError
-	if errors.As(err, &coded) && coded.code == exitCommand {
+	if code, ok := clikit.ExitCodeOf(err); ok && code == exitCommand {
 		t.Fatalf("status failed as a command error on a pre-knowledge database: %v", err)
 	}
 	if strings.Contains(out.String(), "no such table") || strings.Contains(out.String(), "kb_") {

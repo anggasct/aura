@@ -670,13 +670,13 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 
 func TestEmbeddingCredentialIsAnOptionalSecretThatJoinsTheVaultWhenResolved(t *testing.T) {
 	cfg := &appconfig.Config{Knowledge: &knowledge.Config{Embedding: &knowledge.EmbeddingConfig{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
-	var found *configuredSecret
+	var found *appconfig.ConfiguredSecret
 	for _, entry := range additionalConfiguredSecrets(cfg) {
-		if entry.name == "knowledge_embedding_credential" {
+		if entry.Name == "knowledge_embedding_credential" {
 			found = &entry
 		}
 	}
-	if found == nil || !found.optional {
+	if found == nil || !found.Optional {
 		t.Fatalf("embedding credential entry = %+v, want an optional entry", found)
 	}
 	if _, err := buildStrictSecretVault(cfg); err != nil {

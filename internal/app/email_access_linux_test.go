@@ -308,7 +308,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		LiveEvents:     liveEvents,
 		Channels:       []runtimechannelhost.ChannelPort{adapter},
 	})

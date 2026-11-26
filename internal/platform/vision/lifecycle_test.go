@@ -1,9 +1,12 @@
-package vision
+package vision_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,36 +18,56 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/vision"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
+func lifecycleLimits() *vision.Limits {
+	return &vision.Limits{
+		MaxEncodedBytes:      20971520,
+		MaxPixels:            40000000,
+		MaxDimension:         8192,
+		DecodeTimeout:        5 * time.Second,
+		MaxDecodeConcurrency: 4,
+		MaxTransformMemory:   268435456,
+		StripMetadata:        true,
+		OrientNormalize:      true,
+		TransformVersion:     "v1",
+	}
+}
+
+func lifecyclePNGBytes(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			img.Set(x, y, color.NRGBA{R: uint8(x), G: uint8(y), B: 128, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 type bridgeStore struct {
-	inner        storage.ArtifactStore
+	inner        vision.ArtifactWriter
 	lastSourceID string
 	puts         int
 }
 
-func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
-	ref, err := b.inner.Put(ctx, r, &storage.ArtifactMetadata{
-		ID:        meta.ID,
-		SessionID: meta.SessionID,
-		EventID:   meta.EventID,
-		Filename:  meta.Filename,
-		MediaType: meta.MediaType,
-		Metadata:  meta.Metadata,
-	})
+func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *vision.ArtifactMetadata) (vision.ArtifactRef, error) {
+	ref, err := b.inner.Put(ctx, r, meta)
 	if err != nil {
-		if code, ok := fault.CodeOf[storage.ErrorCode](err); ok && code == storage.ErrorCodeArtifactQuotaExceeded {
-			return ArtifactRef{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted", err)
-		}
-		return ArtifactRef{}, err
+		return vision.ArtifactRef{}, err
 	}
 	if b.puts == 0 {
 		b.lastSourceID = ref.ID
 	}
 	b.puts++
-	return ArtifactRef{ID: ref.ID, BlobDigest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
+	return ref, nil
 }
 
 func (b *bridgeStore) Unlink(ctx context.Context, refID string) error {
@@ -68,15 +91,15 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
-	bridged := &bridgeStore{inner: artifacts}
-	svc, err := NewService(ptrLimits(), WithStore(bridged))
+	bridged := &bridgeStore{inner: storage.NewVisionStore(artifacts)}
+	svc, err := vision.NewService(lifecycleLimits(), vision.WithStore(bridged))
 	if err != nil {
 		t.Fatal(err)
 	}
-	part, err := svc.Ingest(ctx, &IngestRequest{
-		Content:    bytes.NewReader(pngBytes(t, 16, 16)),
+	part, err := svc.Ingest(ctx, &vision.IngestRequest{
+		Content:    bytes.NewReader(lifecyclePNGBytes(t, 16, 16)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		Provenance: vision.Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
@@ -133,19 +156,19 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	artifacts := storage.NewArtifactStore(db, root, 16)
-	bridged := &bridgeStore{inner: artifacts}
-	svc, err := NewService(ptrLimits(), WithStore(bridged))
+	bridged := &bridgeStore{inner: storage.NewVisionStore(artifacts)}
+	svc, err := vision.NewService(lifecycleLimits(), vision.WithStore(bridged))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Ingest(ctx, &IngestRequest{
-		Content:    bytes.NewReader(pngBytes(t, 32, 32)),
+	if _, err := svc.Ingest(ctx, &vision.IngestRequest{
+		Content:    bytes.NewReader(lifecyclePNGBytes(t, 32, 32)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		Provenance: vision.Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	}); err == nil {
 		t.Fatal("expected quota failure")
-	} else if !fault.HasCode(err, ErrorCodeArtifactQuotaExceeded) {
-		t.Fatalf("error = %v, want code %s", err, ErrorCodeArtifactQuotaExceeded)
+	} else if !fault.HasCode(err, vision.ErrorCodeArtifactQuotaExceeded) {
+		t.Fatalf("error = %v, want code %s", err, vision.ErrorCodeArtifactQuotaExceeded)
 	}
 }
 
@@ -165,20 +188,20 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 		t.Fatalf("Create session: %v", err)
 	}
 	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
-	bridged := &bridgeStore{inner: artifacts}
-	svc, err := NewService(ptrLimits(), WithStore(bridged))
+	bridged := &bridgeStore{inner: storage.NewVisionStore(artifacts)}
+	svc, err := vision.NewService(lifecycleLimits(), vision.WithStore(bridged))
 	if err != nil {
 		t.Fatal(err)
 	}
-	part, err := svc.Ingest(ctx, &IngestRequest{
-		Content:    bytes.NewReader(pngBytes(t, 12, 12)),
+	part, err := svc.Ingest(ctx, &vision.IngestRequest{
+		Content:    bytes.NewReader(lifecyclePNGBytes(t, 12, 12)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		Provenance: vision.Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	raw, err := MarshalPart(&part)
+	raw, err := vision.MarshalPart(&part)
 	if err != nil {
 		t.Fatalf("MarshalPart: %v", err)
 	}
