@@ -211,8 +211,8 @@ func TestCompositionCommandBuildsOnlyStorage(t *testing.T) {
 	result := loadCompositionConfig(t, writeCommandCompositionConfig(t, validWorkflowYAML))
 	app := buildApp(t, commandCompositionOptions(result, &syncBuffer{}))
 	requireNames(t, "entries", app.group.Names(), []string{"sqlite"})
-	if app.runtime != nil || app.interpreter != nil || app.models != nil {
-		t.Fatalf("an unnamed part was built: runtime=%v interpreter=%v models=%v", app.runtime, app.interpreter, app.models)
+	if app.runtime != nil || app.interpreter != nil || app.models != nil || app.knowledge != nil {
+		t.Fatalf("an unnamed part was built: runtime=%v interpreter=%v models=%v knowledge=%v", app.runtime, app.interpreter, app.models, app.knowledge)
 	}
 	if err := app.Run(t.Context()); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("Run on a command app = %v, want %s", err, ErrorCodeInvalidArgument)
@@ -226,14 +226,15 @@ func TestCompositionCommandBuildsOnlyStorage(t *testing.T) {
 
 func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 	cases := []struct {
-		name                         string
-		parts                        []Part
-		runtime, interpreter, models bool
+		name                                    string
+		parts                                   []Part
+		runtime, interpreter, models, knowledge bool
 	}{
-		{"durable", []Part{PartDurable}, true, false, false},
-		{"workflows", []Part{PartWorkflows}, true, true, false},
-		{"models", []Part{PartModels}, false, false, true},
-		{"models, workflows, durable", []Part{PartModels, PartWorkflows, PartDurable}, true, true, true},
+		{"durable", []Part{PartDurable}, true, false, false, false},
+		{"workflows", []Part{PartWorkflows}, true, true, false, false},
+		{"models", []Part{PartModels}, false, false, true, false},
+		{"knowledge", []Part{PartKnowledge}, false, false, false, true},
+		{"models, workflows, durable, knowledge", []Part{PartModels, PartWorkflows, PartDurable, PartKnowledge}, true, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,7 +252,24 @@ func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 			if got := app.models != nil; got != tc.models {
 				t.Errorf("model registry built = %t, want %t", got, tc.models)
 			}
+			if got := app.knowledge != nil; got != tc.knowledge {
+				t.Errorf("knowledge service built = %t, want %t", got, tc.knowledge)
+			}
 		})
+	}
+}
+
+func TestRootCommandMountsKnowledgeCommands(t *testing.T) {
+	root := NewRootCommand()
+	kb, _, err := root.Find([]string{"kb"})
+	if err != nil || kb == nil || kb.Name() != "kb" {
+		t.Fatalf("root.Find(kb) = %v, %v", kb, err)
+	}
+	for _, sub := range []string{"add", "list", "show", "remove", "refresh", "embed", "check"} {
+		found, _, err := root.Find([]string{"kb", sub})
+		if err != nil || found == nil || found.Name() != sub {
+			t.Errorf("root.Find(kb %s) = %v, %v", sub, found, err)
+		}
 	}
 }
 

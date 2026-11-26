@@ -29,10 +29,13 @@ import (
 
 func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newKBCmd(&globalFlags{configPath: cfg})
+	restoreDefaultLogger(t)
+	cmds := knowledge.Commands(knowledgeOpener(&globalFlags{configPath: cfg}))
+	cmd := cmds[0]
 	out := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errBuf)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -103,7 +106,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list --json: %v", err)
 	}
-	var listed kbListOutput
+	var listed knowledge.ListOutput
 	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Collections) != 1 || listed.Collections[0].ID != "support" || listed.Collections[0].Chunks != 2 {
 		t.Fatalf("list --json = %q, %v", out, err)
 	}
