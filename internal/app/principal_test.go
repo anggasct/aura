@@ -3,13 +3,14 @@ package app
 import (
 	"testing"
 
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestWebhookTurnsAreTrustedClassWithUntrustedInput(t *testing.T) {
-	req := webhookTurnRequest("webhook:primary", "turn-1", webhookTestEvent())
+	req := gatewaywebhook.TurnRequest("webhook:primary", "turn-1", webhookTestEvent())
 	if req.PrincipalID != "webhook:primary" || req.PrincipalClass != principal.ClassTrusted || req.Origin != turn.OriginWebhook {
 		t.Fatalf("webhook turn = %q/%q/%q, want webhook:primary/trusted/webhook", req.PrincipalID, req.PrincipalClass, req.Origin)
 	}

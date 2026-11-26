@@ -13,9 +13,11 @@ import (
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -33,6 +35,7 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -473,18 +476,36 @@ func (b *build) addEdgeListeners() error {
 		if err != nil {
 			return err
 		}
-		webhookListener, err := buildWebhookListener(&webhookListenerInput{cfg: cfg, db: b.db, backend: b.engine, logger: b.logger, runtime: runtime})
+		executions, err := platformwebhook.NewSQLiteStore(b.db)
 		if err != nil {
 			return err
 		}
-		if err := s.listeners.Add(webhookListener); err != nil {
-			return err
-		}
-		reconcilePass, err := webhookListener.dispatcher.reconcilePass()
+		turns := turnstore.NewTurnStore(b.db)
+		runs, err := workflow.NewStore(b.db, turns)
 		if err != nil {
 			return err
 		}
-		if err := b.group.Add(server.Background("webhook_reconcile", reconcilePass.Run)); err != nil {
+		githubAdapter, err := github.NewAdapter(newWorkflowCorrelationStore(runs), runtime, b.logger)
+		if err != nil {
+			return err
+		}
+		ch, err := gatewaywebhook.New(&gatewaywebhook.Deps{
+			Config:     &cfg.Webhook,
+			Sessions:   turnstore.NewSessionService(b.db),
+			Executions: executions,
+			Events:     turns,
+			Runtime:    b.engine,
+			Keys:       gatewaywebhook.EnvKeySource,
+			Handlers:   []gatewaywebhook.EventHandler{githubAdapter},
+			Logger:     b.logger,
+		})
+		if err != nil {
+			return err
+		}
+		if err := s.listeners.Add(ch.Listener()); err != nil {
+			return err
+		}
+		if err := b.group.Add(server.Background("webhook_reconcile", ch.RunReconcile)); err != nil {
 			return err
 		}
 	}

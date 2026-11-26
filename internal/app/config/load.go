@@ -156,7 +156,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		configkit.Under("channels.discord", cfg.Channels.Discord.Validate()),
 		configkit.Under("channels.telegram", cfg.Channels.Telegram.Validate()),
 		configkit.Under("channels.email", cfg.Channels.Email.Validate()),
-		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
+		configkit.Under("channels.http", cfg.Channels.HTTP.Validate()),
 		configkit.Under("broadcast", cfg.Broadcast.Validate()),
 		configkit.Under("scheduler", cfg.Scheduler.Validate()),
 		configkit.Under("memory", cfg.Memory.Validate()),

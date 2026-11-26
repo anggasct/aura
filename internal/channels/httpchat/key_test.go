@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 var keyShape = regexp.MustCompile(`^aura_sk_[a-z2-7]{12}_[a-z2-7]{52}$`)
@@ -42,7 +44,7 @@ func TestIssueKeyFailsClosedOnRandomSourceError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			source := &limitedReader{remaining: readable}
 			issued, err := issueKey(source)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeKeyGeneration {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeKeyGeneration {
 				t.Fatalf("issueKey error = %v, want %s", err, ErrorCodeKeyGeneration)
 			}
 			if issued.Plaintext != "" || issued.Digest != "" {
@@ -103,7 +105,7 @@ func TestParseKeyIsStrict(t *testing.T) {
 	for name, raw := range cases {
 		t.Run(name, func(t *testing.T) {
 			id, err := ParseKey(raw)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeKeyMalformed {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeKeyMalformed {
 				t.Fatalf("ParseKey error = %v, want %s", err, ErrorCodeKeyMalformed)
 			}
 			if id != "" {

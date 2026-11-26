@@ -784,7 +784,7 @@ func TestNewChatValidatesOptions(t *testing.T) {
 			opts := base()
 			mutate(&opts)
 			_, err := NewChat(&opts)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("NewChat error = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})

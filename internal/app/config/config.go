@@ -3,6 +3,7 @@ package config
 import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/channels/terminal"
 	legacyconfig "github.com/anggasct/aura/internal/config"
@@ -21,7 +22,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
-	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -36,10 +36,10 @@ import (
 )
 
 type Channels struct {
-	Discord  discord.Config    `json:"discord"`
-	Telegram telegram.Config   `json:"telegram"`
-	Email    email.Config      `json:"email"`
-	HTTP     legacyconfig.HTTP `json:"http"`
+	Discord  discord.Config  `json:"discord"`
+	Telegram telegram.Config `json:"telegram"`
+	Email    email.Config    `json:"email"`
+	HTTP     httpchat.Config `json:"http"`
 }
 
 type Config struct {
@@ -106,15 +106,7 @@ func Default() Config {
 			Discord:  discord.Default(),
 			Telegram: telegram.Default(),
 			Email:    email.Default(),
-			HTTP: legacyconfig.HTTP{
-				ListenAddress:       legacyconfig.HTTPListenAddress,
-				MaxBodyBytes:        legacyconfig.HTTPMaxBodyBytes,
-				RequestsPerMinute:   legacyconfig.HTTPRequestsPerMinute,
-				MaxConcurrentPerKey: legacyconfig.HTTPMaxConcurrentPerKey,
-				MaxHistoryMessages:  legacyconfig.HTTPMaxHistoryMessages,
-				MaxHistoryBytes:     legacyconfig.HTTPMaxHistoryBytes,
-				KeepaliveInterval:   configkit.Duration(legacyconfig.HTTPKeepaliveInterval),
-			},
+			HTTP:     httpchat.Default(),
 		},
 		Broadcast:   broadcast.Default(),
 		Scheduler:   schedule.Default(),

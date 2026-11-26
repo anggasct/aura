@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -47,10 +48,10 @@ func issueKey(source io.Reader) (IssuedKey, error) {
 	idBytes := make([]byte, keyIDBytes)
 	secretBytes := make([]byte, keySecretBytes)
 	if _, err := io.ReadFull(source, idBytes); err != nil {
-		return IssuedKey{}, &Error{Code: ErrorCodeKeyGeneration, Detail: "random source failed", Cause: err}
+		return IssuedKey{}, fault.Wrap(ErrorCodeKeyGeneration, "random source failed", err)
 	}
 	if _, err := io.ReadFull(source, secretBytes); err != nil {
-		return IssuedKey{}, &Error{Code: ErrorCodeKeyGeneration, Detail: "random source failed", Cause: err}
+		return IssuedKey{}, fault.Wrap(ErrorCodeKeyGeneration, "random source failed", err)
 	}
 	id := strings.ToLower(keyEncoding.EncodeToString(idBytes))[:KeyIDLength]
 	secret := strings.ToLower(keyEncoding.EncodeToString(secretBytes))
@@ -66,11 +67,11 @@ func KeyDigest(plaintext string) string {
 func ParseKey(raw string) (string, error) {
 	rest, found := strings.CutPrefix(raw, KeyPrefix)
 	if !found || len(rest) != KeyIDLength+1+keySecretLength || rest[KeyIDLength] != keySeparator {
-		return "", Errorf(ErrorCodeKeyMalformed, "api key has the wrong shape")
+		return "", fault.New(ErrorCodeKeyMalformed, "api key has the wrong shape")
 	}
 	id, secret := rest[:KeyIDLength], rest[KeyIDLength+1:]
 	if !principal.IsHTTPKeyID(id) || !isKeyAlphabet(secret) {
-		return "", Errorf(ErrorCodeKeyMalformed, "api key has characters outside its alphabet")
+		return "", fault.New(ErrorCodeKeyMalformed, "api key has characters outside its alphabet")
 	}
 	return id, nil
 }

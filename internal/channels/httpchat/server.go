@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -32,16 +33,18 @@ type Server struct {
 	down    atomic.Bool
 }
 
+var _ health.HealthProvider = (*Server)(nil)
+
 func NewServer(handler *Handler, listen string, grace time.Duration, logger *slog.Logger) (*Server, error) {
 	switch {
 	case handler == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "http handler must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "http handler must not be nil")
 	case listen == "":
-		return nil, Errorf(ErrorCodeInvalidArgument, "http listen address must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "http listen address must not be empty")
 	case grace <= 0:
-		return nil, Errorf(ErrorCodeInvalidArgument, "http shutdown grace must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "http shutdown grace must be positive")
 	case logger == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "logger must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "logger must not be nil")
 	}
 	return &Server{handler: handler, listen: listen, grace: grace, logger: logger}, nil
 }
@@ -93,13 +96,24 @@ func (s *Server) Serve(ctx context.Context, listener net.Listener) error {
 	}
 	switch {
 	case shutdownErr != nil:
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "http listener did not drain in time", Cause: shutdownErr}
+		return fault.Wrap(ErrorCodeConnectionFailed, "http listener did not drain in time", shutdownErr)
 	case serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed):
 		s.down.Store(true)
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "http listener stopped", Cause: serveErr}
+		return fault.Wrap(ErrorCodeConnectionFailed, "http listener stopped", serveErr)
 	default:
 		return nil
 	}
+}
+
+func (s *Server) HealthChecks() []health.RegisteredCheck {
+	if s == nil {
+		return nil
+	}
+	return []health.RegisteredCheck{{
+		ID:          healthComponent,
+		Checker:     s,
+		Remediation: RemediationReviewListener,
+	}}
 }
 
 func (s *Server) Check(context.Context) []health.Finding {

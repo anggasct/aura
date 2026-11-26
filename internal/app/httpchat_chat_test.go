@@ -23,6 +23,7 @@ import (
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -37,7 +38,7 @@ type idleRuntime struct{}
 
 func (idleRuntime) Run(context.Context, *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	return func(yield func(turn.Event, error) bool) {
-		yield(turn.Event{}, httpchat.Errorf(httpchat.ErrorCodeInvalidArgument, "no runtime in this test"))
+		yield(turn.Event{}, fault.New(httpchat.ErrorCodeInvalidArgument, "no runtime in this test"))
 	}
 }
 
@@ -494,7 +495,7 @@ func TestHTTPChatAppliesTheSharedAccessGates(t *testing.T) {
 		_, err := h.db.ExecContext(t.Context(), `
 			INSERT INTO usage_reservation (id, invocation_id, attempt, model_definition_id, window_day, window_month, reserved_cost_micros, state, expires_at, created_at, updated_at, principal_id, principal_class, reserved_tokens)
 			VALUES ('res-http', 'inv-http', 1, 'primary', ?, ?, 0, 'active', ?, ?, ?, ?, 'public', 5000)`,
-			time.Now().Format("2006-01-02"), time.Now().Format("2006-01"),
+			time.Now().UTC().Format("2006-01-02"), time.Now().UTC().Format("2006-01"),
 			time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), time.Now().UTC().Format(time.RFC3339Nano), "http:"+keyID)
 		if err != nil {
 			t.Fatalf("seed usage: %v", err)

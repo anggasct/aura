@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -53,15 +54,15 @@ var _ RepliesHandler = (*Replies)(nil)
 func NewReplies(opts *RepliesOptions) (*Replies, error) {
 	switch {
 	case opts == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "replies options must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "replies options must not be nil")
 	case opts.Sessions == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "session store must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "session store must not be nil")
 	case opts.Handoffs == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "handoff gate must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "handoff gate must not be nil")
 	case opts.Replies == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "reply source must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "reply source must not be nil")
 	case opts.Logger == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "logger must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "logger must not be nil")
 	}
 	return &Replies{sessions: opts.Sessions, handoffs: opts.Handoffs, replies: opts.Replies, logger: opts.Logger}, nil
 }
