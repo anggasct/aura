@@ -8,7 +8,6 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
@@ -157,7 +156,7 @@ func bindingLabel(scope *bindingScopeFlags, bindings []auraagent.Binding, index 
 	return strings.Join(fields, " ")
 }
 
-func channelAccounts(channels *config.Channels) []auraagent.ChannelAccount {
+func channelAccounts(channels *appconfig.Channels) []auraagent.ChannelAccount {
 	accounts := make([]auraagent.ChannelAccount, 0, len(channels.Discord.Accounts)+len(channels.Telegram.Accounts)+len(channels.Email.Accounts))
 	for i := range channels.Discord.Accounts {
 		account := &channels.Discord.Accounts[i]

@@ -7,13 +7,15 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/storage"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -32,13 +34,25 @@ func newTelegramAdapter(cfg *appconfig.Config, account *config.TelegramAccount, 
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := telegram.New(&cfg.Channels.Telegram, account, store.NewTelegramCursorStore(db), executor, &discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}, logger)
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
 	if err != nil {
 		return nil, err
 	}
-	adapter.SetSessionResolver(&discordConversationResolver{pointers: turnstore.NewConversationSessionStore(db)})
+	resolver, err := access.NewConversationResolver(turnstore.NewConversationSessionStore(db))
+	if err != nil {
+		return nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := telegram.New(&cfg.Channels.Telegram, account, store.NewTelegramCursorStore(db), executor, sessions, logger)
+	if err != nil {
+		return nil, err
+	}
+	adapter.SetSessionResolver(resolver)
 	adapter.SetSecretVault(buildSecretVault(cfg))
-	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))})
+	adapter.SetMediaStore(mediaStore)
 	adapter.SetUpdateLedger(turnstore.NewDedupeStore(db))
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)

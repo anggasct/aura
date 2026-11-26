@@ -9,6 +9,7 @@ import (
 	"time"
 
 	policy "github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -222,12 +223,12 @@ func TestNilArgumentsFailClosed(t *testing.T) {
 	}
 	if _, _, err := registry.Issue(nil, time.Now()); err == nil {
 		t.Error("nil binding issued")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Errorf("Issue(nil) code = %q, want %q", code, ErrorCodeInvalidArgument)
 	}
 	if _, _, err := registry.Await(t.Context(), "token", nil); err == nil {
 		t.Error("nil pending awaited")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Errorf("Await(nil) code = %q, want %q", code, ErrorCodeInvalidArgument)
 	}
 }

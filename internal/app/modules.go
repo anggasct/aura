@@ -218,6 +218,9 @@ func (b *build) buildSkills(ctx context.Context) error {
 	}
 	b.modules.skillRenderer = mod.Renderer()
 	b.modules.skills = mod.ChatCommands()
+	if b.onServer() && b.server.commandSkills != nil {
+		b.server.commandSkills.bind(b.modules.skills)
+	}
 	return nil
 }
 

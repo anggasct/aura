@@ -9,6 +9,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"golang.org/x/net/html"
 )
 
@@ -92,7 +93,7 @@ func TestHTMLToMarkdownFailsClosedOnOverDeepDocument(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rendered, truncated, err := HTMLToMarkdown(context.Background(), []byte(tc.source), 1<<20)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeHTMLParseFailed {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeHTMLParseFailed {
 				t.Fatalf("err = %v, want %s", err, ErrorCodeHTMLParseFailed)
 			}
 			if rendered != "" || truncated {
@@ -223,7 +224,7 @@ func TestHTMLToMarkdownRendersInLinearTime(t *testing.T) {
 
 func TestFetchFailsClosedOnOverDeepHTML(t *testing.T) {
 	document := strings.Repeat("<div>", 600) + "secret<!-- secret --><script>secret()</script>"
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 8192,
@@ -234,7 +235,7 @@ func TestFetchFailsClosedOnOverDeepHTML(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	outcome, err := adapter(context.Background(), fetchRequest("https://public.example/deep"), constraints())
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeHTMLParseFailed {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeHTMLParseFailed {
 		t.Fatalf("err = %v, want %s", err, ErrorCodeHTMLParseFailed)
 	}
 	if len(outcome.Output) != 0 || strings.Contains(err.Error(), "secret") {
@@ -243,7 +244,7 @@ func TestFetchFailsClosedOnOverDeepHTML(t *testing.T) {
 }
 
 func TestFetchTruncatedHTMLBodyIsValidUTF8(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 8192,

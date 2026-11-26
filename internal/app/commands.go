@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 )
@@ -27,7 +28,15 @@ const (
 	mcpTrustFileName = "trust.json"
 )
 
+func usageWrap(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &usageError{err}
+}
+
 func mountCommands(root *cobra.Command, gf *globalFlags) {
+	root.AddCommand(shellexec.Commands(usageWrap)...)
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
 	root.AddCommand(memory.Commands(memoryOpener(gf))...)
 	root.AddCommand(profile.Commands(profileOpener(gf))...)

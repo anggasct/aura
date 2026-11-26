@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"testing/iotest"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestEligible(t *testing.T) {
@@ -91,7 +93,7 @@ func TestSpool(t *testing.T) {
 			t.Setenv("TMPDIR", scratch)
 			file, err := Spool(tc.body, tc.limit)
 			if tc.wantCode != "" {
-				if code, ok := CodeOf(err); !ok || code != tc.wantCode {
+				if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != tc.wantCode {
 					t.Fatalf("Spool error = %v, want code %q", err, tc.wantCode)
 				}
 				if file != nil {

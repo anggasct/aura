@@ -3,12 +3,11 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -25,15 +24,14 @@ func (r *recordingOwnerApprover) DecideForOwner(_ context.Context, prompt *appro
 
 func workflowRunPrompt(expiresAt time.Time, timeout time.Duration) *approval.Prompt {
 	return &approval.Prompt{
-		ToolName:    "write_file",
-		SessionID:   "wf-run-1",
-		TurnID:      "turn-1",
-		PrincipalID: "telegram:7",
-		Arguments:   `{"path":"a.txt"}`,
-		ReasonCode:  "approval_required",
-		Timeout:     timeout,
-		ExpiresAt:   expiresAt,
-
+		ToolName:             "write_file",
+		SessionID:            "wf-run-1",
+		TurnID:               "turn-1",
+		PrincipalID:          "telegram:7",
+		Arguments:            `{"path":"a.txt"}`,
+		ReasonCode:           "approval_required",
+		Timeout:              timeout,
+		ExpiresAt:            expiresAt,
 		StandingGrantAllowed: true,
 	}
 }
@@ -94,7 +92,7 @@ func TestWorkflowOwnerRouteHoldsOnlyInFlightCalls(t *testing.T) {
 
 func TestWorkflowOwnerApproverStripsTheStandingOffer(t *testing.T) {
 	owners := &recordingOwnerApprover{accept: true}
-	approver := &workflowOwnerApprover{owners: owners, now: time.Now}
+	approver := approval.NewWorkflowApprover(owners, time.Now)
 	prompt := workflowRunPrompt(time.Now().Add(time.Hour), time.Minute)
 	accepted, err := approver.DecideForOwner(t.Context(), prompt, workflowRunRequester())
 	if err != nil || !accepted {
@@ -124,7 +122,7 @@ func TestWorkflowOwnerApproverLeavesTimeToRun(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			owners := &recordingOwnerApprover{accept: true}
-			approver := &workflowOwnerApprover{owners: owners, now: func() time.Time { return now }}
+			approver := approval.NewWorkflowApprover(owners, func() time.Time { return now })
 			accepted, err := approver.DecideForOwner(t.Context(), workflowRunPrompt(tc.expiresAt, execution), workflowRunRequester())
 			if err != nil {
 				t.Fatalf("DecideForOwner() error = %v", err)
@@ -152,10 +150,10 @@ func TestWorkflowOwnerApproverTurnsAnUnansweredCardIntoARefusal(t *testing.T) {
 		err     error
 		wantErr error
 	}{
-		{name: "discord unavailable", err: discordUnavailable()},
-		{name: "telegram unavailable", err: telegramUnavailable()},
-		{name: "discord timeout", err: discord.Errorf(discord.ErrorCodeApprovalTimeout, "owner did not answer the approval in time")},
-		{name: "telegram timeout", err: telegram.Errorf(telegram.ErrorCodeApprovalTimeout, "owner did not answer the approval in time")},
+		{name: "discord unavailable", err: fmt.Errorf("owner has no discord identity: %w", approval.ErrUnavailable)},
+		{name: "telegram unavailable", err: fmt.Errorf("owner has no telegram identity: %w", approval.ErrUnavailable)},
+		{name: "discord timeout", err: fmt.Errorf("owner did not answer the approval in time: %w", approval.ErrTimeout)},
+		{name: "telegram timeout", err: fmt.Errorf("owner did not answer the approval in time: %w", approval.ErrTimeout)},
 		{name: "context cancelled", err: context.Canceled, wantErr: context.Canceled},
 		{name: "deadline exceeded", err: context.DeadlineExceeded, wantErr: context.DeadlineExceeded},
 		{name: "uncoded failure", err: failure, wantErr: failure},
@@ -163,7 +161,7 @@ func TestWorkflowOwnerApproverTurnsAnUnansweredCardIntoARefusal(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			adapter := &scriptedApprover{name: "owner", err: tc.err, log: &askLog{}}
-			approver := &workflowOwnerApprover{owners: newOwnerApprovalRouter([]approvalAdapter{adapter}, nil), now: time.Now}
+			approver := approval.NewWorkflowApprover(approval.NewOwnerRouter(ownerApprovers([]approvalAdapter{adapter}), nil), time.Now)
 			accepted, err := approver.DecideForOwner(t.Context(), workflowRunPrompt(time.Now().Add(time.Hour), time.Minute), workflowRunRequester())
 			if accepted {
 				t.Fatal("an unanswered card was approved")

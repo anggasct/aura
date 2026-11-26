@@ -19,11 +19,6 @@ import (
 )
 
 const (
-	providerDuckDuckGo = "duckduckgo"
-	providerBrave      = "brave"
-	providerTavily     = "tavily"
-	providerSearXNG    = "searxng"
-
 	userAgent = "Aura (+https://github.com/anggasct/aura)"
 
 	detailBlocked       = "search provider blocked the request"
@@ -84,7 +79,7 @@ type searcher struct {
 	client     *http.Client
 }
 
-func New(options *Options) (toolbroker.Adapter, error) {
+func NewAdapter(options *Options) (toolbroker.Adapter, error) {
 	if options == nil {
 		return nil, errors.New("search: options must not be nil")
 	}
@@ -113,16 +108,16 @@ func New(options *Options) (toolbroker.Adapter, error) {
 
 func selectProvider(options *Options) (provider, credentialMode, error) {
 	switch options.Provider {
-	case providerDuckDuckGo:
+	case ProviderDuckDuckGo:
 		if !options.CredentialRef.IsZero() {
 			return nil, credentialNever, errors.New("search: provider duckduckgo does not take a credential")
 		}
 		return duckDuckGo{}, credentialNever, rejectEndpoint(options)
-	case providerBrave:
+	case ProviderBrave:
 		return brave{}, credentialRequired, rejectEndpoint(options)
-	case providerTavily:
+	case ProviderTavily:
 		return tavily{}, credentialRequired, rejectEndpoint(options)
-	case providerSearXNG:
+	case ProviderSearXNG:
 		if options.Endpoint == "" {
 			return nil, credentialNever, errors.New("search: provider searxng requires an endpoint")
 		}

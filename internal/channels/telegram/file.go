@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func (c *botClient) getFile(ctx context.Context, token, fileID string) (fileInfo, error) {
@@ -41,7 +42,7 @@ func (c *botClient) download(ctx context.Context, token, filePath string, limit 
 	}
 	file, err := media.Spool(resp.Body, limit)
 	if err != nil {
-		if code, ok := media.CodeOf(err); ok && code == media.ErrorCodeSizeExceeded {
+		if fault.HasCode(err, media.ErrorCodeSizeExceeded) {
 			return nil, Errorf(ErrorCodeAttachmentRejected, "file exceeds the size bound")
 		}
 		return nil, Errorf(ErrorCodeAttachmentRejected, "file download did not complete")

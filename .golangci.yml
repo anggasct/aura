@@ -146,14 +146,8 @@ linters:
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/tools
               desc: the builtin adapter set is assembled in internal/modules/builtin; the app composition root calls that constructor instead
-            - pkg: github.com/anggasct/aura/internal/modules/shellexec
-              desc: the exec adapter is constructed by internal/modules/builtin, not by the app composition root
-            - pkg: github.com/anggasct/aura/internal/modules/fetch
-              desc: the fetch adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/filesystem
               desc: the filesystem adapters are constructed by internal/modules/builtin, not by the app composition root
-            - pkg: github.com/anggasct/aura/internal/modules/search
-              desc: the search adapter is constructed by internal/modules/builtin, not by the app composition root
     errcheck:
       # A deliberate ignore is written `_ =` at the call site so the decision
       # stays visible in review; check-blank would make that idiom impossible.

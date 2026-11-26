@@ -18,6 +18,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -329,7 +330,7 @@ func TestStrictSecretVaultNamesEveryUnresolvedReferenceAndMatchesTheLenientVault
 		{ID: "set", SecretEnv: "KB_TEST_SET_SECRET"},
 		{ID: "unset", SecretEnv: "KB_TEST_UNSET_SECRET_ONE"},
 	}
-	cfg.Tools = &config.Tools{WebSearch: config.ToolWebSearch{CredentialRef: secrettest.Ref("env://KB_TEST_UNSET_SECRET_TWO")}}
+	cfg.Tools = &config.Tools{WebSearch: search.Config{CredentialRef: secrettest.Ref("env://KB_TEST_UNSET_SECRET_TWO")}}
 
 	_, err := buildStrictSecretVault(&cfg)
 	if err == nil || !strings.Contains(err.Error(), "webhook_unset") || !strings.Contains(err.Error(), "web_search_credential") {

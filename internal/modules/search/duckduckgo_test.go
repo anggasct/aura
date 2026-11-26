@@ -90,7 +90,7 @@ func TestDuckDuckGoKeepsAURLWithoutAWrapper(t *testing.T) {
 
 func TestDuckDuckGoChallengePageIsReportedAsBlockedWithOneRequest(t *testing.T) {
 	var captured capturedRequest
-	options := optionsFor(providerDuckDuckGo)
+	options := optionsFor(ProviderDuckDuckGo)
 	options.client = cannedClient(http.StatusAccepted, duckDuckGoChallenge, &captured)
 	_, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
 	if classOf(err) != toolbroker.ResultExecutionFailed || detailOf(err) != "search provider blocked the request" {
@@ -104,7 +104,7 @@ func TestDuckDuckGoChallengePageIsReportedAsBlockedWithOneRequest(t *testing.T) 
 func TestDuckDuckGoQueryEchoedInAPageDoesNotTriggerTheChallenge(t *testing.T) {
 	page := strings.Replace(duckDuckGoFixture, "go at DuckDuckGo", `id="challenge-form" challenge-form at DuckDuckGo`, 1)
 	page = strings.Replace(page, `<div class="serp__results">`, `<input type="text" name="q" value="challenge-form" data-note="id=&quot;challenge-form&quot;"><div class="serp__results">`, 1)
-	options := optionsFor(providerDuckDuckGo)
+	options := optionsFor(ProviderDuckDuckGo)
 	options.client = cannedClient(http.StatusOK, page, nil)
 	got, err := callSearch(newAdapter(t, options), `{"query":"challenge-form"}`)
 	if err != nil {
@@ -125,7 +125,7 @@ func TestDuckDuckGoPageWithoutReadableResultsIsNotAnEmptyAnswer(t *testing.T) {
 	}
 	for name, page := range pages {
 		t.Run(name, func(t *testing.T) {
-			options := optionsFor(providerDuckDuckGo)
+			options := optionsFor(ProviderDuckDuckGo)
 			options.client = cannedClient(http.StatusOK, page, nil)
 			_, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
 			if classOf(err) != toolbroker.ResultExecutionFailed || detailOf(err) != "search provider returned no readable results" {
