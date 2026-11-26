@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 )
 
@@ -193,7 +192,7 @@ func TestLoad_KnowledgeRejectsUnknownKeyAndShape(t *testing.T) {
 
 func TestLoad_KnowledgeSectionKeepsVersionGateFirst(t *testing.T) {
 	_, err := Load(writeDiscordConfig(t, "version: 2\nknowledge:\n  embedding:\n    bogus: 1\n"))
-	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeVersionUnsupported {
+	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
 		t.Fatalf("error = %v, want the version gate", err)
 	}
 }

@@ -1,12 +1,21 @@
-package store
+package workflow
 
 import (
+	"database/sql"
 	"path/filepath"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store/history"
 )
+
+func seedMigrationSession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+		sessionID, ownerID, `{}`, "2026-09-12T12:00:00Z", "2026-09-12T12:00:00Z"); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+}
 
 func TestMigrationAddsWorkflowApprovalWithItsConstraints(t *testing.T) {
 	ctx := t.Context()
@@ -22,7 +31,7 @@ func TestMigrationAddsWorkflowApprovalWithItsConstraints(t *testing.T) {
 	if err != nil || applied != 48 || latest != 48 {
 		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
 	}
-	seedMemorySession(t, db, "sess-1", "owner-1")
+	seedMigrationSession(t, db, "sess-1", "owner-1")
 	for version := 1; version <= 12; version++ {
 		if _, err := db.ExecContext(ctx, `INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES ('flow', ?, 'g', 'generated', '{}', 'digest', '2026-11-13T10:00:00Z')`, version); err != nil {
 			t.Fatalf("seed definition: %v", err)

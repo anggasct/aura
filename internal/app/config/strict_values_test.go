@@ -7,7 +7,6 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
@@ -206,7 +205,7 @@ func TestWrittenEmptyPersonaValuesAreRefused(t *testing.T) {
 		fields string
 		path   string
 		line   string
-		code   legacyconfig.ErrorCode
+		code   ErrorCode
 		detail string
 		clean  string
 	}{

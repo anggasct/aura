@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -26,17 +25,17 @@ import (
 const testdataDir = "../../../testdata"
 
 const (
-	invalidCode    = legacyconfig.ErrorCode(configkit.ErrorCodeInvalid)
-	unknownKeyCode = legacyconfig.ErrorCode(configkit.ErrorCodeUnknownKey)
-	malformedCode  = legacyconfig.ErrorCode(configkit.ErrorCodeMalformed)
+	invalidCode    = ErrorCode(configkit.ErrorCodeInvalid)
+	unknownKeyCode = ErrorCode(configkit.ErrorCodeUnknownKey)
+	malformedCode  = ErrorCode(configkit.ErrorCodeMalformed)
 
-	personaInvalidCode = legacyconfig.ErrorCode(auraagent.ErrorCodePersonaInvalid)
-	personaSecretCode  = legacyconfig.ErrorCode(auraagent.ErrorCodePersonaSecret)
-	bindingInvalidCode = legacyconfig.ErrorCode(auraagent.ErrorCodeBindingInvalid)
+	personaInvalidCode = ErrorCode(auraagent.ErrorCodePersonaInvalid)
+	personaSecretCode  = ErrorCode(auraagent.ErrorCodePersonaSecret)
+	bindingInvalidCode = ErrorCode(auraagent.ErrorCodeBindingInvalid)
 
-	modelProtocolInvalidCode       = legacyconfig.ErrorCode(model.ErrorCodeProtocolInvalid)
-	modelCapabilityUnsupportedCode = legacyconfig.ErrorCode(model.ErrorCodeCapabilityUnsupported)
-	modelProviderInvalidCode       = legacyconfig.ErrorCode(model.ErrorCodeProviderInvalid)
+	modelProtocolInvalidCode       = ErrorCode(model.ErrorCodeProtocolInvalid)
+	modelCapabilityUnsupportedCode = ErrorCode(model.ErrorCodeCapabilityUnsupported)
+	modelProviderInvalidCode       = ErrorCode(model.ErrorCodeProviderInvalid)
 )
 
 func unknownKeyText(path, position string) string {
@@ -64,21 +63,21 @@ func requireProblemText(t *testing.T, err error, want string) {
 	}
 }
 
-func codeOf(err error) (legacyconfig.ErrorCode, bool) {
-	if code, ok := fault.CodeOf[legacyconfig.ErrorCode](err); ok {
+func codeOf(err error) (ErrorCode, bool) {
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
 		return code, true
 	}
 	if code, ok := fault.CodeOf[configkit.ErrorCode](err); ok {
-		return legacyconfig.ErrorCode(code), true
+		return ErrorCode(code), true
 	}
 	if code, ok := fault.CodeOf[model.ErrorCode](err); ok {
-		return legacyconfig.ErrorCode(code), true
+		return ErrorCode(code), true
 	}
 	if code, ok := fault.CodeOf[auraagent.ErrorCode](err); ok {
-		return legacyconfig.ErrorCode(code), true
+		return ErrorCode(code), true
 	}
 	if code, ok := fault.CodeOf[principal.ErrorCode](err); ok {
-		return legacyconfig.ErrorCode(code), true
+		return ErrorCode(code), true
 	}
 	return "", false
 }
@@ -364,8 +363,8 @@ func TestLoad_WrongVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for unsupported version, got nil")
 	}
-	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeVersionUnsupported {
-		t.Errorf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, legacyconfig.ErrorCodeVersionUnsupported)
+	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+		t.Errorf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
 	}
 	if !strings.Contains(err.Error(), `unsupported version 2 (supported: 1)`) {
 		t.Errorf("error %q does not report unsupported version", err)
@@ -376,8 +375,8 @@ func TestLoad_EnvironmentCannotUpgradeSchemaVersion(t *testing.T) {
 	path := writeTempConfig(t, "version: 1\nserver:\n  host: 127.0.0.1\n")
 	t.Setenv("AURA_VERSION", "2")
 	_, err := Load(path)
-	if code, ok := codeOf(err); !ok || code != legacyconfig.ErrorCodeVersionUnsupported {
-		t.Fatalf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, legacyconfig.ErrorCodeVersionUnsupported)
+	if code, ok := codeOf(err); !ok || code != ErrorCodeVersionUnsupported {
+		t.Fatalf("codeOf(%v) = %q, %v; want %q, true", err, code, ok, ErrorCodeVersionUnsupported)
 	}
 }
 
@@ -693,7 +692,7 @@ models:
 	tests := []struct {
 		name    string
 		content string
-		code    legacyconfig.ErrorCode
+		code    ErrorCode
 		want    string
 	}{
 		{
@@ -1095,7 +1094,7 @@ func TestDurationYAMLRoundTrip(t *testing.T) {
 	}
 }
 
-func wantCode(t *testing.T, err error, want legacyconfig.ErrorCode) {
+func wantCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
 	if err == nil {
 		t.Fatalf("expected error with code %s, got nil", want)

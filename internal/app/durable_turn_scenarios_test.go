@@ -14,9 +14,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -214,7 +214,7 @@ func skillAcrossLives(_ *testing.T, ledger *turnLedger) lifeWiring {
 }
 
 func transientSkillRender(_ *testing.T, ledger *turnLedger) lifeWiring {
-	stub := &ledgerSkill{ledger: ledger, block: turn.SkillContextStart + "]\nUNUSED-BLOCK\n" + turn.SkillContextEnd, err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	stub := &ledgerSkill{ledger: ledger, block: turn.SkillContextStart + "]\nUNUSED-BLOCK\n" + turn.SkillContextEnd, err: fault.New(sqlite.ErrorCodeUnavailable, "read skill")}
 	return lifeWiring{renderer: stub, skillContext: stub}
 }
 

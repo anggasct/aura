@@ -14,7 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type stubSkillRenderer struct {
@@ -148,7 +147,7 @@ func TestPinnedTurnFailsClosedWhenTheSkillIsUnavailable(t *testing.T) {
 
 func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T) {
 	for name, renderer := range map[string]SkillRenderer{
-		"storage failed":  &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")},
+		"storage failed":  &stubSkillRenderer{err: fault.New(sqlite.ErrorCodeUnavailable, "read skill")},
 		"storage busy":    &stubSkillRenderer{err: fault.New(sqlite.ErrorCodeBusy, "read skill")},
 		"renderer broken": &stubSkillRenderer{err: errors.New("renderer panicked")},
 	} {
@@ -180,7 +179,7 @@ func TestPinnedTurnSurfacesTransientRenderFailuresWithTheirOwnCode(t *testing.T)
 }
 
 func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
-	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	renderer := &stubSkillRenderer{err: fault.New(sqlite.ErrorCodeUnavailable, "read skill")}
 	engine, db, events := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, &pinRecordingExecutor{})
 	mustCreateSession(t, db, "session-a")
 	inv := &journalInvocation{}
@@ -291,7 +290,7 @@ func TestDurablePinnedTurnRecordsOneActivation(t *testing.T) {
 
 func TestDurablePinnedTurnFailsAndReleasesOnTransientRenderFailure(t *testing.T) {
 	executor := &pinRecordingExecutor{}
-	renderer := &stubSkillRenderer{err: store.Errorf(store.ErrorCodeStorageUnavailable, "read skill")}
+	renderer := &stubSkillRenderer{err: fault.New(sqlite.ErrorCodeUnavailable, "read skill")}
 	engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, executor)
 	pinned := sampleEnvelope("conv-1", "msg-1")
 	pinned.Skill = samplePin()

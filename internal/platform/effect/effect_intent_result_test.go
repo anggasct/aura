@@ -1,4 +1,4 @@
-package store
+package effect
 
 import (
 	"database/sql"
@@ -14,6 +14,14 @@ type legacyIntent struct {
 	id, state, receipt string
 }
 
+func seedLegacyEffectSession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?,?,?,?,?) ON CONFLICT(id) DO NOTHING`,
+		sessionID, ownerID, `{}`, "2026-09-12T12:00:00Z", "2026-09-12T12:00:00Z"); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+}
+
 func TestMigrationKeepsEffectIntentsWithoutARecordedResult(t *testing.T) {
 	ctx := t.Context()
 	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "legacy.db"), sqlite.Options{})
@@ -24,7 +32,7 @@ func TestMigrationKeepsEffectIntentsWithoutARecordedResult(t *testing.T) {
 	if err := sqlite.Migrate(ctx, db, history.Migrations()[:44]); err != nil {
 		t.Fatalf("migrate to v%d: %v", 44, err)
 	}
-	seedMemorySession(t, db, "sess-1", "owner-1")
+	seedLegacyEffectSession(t, db, "sess-1", "owner-1")
 	legacy := []legacyIntent{
 		{id: "intent-succeeded", state: "succeeded", receipt: `{"output_bytes":2}`},
 		{id: "intent-started", state: "started"},
