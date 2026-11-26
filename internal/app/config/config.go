@@ -3,12 +3,14 @@ package config
 import (
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/memory"
@@ -34,7 +36,7 @@ import (
 )
 
 type Channels struct {
-	Discord  legacyconfig.Discord  `json:"discord"`
+	Discord  discord.Config        `json:"discord"`
 	Telegram legacyconfig.Telegram `json:"telegram"`
 	Email    email.Config          `json:"email"`
 	HTTP     legacyconfig.HTTP     `json:"http"`
@@ -68,7 +70,7 @@ type Config struct {
 	Owner        *principal.Owner            `json:"owner,omitempty"`
 	Children     *child.Config               `json:"children,omitempty"`
 	Access       *principal.Config           `json:"access,omitempty"`
-	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
+	Sync         *gitsync.Config             `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
 	Interpreter  codeexec.Config             `json:"interpreter"`
@@ -101,11 +103,7 @@ func Default() Config {
 		Terminal:     legacyconfig.DefaultTerminal(),
 		Webhook:      platformwebhook.Default(),
 		Channels: Channels{
-			Discord: legacyconfig.Discord{
-				MinEditInterval:          configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes:       20971520,
-				ThreadAutoArchiveMinutes: 1440,
-			},
+			Discord: discord.Default(),
 			Telegram: legacyconfig.Telegram{
 				Polling: legacyconfig.TelegramPolling{
 					Timeout:    configkit.Duration(30 * time.Second),
@@ -135,7 +133,7 @@ func Default() Config {
 		Memory:      memory.Default(),
 		Interpreter: codeexec.Default(),
 		Skills:      &defaultSkills,
-		Sync:        legacyconfig.DefaultSync(),
+		Sync:        gitsync.Default(),
 		Vision:      &defaultVision,
 		Context:     &defaultContext,
 		Profile:     &defaultProfile,

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type stubGraph struct {
@@ -25,7 +27,7 @@ func TestDecideAdvance(t *testing.T) {
 	}
 	if _, err := DecideAdvance(t.Context(), "", "bbb"); err == nil {
 		t.Fatal("empty ref must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Fatalf("code = %v,%v want sync_conflict", code, ok)
 	}
 }
@@ -37,7 +39,7 @@ func TestCheckFastForward(t *testing.T) {
 	}
 	if _, err := CheckFastForward(t.Context(), &stubGraph{ancestor: false}, "aaa", "bbb"); err == nil {
 		t.Fatal("divergence must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Fatalf("code = %v,%v want sync_conflict", code, ok)
 	}
 	if _, err := CheckFastForward(t.Context(), &stubGraph{err: errors.New("boom")}, "aaa", "bbb"); err == nil {

@@ -6,6 +6,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	policy "github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -42,19 +43,19 @@ func (c ProposalCard) tooLongNotice() string {
 
 func (a *Adapter) OfferProposal(ctx context.Context, card ProposalCard, decide ProposalDecider) error {
 	if decide == nil {
-		return Errorf(ErrorCodeInvalidArgument, "proposal decider must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "proposal decider must not be nil")
 	}
 	owners := a.owners.OwnerExternalIDs(principal.ChannelDiscord)
 	if len(owners) == 0 {
-		return Errorf(ErrorCodeApprovalUnavailable, "owner has no discord identity")
+		return approvalUnavailable("owner has no discord identity")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return Errorf(ErrorCodeApprovalUnavailable, "bot token is unavailable")
+		return approvalUnavailable("bot token is unavailable")
 	}
 	dmChannel, err := a.ownerDMChannel(ctx, token, owners[0])
 	if err != nil {
-		return Errorf(ErrorCodeApprovalUnavailable, "owner dm channel is unavailable")
+		return approvalUnavailable("owner dm channel is unavailable")
 	}
 	content := card.content()
 	if len([]rune(content)) > discordMessageLimit {
@@ -70,12 +71,12 @@ func (a *Adapter) OfferProposal(ctx context.Context, card ProposalCard, decide P
 	}
 	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {
-		return Errorf(ErrorCodeApprovalUnavailable, "approval token mint failed")
+		return approvalUnavailable("approval token mint failed")
 	}
 	cardID, err := a.postApprovalCard(ctx, token, dmChannel, content, tokenID, pending)
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)
-		return Errorf(ErrorCodeApprovalUnavailable, "proposal card delivery failed")
+		return approvalUnavailable("proposal card delivery failed")
 	}
 	go a.awaitProposal(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID}, card.ID, decide)
 	return nil

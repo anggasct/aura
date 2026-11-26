@@ -11,6 +11,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
@@ -198,7 +199,7 @@ func TestDecideForOwnerTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 	personas[1].ApprovalTimeout = configkit.Duration(80 * time.Millisecond)
 	adapter, observer := newHTTPOwnerAdapter(t, stub, []string{"discord:777"}, personas)
 	accepted, err := adapter.DecideForOwner(t.Context(), httpPrompt(time.Now().Add(time.Hour)), httpRequester(principal.ClassPublic))
-	if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalTimeout {
+	if accepted || !fault.HasCode(err, ErrorCodeApprovalTimeout) {
 		t.Fatalf("DecideForOwner() = %v, %v; want approval_timeout", accepted, err)
 	}
 	if posts, _, patches := stub.counts(); posts != 1 || patches != 1 {
@@ -223,7 +224,7 @@ func TestDecideForOwnerUnavailableDenies(t *testing.T) {
 			stub.dmCode = tc.dmCode
 			adapter, observer := newHTTPOwnerAdapter(t, stub, tc.owners, accessPersonas())
 			accepted, err := adapter.DecideForOwner(t.Context(), httpPrompt(time.Now().Add(time.Minute)), httpRequester(principal.ClassTrusted))
-			if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalUnavailable {
+			if accepted || !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
 				t.Fatalf("DecideForOwner() = %v, %v; want approval_unavailable", accepted, err)
 			}
 			if posts, _, _ := stub.counts(); posts != 0 {
@@ -262,7 +263,7 @@ func TestDecideForOwnerRejectsInvalidArguments(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			accepted, err := tc.decide()
-			if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeInvalidArgument {
+			if accepted || !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("DecideForOwner() = %v, %v; want a denial with invalid_argument", accepted, err)
 			}
 		})
@@ -290,7 +291,7 @@ func TestServesPersonaFollowsTheAccountBinding(t *testing.T) {
 			}
 		})
 	}
-	adapter.SetPersonaRouter(nil)
+	adapter.router = nil
 	if adapter.ServesPersona("team") {
 		t.Error("an adapter without a router serves a persona")
 	}

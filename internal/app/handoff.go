@@ -135,7 +135,7 @@ func newHTTPHandoffNotifier(requesters httpRequesters, adapters []approvalAdapte
 	return handoff.NewHTTPNotifier(&httpRequesterLookupAdapter{requesters: requesters}, newOwnerHandoffRouter(notifiers))
 }
 
-func discordAccount(cfg *appconfig.Config, name string) (*config.DiscordAccount, bool) {
+func discordAccount(cfg *appconfig.Config, name string) (*discord.Account, bool) {
 	for i := range cfg.Channels.Discord.Accounts {
 		if cfg.Channels.Discord.Accounts[i].Name == name {
 			return &cfg.Channels.Discord.Accounts[i], true

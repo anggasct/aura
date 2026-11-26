@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func promoteSnapshot() (snapshot FetchSnapshot, contents map[string][]byte) {
@@ -40,7 +42,7 @@ func TestPlanPromotionSkipsSkillReview(t *testing.T) {
 	}
 	if _, _, err := PlanPromotion(snapshot, AdvanceConflict, nil); err == nil {
 		t.Fatal("conflict decision must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Fatalf("code = %v,%v want sync_conflict", code, ok)
 	}
 }
@@ -278,7 +280,7 @@ func TestApplyPromotionRejectsDenied(t *testing.T) {
 	rollback := RollbackManifest{}
 	if err := ApplyPromotion(t.Context(), t.TempDir(), plan, map[string][]byte{"skills/state.db": content}, &rollback); err == nil {
 		t.Fatal("denied path must fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 }
