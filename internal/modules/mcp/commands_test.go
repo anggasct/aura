@@ -10,7 +10,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -48,10 +47,10 @@ func TestMCPCommandsListAndTrustRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewFileTrustRegistry: %v", err)
 	}
-	servers := []config.MCPServer{
-		{Name: "docs", Transport: config.MCPTransportStdio, Command: "/usr/bin/docs-mcp"},
+	servers := []ServerConfig{
+		{Name: "docs", Transport: TransportStdio, Command: "/usr/bin/docs-mcp"},
 	}
-	open := func(cmd *cobra.Command, fn func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error) error {
+	open := func(cmd *cobra.Command, fn func(ctx context.Context, servers []ServerConfig, registry *FileTrustRegistry) error) error {
 		return fn(cmd.Context(), servers, registry)
 	}
 

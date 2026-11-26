@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -52,11 +51,12 @@ func TestClientInMemory(t *testing.T) {
 		_ = server.Run(ctx, serverTransport)
 	}()
 
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "mem-server",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		RequestTimeout: configkit.Duration(5 * time.Second),
 		StartupTimeout: configkit.Duration(5 * time.Second),
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 
 	client, err := NewClient(serverCfg, nil)
@@ -103,9 +103,12 @@ func TestClientMissingToolCapability(t *testing.T) {
 		_ = server.Run(ctx, serverTransport)
 	}()
 
-	serverCfg := &config.MCPServer{
-		Name:      "no-tools-server",
-		Transport: config.MCPTransportStdio,
+	serverCfg := &ServerConfig{
+		Name:           "no-tools-server",
+		Transport:      TransportStdio,
+		StartupTimeout: DefaultStartupTimeout,
+		RequestTimeout: DefaultRequestTimeout,
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 
 	client, err := NewClient(serverCfg, nil)
@@ -125,9 +128,12 @@ func TestClientMissingToolCapability(t *testing.T) {
 
 func TestClientNotConnectedErrors(t *testing.T) {
 	ctx := t.Context()
-	serverCfg := &config.MCPServer{
-		Name:      "unconnected",
-		Transport: config.MCPTransportStdio,
+	serverCfg := &ServerConfig{
+		Name:           "unconnected",
+		Transport:      TransportStdio,
+		StartupTimeout: DefaultStartupTimeout,
+		RequestTimeout: DefaultRequestTimeout,
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 
 	client, err := NewClient(serverCfg, nil)
@@ -179,9 +185,9 @@ func TestHelperProcess(t *testing.T) {
 func TestClientStdioTransport(t *testing.T) {
 	ctx := t.Context()
 
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "local-stdio",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        "/bin/contained-stdio",
 		Environment:    map[string]string{"SERVER_MODE": "test"},
 		StartupTimeout: configkit.Duration(10 * time.Second),
@@ -240,11 +246,12 @@ func TestClientUnsupportedProtocolVersion(t *testing.T) {
 		_ = server.Run(ctx, serverTransport)
 	}()
 
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "ancient-server",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		StartupTimeout: configkit.Duration(3 * time.Second),
 		RequestTimeout: configkit.Duration(3 * time.Second),
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 
 	client, err := NewClient(serverCfg, nil)
@@ -303,11 +310,12 @@ func TestClientDiscoveryValidation(t *testing.T) {
 			_ = server.Run(ctx, serverTransport)
 		}()
 
-		serverCfg := &config.MCPServer{
+		serverCfg := &ServerConfig{
 			Name:           "dup-server",
-			Transport:      config.MCPTransportStdio,
+			Transport:      TransportStdio,
 			StartupTimeout: configkit.Duration(3 * time.Second),
 			RequestTimeout: configkit.Duration(3 * time.Second),
+			MaxMessageSize: DefaultMaxMessageSize,
 		}
 		client, err := NewClient(serverCfg, nil)
 		if err != nil {
@@ -351,9 +359,9 @@ func TestClientDiscoveryValidation(t *testing.T) {
 			_ = server.Run(ctx, serverTransport)
 		}()
 
-		serverCfg := &config.MCPServer{
+		serverCfg := &ServerConfig{
 			Name:           "large-server",
-			Transport:      config.MCPTransportStdio,
+			Transport:      TransportStdio,
 			MaxMessageSize: 30,
 			StartupTimeout: configkit.Duration(3 * time.Second),
 			RequestTimeout: configkit.Duration(3 * time.Second),
@@ -388,12 +396,12 @@ func TestClientStreamableHTTPTransport(t *testing.T) {
 	httpServer := httptest.NewServer(handler)
 	defer httpServer.Close()
 
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "http-server",
-		Transport:      config.MCPTransportStreamableHTTP,
+		Transport:      TransportStreamableHTTP,
 		URL:            httpServer.URL,
 		RequestTimeout: configkit.Duration(5 * time.Second),
-		ConnectTimeout: configkit.Duration(5 * time.Second),
+		ConnectTimeout: durationPtr(5 * time.Second),
 		StartupTimeout: configkit.Duration(5 * time.Second),
 		MaxMessageSize: 1024 * 1024,
 	}
@@ -420,12 +428,15 @@ func TestClientStreamableHTTPTransport(t *testing.T) {
 
 func TestClientStreamableHTTPRequiresAuth(t *testing.T) {
 	ctx := t.Context()
-	serverCfg := &config.MCPServer{
-		Name:      "auth-server",
-		Transport: config.MCPTransportStreamableHTTP,
-		URL:       "http://127.0.0.1:9/mcp",
-		Auth: &config.MCPAuth{
-			Static: &config.MCPStaticAuth{CredentialRef: "secret://key"},
+	serverCfg := &ServerConfig{
+		Name:           "auth-server",
+		Transport:      TransportStreamableHTTP,
+		URL:            "http://127.0.0.1:9/mcp",
+		StartupTimeout: DefaultStartupTimeout,
+		RequestTimeout: DefaultRequestTimeout,
+		MaxMessageSize: DefaultMaxMessageSize,
+		Auth: &AuthConfig{
+			Static: &StaticAuthConfig{CredentialRef: mustSecretRef(t, "env://MCP_MISSING_KEY")},
 		},
 	}
 	client, err := NewClient(serverCfg, nil,
@@ -445,11 +456,13 @@ func TestClientStreamableHTTPRequiresAuth(t *testing.T) {
 
 func TestClientStreamableHTTPWithoutClientFailsClosed(t *testing.T) {
 	ctx := t.Context()
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "bare-server",
-		Transport:      config.MCPTransportStreamableHTTP,
+		Transport:      TransportStreamableHTTP,
 		URL:            "http://127.0.0.1:9/mcp",
+		StartupTimeout: DefaultStartupTimeout,
 		RequestTimeout: configkit.Duration(5 * time.Second),
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 	client, err := NewClient(serverCfg, nil)
 	if err != nil {
@@ -465,11 +478,13 @@ func TestClientStreamableHTTPWithoutClientFailsClosed(t *testing.T) {
 
 func TestClientStreamableHTTPWithoutPolicyFailsClosed(t *testing.T) {
 	ctx := t.Context()
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "no-policy-server",
-		Transport:      config.MCPTransportStreamableHTTP,
+		Transport:      TransportStreamableHTTP,
 		URL:            "http://127.0.0.1:9/mcp",
+		StartupTimeout: DefaultStartupTimeout,
 		RequestTimeout: configkit.Duration(5 * time.Second),
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 	client, err := NewClient(serverCfg, nil, WithHTTPClient(&http.Client{}))
 	if err != nil {
@@ -512,11 +527,12 @@ func TestClientDiscoveryNameValidation(t *testing.T) {
 			})
 			clientTransport, serverTransport := sdk.NewInMemoryTransports()
 			go func() { _ = server.Run(ctx, serverTransport) }()
-			serverCfg := &config.MCPServer{
+			serverCfg := &ServerConfig{
 				Name:           "bad-server",
-				Transport:      config.MCPTransportStdio,
+				Transport:      TransportStdio,
 				StartupTimeout: configkit.Duration(3 * time.Second),
 				RequestTimeout: configkit.Duration(3 * time.Second),
+				MaxMessageSize: DefaultMaxMessageSize,
 			}
 			client, err := NewClient(serverCfg, nil)
 			if err != nil {
@@ -530,6 +546,41 @@ func TestClientDiscoveryNameValidation(t *testing.T) {
 				t.Fatalf("expected %s to fail", tc.name)
 			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrSchemaInvalid {
 				t.Fatalf("expected %s, got %s (%v)", ErrSchemaInvalid, code, err)
+			}
+		})
+	}
+}
+
+func TestNewClientRejectsZeroRequestTimeout(t *testing.T) {
+	base := func() *ServerConfig {
+		return &ServerConfig{
+			Name:           "bounded",
+			Transport:      TransportStdio,
+			Command:        "/usr/local/bin/docs-mcp",
+			StartupTimeout: DefaultStartupTimeout,
+			RequestTimeout: DefaultRequestTimeout,
+			MaxMessageSize: DefaultMaxMessageSize,
+		}
+	}
+	cases := []struct {
+		name   string
+		mutate func(*ServerConfig)
+	}{
+		{"zero request_timeout", func(s *ServerConfig) { s.RequestTimeout = 0 }},
+		{"zero startup_timeout", func(s *ServerConfig) { s.StartupTimeout = 0 }},
+		{"zero max_message_size", func(s *ServerConfig) { s.MaxMessageSize = 0 }},
+		{"zero connect_timeout", func(s *ServerConfig) {
+			s.Transport = TransportStreamableHTTP
+			s.URL = "https://mcp.example.com/mcp"
+			s.ConnectTimeout = durationPtr(0)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base()
+			tc.mutate(cfg)
+			if _, err := NewClient(cfg, nil); !fault.HasCode(err, ErrConfigInvalid) {
+				t.Fatalf("NewClient(%s) = %v, want %s", tc.name, err, ErrConfigInvalid)
 			}
 		})
 	}

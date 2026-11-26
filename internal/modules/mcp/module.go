@@ -9,7 +9,6 @@ import (
 
 	"go.opentelemetry.io/otel/metric"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/egress"
@@ -22,7 +21,7 @@ import (
 const HealthCheckID = "mcp"
 
 type ModuleDeps struct {
-	Config         *config.MCP
+	Config         *Config
 	Plugins        []PluginServer
 	Broker         *toolbroker.Broker
 	TrustPath      string
@@ -38,7 +37,7 @@ type ModuleDeps struct {
 
 type Module struct {
 	manager      *Manager
-	servers      []config.MCPServer
+	servers      []ServerConfig
 	checkTimeout time.Duration
 	logger       *slog.Logger
 }
@@ -51,7 +50,7 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	var servers []config.MCPServer
+	var servers []ServerConfig
 	if deps.Config != nil {
 		servers = deps.Config.Servers
 	}
@@ -60,7 +59,7 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 	}
 	mcpConfig := deps.Config
 	if mcpConfig == nil {
-		mcpConfig = &config.MCP{}
+		mcpConfig = &Config{}
 	}
 	var registry TrustRegistry
 	if len(servers) > 0 || deps.TrustPath != "" {

@@ -137,14 +137,14 @@ func additionalConfiguredSecrets(cfg *appconfig.Config) []configuredSecret {
 				continue
 			}
 			if static := server.Auth.Static; static != nil {
-				if parsed, err := secret.ParseRef(static.CredentialRef); err == nil && !parsed.IsZero() {
-					if ref := parsed.Reference(); ref.Env != "" || ref.File != "" {
-						secrets = append(secrets, referenceSecret("mcp_credential_"+server.Name, ref))
-					}
+				if ref := static.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
+					secrets = append(secrets, referenceSecret("mcp_credential_"+server.Name, ref))
 				}
 			}
-			if oauth := server.Auth.OAuth; oauth != nil && oauth.ClientSecretEnv != "" {
-				secrets = append(secrets, environmentSecret("mcp_client_secret_"+server.Name, oauth.ClientSecretEnv))
+			if oauth := server.Auth.OAuth; oauth != nil {
+				if ref := oauth.ClientSecretRef.Reference(); ref.Env != "" || ref.File != "" {
+					secrets = append(secrets, referenceSecret("mcp_client_secret_"+server.Name, ref))
+				}
 			}
 		}
 	}

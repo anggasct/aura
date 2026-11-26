@@ -10,7 +10,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -221,8 +220,8 @@ func planPlugins(ctx context.Context, cfg *appconfig.Config, db *sql.DB, redacto
 	return &pluginRuntime{service: service, plan: plan, installed: len(summaries)}, nil
 }
 
-func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
-	return legacyconfig.MCPServer{
+func mcpServerFromBackend(s *plugin.BackendServer) mcp.ServerConfig {
+	out := mcp.ServerConfig{
 		Name:           s.Name,
 		Transport:      s.Transport,
 		Command:        s.Command,
@@ -230,10 +229,14 @@ func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
 		URL:            s.URL,
 		StartupTimeout: s.StartupTimeout,
 		RequestTimeout: s.RequestTimeout,
-		ConnectTimeout: s.ConnectTimeout,
 		MaxMessageSize: s.MaxMessageSize,
 		Capabilities:   slices.Clone(s.Capabilities),
 	}
+	if s.ConnectTimeout > 0 {
+		ct := s.ConnectTimeout
+		out.ConnectTimeout = &ct
+	}
+	return out
 }
 
 func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {

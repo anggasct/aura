@@ -7,13 +7,11 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 const restartNotice = "takes effect at the next server start"
 
-type Opener func(cmd *cobra.Command, fn func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error) error
+type Opener func(cmd *cobra.Command, fn func(ctx context.Context, servers []ServerConfig, registry *FileTrustRegistry) error) error
 
 type ListRow struct {
 	Name         string   `json:"name"`
@@ -41,14 +39,14 @@ func Commands(open Opener) []*cobra.Command {
 	return []*cobra.Command{cmd}
 }
 
-func runWithOpener(cmd *cobra.Command, open Opener, fn func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error) error {
+func runWithOpener(cmd *cobra.Command, open Opener, fn func(ctx context.Context, servers []ServerConfig, registry *FileTrustRegistry) error) error {
 	if open == nil {
 		return Errorf(ErrConfigInvalid, "mcp command opener must not be nil")
 	}
 	return open(cmd, fn)
 }
 
-func findServer(servers []config.MCPServer, name string) (*config.MCPServer, bool) {
+func findServer(servers []ServerConfig, name string) (*ServerConfig, bool) {
 	for i := range servers {
 		if servers[i].Name == name {
 			return &servers[i], true
@@ -71,7 +69,7 @@ func newListCmd(open Opener) *cobra.Command {
 		Short: "List configured MCP servers with their trust state",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			return runWithOpener(cmd, open, func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error {
+			return runWithOpener(cmd, open, func(ctx context.Context, servers []ServerConfig, registry *FileTrustRegistry) error {
 				reviews, err := ReviewServers(ctx, registry, servers)
 				if err != nil {
 					return err
@@ -118,7 +116,7 @@ func newTrustApproveCmd(open Opener) *cobra.Command {
 		Short: "Approve the current configuration of an MCP server",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWithOpener(cmd, open, func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error {
+			return runWithOpener(cmd, open, func(ctx context.Context, servers []ServerConfig, registry *FileTrustRegistry) error {
 				server, ok := findServer(servers, args[0])
 				if !ok {
 					return Errorf(ErrConfigInvalid, "server %q is not configured", args[0])
@@ -149,7 +147,7 @@ func newTrustRevokeCmd(open Opener) *cobra.Command {
 		Short: "Remove the trust record of an MCP server",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runWithOpener(cmd, open, func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error {
+			return runWithOpener(cmd, open, func(ctx context.Context, servers []ServerConfig, registry *FileTrustRegistry) error {
 				removed, err := RevokeServer(ctx, registry, args[0])
 				if err != nil {
 					return err

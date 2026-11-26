@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
@@ -182,11 +181,12 @@ func TestMCPRecorderBridgeCarriesProtocolAndSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMCPRecorder(): %v", err)
 	}
-	client, err := mcp.NewClient(&config.MCPServer{
+	client, err := mcp.NewClient(&mcp.ServerConfig{
 		Name:           "bridge-e2e",
-		Transport:      config.MCPTransportStdio,
+		Transport:      mcp.TransportStdio,
 		RequestTimeout: configkit.Duration(5 * time.Second),
 		StartupTimeout: configkit.Duration(5 * time.Second),
+		MaxMessageSize: mcp.DefaultMaxMessageSize,
 	}, nil, mcp.WithObserver(mcp.NewTelemetryObserver(recorder)))
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)

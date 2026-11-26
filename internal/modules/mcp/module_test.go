@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -44,11 +43,11 @@ func TestModuleHealthChecksAndNilClose(t *testing.T) {
 		t.Fatalf("toolbroker.New: %v", err)
 	}
 	mod, err := New(t.Context(), &ModuleDeps{
-		Config: &config.MCP{
-			Servers: []config.MCPServer{
+		Config: &Config{
+			Servers: []ServerConfig{
 				{
 					Name:           "docs",
-					Transport:      config.MCPTransportStdio,
+					Transport:      TransportStdio,
 					Command:        "/usr/bin/docs-mcp",
 					StartupTimeout: configkit.Duration(5 * time.Second),
 					RequestTimeout: configkit.Duration(5 * time.Second),

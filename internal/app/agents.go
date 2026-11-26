@@ -140,15 +140,6 @@ func personaToolNames(cfg *appconfig.Config) []string {
 	return names
 }
 
-func configuredMCPServerNames(cfg *appconfig.Config) []string {
-	servers := configuredMCPServers(cfg)
-	names := make([]string, 0, len(servers))
-	for i := range servers {
-		names = append(names, servers[i].Name)
-	}
-	return names
-}
-
 func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 	routeSet := make(map[string]bool, len(cfg.Models.Definitions)+len(cfg.ModelRoutes))
 	for route := range cfg.Models.Definitions {
@@ -163,7 +154,7 @@ func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 	if cfg.Agents != nil {
 		overrides = cfg.Agents.Definitions
 	}
-	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), configuredMCPServerNames(cfg), modelRoutes)
+	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), cfg.MCP.ServerNames(), modelRoutes)
 	if err != nil {
 		return nil, err
 	}

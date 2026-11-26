@@ -9,18 +9,18 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-func staticStreamableConfig(name, serverURL string) *config.MCPServer {
-	return &config.MCPServer{
-		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
-		Auth:           &config.MCPAuth{Static: &config.MCPStaticAuth{CredentialRef: "env://MCP_STATIC_TOKEN"}},
+func staticStreamableConfig(t *testing.T, name, serverURL string) *ServerConfig {
+	t.Helper()
+	return &ServerConfig{
+		Name: name, Transport: TransportStreamableHTTP, URL: serverURL,
+		Auth:           &AuthConfig{Static: &StaticAuthConfig{CredentialRef: mustSecretRef(t, "env://MCP_STATIC_TOKEN")}},
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
@@ -53,7 +53,7 @@ func TestStaticAuthEndToEndWithRotation(t *testing.T) {
 	t.Setenv("MCP_STATIC_TOKEN", "static-secret-v1")
 	resolver := &stubSecretResolver{values: map[string]string{"env://MCP_STATIC_TOKEN": "static-secret-v1"}}
 
-	client, err := NewClient(staticStreamableConfig("static-e2e", httpServer.URL+"/mcp"), nil,
+	client, err := NewClient(staticStreamableConfig(t, "static-e2e", httpServer.URL+"/mcp"), nil,
 		WithHTTPClient(&http.Client{}),
 		WithEndpointPolicy(stubEndpointPolicy{}),
 		WithSecretResolver(resolver),
@@ -88,7 +88,7 @@ func TestEndpointPolicyDenyBlocksConnect(t *testing.T) {
 	ctx := t.Context()
 	httpServer := authedStreamableServer(t, func() string { return "x" }, func() string { return "x" })
 	policyErr := Errorf(ErrEgressDenied, "test policy denies all")
-	client, err := NewClient(staticStreamableConfig("denied", httpServer.URL+"/mcp"), nil,
+	client, err := NewClient(staticStreamableConfig(t, "denied", httpServer.URL+"/mcp"), nil,
 		WithHTTPClient(&http.Client{}),
 		WithEndpointPolicy(stubEndpointPolicy{err: policyErr}),
 		WithSecretResolver(&stubSecretResolver{values: map[string]string{"env://MCP_STATIC_TOKEN": "x"}}),
@@ -118,7 +118,7 @@ func TestCrossOriginRedirectDenied(t *testing.T) {
 	t.Cleanup(origin.Close)
 
 	allow := true
-	serverCfg := staticStreamableConfig("redirected", origin.URL+"/mcp")
+	serverCfg := staticStreamableConfig(t, "redirected", origin.URL+"/mcp")
 	serverCfg.AllowRedirects = &allow
 	client, err := NewClient(serverCfg, nil,
 		WithHTTPClient(&http.Client{}),
@@ -153,11 +153,11 @@ func TestSameOriginRedirectAllowed(t *testing.T) {
 	t.Cleanup(httpServer.Close)
 
 	allow := true
-	serverCfg := &config.MCPServer{
-		Name: "same-origin", Transport: config.MCPTransportStreamableHTTP, URL: httpServer.URL + "/entry",
+	serverCfg := &ServerConfig{
+		Name: "same-origin", Transport: TransportStreamableHTTP, URL: httpServer.URL + "/entry",
 		AllowRedirects: &allow,
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
@@ -191,10 +191,10 @@ func TestOversizeToolResultFails(t *testing.T) {
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 
-	serverCfg := &config.MCPServer{
-		Name: "big", Transport: config.MCPTransportStreamableHTTP, URL: httpServer.URL,
+	serverCfg := &ServerConfig{
+		Name: "big", Transport: TransportStreamableHTTP, URL: httpServer.URL,
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1024,
 	}

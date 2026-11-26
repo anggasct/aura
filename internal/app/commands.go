@@ -9,7 +9,6 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
@@ -40,7 +39,7 @@ func mcpTrustRegistryPath(cfg *appconfig.Config) (string, error) {
 	return filepath.Join(dataRoot, mcpTrustDirName, mcpTrustFileName), nil
 }
 
-func configuredMCPServers(cfg *appconfig.Config) []legacyconfig.MCPServer {
+func configuredMCPServers(cfg *appconfig.Config) []mcp.ServerConfig {
 	if cfg == nil || cfg.MCP == nil {
 		return nil
 	}
@@ -48,7 +47,7 @@ func configuredMCPServers(cfg *appconfig.Config) []legacyconfig.MCPServer {
 }
 
 func mcpOpener(gf *globalFlags) mcp.Opener {
-	return func(cmd *cobra.Command, fn func(ctx context.Context, servers []legacyconfig.MCPServer, registry *mcp.FileTrustRegistry) error) error {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, servers []mcp.ServerConfig, registry *mcp.FileTrustRegistry) error) error {
 		result, err := appconfig.Load(gf.configPath)
 		if err != nil {
 			return err

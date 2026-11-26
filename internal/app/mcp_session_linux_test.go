@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -49,9 +48,9 @@ func TestContainedRealSessionExchange(t *testing.T) {
 	}
 	_ = probe.Close(ctx)
 
-	serverCfg := &config.MCPServer{
+	serverCfg := &mcp.ServerConfig{
 		Name:           "contained-real",
-		Transport:      config.MCPTransportStdio,
+		Transport:      mcp.TransportStdio,
 		Command:        helper,
 		Environment:    map[string]string{"SERVER_MODE": "contained"},
 		StartupTimeout: configkit.Duration(30 * time.Second),

@@ -5,6 +5,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
@@ -31,7 +32,7 @@ type Config struct {
 	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
 	Agents       *auraagent.Config           `json:"agents,omitempty"`
 	Workflows    *legacyconfig.Workflows     `json:"workflows,omitempty"`
-	MCP          *legacyconfig.MCP           `json:"mcp,omitempty"`
+	MCP          *mcp.Config                 `json:"mcp,omitempty"`
 	Plugins      *plugin.Config              `json:"plugins,omitempty"`
 	Server       server.Config               `json:"server"`
 	Logging      logging.Config              `json:"logging"`

@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -75,7 +74,7 @@ func TestIntegrationMCPStdioServerInsideTheSandboxSession(t *testing.T) {
 	server.StartupTimeout = configkit.Duration(30 * time.Second)
 	server.RequestTimeout = configkit.Duration(integrationRequestTimeout)
 
-	harness := newMCPHarness(t, []config.MCPServer{server})
+	harness := newMCPHarness(t, []mcp.ServerConfig{server})
 	harness.approveServer(t, "docs")
 	started := harness.start(t, mcp.NewSandboxSessionStarter(sandbox.Start))
 

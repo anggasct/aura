@@ -16,7 +16,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -191,12 +190,12 @@ type mcpHarness struct {
 	mu       sync.Mutex
 }
 
-func newMCPHarness(t *testing.T, servers []config.MCPServer) *mcpHarness {
+func newMCPHarness(t *testing.T, servers []mcp.ServerConfig) *mcpHarness {
 	t.Helper()
 	return newMCPHarnessWithAccess(t, servers, nil)
 }
 
-func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access func(db *sql.DB) toolbroker.AccessPolicy) *mcpHarness {
+func newMCPHarnessWithAccess(t *testing.T, servers []mcp.ServerConfig, access func(db *sql.DB) toolbroker.AccessPolicy) *mcpHarness {
 	t.Helper()
 	ctx := t.Context()
 	dataRoot := t.TempDir()
@@ -213,7 +212,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	harness := &mcpHarness{cfg: appconfig.Default(), db: db, report: capabilitytest.All(t), approve: true}
 	harness.cfg.Tools.Workspace = t.TempDir()
 	harness.cfg.Storage.Path = dataRoot
-	harness.cfg.MCP = &config.MCP{Servers: servers}
+	harness.cfg.MCP = &mcp.Config{Servers: servers}
 	var policy toolbroker.AccessPolicy
 	if access != nil {
 		policy = access(db)
@@ -277,7 +276,7 @@ func (h *mcpHarness) approveServer(t *testing.T, name string) {
 		t.Fatalf("NewFileTrustRegistry: %v", err)
 	}
 	servers := configuredMCPServers(&h.cfg)
-	var server *config.MCPServer
+	var server *mcp.ServerConfig
 	for i := range servers {
 		if servers[i].Name == name {
 			server = &servers[i]
@@ -327,10 +326,10 @@ func (h *mcpHarness) callToolAs(ctx context.Context, name, id string, class prin
 	return err
 }
 
-func mcpTestServer(name string) config.MCPServer {
-	return config.MCPServer{
+func mcpTestServer(name string) mcp.ServerConfig {
+	return mcp.ServerConfig{
 		Name:           name,
-		Transport:      config.MCPTransportStdio,
+		Transport:      mcp.TransportStdio,
 		Command:        "/opt/mcp/" + name,
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"MODE": "test"},
@@ -359,7 +358,7 @@ func countIntents(t *testing.T, db *sql.DB) int {
 }
 
 func TestMCPRuntimeStartsApprovedServerAndRoutesCallsThroughTheBroker(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	harness.approveServer(t, "docs")
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	started := harness.start(t, starter)
@@ -414,7 +413,7 @@ func TestMCPRuntimeStartsApprovedServerAndRoutesCallsThroughTheBroker(t *testing
 }
 
 func TestMCPToolsAreDeniedToNonOwnersAtTheBroker(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	harness.approveServer(t, "docs")
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	harness.start(t, starter)
@@ -439,7 +438,7 @@ func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *t
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)
 	}
-	harness := newMCPHarnessWithAccess(t, []config.MCPServer{mcpTestServer("docs")}, func(db *sql.DB) toolbroker.AccessPolicy {
+	harness := newMCPHarnessWithAccess(t, []mcp.ServerConfig{mcpTestServer("docs")}, func(db *sql.DB) toolbroker.AccessPolicy {
 		return newAccessPolicy(registry, db, nil)
 	})
 	harness.approveServer(t, "docs")
@@ -492,7 +491,7 @@ func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *t
 }
 
 func TestMCPRuntimeNeverStartsUnapprovedOrChangedServers(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	started := harness.start(t, starter)
 
@@ -529,7 +528,7 @@ func TestMCPRuntimeNeverStartsUnapprovedOrChangedServers(t *testing.T) {
 }
 
 func TestMCPRuntimeIsolatesFailingServers(t *testing.T) {
-	servers := []config.MCPServer{mcpTestServer("crashy"), mcpTestServer("steady"), mcpTestServer("stranger")}
+	servers := []mcp.ServerConfig{mcpTestServer("crashy"), mcpTestServer("steady"), mcpTestServer("stranger")}
 	harness := newMCPHarness(t, servers)
 	harness.approveServer(t, "crashy")
 	harness.approveServer(t, "steady")
@@ -563,7 +562,7 @@ func TestMCPRuntimeIsolatesFailingServers(t *testing.T) {
 }
 
 func TestMCPRuntimeCloseLeavesNoSessionOrGoroutine(t *testing.T) {
-	servers := []config.MCPServer{mcpTestServer("one"), mcpTestServer("two")}
+	servers := []mcp.ServerConfig{mcpTestServer("one"), mcpTestServer("two")}
 	harness := newMCPHarness(t, servers)
 	harness.approveServer(t, "one")
 	harness.approveServer(t, "two")
@@ -609,7 +608,7 @@ func TestMCPRuntimeRequiresInputs(t *testing.T) {
 func TestMCPServerDeclaringACapabilityOutsideTheRegistryRegistersNoTools(t *testing.T) {
 	server := mcpTestServer("docs")
 	server.Capabilities = []string{"fs.read"}
-	harness := newMCPHarness(t, []config.MCPServer{server})
+	harness := newMCPHarness(t, []mcp.ServerConfig{server})
 	harness.approveServer(t, "docs")
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	started := harness.start(t, starter)
@@ -739,7 +738,7 @@ func TestMCPEntriesInPrincipalToolsNeedToolsCoverageAtBoot(t *testing.T) {
 }
 
 func TestMCPWarnsAboutListedToolsAServerDoesNotExpose(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	harness.approveServer(t, "docs")
 	trustPath, err := mcpTrustRegistryPath(&harness.cfg)
 	if err != nil {

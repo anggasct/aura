@@ -4,8 +4,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 type TrustState string
@@ -46,7 +44,7 @@ type ApprovalResult struct {
 	Tools  []string
 }
 
-func ReviewServer(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer) (ServerReview, error) {
+func ReviewServer(ctx context.Context, registry TrustRegistry, serverCfg *ServerConfig) (ServerReview, error) {
 	if registry == nil || serverCfg == nil {
 		return ServerReview{}, Errorf(ErrConfigInvalid, "trust registry and server configuration are required")
 	}
@@ -78,7 +76,7 @@ func ReviewServer(ctx context.Context, registry TrustRegistry, serverCfg *config
 	return review, nil
 }
 
-func ReviewServers(ctx context.Context, registry TrustRegistry, servers []config.MCPServer) ([]ServerReview, error) {
+func ReviewServers(ctx context.Context, registry TrustRegistry, servers []ServerConfig) ([]ServerReview, error) {
 	reviews := make([]ServerReview, 0, len(servers))
 	for i := range servers {
 		review, err := ReviewServer(ctx, registry, &servers[i])
@@ -90,7 +88,7 @@ func ReviewServers(ctx context.Context, registry TrustRegistry, servers []config
 	return reviews, nil
 }
 
-func ApproveServer(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer) (ApprovalResult, error) {
+func ApproveServer(ctx context.Context, registry TrustRegistry, serverCfg *ServerConfig) (ApprovalResult, error) {
 	review, err := ReviewServer(ctx, registry, serverCfg)
 	if err != nil {
 		return ApprovalResult{}, err
@@ -116,7 +114,7 @@ func ApproveServer(ctx context.Context, registry TrustRegistry, serverCfg *confi
 	return ApprovalResult{Change: ApprovalChangeToolSurface, Review: review, Tools: slices.Sorted(slices.Values(record.Tools))}, nil
 }
 
-func approveConfig(ctx context.Context, registry TrustRegistry, serverCfg *config.MCPServer, review *ServerReview) (ApprovalResult, error) {
+func approveConfig(ctx context.Context, registry TrustRegistry, serverCfg *ServerConfig, review *ServerReview) (ApprovalResult, error) {
 	if err := registry.ApproveConfig(ctx, serverCfg.Name, review.Digest); err != nil {
 		return ApprovalResult{}, err
 	}

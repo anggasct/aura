@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -54,12 +53,12 @@ func newDroppingServer(t *testing.T) *droppingServer {
 	return dropped
 }
 
-func reconnectTestConfig(name, serverURL string) *config.MCPServer {
-	return &config.MCPServer{
-		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
-		Restart:        &config.MCPRestart{MaxAttempts: 3, Window: configkit.Duration(time.Minute)},
+func reconnectTestConfig(name, serverURL string) *ServerConfig {
+	return &ServerConfig{
+		Name: name, Transport: TransportStreamableHTTP, URL: serverURL,
+		Restart:        &RestartConfig{MaxAttempts: 3, Window: configkit.Duration(time.Minute)},
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
@@ -160,7 +159,13 @@ func TestReconnectBudgetExhausts(t *testing.T) {
 }
 
 func TestReconnectWindowPrunes(t *testing.T) {
-	cfg := &config.MCPServer{Name: "window", Restart: &config.MCPRestart{MaxAttempts: 1, Window: configkit.Duration(40 * time.Millisecond)}}
+	cfg := &ServerConfig{
+		Name:           "window",
+		StartupTimeout: DefaultStartupTimeout,
+		RequestTimeout: DefaultRequestTimeout,
+		MaxMessageSize: DefaultMaxMessageSize,
+		Restart:        &RestartConfig{MaxAttempts: 1, Window: configkit.Duration(40 * time.Millisecond)},
+	}
 	client, err := NewClient(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
@@ -185,7 +190,12 @@ func TestReconnectWindowPrunes(t *testing.T) {
 }
 
 func TestReconnectDisabledWithoutPolicy(t *testing.T) {
-	cfg := &config.MCPServer{Name: "no-restart"}
+	cfg := &ServerConfig{
+		Name:           "no-restart",
+		StartupTimeout: DefaultStartupTimeout,
+		RequestTimeout: DefaultRequestTimeout,
+		MaxMessageSize: DefaultMaxMessageSize,
+	}
 	client, err := NewClient(cfg, nil)
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)

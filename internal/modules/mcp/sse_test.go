@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -30,11 +29,11 @@ func legacySSEServer(t *testing.T) *httptest.Server {
 func TestLegacySSEConnectAndDiscover(t *testing.T) {
 	ctx := t.Context()
 	httpServer := legacySSEServer(t)
-	serverCfg := &config.MCPServer{
-		Name: "legacy", Transport: config.MCPTransportLegacySSE, URL: httpServer.URL,
+	serverCfg := &ServerConfig{
+		Name: "legacy", Transport: TransportLegacySSE, URL: httpServer.URL,
 		CompatibilityAck: true,
 		RequestTimeout:   configkit.Duration(10 * time.Second),
-		ConnectTimeout:   configkit.Duration(10 * time.Second),
+		ConnectTimeout:   durationPtr(10 * time.Second),
 		StartupTimeout:   configkit.Duration(10 * time.Second),
 		MaxMessageSize:   1 << 20,
 	}
@@ -63,7 +62,7 @@ func TestLegacySSEConnectAndDiscover(t *testing.T) {
 	if len(observations) < 2 {
 		t.Fatalf("observations = %d, want connect + discovery", len(observations))
 	}
-	if observations[0].Transport != config.MCPTransportLegacySSE || observations[0].Result != ResultConnected {
+	if observations[0].Transport != TransportLegacySSE || observations[0].Result != ResultConnected {
 		t.Errorf("connect observation = %+v", observations[0])
 	}
 }
@@ -71,11 +70,16 @@ func TestLegacySSEConnectAndDiscover(t *testing.T) {
 func TestLegacySSEOAuthFailsClosed(t *testing.T) {
 	ctx := t.Context()
 	httpServer := legacySSEServer(t)
-	serverCfg := &config.MCPServer{
-		Name: "legacy-oauth", Transport: config.MCPTransportLegacySSE, URL: httpServer.URL,
+	serverCfg := &ServerConfig{
+		Name: "legacy-oauth", Transport: TransportLegacySSE, URL: httpServer.URL,
 		CompatibilityAck: true,
-		Auth:             &config.MCPAuth{OAuth: &config.MCPOAuth{ClientIDEnv: "X", ClientSecretEnv: "Y"}},
-		RequestTimeout:   configkit.Duration(10 * time.Second),
+		Auth: &AuthConfig{OAuth: &OAuthConfig{
+			ClientIDRef:     mustSecretRef(t, "env://X"),
+			ClientSecretRef: mustSecretRef(t, "env://Y"),
+		}},
+		StartupTimeout: configkit.Duration(10 * time.Second),
+		RequestTimeout: configkit.Duration(10 * time.Second),
+		MaxMessageSize: 1 << 20,
 	}
 	client, err := NewClient(serverCfg, nil,
 		WithHTTPClient(&http.Client{}),
@@ -93,9 +97,9 @@ func TestLegacySSEOAuthFailsClosed(t *testing.T) {
 }
 
 func TestLegacySSECheckerEmitsFinding(t *testing.T) {
-	servers := []config.MCPServer{
-		{Name: "legacy-one", Transport: config.MCPTransportLegacySSE},
-		{Name: "modern", Transport: config.MCPTransportStreamableHTTP},
+	servers := []ServerConfig{
+		{Name: "legacy-one", Transport: TransportLegacySSE},
+		{Name: "modern", Transport: TransportStreamableHTTP},
 	}
 	checker := NewLegacySSEChecker(servers)
 	findings := checker.Check(t.Context())
@@ -123,13 +127,13 @@ func TestLegacyHandshakeCancelCarriesStableCode(t *testing.T) {
 		<-r.Context().Done()
 	}))
 	t.Cleanup(blocking.Close)
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:             "legacy-cancel",
-		Transport:        config.MCPTransportLegacySSE,
+		Transport:        TransportLegacySSE,
 		URL:              blocking.URL,
 		CompatibilityAck: true,
 		RequestTimeout:   configkit.Duration(10 * time.Second),
-		ConnectTimeout:   configkit.Duration(10 * time.Second),
+		ConnectTimeout:   durationPtr(10 * time.Second),
 		StartupTimeout:   configkit.Duration(10 * time.Second),
 		MaxMessageSize:   1 << 20,
 	}

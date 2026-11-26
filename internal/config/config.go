@@ -260,58 +260,8 @@ type GeneratedWorkflows struct {
 	MaxTokens int64 `json:"max_tokens"`
 }
 
-const (
-	MCPTransportStdio          = "stdio"
-	MCPTransportStreamableHTTP = "streamable_http"
-	MCPTransportLegacySSE      = "legacy_sse"
-)
-
-type MCP struct {
-	Servers []MCPServer `json:"servers"`
-}
-
-type MCPServer struct {
-	Name             string             `json:"name"`
-	Transport        string             `json:"transport"`
-	Command          string             `json:"command,omitempty"`
-	Args             []string           `json:"args,omitempty"`
-	Environment      map[string]string  `json:"environment,omitempty"`
-	Capabilities     []string           `json:"capabilities,omitempty"`
-	StartupTimeout   configkit.Duration `json:"startup_timeout,omitempty"`
-	RequestTimeout   configkit.Duration `json:"request_timeout,omitempty"`
-	MaxMessageSize   configkit.ByteSize `json:"max_message_size,omitempty"`
-	Restart          *MCPRestart        `json:"restart,omitempty"`
-	URL              string             `json:"url,omitempty"`
-	Auth             *MCPAuth           `json:"auth,omitempty"`
-	ConnectTimeout   configkit.Duration `json:"connect_timeout,omitempty"`
-	AllowRedirects   *bool              `json:"allow_redirects,omitempty"`
-	CompatibilityAck bool               `json:"compatibility_ack,omitempty"`
-}
-
-type MCPRestart struct {
-	MaxAttempts int                `json:"max_attempts"`
-	Window      configkit.Duration `json:"window"`
-}
-
-type MCPAuth struct {
-	OAuth  *MCPOAuth      `json:"oauth,omitempty"`
-	Static *MCPStaticAuth `json:"static,omitempty"`
-}
-
-type MCPOAuth struct {
-	ClientIDEnv     string `json:"client_id_env"`
-	ClientSecretEnv string `json:"client_secret_env"`
-	TokenStore      string `json:"token_store"`
-}
-
-type MCPStaticAuth struct {
-	Header        string `json:"header,omitempty"`
-	CredentialRef string `json:"credential_ref"`
-}
-
 var (
-	mcpServerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-	syncBranchPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+	syncBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
 
 func DefaultTools() *Tools {

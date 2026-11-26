@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -234,7 +233,7 @@ func (f *e2eFixture) start(t *testing.T) (*pluginRuntime, *mcp.Module) {
 		return runtime, nil
 	}
 	mod, err := mcp.New(t.Context(), &mcp.ModuleDeps{
-		Config:     &config.MCP{},
+		Config:     &mcp.Config{},
 		Plugins:    mcpPlugins,
 		Broker:     f.h.executor.Broker(),
 		HTTPClient: &http.Client{},

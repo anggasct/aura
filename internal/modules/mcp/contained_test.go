@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -145,10 +144,10 @@ func (s *stubSessionStarter) starts() int {
 	return len(s.requests)
 }
 
-func containedStdioConfig() *config.MCPServer {
-	return &config.MCPServer{
+func containedStdioConfig() *ServerConfig {
+	return &ServerConfig{
 		Name:           "contained",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        "/bin/contained-server",
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"SERVER_MODE": "test"},
@@ -289,7 +288,7 @@ func TestContainedReconnectClosesPriorSession(t *testing.T) {
 	second := &scriptedSession{}
 	starter := &stubSessionStarter{session: first}
 	cfg := containedStdioConfig()
-	cfg.Restart = &config.MCPRestart{MaxAttempts: 3, Window: configkit.Duration(time.Minute)}
+	cfg.Restart = &RestartConfig{MaxAttempts: 3, Window: configkit.Duration(time.Minute)}
 	client, err := NewClient(cfg, nil, WithSessionStarter(starter))
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -48,10 +47,10 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 	go func() { _ = server.Run(ctx, serverTransport) }()
 
 	serverName = "hostile"
-	mcpCfg := &config.MCP{
-		Servers: []config.MCPServer{{
+	mcpCfg := &Config{
+		Servers: []ServerConfig{{
 			Name:           serverName,
-			Transport:      config.MCPTransportStdio,
+			Transport:      TransportStdio,
 			Capabilities:   []string{"workspace-read"},
 			RequestTimeout: configkit.Duration(5 * time.Second),
 			StartupTimeout: configkit.Duration(5 * time.Second),
