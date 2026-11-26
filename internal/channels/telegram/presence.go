@@ -12,7 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/platform/effect"
-	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -55,13 +55,6 @@ type presenceSnapshot struct {
 	updates    int
 }
 
-func (a *Adapter) SetSecretVault(vault *secret.Vault) {
-	if a == nil {
-		return
-	}
-	a.secretVault = vault
-}
-
 func (a *Adapter) snapshot(session *presenceSession) presenceSnapshot {
 	a.presenceMu.Lock()
 	defer a.presenceMu.Unlock()
@@ -77,14 +70,14 @@ func (a *Adapter) snapshot(session *presenceSession) presenceSnapshot {
 
 func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*presenceSession, error) {
 	if req == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "presence request must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	if req.EffectID == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "presence request carries no turn id")
+		return nil, fault.New(ErrorCodeInvalidArgument, "presence request carries no turn id")
 	}
 	var target replyReference
 	if err := json.Unmarshal(req.ReplyContext, &target); err != nil || target.ChatID == 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "presence reply context carries no chat")
+		return nil, fault.New(ErrorCodeInvalidArgument, "presence reply context carries no chat")
 	}
 	a.presenceMu.Lock()
 	defer a.presenceMu.Unlock()
@@ -92,7 +85,7 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 		return session, nil
 	}
 	if len(a.presence) >= maxPresenceSessions {
-		return nil, Errorf(ErrorCodeDeliveryUnavailable, "presence session capacity is exhausted")
+		return nil, fault.New(ErrorCodeDeliveryUnavailable, "presence session capacity is exhausted")
 	}
 	cloned := *req
 	cloned.Parts = nil
@@ -330,7 +323,7 @@ func (a *Adapter) recordShown(session *presenceSession, statusID int64, display 
 func (a *Adapter) postStatusMessage(ctx context.Context, session *presenceSession, attempt int, text string) (int64, error) {
 	request, err := json.Marshal(sendOperation{ChatID: session.chatID, ThreadID: session.threadID, Text: text, Status: true})
 	if err != nil {
-		return 0, Errorf(ErrorCodeProtocolInvalid, "status request is not serializable")
+		return 0, fault.New(ErrorCodeProtocolInvalid, "status request is not serializable")
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      session.request.ConversationID,
@@ -350,7 +343,7 @@ func (a *Adapter) postStatusMessage(ctx context.Context, session *presenceSessio
 func (a *Adapter) editStatusMessage(ctx context.Context, session *presenceSession, messageID int64, attempt int, text string) error {
 	request, err := json.Marshal(editOperation{ChatID: session.chatID, MessageID: messageID, Text: text})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "status edit request is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "status edit request is not serializable")
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      session.request.ConversationID,
@@ -437,7 +430,7 @@ func (a *Adapter) stopPresence(turnID string) {
 
 func (a *Adapter) PresenceEnded(_ context.Context, turnID string) error {
 	if turnID == "" {
-		return Errorf(ErrorCodeInvalidArgument, "presence turn id must not be empty")
+		return fault.New(ErrorCodeInvalidArgument, "presence turn id must not be empty")
 	}
 	a.stopPresence(turnID)
 	a.presenceMu.Lock()

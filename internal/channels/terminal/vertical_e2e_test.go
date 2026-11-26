@@ -19,6 +19,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -177,23 +178,25 @@ func newApprovalE2EConsole(t *testing.T, stack *approvalE2EStack, bridge *termin
 	t.Helper()
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: stack.engine},
-		e2eSessions{sessions: stack.sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString(input),
-		out, diag,
-		terminal.Config{MaxInputBytes: 4096, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
-	console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
-		Out:     e2eWriteCloser{Writer: out},
-		Width:   func() int { return 80 },
-		Hz:      500,
-		Styling: false,
-	}))
-	if bridge != nil {
-		console.SetApprovalBridge(bridge)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: stack.engine},
+		Sessions:  e2eSessions{sessions: stack.sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString(input),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 4096, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+		TTY: terminal.NewTTYRenderer(terminal.TTYOptions{
+			Out:     e2eWriteCloser{Writer: out},
+			Width:   func() int { return 80 },
+			Hz:      500,
+			Styling: false,
+		}),
+		Approvals: bridge,
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
 	}
 	return out, diag, console
 }
@@ -372,15 +375,19 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: engine},
-		e2eSessions{sessions: sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("hi\n"),
-		out, diag,
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine},
+		Sessions:  e2eSessions{sessions: sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("hi\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	err = console.Run(context.Background())
 	if err == nil {
 		t.Fatal("overloaded submission must surface an error")
@@ -427,15 +434,19 @@ func TestTerminalRestartResume(t *testing.T) {
 		t.Fatalf("engine: %v", err)
 	}
 	out1 := &bytes.Buffer{}
-	console1 := terminal.NewConsole(
-		e2eRunner{engine: engine1},
-		e2eSessions{sessions: sessions1},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("hello\n"),
-		out1, &bytes.Buffer{},
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console1, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine1},
+		Sessions:  e2eSessions{sessions: sessions1},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("hello\n"),
+		Out:       out1,
+		Diag:      &bytes.Buffer{},
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console1.Run(context.Background()); err != nil {
 		t.Fatalf("first process run: %v", err)
 	}
@@ -461,16 +472,20 @@ func TestTerminalRestartResume(t *testing.T) {
 		t.Fatalf("second engine: %v", err)
 	}
 	out2 := &bytes.Buffer{}
-	console2 := terminal.NewConsole(
-		e2eRunner{engine: engine2},
-		e2eSessions{sessions: sessions2},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("again\n"),
-		out2, &bytes.Buffer{},
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
-	console2.SetSessionID("e2e-session")
+	console2, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine2},
+		Sessions:  e2eSessions{sessions: sessions2},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("again\n"),
+		Out:       out2,
+		Diag:      &bytes.Buffer{},
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+		SessionID: "e2e-session",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console2.Run(context.Background()); err != nil {
 		t.Fatalf("resumed process run: %v", err)
 	}
@@ -519,15 +534,19 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	}
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: engine},
-		e2eSessions{sessions: sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("canary-prompt-9f2a\n"),
-		out, diag,
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine},
+		Sessions:  e2eSessions{sessions: sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("canary-prompt-9f2a\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("console run: %v", err)
 	}

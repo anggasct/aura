@@ -1,1 +1,0 @@
-internal/cli -> internal/channels/terminal  # stderr error sanitizer until the channels step moves it out of the terminal channel

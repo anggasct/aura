@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -37,7 +37,7 @@ const (
 	findingWebhookFailing  = "telegram_webhook_failing"
 )
 
-var errWebhookSecretInvalid = Errorf(ErrorCodeInvalidArgument, "webhook secret is unavailable or invalid")
+var errWebhookSecretInvalid = fault.New(ErrorCodeInvalidArgument, "webhook secret is unavailable or invalid")
 
 type webhookSession struct {
 	digest [sha256.Size]byte
@@ -51,13 +51,13 @@ func (s *webhookSession) matches(values []string) bool {
 	return subtle.ConstantTimeCompare(presented[:], s.digest[:]) == 1
 }
 
-func webhookSettings(cfg *config.Telegram, account *config.TelegramAccount) (secret.Reference, chan struct{}, error) {
+func webhookSettings(cfg *Config, account *Account) (secret.Reference, chan struct{}, error) {
 	switch account.Mode {
-	case "", config.TelegramModePolling:
+	case "", ModePolling:
 		return secret.Reference{}, nil, nil
-	case config.TelegramModeWebhook:
+	case ModeWebhook:
 	default:
-		return secret.Reference{}, nil, Errorf(ErrorCodeInvalidArgument, "telegram account mode must be polling or webhook")
+		return secret.Reference{}, nil, fault.New(ErrorCodeInvalidArgument, "telegram account mode must be polling or webhook")
 	}
 	ref, err := parseSecretReference(account.WebhookSecretRef, "webhook secret")
 	if err != nil {
@@ -66,11 +66,11 @@ func webhookSettings(cfg *config.Telegram, account *config.TelegramAccount) (sec
 	hook := &cfg.Webhook
 	switch {
 	case hook.PublicBaseURL == "":
-		return secret.Reference{}, nil, Errorf(ErrorCodeInvalidArgument, "webhook public base url must not be empty")
+		return secret.Reference{}, nil, fault.New(ErrorCodeInvalidArgument, "webhook public base url must not be empty")
 	case hook.MaxBodyBytes < 1:
-		return secret.Reference{}, nil, Errorf(ErrorCodeInvalidArgument, "webhook body bound must be positive")
+		return secret.Reference{}, nil, fault.New(ErrorCodeInvalidArgument, "webhook body bound must be positive")
 	case hook.MaxConnections < 1:
-		return secret.Reference{}, nil, Errorf(ErrorCodeInvalidArgument, "webhook connection cap must be positive")
+		return secret.Reference{}, nil, fault.New(ErrorCodeInvalidArgument, "webhook connection cap must be positive")
 	}
 	return ref, make(chan struct{}, hook.MaxConnections), nil
 }
@@ -168,8 +168,8 @@ func (a *Adapter) webhookFindings(ctx context.Context) []health.Finding {
 	defer cancel()
 	info, err := a.bot.getWebhookInfo(call, token)
 	if err != nil {
-		fault := classifyFault(err)
-		return []health.Finding{a.finding(fault, faultDetails[fault])}
+		code := classifyFault(err)
+		return []health.Finding{a.finding(code, faultDetails[code])}
 	}
 	if info.URL != a.webhookURL() {
 		return []health.Finding{a.finding(findingWebhookMismatch, "telegram holds a different webhook url than the configured one")}
@@ -287,19 +287,19 @@ func NewWebhookHandler(adapters []*Adapter) (*WebhookHandler, error) {
 	routes := make(map[string]*Adapter, len(adapters))
 	for _, adapter := range adapters {
 		if adapter == nil {
-			return nil, Errorf(ErrorCodeInvalidArgument, "telegram adapter must not be nil")
+			return nil, fault.New(ErrorCodeInvalidArgument, "telegram adapter must not be nil")
 		}
 		if !adapter.account.WebhookMode() {
 			continue
 		}
 		path := adapter.webhookPath()
 		if _, duplicate := routes[path]; duplicate {
-			return nil, Errorf(ErrorCodeInvalidArgument, "telegram webhook route is configured more than once")
+			return nil, fault.New(ErrorCodeInvalidArgument, "telegram webhook route is configured more than once")
 		}
 		routes[path] = adapter
 	}
 	if len(routes) == 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "no telegram account uses webhook mode")
+		return nil, fault.New(ErrorCodeInvalidArgument, "no telegram account uses webhook mode")
 	}
 	return &WebhookHandler{routes: routes}, nil
 }
@@ -343,13 +343,13 @@ type WebhookServer struct {
 
 func NewWebhookServer(handler *WebhookHandler, listen string, grace time.Duration) (*WebhookServer, error) {
 	if handler == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "webhook handler must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "webhook handler must not be nil")
 	}
 	if listen == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "webhook listen address must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "webhook listen address must not be empty")
 	}
 	if grace <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "webhook shutdown grace must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "webhook shutdown grace must be positive")
 	}
 	return &WebhookServer{handler: handler, listen: listen, grace: grace}, nil
 }
@@ -359,7 +359,7 @@ func (s *WebhookServer) Name() string { return "telegram-webhook" }
 func (s *WebhookServer) Start(ctx context.Context) error {
 	listener, err := (&net.ListenConfig{}).Listen(ctx, "tcp", s.listen)
 	if err != nil {
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "telegram webhook listener is not bindable", Cause: err}
+		return fault.Wrap(ErrorCodeConnectionFailed, "telegram webhook listener is not bindable", err)
 	}
 	return s.Serve(ctx, listener)
 }
@@ -398,9 +398,9 @@ func (s *WebhookServer) Serve(ctx context.Context, listener net.Listener) error 
 	s.handler.drain()
 	switch {
 	case shutdownErr != nil:
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "telegram webhook listener did not drain in time", Cause: shutdownErr}
+		return fault.Wrap(ErrorCodeConnectionFailed, "telegram webhook listener did not drain in time", shutdownErr)
 	case serveErr != nil && !errors.Is(serveErr, http.ErrServerClosed):
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "telegram webhook listener stopped", Cause: serveErr}
+		return fault.Wrap(ErrorCodeConnectionFailed, "telegram webhook listener stopped", serveErr)
 	default:
 		return nil
 	}

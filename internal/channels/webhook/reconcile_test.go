@@ -1,6 +1,7 @@
-package app
+package webhook
 
 import (
+	"bytes"
 	"cmp"
 	"context"
 	"database/sql"
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -18,6 +20,23 @@ import (
 )
 
 const reconcilePassWait = 10 * time.Second
+
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
 
 type storedTurnEvent struct {
 	id      string
@@ -81,7 +100,7 @@ func corruptStoredEvents(t *testing.T, db *sql.DB, sessionID string) {
 }
 
 func replayOf(execution *platformwebhook.Execution) *platformwebhook.AcceptedEvent {
-	event := webhookTestEvent()
+	event := testAcceptedEvent()
 	event.KeyID, event.Nonce, event.BodyDigest, event.Envelope.EventID = execution.KeyID, execution.Nonce, execution.BodyDigest, execution.EventID
 	return event
 }
@@ -166,8 +185,8 @@ func TestWebhookDispatcher_ReplayOfAnAdmittedTurnSubmitsNothing(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := storetest.OpenMigrated(t)
 			first := &fakeTurnRuntime{events: turnEmitting(tc.kinds...)}
-			dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: first})
-			ref, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
+			dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: first})
+			ref, err := dispatcher.Dispatch(t.Context(), testAcceptedEvent())
 			if err != nil {
 				t.Fatalf("Dispatch: %v", err)
 			}
@@ -182,8 +201,8 @@ func TestWebhookDispatcher_ReplayOfAnAdmittedTurnSubmitsNothing(t *testing.T) {
 				appendTurnCompleted(t, db, &left)
 			}
 			second := &fakeTurnRuntime{events: acceptedTurnEvents}
-			restarted, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: second})
-			again, err := restarted.Dispatch(t.Context(), webhookTestEvent())
+			restarted, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: second})
+			again, err := restarted.Dispatch(t.Context(), testAcceptedEvent())
 			if err != nil || again != ref {
 				t.Fatalf("replay after the restart = %+v, %v; want %+v", again, err, ref)
 			}
@@ -225,10 +244,10 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 		settledBefore := readExecution(t, db, "whex_5settled")
 		logs := &syncBuffer{}
 		backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
-		pass, err := dispatcher.reconcilePass()
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
+		pass, err := dispatcher.ReconcilePass()
 		if err != nil {
-			t.Fatalf("reconcilePass: %v", err)
+			t.Fatalf("ReconcilePass: %v", err)
 		}
 		runPassWithin(t, pass)
 		for id, want := range map[string]string{
@@ -263,7 +282,7 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 			seedWebhookTurn(t, db, &webhookTurnSeed{id: id, events: []storedTurnEvent{accepted, completed}})
 		}
 		logs := &syncBuffer{}
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}, logger: capturedLogger(logs)})
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}, logger: capturedLogger(logs)})
 		pass, err := platformwebhook.NewReconcilePass(&platformwebhook.ReconcilePassOptions{
 			Executions: dispatcher.executions,
 			Reconciler: dispatcher.reconciler,
@@ -292,10 +311,10 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_c1", events: []storedTurnEvent{accepted, completed}})
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_c2", events: []storedTurnEvent{accepted, completed}})
 		logs := &syncBuffer{}
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}, logger: capturedLogger(logs)})
-		pass, err := dispatcher.reconcilePass()
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}, logger: capturedLogger(logs)})
+		pass, err := dispatcher.ReconcilePass()
 		if err != nil {
-			t.Fatalf("reconcilePass: %v", err)
+			t.Fatalf("ReconcilePass: %v", err)
 		}
 		runPassWithin(t, pass)
 		for id, want := range map[string]string{
@@ -348,7 +367,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		corruptStoredEvents(t, db, execution.SessionID)
 		logs := &syncBuffer{}
 		backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
 		ref, err := dispatcher.Dispatch(t.Context(), replayOf(execution))
 		if err != nil || ref != (platformwebhook.ExecutionRef{ExecutionID: execution.ID, TurnID: execution.TurnID}) {
 			t.Fatalf("replay = %+v, %v; want the original reference", ref, err)
@@ -367,7 +386,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_refused"})
 		logs := &syncBuffer{}
 		backend := &fakeTurnRuntime{overload: true}
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
 		ref, err := dispatcher.Dispatch(t.Context(), replayOf(execution))
 		if err != nil || ref != (platformwebhook.ExecutionRef{ExecutionID: execution.ID, TurnID: execution.TurnID}) {
 			t.Fatalf("replay = %+v, %v; want the original reference", ref, err)
@@ -386,8 +405,8 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 				{err: errors.New("stream broke")},
 			}
 		}}
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend})
-		ref, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: backend})
+		ref, err := dispatcher.Dispatch(t.Context(), testAcceptedEvent())
 		if err != nil {
 			t.Fatalf("Dispatch: %v", err)
 		}
@@ -402,7 +421,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 	t.Run("a terminal event without an id leaves the execution to the store", func(t *testing.T) {
 		db := storetest.OpenMigrated(t)
 		execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_unstored", events: []storedTurnEvent{{id: "a", kind: turn.EventKindTurnAccepted}}})
-		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}})
+		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}})
 		yielded := false
 		dispatcher.startDrain(t.Context(), execution.ID, func() (turn.Event, error, bool) {
 			if yielded {

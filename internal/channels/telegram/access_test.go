@@ -13,11 +13,12 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
 const (
@@ -174,8 +175,14 @@ type accessOpts struct {
 	definition    auraagent.Definition
 	public        bool
 	unrouted      []string
-	settings      AccessSettings
+	settings      access.Settings
 	withoutAccess bool
+	owners        *principal.Resolver
+	commands      *command.Dispatcher
+	media         MediaStore
+	withoutMedia  bool
+	vision        *vision.Service
+	ledger        func(*memorySink) UpdateLedger
 }
 
 type accessRig struct {
@@ -198,12 +205,12 @@ func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore,
 	if opts.definition.ID == "" {
 		opts.definition = auraagent.Definition{ID: testPersona, Name: "Main", Audience: auraagent.AudiencePublic}
 	}
-	cfg := &config.Telegram{
+	cfg := &Config{
 		Enabled:            true,
-		Polling:            config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
-		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
+		Polling:            PollingConfig{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
+		MaxAttachmentBytes: MaxAttachmentBytes,
 	}
-	account := &config.TelegramAccount{
+	account := &Account{
 		Name:               "pocket",
 		BotTokenRef:        secrettest.Ref("env://" + testTokenEnv),
 		AllowedUserIDs:     opts.allowed,
@@ -211,37 +218,60 @@ func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore,
 		AcceptPrivateChats: !opts.privateOff,
 	}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	adapter, err := New(cfg, account, cursors, effects, sessions, logger)
-	if err != nil {
-		t.Fatalf("New: %v", err)
+	owners := opts.owners
+	if owners == nil {
+		var err error
+		owners, err = principal.NewResolver([]string{"telegram:" + strconv.Itoa(ownerUserID)})
+		if err != nil {
+			t.Fatalf("NewResolver: %v", err)
+		}
 	}
-	owners, err := principal.NewResolver([]string{"telegram:" + strconv.Itoa(ownerUserID)})
-	if err != nil {
-		t.Fatalf("NewResolver: %v", err)
-	}
-	rig := &accessRig{h: h, adapter: adapter, sink: newMemorySink(), scopes: &scopeLog{}}
+	sink := newMemorySink()
+	rig := &accessRig{h: h, sink: sink, scopes: &scopeLog{}}
 	unrouted := map[string]bool{}
 	for _, id := range opts.unrouted {
 		unrouted[id] = true
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(accessRouter{definition: opts.definition, public: opts.public, unrouted: unrouted, scopes: rig.scopes})
+	var settings access.Settings
 	if !opts.withoutAccess {
-		adapter.SetAccess(&opts.settings)
+		settings = opts.settings
 	}
-	adapter.SetDenialObserver(func(_ context.Context, reason string) {
+	settings.Denied = func(_ context.Context, reason string) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
 		h.denials = append(h.denials, reason)
+	}
+	var ledger UpdateLedger
+	if opts.ledger != nil {
+		ledger = opts.ledger(sink)
+	}
+	adapter, err := New(&Deps{
+		Config:            cfg,
+		Account:           account,
+		Cursors:           cursors,
+		Effects:           effects,
+		Sessions:          sessions,
+		Logger:            logger,
+		PrincipalResolver: owners,
+		PersonaRouter:     accessRouter{definition: opts.definition, public: opts.public, unrouted: unrouted, scopes: rig.scopes},
+		Commands:          opts.commands,
+		Media:             opts.media,
+		Vision:            opts.vision,
+		UpdateLedger:      ledger,
+		Access:            &settings,
+		OnDropped: func(_ context.Context, reason string) {
+			rig.mu.Lock()
+			defer rig.mu.Unlock()
+			rig.drops = append(rig.drops, reason)
+		},
 	})
-	adapter.SetDropObserver(func(_ context.Context, reason string) {
-		rig.mu.Lock()
-		defer rig.mu.Unlock()
-		rig.drops = append(rig.drops, reason)
-	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	adapter.bot.base = h.api.srv.URL
 	adapter.retryBase = 10 * time.Millisecond
 	adapter.rateCap = 50 * time.Millisecond
+	rig.adapter = adapter
 	return rig
 }
 
@@ -316,7 +346,7 @@ func TestAdmissionClassesMatchTheSharedResolver(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig := newAccessRig(t, accessOpts{allowed: tc.allowed, public: tc.public, settings: AccessSettings{Pairing: granted}})
+			rig := newAccessRig(t, accessOpts{allowed: tc.allowed, public: tc.public, settings: access.Settings{Pairing: granted}})
 			rig.run(t, privateText(10, tc.userID, "hello"))
 			if tc.wantID == "" {
 				rig.assertQuiet(t, tc.wantDrops...)
@@ -378,7 +408,7 @@ func TestAudienceGateDropsClassesThePersonaDoesNotAdmit(t *testing.T) {
 func TestPairingRepliesToUnknownSendersWithTheIssuedCode(t *testing.T) {
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD2345"}}
 	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
-	rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
+	rig := newAccessRig(t, accessOpts{definition: definition, settings: access.Settings{Pairing: pairing}})
 	rig.run(t, privateText(10, strangerID, "/start"))
 	rig.assertQuiet(t, "pairing")
 	if got := pairing.requested(); !slices.Equal(got, []string{"telegram:999001@pocket"}) {
@@ -410,7 +440,7 @@ func TestPairingOutcomesPickTheMatchingMessage(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			pairing := &fakePairing{result: tc.result, requestEr: tc.err}
-			rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
+			rig := newAccessRig(t, accessOpts{definition: definition, settings: access.Settings{Pairing: pairing}})
 			rig.run(t, privateText(10, strangerID, "hi"))
 			rig.assertQuiet(t, "pairing")
 			got := sentTo(rig.h.api, strangerID)
@@ -430,7 +460,7 @@ func TestPairingOutcomesPickTheMatchingMessage(t *testing.T) {
 func TestPairingFallsBackWhenTheAudienceRefusesAPublicSender(t *testing.T) {
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ZXCV5678"}}
 	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
-	rig := newAccessRig(t, accessOpts{definition: definition, public: true, settings: AccessSettings{Pairing: pairing}})
+	rig := newAccessRig(t, accessOpts{definition: definition, public: true, settings: access.Settings{Pairing: pairing}})
 	rig.run(t, privateText(10, publicUserID, "hi"))
 	rig.assertQuiet(t, "pairing")
 	if got := sentTo(rig.h.api, publicUserID); len(got) != 1 || !strings.Contains(got[0], "ZXCV5678") {
@@ -445,7 +475,7 @@ func TestPairingNeverStartsFromAPersonaWithoutPairing(t *testing.T) {
 		"audience is owner": {ID: testPersona, Audience: auraagent.AudienceOwner, Pairing: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
+			rig := newAccessRig(t, accessOpts{definition: definition, settings: access.Settings{Pairing: pairing}})
 			rig.run(t, privateText(10, strangerID, "hi"))
 			rig.assertQuiet(t, "author_not_allowed")
 			if sends := rig.h.api.sends(); len(sends) != 0 {
@@ -461,7 +491,7 @@ func TestPairingNeverStartsFromAPersonaWithoutPairing(t *testing.T) {
 func TestPairingGrantAdmitsATrustedSender(t *testing.T) {
 	pairing := &fakePairing{granted: map[string]bool{"telegram:999001@pocket": true}}
 	definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
-	rig := newAccessRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
+	rig := newAccessRig(t, accessOpts{definition: definition, settings: access.Settings{Pairing: pairing}})
 	rig.run(t, privateText(10, strangerID, "hi"))
 	if id, class, _ := rig.onlyEnvelope(t); id != "telegram:999001" || class != string(principal.ClassTrusted) {
 		t.Fatalf("principal = %q %q", id, class)
@@ -473,7 +503,7 @@ func TestPairingGrantAdmitsATrustedSender(t *testing.T) {
 
 func TestPairingGrantLookupFailureFailsClosed(t *testing.T) {
 	pairing := &fakePairing{grantEr: errors.New("store down")}
-	rig := newAccessRig(t, accessOpts{settings: AccessSettings{Pairing: pairing}})
+	rig := newAccessRig(t, accessOpts{settings: access.Settings{Pairing: pairing}})
 	rig.run(t, privateText(10, strangerID, "hi"))
 	rig.assertQuiet(t, "author_not_allowed")
 }
@@ -488,7 +518,7 @@ func TestPrivateChatsDisabledRejectsEveryNonOwnerWithoutPairing(t *testing.T) {
 		allowed:    []string{strconv.Itoa(allowedUserID)},
 		privateOff: true,
 		definition: definition,
-		settings:   AccessSettings{Pairing: pairing},
+		settings:   access.Settings{Pairing: pairing},
 	})
 	rig.run(t,
 		privateText(10, ownerUserID, "owner still passes"),
@@ -523,7 +553,7 @@ func TestEvalGateRefusesNonOwnersOfUnevaluatedPersonas(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Evals: tc.evals}})
+			rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Evals: tc.evals}})
 			rig.run(t, privateText(10, allowedUserID, "hello"))
 			if len(tc.wantDrops) == 0 {
 				rig.onlyEnvelope(t)
@@ -543,11 +573,11 @@ func TestEvalGateRefusesNonOwnersOfUnevaluatedPersonas(t *testing.T) {
 
 func TestEvalGateSkipsOwnersAndOwnerOnlyPersonas(t *testing.T) {
 	evals := &fakeEvals{}
-	rig := newAccessRig(t, accessOpts{settings: AccessSettings{Evals: evals}})
+	rig := newAccessRig(t, accessOpts{settings: access.Settings{Evals: evals}})
 	rig.run(t, privateText(10, ownerUserID, "hello"))
 	rig.onlyEnvelope(t)
 	ownerOnly := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceOwner}
-	other := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, definition: ownerOnly, settings: AccessSettings{Evals: evals}})
+	other := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, definition: ownerOnly, settings: access.Settings{Evals: evals}})
 	other.run(t, privateText(10, allowedUserID, "hello"))
 	other.assertQuiet(t, "audience")
 	if len(evals.personas) != 0 {
@@ -567,7 +597,7 @@ func TestBudgetGateRefusesWithThePersonaMessage(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Budgets: tc.budgets}})
+			rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Budgets: tc.budgets}})
 			rig.run(t, privateText(10, allowedUserID, "hello"))
 			rig.assertQuiet(t, tc.wantDrop)
 			if calls := tc.budgets.recorded(); len(calls) != 1 || calls[0] != (budgetCall{"telegram:555001", principal.ClassTrusted}) {
@@ -589,7 +619,7 @@ func TestBudgetGateRefusesWithThePersonaMessage(t *testing.T) {
 
 func TestBudgetGateAdmitsWithinLimitsAndSkipsOwners(t *testing.T) {
 	budgets := &fakeBudgets{}
-	rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Budgets: budgets}})
+	rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Budgets: budgets}})
 	rig.run(t, privateText(10, ownerUserID, "owner"), privateText(11, allowedUserID, "trusted"))
 	if accepted := rig.sink.accepted(); len(accepted) != 2 {
 		t.Fatalf("accepted %d envelopes, want 2", len(accepted))
@@ -602,7 +632,7 @@ func TestBudgetGateAdmitsWithinLimitsAndSkipsOwners(t *testing.T) {
 func TestHandoffGate(t *testing.T) {
 	t.Run("open handoff forwards to the owner and holds the turn", func(t *testing.T) {
 		handoffs := &fakeHandoffs{state: access.HandoffStateOpen}
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: handoffs}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Handoffs: handoffs}})
 		rig.run(t, privateText(10, allowedUserID, "need a human"))
 		rig.assertQuiet(t)
 		forwarded := sentTo(rig.h.api, ownerUserID)
@@ -617,7 +647,7 @@ func TestHandoffGate(t *testing.T) {
 		}
 	})
 	t.Run("expired handoff tells the sender and continues", func(t *testing.T) {
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: &fakeHandoffs{state: access.HandoffStateExpired}}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Handoffs: &fakeHandoffs{state: access.HandoffStateExpired}}})
 		rig.run(t, privateText(10, allowedUserID, "hello again"))
 		rig.onlyEnvelope(t)
 		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageHandoffClosed)}) {
@@ -625,7 +655,7 @@ func TestHandoffGate(t *testing.T) {
 		}
 	})
 	t.Run("no handoff continues untouched", func(t *testing.T) {
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: &fakeHandoffs{state: access.HandoffStateNone}}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Handoffs: &fakeHandoffs{state: access.HandoffStateNone}}})
 		rig.run(t, privateText(10, allowedUserID, "hello"))
 		rig.onlyEnvelope(t)
 		if sends := rig.h.api.sends(); len(sends) != 0 {
@@ -633,13 +663,13 @@ func TestHandoffGate(t *testing.T) {
 		}
 	})
 	t.Run("a failed check holds the turn", func(t *testing.T) {
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: &fakeHandoffs{err: errors.New("store down")}}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Handoffs: &fakeHandoffs{err: errors.New("store down")}}})
 		rig.run(t, privateText(10, allowedUserID, "hello"))
 		rig.assertQuiet(t, "handoff_check_failed")
 	})
 	t.Run("the owner is never held", func(t *testing.T) {
 		handoffs := &fakeHandoffs{state: access.HandoffStateOpen}
-		rig := newAccessRig(t, accessOpts{settings: AccessSettings{Handoffs: handoffs}})
+		rig := newAccessRig(t, accessOpts{settings: access.Settings{Handoffs: handoffs}})
 		rig.run(t, privateText(10, ownerUserID, "hello"))
 		rig.onlyEnvelope(t)
 		if len(handoffs.sessions) != 0 {
@@ -649,12 +679,11 @@ func TestHandoffGate(t *testing.T) {
 }
 
 func TestHandoffForwardWithoutATelegramOwnerIsDropped(t *testing.T) {
-	rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: &fakeHandoffs{state: access.HandoffStateOpen}}})
 	owners, err := principal.NewResolver(nil)
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	rig.adapter.SetPrincipalResolver(owners)
+	rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, owners: owners, settings: access.Settings{Handoffs: &fakeHandoffs{state: access.HandoffStateOpen}}})
 	rig.run(t, privateText(10, allowedUserID, "hello"))
 	rig.assertQuiet(t, "handoff_forward_failed")
 	if sends := rig.h.api.sends(); len(sends) != 0 {
@@ -665,7 +694,7 @@ func TestHandoffForwardWithoutATelegramOwnerIsDropped(t *testing.T) {
 func TestForgetMeCommand(t *testing.T) {
 	t.Run("without confirmation asks for it", func(t *testing.T) {
 		eraser := &fakeEraser{}
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetme"))
 		rig.assertQuiet(t)
 		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeConfirm)}) {
@@ -677,7 +706,7 @@ func TestForgetMeCommand(t *testing.T) {
 	})
 	t.Run("with confirmation erases the sender", func(t *testing.T) {
 		eraser := &fakeEraser{}
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetme CONFIRM"))
 		rig.assertQuiet(t)
 		if erased := eraser.erased(); !slices.Equal(erased, []string{"telegram:555001"}) {
@@ -689,7 +718,7 @@ func TestForgetMeCommand(t *testing.T) {
 	})
 	t.Run("a failed erasure sends no completion notice", func(t *testing.T) {
 		eraser := &fakeEraser{err: errors.New("disk full")}
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
 		if got := sentTo(rig.h.api, allowedUserID); len(got) != 0 {
@@ -698,7 +727,7 @@ func TestForgetMeCommand(t *testing.T) {
 	})
 	t.Run("an erasure waiting on workflow runs asks to repeat the command", func(t *testing.T) {
 		eraser := &fakeEraser{err: fmt.Errorf("blocked: %w", access.ErrForgetRunsStopping)}
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
 		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeStopping)}) {
@@ -707,7 +736,7 @@ func TestForgetMeCommand(t *testing.T) {
 	})
 	t.Run("the owner is not permitted", func(t *testing.T) {
 		eraser := &fakeEraser{}
-		rig := newAccessRig(t, accessOpts{settings: AccessSettings{Erasure: eraser}})
+		rig := newAccessRig(t, accessOpts{settings: access.Settings{Erasure: eraser}})
 		rig.run(t, privateText(10, ownerUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
 		if got := sentTo(rig.h.api, ownerUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageNotPermitted)}) {
@@ -718,7 +747,7 @@ func TestForgetMeCommand(t *testing.T) {
 		}
 	})
 	t.Run("other slash text goes to the model", func(t *testing.T) {
-		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: &fakeEraser{}}})
+		rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: &fakeEraser{}}})
 		rig.run(t, privateText(10, allowedUserID, "/forgetmenot"), privateText(11, allowedUserID, "please /forgetme"))
 		if accepted := rig.sink.accepted(); len(accepted) != 2 {
 			t.Fatalf("accepted %d envelopes, want 2", len(accepted))
@@ -738,7 +767,7 @@ func TestEveryDroppedMessageProducesOneReasonedRecordWithoutContentOrIDs(t *test
 		definition: definition,
 		public:     true,
 		unrouted:   []string{"555004"},
-		settings:   AccessSettings{Evals: &fakeEvals{}},
+		settings:   access.Settings{Evals: &fakeEvals{}},
 	})
 	group := privateText(13, ownerUserID, "secret group text")
 	group.Message.Chat = chat{ID: -100500, Type: "supergroup"}

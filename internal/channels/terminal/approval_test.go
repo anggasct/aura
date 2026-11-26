@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
 
@@ -63,28 +64,41 @@ func testCard() *ApprovalCard {
 	}
 }
 
-func newApprovalConsole(runner Runner, sess *fakeSessions, in io.Reader) (*Console, *ApprovalBridge, *bytes.Buffer) {
+func newApprovalConsole(t *testing.T, runner Runner, sess *fakeSessions, in io.Reader) (*Console, *ApprovalBridge, *bytes.Buffer) {
+	t.Helper()
 	bridge := NewApprovalBridge()
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := NewConsole(runner, sess, PlainRenderer{}, in, out, diag, Config{
-		MaxInputBytes:       1000,
-		InMemoryHistory:     100,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{
-		Out:     testWriteCloser{Writer: out},
-		Width:   func() int { return 80 },
-		Hz:      500,
-		Styling: false,
-	}))
-	console.SetApprovalBridge(bridge)
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: sess,
+		Renderer: PlainRenderer{},
+		In:       in,
+		Out:      out,
+		Diag:     diag,
+		Config: Config{
+			MaxInputBytes:       1000,
+			InMemoryHistory:     100,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		},
+		Principal: "owner",
+		TTY: NewTTYRenderer(TTYOptions{
+			Out:     testWriteCloser{Writer: out},
+			Width:   func() int { return 80 },
+			Hz:      500,
+			Styling: false,
+		}),
+		Approvals: bridge,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	return console, bridge, out
 }
 
 func TestApprovalAcceptedExecutesTool(t *testing.T) {
 	runner := &approvalRunner{bridge: NewApprovalBridge(), card: testCard()}
-	console, bridge, out := newApprovalConsole(runner, newFakeSessions(), strings.NewReader("hi\ny\n"))
+	console, bridge, out := newApprovalConsole(t, runner, newFakeSessions(), strings.NewReader("hi\ny\n"))
 	runner.bridge = bridge
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -103,7 +117,7 @@ func TestApprovalAcceptedExecutesTool(t *testing.T) {
 
 func TestApprovalCardDisplaysCanonicalScope(t *testing.T) {
 	runner := &approvalRunner{bridge: NewApprovalBridge(), card: testCard()}
-	console, bridge, out := newApprovalConsole(runner, newFakeSessions(), strings.NewReader("hi\nyes\n"))
+	console, bridge, out := newApprovalConsole(t, runner, newFakeSessions(), strings.NewReader("hi\nyes\n"))
 	runner.bridge = bridge
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -128,7 +142,7 @@ func TestApprovalCardDisplaysCanonicalScope(t *testing.T) {
 
 func TestApprovalDefaultActionIsReject(t *testing.T) {
 	runner := &approvalRunner{bridge: NewApprovalBridge(), card: testCard()}
-	console, bridge, out := newApprovalConsole(runner, newFakeSessions(), strings.NewReader("hi\n\n"))
+	console, bridge, out := newApprovalConsole(t, runner, newFakeSessions(), strings.NewReader("hi\n\n"))
 	runner.bridge = bridge
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -143,7 +157,7 @@ func TestApprovalDefaultActionIsReject(t *testing.T) {
 
 func TestApprovalExplicitReject(t *testing.T) {
 	runner := &approvalRunner{bridge: NewApprovalBridge(), card: testCard()}
-	console, bridge, out := newApprovalConsole(runner, newFakeSessions(), strings.NewReader("hi\nn\n"))
+	console, bridge, out := newApprovalConsole(t, runner, newFakeSessions(), strings.NewReader("hi\nn\n"))
 	runner.bridge = bridge
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -158,7 +172,7 @@ func TestApprovalExplicitReject(t *testing.T) {
 
 func TestApprovalEOFRejects(t *testing.T) {
 	runner := &approvalRunner{bridge: NewApprovalBridge(), card: testCard()}
-	console, bridge, out := newApprovalConsole(runner, newFakeSessions(), strings.NewReader("hi\n"))
+	console, bridge, out := newApprovalConsole(t, runner, newFakeSessions(), strings.NewReader("hi\n"))
 	runner.bridge = bridge
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -203,18 +217,30 @@ func TestApprovalExpiryRejects(t *testing.T) {
 	runner.bridge = bridge
 	out := &syncBuffer{}
 	diag := &bytes.Buffer{}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, pr, out, diag, Config{
-		MaxInputBytes:       1000,
-		InMemoryHistory:     100,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{
-		Out:     syncOutput{s: out},
-		Width:   func() int { return 80 },
-		Hz:      500,
-		Styling: false,
-	}))
-	console.SetApprovalBridge(bridge)
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       pr,
+		Out:      out,
+		Diag:     diag,
+		Config: Config{
+			MaxInputBytes:       1000,
+			InMemoryHistory:     100,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		},
+		Principal: "owner",
+		TTY: NewTTYRenderer(TTYOptions{
+			Out:     syncOutput{s: out},
+			Width:   func() int { return 80 },
+			Hz:      500,
+			Styling: false,
+		}),
+		Approvals: bridge,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
@@ -284,18 +310,30 @@ func TestLateApprovalInputIsDiscardedInsteadOfBecomingPrompt(t *testing.T) {
 	runner := &lateApprovalRunner{bridge: bridge, card: testCard()}
 	runner.card.ExpiresAt = time.Now().Add(50 * time.Millisecond)
 	out := &syncBuffer{}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, pr, out, &bytes.Buffer{}, Config{
-		MaxInputBytes:       1000,
-		InMemoryHistory:     100,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
-	console.SetTTY(NewTTYRenderer(TTYOptions{
-		Out:     syncOutput{s: out},
-		Width:   func() int { return 80 },
-		Hz:      500,
-		Styling: false,
-	}))
-	console.SetApprovalBridge(bridge)
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       pr,
+		Out:      out,
+		Diag:     &bytes.Buffer{},
+		Config: Config{
+			MaxInputBytes:       1000,
+			InMemoryHistory:     100,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		},
+		Principal: "owner",
+		TTY: NewTTYRenderer(TTYOptions{
+			Out:     syncOutput{s: out},
+			Width:   func() int { return 80 },
+			Hz:      500,
+			Styling: false,
+		}),
+		Approvals: bridge,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()

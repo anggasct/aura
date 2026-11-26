@@ -16,6 +16,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -179,7 +180,7 @@ func (r *untrustedInputRig) webhookTurn(call string) *turn.TurnRequest {
 	event := webhookTestEvent()
 	event.Envelope.EventID = fmt.Sprintf("evt-%d", r.turns)
 	event.Envelope.Subject = callMarker + call + "\n"
-	return webhookTurnRequest(fmt.Sprintf("sess_hook_%d", r.turns), fmt.Sprintf("turn-hook-%d", r.turns), event)
+	return gatewaywebhook.TurnRequest(fmt.Sprintf("sess_hook_%d", r.turns), fmt.Sprintf("turn-hook-%d", r.turns), event)
 }
 
 func (r *untrustedInputRig) discordTurn(principalID, call string) *turn.TurnRequest {

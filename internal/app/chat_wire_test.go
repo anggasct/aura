@@ -2,68 +2,10 @@ package app
 
 import (
 	"context"
-	"database/sql"
-	"errors"
-	"fmt"
 	"os"
 	"testing"
 	"time"
-
-	"github.com/anggasct/aura/internal/channels/terminal"
-	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 )
-
-type fakeTerminalSessionService struct {
-	created *turn.Session
-	getErr  error
-}
-
-func (f *fakeTerminalSessionService) Create(_ context.Context, sess *turn.Session) error {
-	f.created = sess
-	return nil
-}
-
-func (f *fakeTerminalSessionService) Get(context.Context, string) (turn.Session, error) {
-	if f.getErr != nil {
-		return turn.Session{}, f.getErr
-	}
-	return turn.Session{}, errors.New("not implemented")
-}
-
-func (f *fakeTerminalSessionService) ListEvents(context.Context, string, uint64, int) ([]turn.Event, error) {
-	return nil, nil
-}
-
-func TestTerminalSessionIDFailureIsReturned(t *testing.T) {
-	svc := &fakeTerminalSessionService{}
-	want := errors.New("random source unavailable")
-	sessions := &terminalSessions{sessions: svc, newID: func() (string, error) { return "", want }}
-	if _, err := sessions.Create(context.Background(), "owner", "main"); !errors.Is(err, want) {
-		t.Fatalf("Create error = %v, want %v", err, want)
-	}
-	if svc.created != nil {
-		t.Fatal("session was created after ID generation failed")
-	}
-}
-
-func TestTerminalSessionGetReportsMissingSessions(t *testing.T) {
-	for _, missing := range []error{
-		fmt.Errorf("get session x: %w", sql.ErrNoRows),
-		fault.New(turnstore.ErrorCodeSessionNotFound, "session does not exist"),
-	} {
-		sessions := &terminalSessions{sessions: &fakeTerminalSessionService{getErr: missing}}
-		if _, err := sessions.Get(t.Context(), "x"); !errors.Is(err, terminal.ErrSessionNotFound) {
-			t.Errorf("Get(%v) error = %v, want session not found", missing, err)
-		}
-	}
-	other := errors.New("database is locked")
-	sessions := &terminalSessions{sessions: &fakeTerminalSessionService{getErr: other}}
-	if _, err := sessions.Get(t.Context(), "x"); !errors.Is(err, other) || errors.Is(err, terminal.ErrSessionNotFound) {
-		t.Errorf("Get error = %v, want the store error", err)
-	}
-}
 
 func TestForwardInterrupts(t *testing.T) {
 	signals := make(chan os.Signal, 1)
@@ -96,15 +38,5 @@ func TestShouldUseTTY(t *testing.T) {
 				t.Errorf("shouldUseTTY(%+v, %v, %v) = %v, want %v", tc.present, tc.inTTY, tc.outTTY, got, tc.want)
 			}
 		})
-	}
-}
-
-func TestTerminalApprovalReachableOnlyWhenTheBridgeExists(t *testing.T) {
-	if terminalApprovalReachable(nil) != nil {
-		t.Error("a chat without an approval bridge must be unreachable")
-	}
-	reachable := terminalApprovalReachable(terminal.NewApprovalBridge())
-	if reachable == nil || !reachable("any-session") {
-		t.Error("a TTY chat with the approval bridge must be reachable for every session")
 	}
 }

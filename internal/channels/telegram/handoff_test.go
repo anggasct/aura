@@ -12,8 +12,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
@@ -95,15 +95,14 @@ func TestNotifyHandoffRefusals(t *testing.T) {
 		}
 	})
 	t.Run("owner without a telegram identity", func(t *testing.T) {
-		rig := newApprovalRig(t, accessOpts{})
 		owners, err := principal.NewResolver(nil)
 		if err != nil {
 			t.Fatalf("NewResolver: %v", err)
 		}
-		rig.adapter.SetPrincipalResolver(owners)
+		rig := newApprovalRig(t, accessOpts{owners: owners})
 		rig.adapter.rememberTarget(handoffSession, memberTarget(principal.ClassTrusted, privateDest(requesterID)))
 		_, err = rig.adapter.NotifyHandoff(t.Context(), handoffSession, "x")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeHandoffUnavailable {
+		if !fault.HasCode(err, ErrorCodeHandoffUnavailable) {
 			t.Fatalf("err = %v, want %s", err, ErrorCodeHandoffUnavailable)
 		}
 		if sends := rig.h.api.sends(); len(sends) != 0 {
@@ -115,7 +114,7 @@ func TestNotifyHandoffRefusals(t *testing.T) {
 		rig.adapter.rememberTarget(handoffSession, memberTarget(principal.ClassTrusted, privateDest(requesterID)))
 		t.Setenv(testTokenEnv, "")
 		_, err := rig.adapter.NotifyHandoff(t.Context(), handoffSession, "x")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
+		if !fault.HasCode(err, ErrorCodeConnectionFailed) {
 			t.Fatalf("err = %v, want %s", err, ErrorCodeConnectionFailed)
 		}
 	})
@@ -124,7 +123,7 @@ func TestNotifyHandoffRefusals(t *testing.T) {
 		rig.adapter.rememberTarget(handoffSession, memberTarget(principal.ClassTrusted, privateDest(requesterID)))
 		rig.h.api.failNextOn("sendMessage", apiFailure(http.StatusForbidden, 0))
 		_, err := rig.adapter.NotifyHandoff(t.Context(), handoffSession, "x")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeBotAPIRejected {
+		if !fault.HasCode(err, ErrorCodeBotAPIRejected) {
 			t.Fatalf("err = %v, want %s", err, ErrorCodeBotAPIRejected)
 		}
 		if got := noticesTo(rig, privateDest(requesterID)); len(got) != 0 {
@@ -167,14 +166,13 @@ func TestNotifyOwnerHandoffReachesOnlyTheOwner(t *testing.T) {
 
 func TestNotifyOwnerHandoffRefusals(t *testing.T) {
 	t.Run("owner without a telegram identity", func(t *testing.T) {
-		rig := newApprovalRig(t, accessOpts{})
 		owners, err := principal.NewResolver(nil)
 		if err != nil {
 			t.Fatalf("NewResolver: %v", err)
 		}
-		rig.adapter.SetPrincipalResolver(owners)
+		rig := newApprovalRig(t, accessOpts{owners: owners})
 		err = rig.adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), handoffSession, "x")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeHandoffUnavailable {
+		if !fault.HasCode(err, ErrorCodeHandoffUnavailable) {
 			t.Fatalf("err = %v, want %s", err, ErrorCodeHandoffUnavailable)
 		}
 		if sends := rig.h.api.sends(); len(sends) != 0 {
@@ -185,7 +183,7 @@ func TestNotifyOwnerHandoffRefusals(t *testing.T) {
 		rig := newApprovalRig(t, accessOpts{})
 		t.Setenv(testTokenEnv, "")
 		err := rig.adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), handoffSession, "x")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
+		if !fault.HasCode(err, ErrorCodeConnectionFailed) {
 			t.Fatalf("err = %v, want %s", err, ErrorCodeConnectionFailed)
 		}
 	})
@@ -203,7 +201,7 @@ func TestNotifyOwnerHandoffRefusals(t *testing.T) {
 		}
 		for name, tc := range cases {
 			err := rig.adapter.NotifyOwnerHandoff(t.Context(), tc.requester, tc.session, "x")
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("%s: err = %v, want %s", name, err, ErrorCodeInvalidArgument)
 			}
 		}
@@ -215,7 +213,7 @@ func TestNotifyOwnerHandoffRefusals(t *testing.T) {
 		rig := newApprovalRig(t, accessOpts{})
 		rig.h.api.failNextOn("sendMessage", apiFailure(http.StatusForbidden, 0))
 		err := rig.adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), handoffSession, "x")
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeBotAPIRejected {
+		if !fault.HasCode(err, ErrorCodeBotAPIRejected) {
 			t.Fatalf("err = %v, want %s", err, ErrorCodeBotAPIRejected)
 		}
 	})
@@ -259,7 +257,7 @@ func TestParseDestination(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := parseDestination(tc.chatID, tc.threadID)
 			if tc.wantErr {
-				if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+				if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 					t.Fatalf("err = %v, want %s", err, ErrorCodeInvalidArgument)
 				}
 				return
@@ -299,7 +297,7 @@ func TestSendPlainTextErrorsNeverCarryTheToken(t *testing.T) {
 	bot := newBotClient()
 	bot.base = base
 	err := sendPlainText(t.Context(), bot, testToken, privateDest(requesterID), "hello")
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
+	if !fault.HasCode(err, ErrorCodeConnectionFailed) {
 		t.Fatalf("err = %v, want %s", err, ErrorCodeConnectionFailed)
 	}
 	if strings.Contains(err.Error(), testToken) {
@@ -309,10 +307,10 @@ func TestSendPlainTextErrorsNeverCarryTheToken(t *testing.T) {
 
 func TestDeliverTextValidatesBeforeSending(t *testing.T) {
 	t.Setenv(testTokenEnv, testToken)
-	valid := &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv)}
+	valid := &Account{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv)}
 	cases := []struct {
 		name     string
-		account  *config.TelegramAccount
+		account  *Account
 		chatID   string
 		threadID string
 		want     ErrorCode
@@ -320,26 +318,26 @@ func TestDeliverTextValidatesBeforeSending(t *testing.T) {
 		{name: "nil account", chatID: "555001", want: ErrorCodeInvalidArgument},
 		{name: "corrupt chat id", account: valid, chatID: "not-a-chat", want: ErrorCodeInvalidArgument},
 		{name: "corrupt thread id", account: valid, chatID: "555001", threadID: "-1", want: ErrorCodeInvalidArgument},
-		{name: "unsupported token reference", account: &config.TelegramAccount{Name: "pocket"}, chatID: "555001", want: ErrorCodeInvalidArgument},
-		{name: "unset token", account: &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://AURA_TEST_UNSET_TELEGRAM_TOKEN")}, chatID: "555001", want: ErrorCodeConnectionFailed},
+		{name: "unsupported token reference", account: &Account{Name: "pocket"}, chatID: "555001", want: ErrorCodeInvalidArgument},
+		{name: "unset token", account: &Account{Name: "pocket", BotTokenRef: secrettest.Ref("env://AURA_TEST_UNSET_TELEGRAM_TOKEN")}, chatID: "555001", want: ErrorCodeConnectionFailed},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			err := DeliverText(t.Context(), tc.account, tc.chatID, tc.threadID, "hello")
-			if code, ok := CodeOf(err); !ok || code != tc.want {
+			if !fault.HasCode(err, tc.want) {
 				t.Fatalf("err = %v, want %s", err, tc.want)
 			}
 		})
 	}
 	var missing context.Context
-	if code, ok := CodeOf(DeliverText(missing, valid, "555001", "", "hello")); !ok || code != ErrorCodeInvalidArgument {
-		t.Errorf("nil context code = %q, %v", code, ok)
+	if !fault.HasCode(DeliverText(missing, valid, "555001", "", "hello"), ErrorCodeInvalidArgument) {
+		t.Error("nil context did not fail with invalid_argument")
 	}
 }
 
 func TestOpenHandoffHoldsTheNextRequesterMessage(t *testing.T) {
 	handoffs := &fakeHandoffs{state: access.HandoffStateNone}
-	rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Handoffs: handoffs}})
+	rig := newAccessRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Handoffs: handoffs}})
 	rig.run(t, privateText(10, allowedUserID, "I need a person"))
 	_, _, session := rig.onlyEnvelope(t)
 	target, err := rig.adapter.NotifyHandoff(t.Context(), session, "wants a human")

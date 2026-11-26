@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -139,7 +140,7 @@ func TestNewServerValidatesArguments(t *testing.T) {
 	for name, build := range cases {
 		t.Run(name, func(t *testing.T) {
 			server, err := build()
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument || server != nil {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument || server != nil {
 				t.Fatalf("NewServer = %v, %v; want %s", server, err, ErrorCodeInvalidArgument)
 			}
 		})

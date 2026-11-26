@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
-	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
@@ -21,25 +20,6 @@ const (
 	noticeTimeout       = 15 * time.Second
 	handoffForwardRunes = 1500
 )
-
-type AccessSettings struct {
-	ApprovalTimeout  time.Duration
-	StandingGrantTTL time.Duration
-	Grants           approval.StandingGrantRecorder
-	Pairing          access.PairingService
-	Budgets          access.BudgetGate
-	Erasure          access.PrincipalEraser
-	Handoffs         access.HandoffGate
-	Evals            access.EvalGate
-	ApprovalRouted   func(ctx context.Context, result string)
-}
-
-func (a *Adapter) SetAccess(settings *AccessSettings) {
-	if a == nil || settings == nil {
-		return
-	}
-	a.access = *settings
-}
 
 type authorAccess struct {
 	servesPublic bool
@@ -112,8 +92,8 @@ func (a *Adapter) personaEvaluated(ctx context.Context, target destination, pers
 }
 
 func (a *Adapter) deny(ctx context.Context, reason string) {
-	if a.denied != nil {
-		a.denied(ctx, reason)
+	if a.access.Denied != nil {
+		a.access.Denied(ctx, reason)
 	}
 }
 
