@@ -13,7 +13,7 @@ import (
 )
 
 func TestFetchTimesOut(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         50 * time.Millisecond,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -47,7 +47,7 @@ func TestFetchResolvesOnceAgainstRebindingResolver(t *testing.T) {
 		}
 		return []net.IP{net.ParseIP("10.0.0.8")}, nil
 	})
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         500 * time.Millisecond,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -84,7 +84,7 @@ func TestFetchPinsAnswerAcrossMultiAnswerLookup(t *testing.T) {
 		calls++
 		return []net.IP{net.ParseIP("192.0.2.10"), net.ParseIP("198.51.100.20")}, nil
 	})
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         500 * time.Millisecond,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,

@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"slices"
 	"time"
@@ -145,40 +144,22 @@ func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHold
 	if err != nil {
 		return nil, err
 	}
-	fetchAdapter, err := fetchTool.New(fetchTool.Options{
-		Timeout:         time.Duration(toolsCfg.Fetch.Timeout),
-		MaxRedirects:    toolsCfg.Fetch.MaxRedirects,
-		MaxEncodedBytes: toolsCfg.Fetch.MaxEncodedBytes,
-		MaxDecodedBytes: toolsCfg.Fetch.MaxDecodedBytes,
-	})
+	fetchMod, err := fetchTool.New(&fetchTool.Deps{Config: &toolsCfg.Fetch})
 	if err != nil {
 		return nil, err
 	}
-	searchOptions := &searchTool.Options{
-		Provider:      toolsCfg.WebSearch.Provider,
-		CredentialRef: toolsCfg.WebSearch.CredentialRef,
-		Timeout:       time.Duration(toolsCfg.Fetch.Timeout),
-		MaxResults:    toolsCfg.WebSearch.MaxResults,
-		MaxBodyBytes:  toolsCfg.Fetch.MaxDecodedBytes,
-	}
-	if toolsCfg.WebSearch.Endpoint != "" {
-		endpoint, err := toolsCfg.WebSearch.SearchEndpoint()
-		if err != nil {
-			return nil, fmt.Errorf("web search endpoint: %w", err)
-		}
-		searchOptions.Endpoint = endpoint.URL()
-		if endpoint.Loopback {
-			searchOptions.LoopbackAuthority = endpoint.Authority()
-		}
-	}
-	searchAdapter, err := searchTool.New(searchOptions)
+	searchMod, err := searchTool.New(&searchTool.Deps{
+		Config:       &toolsCfg.WebSearch,
+		Timeout:      time.Duration(toolsCfg.Fetch.Timeout),
+		MaxBodyBytes: toolsCfg.Fetch.MaxDecodedBytes,
+	})
 	if err != nil {
 		return nil, err
 	}
 	adapters := filesystemAdapters
 	adapters["exec@v1"] = execAdapter
-	adapters["web_fetch@v1"] = fetchAdapter
-	adapters["web_search@v1"] = searchAdapter
+	adapters["web_fetch@v1"] = fetchMod.Adapter()
+	adapters["web_search@v1"] = searchMod.Adapter()
 	adapters[tools.EmailSendToolName+"@"+tools.Version] = emails.adapter
 	adapters[codeKey()] = code.adapter
 	return adapters, nil
@@ -235,11 +216,7 @@ func ConfiguredToolSecrets(toolsCfg *config.Tools) []string {
 	if toolsCfg == nil {
 		return nil
 	}
-	value, err := toolsCfg.WebSearch.CredentialRef.Reference().Resolve()
-	if err != nil || value == "" {
-		return nil
-	}
-	return []string{value}
+	return toolsCfg.WebSearch.ConfiguredSecrets()
 }
 
 func (e *Executor) Definitions() []runtimeadk.BuiltinToolDefinition {

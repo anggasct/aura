@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -16,9 +17,9 @@ import (
 
 func installApprovedCLIPlugin(t *testing.T, h *mcpHarness, manifest string) *plugin.Service {
 	t.Helper()
-	service, err := newPluginService(&h.cfg, h.db, discardRedactor{})
+	service, err := openPluginService(&h.cfg, h.db, discardRedactor{})
 	if err != nil {
-		t.Fatalf("newPluginService: %v", err)
+		t.Fatalf("openPluginService: %v", err)
 	}
 	installed, err := service.Install(t.Context(), writeCLIPluginBundle(t, manifest))
 	if err != nil {
@@ -30,14 +31,14 @@ func installApprovedCLIPlugin(t *testing.T, h *mcpHarness, manifest string) *plu
 	return service
 }
 
-func (h *mcpHarness) startPlugins(t *testing.T, starter mcp.SessionStarter, plugins *pluginRuntime) *mcp.Module {
+func (h *mcpHarness) startPlugins(t *testing.T, starter mcp.SessionStarter, plugins *plugin.Module) *mcp.Module {
 	t.Helper()
 	trustPath, err := mcpTrustRegistryPath(&h.cfg)
 	if err != nil {
 		t.Fatalf("mcpTrustRegistryPath: %v", err)
 	}
 	started, err := mcp.New(t.Context(), &mcp.ModuleDeps{
-		Config: h.cfg.MCP, Broker: h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), SessionStarter: starter, TrustPath: trustPath, Plugins: plugins.mcpPlugins(),
+		Config: h.cfg.MCP, Broker: h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), SessionStarter: starter, TrustPath: trustPath, Plugins: mcpPluginsFromBackends(plugins.MCPBackends()),
 	})
 	if err != nil {
 		t.Fatalf("mcp.New: %v", err)
@@ -46,15 +47,31 @@ func (h *mcpHarness) startPlugins(t *testing.T, starter mcp.SessionStarter, plug
 	return started
 }
 
+func planPluginModule(t *testing.T, h *mcpHarness) *plugin.Module {
+	t.Helper()
+	dataRoot, err := resolveDataRoot(&h.cfg)
+	if err != nil {
+		t.Fatalf("resolveDataRoot: %v", err)
+	}
+	mod, err := plugin.New(t.Context(), &plugin.ModuleDeps{
+		Config:   h.cfg.Plugins,
+		DB:       h.db,
+		DataRoot: dataRoot,
+		Redactor: discardRedactor{},
+		Logger:   slog.New(slog.DiscardHandler),
+	})
+	if err != nil {
+		t.Fatalf("plugin.New: %v", err)
+	}
+	return mod
+}
+
 func TestPluginRuntimeExposesOnlyApprovedToolsOfAnApprovedPlugin(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	installApprovedCLIPlugin(t, h, cliPluginManifest)
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
-	if err != nil {
-		t.Fatalf("planPlugins: %v", err)
-	}
-	if len(plugins.plan.Active) != 1 || len(plugins.plan.Held) != 0 {
-		t.Fatalf("plan = %+v", plugins.plan)
+	plugins := planPluginModule(t, h)
+	if len(plugins.Plan().Active) != 1 || len(plugins.Plan().Held) != 0 {
+		t.Fatalf("plan = %+v", plugins.Plan())
 	}
 	starter := newFixtureStarter(map[string][]string{"plugin-demo": {"forecast", "export_all"}})
 	started := h.startPlugins(t, starter, plugins)
@@ -68,7 +85,7 @@ func TestPluginRuntimeExposesOnlyApprovedToolsOfAnApprovedPlugin(t *testing.T) {
 	if len(statuses) != 1 || !slices.Equal(statuses[0].Drift, []string{"export_all"}) {
 		t.Fatalf("statuses = %+v", statuses)
 	}
-	check, ok, err := plugins.healthCheck(&h.cfg, h.db, started)
+	check, ok, err := pluginHealthCheck(plugins, started, time.Duration(h.cfg.Health.CheckTimeout))
 	if err != nil || !ok {
 		t.Fatalf("healthCheck = %v, %v", ok, err)
 	}
@@ -81,10 +98,7 @@ func TestPluginRuntimeExposesOnlyApprovedToolsOfAnApprovedPlugin(t *testing.T) {
 func TestPluginToolsAreDeniedToPublicAndUnlistedPrincipals(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	installApprovedCLIPlugin(t, h, cliPluginManifest)
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
-	if err != nil {
-		t.Fatalf("planPlugins: %v", err)
-	}
+	plugins := planPluginModule(t, h)
 	starter := newFixtureStarter(map[string][]string{"plugin-demo": {"forecast"}})
 	h.startPlugins(t, starter, plugins)
 	if err := h.callTool(t.Context(), "plugin_demo_forecast", "public-call", principal.ClassPublic); err == nil {
@@ -98,24 +112,21 @@ func TestPluginToolsAreDeniedToPublicAndUnlistedPrincipals(t *testing.T) {
 func TestPlanPluginsKeepsATamperedBundleOff(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	installApprovedCLIPlugin(t, h, cliPluginManifest)
-	dir, err := pluginDirectory(&h.cfg, pluginDirName)
+	dataRoot, err := resolveDataRoot(&h.cfg)
 	if err != nil {
-		t.Fatalf("pluginDirectory: %v", err)
+		t.Fatalf("resolveDataRoot: %v", err)
 	}
-	if err := os.WriteFile(filepath.Join(dir, "demo", "1.0.0", "server"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
+	if err := os.WriteFile(filepath.Join(dataRoot, "plugins", "demo", "1.0.0", "server"), []byte("#!/bin/sh\nexit 1\n"), 0o700); err != nil {
 		t.Fatalf("tamper: %v", err)
 	}
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
-	if err != nil {
-		t.Fatalf("planPlugins: %v", err)
+	plugins := planPluginModule(t, h)
+	if len(plugins.Plan().Active) != 0 || len(plugins.Plan().Held) != 1 || plugins.Plan().Held[0].Code != plugin.ErrTampered {
+		t.Fatalf("plan = %+v", plugins.Plan())
 	}
-	if len(plugins.plan.Active) != 0 || len(plugins.plan.Held) != 1 || plugins.plan.Held[0].Code != plugin.ErrTampered {
-		t.Fatalf("plan = %+v", plugins.plan)
-	}
-	if got := plugins.mcpPlugins(); len(got) != 0 {
+	if got := mcpPluginsFromBackends(plugins.MCPBackends()); len(got) != 0 {
 		t.Fatalf("tampered plugin reached the runtime: %+v", got)
 	}
-	check, ok, err := plugins.healthCheck(&h.cfg, h.db, nil)
+	check, ok, err := pluginHealthCheck(plugins, nil, time.Duration(h.cfg.Health.CheckTimeout))
 	if err != nil || !ok {
 		t.Fatalf("healthCheck = %v, %v", ok, err)
 	}
@@ -127,14 +138,11 @@ func TestPlanPluginsKeepsATamperedBundleOff(t *testing.T) {
 
 func TestPlanPluginsWithoutPluginsIsEmptyAndRegistersNoCheck(t *testing.T) {
 	h := newMCPHarness(t, nil)
-	plugins, err := planPlugins(t.Context(), &h.cfg, h.db, discardRedactor{})
-	if err != nil {
-		t.Fatalf("planPlugins: %v", err)
+	plugins := planPluginModule(t, h)
+	if len(mcpPluginsFromBackends(plugins.MCPBackends())) != 0 {
+		t.Fatalf("plugins = %+v", plugins.MCPBackends())
 	}
-	if len(plugins.mcpPlugins()) != 0 {
-		t.Fatalf("plugins = %+v", plugins.mcpPlugins())
-	}
-	if _, ok, err := plugins.healthCheck(&h.cfg, h.db, nil); err != nil || ok {
+	if _, ok, err := pluginHealthCheck(plugins, nil, time.Duration(h.cfg.Health.CheckTimeout)); err != nil || ok {
 		t.Fatalf("healthCheck = %v, %v", ok, err)
 	}
 }
@@ -165,9 +173,9 @@ backend:
 func TestPluginReviewShowsSecretReferencesNeverValues(t *testing.T) {
 	h := newMCPHarness(t, nil)
 	t.Setenv("AURA_TEST_PLUGIN_TOKEN", "super-secret-value")
-	service, err := newPluginService(&h.cfg, h.db, discardRedactor{})
+	service, err := openPluginService(&h.cfg, h.db, discardRedactor{})
 	if err != nil {
-		t.Fatalf("newPluginService: %v", err)
+		t.Fatalf("openPluginService: %v", err)
 	}
 	installed, err := service.Install(t.Context(), writeCLIPluginBundle(t, cliHTTPPluginManifest))
 	if err != nil {
@@ -177,7 +185,7 @@ func TestPluginReviewShowsSecretReferencesNeverValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Review: %v", err)
 	}
-	text := strings.Join(reviewLines(review), "\n")
+	text := strings.Join(plugin.FormatReview(review), "\n")
 	if strings.Contains(text, "super-secret-value") || !strings.Contains(text, "env://AURA_TEST_PLUGIN_TOKEN") {
 		t.Fatalf("review output = %q", text)
 	}
@@ -185,9 +193,9 @@ func TestPluginReviewShowsSecretReferencesNeverValues(t *testing.T) {
 
 func TestPluginInstallRejectsAnInlineSecretWithoutEchoingIt(t *testing.T) {
 	h := newMCPHarness(t, nil)
-	service, err := newPluginService(&h.cfg, h.db, discardRedactor{})
+	service, err := openPluginService(&h.cfg, h.db, discardRedactor{})
 	if err != nil {
-		t.Fatalf("newPluginService: %v", err)
+		t.Fatalf("openPluginService: %v", err)
 	}
 	manifest := strings.Replace(cliHTTPPluginManifest, "env://AURA_TEST_PLUGIN_TOKEN", "sk-live-inline-value", 1)
 	_, err = service.Install(t.Context(), writeCLIPluginBundle(t, manifest))

@@ -5,7 +5,9 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/fetch"
 	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -210,23 +212,9 @@ type Tools struct {
 	Workspace            string           `json:"workspace"`
 	MaxInlineResultBytes int64            `json:"max_inline_result_bytes"`
 	Exec                 shellexec.Config `json:"exec"`
-	Fetch                ToolFetch        `json:"fetch"`
-	WebSearch            ToolWebSearch    `json:"web_search"`
+	Fetch                fetch.Config     `json:"fetch"`
+	WebSearch            search.Config    `json:"web_search"`
 	GitHub               github.Config    `json:"github,omitzero"`
-}
-
-type ToolFetch struct {
-	Timeout         configkit.Duration `json:"timeout"`
-	MaxRedirects    int                `json:"max_redirects"`
-	MaxEncodedBytes int64              `json:"max_encoded_bytes"`
-	MaxDecodedBytes int64              `json:"max_decoded_bytes"`
-}
-
-type ToolWebSearch struct {
-	Provider      string     `json:"provider"`
-	CredentialRef secret.Ref `json:"credential_ref,omitzero"`
-	Endpoint      string     `json:"endpoint,omitempty"`
-	MaxResults    int        `json:"max_results"`
 }
 
 var (
@@ -238,16 +226,8 @@ func DefaultTools() *Tools {
 		Workspace:            "/srv/aura/workspace",
 		MaxInlineResultBytes: 65536,
 		Exec:                 shellexec.Default(),
-		Fetch: ToolFetch{
-			Timeout:         configkit.Duration(30 * time.Second),
-			MaxRedirects:    5,
-			MaxEncodedBytes: 2097152,
-			MaxDecodedBytes: 8388608,
-		},
-		WebSearch: ToolWebSearch{
-			Provider:   WebSearchProviderDuckDuckGo,
-			MaxResults: 5,
-		},
+		Fetch:                fetch.Default(),
+		WebSearch:            search.Default(),
 	}
 }
 

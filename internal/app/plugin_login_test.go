@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth/authtest"
 )
 
@@ -75,9 +76,11 @@ func oauthManifestFor(as *authtest.Server) string {
 
 func runPluginCommandIn(t *testing.T, cfg string, in io.Reader, out *bytes.Buffer, args ...string) error {
 	t.Helper()
-	cmd := newPluginCmd(&globalFlags{configPath: cfg})
+	restoreDefaultLogger(t)
+	cmd := plugin.Commands(pluginOpener(&globalFlags{configPath: cfg}))[0]
+	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errOut)
 	cmd.SetIn(in)
 	cmd.SetArgs(args)
 	return cmd.ExecuteContext(t.Context())
@@ -151,8 +154,8 @@ func TestPluginLoginAndLogoutLifecycle(t *testing.T) {
 	if err := runPluginCommandIn(t, cfg, strings.NewReader(""), logout, "logout", "mailer"); err != nil || !strings.Contains(logout.String(), "logged out mailer") {
 		t.Fatalf("logout = %q, %v", logout.String(), err)
 	}
-	if accessEventCount(t, cfg, accessActionPluginLogin) != 1 || accessEventCount(t, cfg, accessActionPluginLogout) != 1 {
-		t.Fatalf("login events = %d logout events = %d, want one each", accessEventCount(t, cfg, accessActionPluginLogin), accessEventCount(t, cfg, accessActionPluginLogout))
+	if accessEventCount(t, cfg, plugin.AuditActionLogin) != 1 || accessEventCount(t, cfg, plugin.AuditActionLogout) != 1 {
+		t.Fatalf("login events = %d logout events = %d, want one each", accessEventCount(t, cfg, plugin.AuditActionLogin), accessEventCount(t, cfg, plugin.AuditActionLogout))
 	}
 	if _, err := os.Stat(namespace); !os.IsNotExist(err) {
 		t.Fatalf("namespace after logout: %v", err)

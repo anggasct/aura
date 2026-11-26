@@ -25,7 +25,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -157,10 +156,11 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 	t.Setenv("AURA_TEST_OAUTH_CLIENT_SECRET", authtest.Secret)
 	h := newMCPHarness(t, nil)
 	as := authtest.New(t)
-	secretsDir, err := pluginDirectory(&h.cfg, pluginSecretsDirName)
+	dataRoot, err := resolveDataRoot(&h.cfg)
 	if err != nil {
-		t.Fatalf("pluginDirectory: %v", err)
+		t.Fatalf("resolveDataRoot: %v", err)
 	}
+	secretsDir := filepath.Join(dataRoot, "plugin-secrets")
 	resource := newResourceServer(t, as, func() string { return filepath.Join(secretsDir, "mailer", "token.json") })
 	asURL, err := url.Parse(as.URL())
 	if err != nil {
@@ -185,23 +185,23 @@ func newE2EFixture(t *testing.T) *e2eFixture {
 
 func (f *e2eFixture) newService(t *testing.T) *plugin.Service {
 	t.Helper()
-	secretsDir, err := pluginDirectory(&f.h.cfg, pluginSecretsDirName)
+	dataRoot, err := resolveDataRoot(&f.h.cfg)
 	if err != nil {
-		t.Fatalf("pluginDirectory: %v", err)
+		t.Fatalf("resolveDataRoot: %v", err)
 	}
 	registry, err := auth.NewRegistry(&auth.Options{
-		Dir: secretsDir, Secrets: mcp.NewSecretResolver(), HTTPClient: pluginHTTPClient(mcp.NewHTTPClient(nil)),
+		Dir: filepath.Join(dataRoot, "plugin-secrets"), Secrets: auth.NewSecretResolver(), HTTPClient: auth.NewHTTPClient(nil),
 		Redactor: f.h.executor.Broker(), Now: f.clock.now,
 	})
 	if err != nil {
 		t.Fatalf("auth.NewRegistry: %v", err)
 	}
-	pluginsDir, err := pluginDirectory(&f.h.cfg, pluginDirName)
+	store, err := plugin.NewSQLiteStore(f.h.db)
 	if err != nil {
-		t.Fatalf("pluginDirectory: %v", err)
+		t.Fatalf("plugin.NewSQLiteStore: %v", err)
 	}
 	service, err := plugin.NewService(&plugin.Options{
-		Registry: &storePluginRegistry{plugins: store.NewPluginStore(f.h.db)}, Auth: registry, Dir: pluginsDir,
+		Registry: store, Auth: registry, Dir: filepath.Join(dataRoot, "plugins"),
 	})
 	if err != nil {
 		t.Fatalf("plugin.NewService: %v", err)
@@ -221,16 +221,15 @@ func (f *e2eFixture) login(t *testing.T) {
 	}
 }
 
-func (f *e2eFixture) start(t *testing.T) (*pluginRuntime, *mcp.Module) {
+func (f *e2eFixture) start(t *testing.T) (*plugin.Plan, *mcp.Module) {
 	t.Helper()
 	plan, err := f.service.Plan(t.Context())
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	runtime := &pluginRuntime{service: f.service, plan: plan, installed: 1}
-	mcpPlugins := runtime.mcpPlugins()
+	mcpPlugins := mcpPluginsFromBackends(plan.Active)
 	if len(mcpPlugins) == 0 {
-		return runtime, nil
+		return plan, nil
 	}
 	mod, err := mcp.New(t.Context(), &mcp.ModuleDeps{
 		Config:     &mcp.Config{},
@@ -243,7 +242,39 @@ func (f *e2eFixture) start(t *testing.T) (*pluginRuntime, *mcp.Module) {
 		t.Fatalf("mcp.New: %v", err)
 	}
 	t.Cleanup(func() { _ = mod.Close(context.WithoutCancel(t.Context())) })
-	return runtime, mod
+	return plan, mod
+}
+
+func (f *e2eFixture) checkFindings(t *testing.T, plan *plugin.Plan, mcpMod *mcp.Module) []health.Finding {
+	t.Helper()
+	store, err := plugin.NewSQLiteStore(f.h.db)
+	if err != nil {
+		t.Fatalf("plugin.NewSQLiteStore: %v", err)
+	}
+	var source func(context.Context) []plugin.RuntimeStatus
+	if mcpMod != nil {
+		source = func(ctx context.Context) []plugin.RuntimeStatus {
+			statuses := mcpPluginStatuses(mcpMod)
+			for i := range statuses {
+				for j := range plan.Active {
+					if plan.Active[j].ID == statuses[i].ID {
+						statuses[i].Auth = plan.Active[j].AuthStatus(ctx)
+					}
+				}
+			}
+			return statuses
+		}
+	}
+	checker, err := plugin.NewChecker(&plugin.CheckerOptions{
+		Registry: store,
+		Desired:  f.h.cfg.Plugins,
+		Held:     plan.Held,
+		Runtime:  source,
+	})
+	if err != nil {
+		t.Fatalf("NewChecker: %v", err)
+	}
+	return checker.Check(t.Context())
 }
 
 func (f *e2eFixture) search(t *testing.T, id, message string) (json.RawMessage, error) {
@@ -271,18 +302,14 @@ func requireNoPlanted(t *testing.T, label, text string, extra ...string) {
 
 func TestActiveOAuth2PluginWithoutATokenStaysOffWithAuthRequired(t *testing.T) {
 	f := newE2EFixture(t)
-	runtime, manager := f.start(t)
-	if len(runtime.plan.Active) != 0 || len(runtime.plan.Held) != 1 || runtime.plan.Held[0].Code != plugin.ErrAuthRequired {
-		t.Fatalf("plan = %+v", runtime.plan)
+	plan, manager := f.start(t)
+	if len(plan.Active) != 0 || len(plan.Held) != 1 || plan.Held[0].Code != plugin.ErrAuthRequired {
+		t.Fatalf("plan = %+v", plan)
 	}
-	if len(manager.PluginStatuses()) != 0 {
+	if manager != nil && len(manager.PluginStatuses()) != 0 {
 		t.Fatalf("a plugin without a token reached the mcp manager: %+v", manager.PluginStatuses())
 	}
-	check, ok, err := runtime.healthCheck(&f.h.cfg, f.h.db, nil)
-	if err != nil || !ok {
-		t.Fatalf("healthCheck = %v, %v", ok, err)
-	}
-	findings := check.Checker.Check(t.Context())
+	findings := f.checkFindings(t, plan, nil)
 	if len(findings) != 1 || findings[0].Code != string(plugin.ErrAuthRequired) || findings[0].Remediation != plugin.RemediationLogin {
 		t.Fatalf("findings = %+v", findings)
 	}
@@ -339,7 +366,7 @@ func TestPermanentRefreshFailureFailsClosedAndSurvivesARestart(t *testing.T) {
 	f := newE2EFixture(t)
 	f.as.ExpireIn(120)
 	f.login(t)
-	runtime, manager := f.start(t)
+	plan, manager := f.start(t)
 	if statuses := manager.PluginStatuses(); len(statuses) != 1 || statuses[0].Code != "" {
 		t.Fatalf("statuses = %+v", statuses)
 	}
@@ -361,11 +388,7 @@ func TestPermanentRefreshFailureFailsClosedAndSurvivesARestart(t *testing.T) {
 	if f.as.Refreshes() != refreshes+1 {
 		t.Fatalf("refreshes = %d, want the failed plugin to stop calling the token endpoint", f.as.Refreshes())
 	}
-	check, ok, err := runtime.healthCheck(&f.h.cfg, f.h.db, manager)
-	if err != nil || !ok {
-		t.Fatalf("healthCheck = %v, %v", ok, err)
-	}
-	findings := check.Checker.Check(t.Context())
+	findings := f.checkFindings(t, plan, manager)
 	codes := findingCodes(findings)
 	if codes["mailer"] != string(plugin.ErrAuthFailed) {
 		t.Fatalf("findings = %+v", findings)
@@ -377,28 +400,19 @@ func TestPermanentRefreshFailureFailsClosedAndSurvivesARestart(t *testing.T) {
 	requireNoPlanted(t, "health findings", string(rendered), f.as.RefreshToken(1))
 	requireNoPlanted(t, "logs", f.logs.String(), f.as.RefreshToken(1), f.as.AccessToken(1))
 	restarted, _ := f.start(t)
-	if len(restarted.plan.Active) != 0 || len(restarted.plan.Held) != 1 || restarted.plan.Held[0].Code != plugin.ErrAuthFailed {
-		t.Fatalf("restarted plan = %+v", restarted.plan)
+	if len(restarted.Active) != 0 || len(restarted.Held) != 1 || restarted.Held[0].Code != plugin.ErrAuthFailed {
+		t.Fatalf("restarted plan = %+v", restarted)
 	}
-	if got := findingCodes(mustFindings(t, restarted, f)); got["mailer"] != string(plugin.ErrAuthFailed) {
+	if got := findingCodes(f.checkFindings(t, restarted, nil)); got["mailer"] != string(plugin.ErrAuthFailed) {
 		t.Fatalf("restarted findings = %v", got)
 	}
-}
-
-func mustFindings(t *testing.T, runtime *pluginRuntime, f *e2eFixture) []health.Finding {
-	t.Helper()
-	check, ok, err := runtime.healthCheck(&f.h.cfg, f.h.db, nil)
-	if err != nil || !ok {
-		t.Fatalf("healthCheck = %v, %v", ok, err)
-	}
-	return check.Checker.Check(t.Context())
 }
 
 func TestTransientRefreshFailureFailsOnlyThatCall(t *testing.T) {
 	f := newE2EFixture(t)
 	f.as.ExpireIn(120)
 	f.login(t)
-	runtime, manager := f.start(t)
+	plan, manager := f.start(t)
 	if _, err := f.search(t, "before", "ok"); err != nil {
 		t.Fatalf("search before the outage: %v", err)
 	}
@@ -410,7 +424,7 @@ func TestTransientRefreshFailureFailsOnlyThatCall(t *testing.T) {
 		t.Fatal("a call succeeded during the token endpoint outage")
 	}
 	requireNoPlanted(t, "tool error", err.Error())
-	if got := runtime.plan.Active[0].AuthStatus(t.Context()); got != "" {
+	if got := plan.Active[0].AuthStatus(t.Context()); got != "" {
 		t.Fatalf("auth status after an outage = %q, want none", got)
 	}
 	if output, err := f.search(t, "after", "recovered"); err != nil || !strings.Contains(string(output), "recovered") {

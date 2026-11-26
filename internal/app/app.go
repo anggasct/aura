@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -58,6 +59,7 @@ const (
 	PartKnowledge Part = "knowledge"
 	PartMemory    Part = "memory"
 	PartProfile   Part = "profile"
+	PartPlugins   Part = "plugins"
 	PartSkills    Part = "skills"
 )
 
@@ -116,6 +118,7 @@ type App struct {
 	knowledge    *knowledge.Service
 	memory       *memory.Service
 	profile      *profile.Service
+	plugins      *plugin.Service
 	skillsEngine *skills.Engine
 	skillsRoot   string
 
@@ -140,7 +143,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
 		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile,
-		skillsEngine: b.skillsEngine, skillsRoot: b.skillsRoot,
+		plugins: b.plugins, skillsEngine: b.skillsEngine, skillsRoot: b.skillsRoot,
 	}, nil
 }
 
@@ -244,7 +247,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile, PartSkills:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile, PartPlugins, PartSkills:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -347,6 +350,7 @@ type build struct {
 	knowledge    *knowledge.Service
 	memory       *memory.Service
 	profile      *profile.Service
+	plugins      *plugin.Service
 	skillsEngine *skills.Engine
 	skillsRoot   string
 	quarantined  []workflow.Quarantined
@@ -458,6 +462,13 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.profile = service
+	}
+	if slices.Contains(parts, PartPlugins) {
+		service, err := openPluginService(b.cfg, b.db, discardRedactor{})
+		if err != nil {
+			return err
+		}
+		b.plugins = service
 	}
 	if slices.Contains(parts, PartSkills) {
 		if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {

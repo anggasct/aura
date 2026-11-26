@@ -12,22 +12,23 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
 func TestEveryConfiguredWebSearchProviderBuildsAnAdapter(t *testing.T) {
-	for _, provider := range config.WebSearchProviders() {
+	for _, provider := range search.Providers() {
 		t.Run(provider, func(t *testing.T) {
 			toolsCfg := config.DefaultTools()
 			toolsCfg.Workspace = t.TempDir()
-			toolsCfg.WebSearch = config.ToolWebSearch{
+			toolsCfg.WebSearch = search.Config{
 				Provider:      provider,
-				CredentialRef: config.DefaultWebSearchCredentialRef(provider),
+				CredentialRef: search.DefaultCredentialRef(provider),
 				MaxResults:    5,
 			}
-			if provider == config.WebSearchProviderSearXNG {
+			if provider == search.ProviderSearXNG {
 				toolsCfg.WebSearch.Endpoint = "https://search.example.com/search"
 			}
 			adapters, err := builtinAdapters(toolsCfg, &emailHolder{}, &codeHolder{})
@@ -54,8 +55,8 @@ func TestSearXNGToolsConfigReachesALoopbackServerThroughTheExecutorAdapters(t *t
 	defer server.Close()
 	toolsCfg := config.DefaultTools()
 	toolsCfg.Workspace = t.TempDir()
-	toolsCfg.WebSearch = config.ToolWebSearch{
-		Provider:      config.WebSearchProviderSearXNG,
+	toolsCfg.WebSearch = search.Config{
+		Provider:      search.ProviderSearXNG,
 		Endpoint:      server.URL + "/search",
 		CredentialRef: secrettest.Ref("env://AURA_TEST_SEARXNG_TOKEN"),
 		MaxResults:    5,
@@ -87,7 +88,7 @@ func TestSearXNGToolsConfigReachesALoopbackServerThroughTheExecutorAdapters(t *t
 func TestExecutorRejectsASearchEndpointItCannotParse(t *testing.T) {
 	toolsCfg := config.DefaultTools()
 	toolsCfg.Workspace = t.TempDir()
-	toolsCfg.WebSearch = config.ToolWebSearch{Provider: config.WebSearchProviderSearXNG, Endpoint: "http://localhost:8888/search", MaxResults: 5}
+	toolsCfg.WebSearch = search.Config{Provider: search.ProviderSearXNG, Endpoint: "http://localhost:8888/search", MaxResults: 5}
 	if _, err := builtinAdapters(toolsCfg, &emailHolder{}, &codeHolder{}); err == nil {
 		t.Fatal("builtinAdapters accepted a loopback name endpoint")
 	}
