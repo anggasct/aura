@@ -25,7 +25,7 @@ func TestTurnToolCallsLetTheJournalAllocateTheSequence(t *testing.T) {
 	dataRoot := t.TempDir()
 	db := storetest.OpenMigrated(t)
 	const session = "session-allocate"
-	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: session, OwnerID: principal.OwnerID}); err != nil {
+	if err := store.NewSessionService(db).Create(ctx, &turn.Session{ID: session, OwnerID: principal.OwnerID}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	toolsCfg := config.DefaultTools()
@@ -52,7 +52,7 @@ func TestTurnToolCallsLetTheJournalAllocateTheSequence(t *testing.T) {
 	}
 	events := store.NewEventStore(db)
 	for sequence := uint64(1); sequence <= 2; sequence++ {
-		if err := events.Append(ctx, &store.RuntimeEvent{
+		if err := events.Append(ctx, &turn.Event{
 			ID: "other-" + string(rune('0'+sequence)), SessionID: session, Sequence: sequence, TurnID: "turn-other",
 			Kind: turn.EventKindTurnAccepted, SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(),
 		}); err != nil {

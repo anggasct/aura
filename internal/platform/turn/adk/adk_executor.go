@@ -210,11 +210,11 @@ func WithSkillContext(provider SkillContextProvider) ExecutorOption {
 	}
 }
 
-func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		definition, err := x.resolveDefinition(req)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req, definition.ID)
@@ -229,7 +229,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		}
 		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		sessionService.historyAuthor = x.agentName(&definition)
@@ -241,7 +241,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			evidence, rerr := x.recall.RecallTurn(runCtx, req)
 			if rerr != nil {
 				if req.RequireRecall {
-					yield(store.RuntimeEvent{}, codedError(turn.ErrorCodeStorageUnavailable, "required recall is unavailable", rerr))
+					yield(turn.Event{}, codedError(turn.ErrorCodeStorageUnavailable, "required recall is unavailable", rerr))
 					return
 				}
 			} else if evidence != nil {
@@ -259,13 +259,13 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			knowledgeScope: req.Knowledge,
 		})
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		if knowledgeRan {
 			retrieved, eventErr := knowledgeRetrievedEvent(&knowledgeTurn)
 			if eventErr != nil {
-				yield(store.RuntimeEvent{}, eventErr)
+				yield(turn.Event{}, eventErr)
 				return
 			}
 			if !yield(retrieved, nil) {
@@ -275,7 +275,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 
 		content, err := contentFromParts(req)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 
@@ -288,19 +288,19 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, runConfig, runOpts...) {
 			if err != nil {
 				if turnUsage.exceeded {
-					yield(store.RuntimeEvent{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
+					yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 					return
 				}
-				yield(store.RuntimeEvent{}, err)
+				yield(turn.Event{}, err)
 				return
 			}
 			if exceeded := turnUsage.add(ev); exceeded {
-				yield(store.RuntimeEvent{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
+				yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 				return
 			}
 			re, err := store.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
 			if err != nil {
-				yield(store.RuntimeEvent{}, fmt.Errorf("map adk event: %w", err))
+				yield(turn.Event{}, fmt.Errorf("map adk event: %w", err))
 				return
 			}
 			if !yield(re, nil) {

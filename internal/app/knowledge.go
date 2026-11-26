@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -110,7 +111,7 @@ func (a *knowledgeActions) RecordOwnerAction(ctx context.Context, action *knowle
 	if err != nil {
 		return fmt.Errorf("cli: marshal knowledge owner action: %w", err)
 	}
-	_, _, err = store.NewEventStore(a.db).UpsertEvent(ctx, &store.RuntimeEvent{
+	_, _, err = store.NewEventStore(a.db).UpsertEvent(ctx, &turn.Event{
 		ID:            "kb-owner-action-" + action.Action + "-" + action.SourceID + "-" + at,
 		SessionID:     sessionID,
 		TurnID:        "owner-action",

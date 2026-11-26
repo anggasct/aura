@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/store"
 
@@ -79,7 +80,7 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -165,7 +166,7 @@ func openChildTestService(t *testing.T, sessions ...string) (*child.Service, tim
 	now := time.Now().UTC()
 	storeSessions := store.NewSessionService(db)
 	for _, id := range sessions {
-		if err := storeSessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := storeSessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -356,7 +357,7 @@ func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -436,7 +437,7 @@ func TestChildCancellerDrivesDurableCancel(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -503,7 +504,7 @@ func TestChildCancellerDurableFailureLeavesStateUnchanged(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -577,7 +578,7 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -647,7 +648,7 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -824,7 +825,7 @@ func TestProductionHandlerSignalsSettlement(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -890,7 +891,7 @@ func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
@@ -937,7 +938,7 @@ func TestChildInheritsParentPersona(t *testing.T) {
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-parent", OwnerID: "owner-1", AgentID: "engineer", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-parent", OwnerID: "owner-1", AgentID: "engineer", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create parent session: %v", err)
 	}
 	service, err := child.NewService(newChildRegistry(db))

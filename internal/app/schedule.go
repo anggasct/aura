@@ -212,7 +212,7 @@ func mapScheduleStoreError(err error) error {
 }
 
 type cronTurnEngine interface {
-	Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error]
 }
 
 type workflowStarter interface {
@@ -321,7 +321,7 @@ func ensureCronSession(ctx context.Context, sessions store.SessionService, sessi
 		}
 	}
 	now := time.Now().UTC()
-	err := sessions.Create(ctx, &store.Session{
+	err := sessions.Create(ctx, &turn.Session{
 		ID: sessionID, OwnerID: principal.OwnerID,
 		Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	})

@@ -21,23 +21,23 @@ var replayEventKinds = []string{turn.EventKindModelStarted, turn.EventKindModelS
 type replayingExecutor struct {
 	mu          sync.Mutex
 	invocations int
-	yielded     map[int][]store.RuntimeEvent
+	yielded     map[int][]turn.Event
 	blocked     chan struct{}
 	replayErr   error
 }
 
 func newReplayingExecutor(replayErr error) *replayingExecutor {
-	return &replayingExecutor{yielded: map[int][]store.RuntimeEvent{}, blocked: make(chan struct{}), replayErr: replayErr}
+	return &replayingExecutor{yielded: map[int][]turn.Event{}, blocked: make(chan struct{}), replayErr: replayErr}
 }
 
-func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		x.mu.Lock()
 		x.invocations++
 		invocation := x.invocations
 		x.mu.Unlock()
 		if invocation > 1 && x.replayErr != nil {
-			yield(store.RuntimeEvent{}, x.replayErr)
+			yield(turn.Event{}, x.replayErr)
 			return
 		}
 		for position, kind := range replayEventKinds {
@@ -47,10 +47,10 @@ func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) it
 			if invocation == 1 && position == 2 {
 				close(x.blocked)
 				<-ctx.Done()
-				yield(store.RuntimeEvent{}, ctx.Err())
+				yield(turn.Event{}, ctx.Err())
 				return
 			}
-			ev := store.RuntimeEvent{
+			ev := turn.Event{
 				ID:        NewTurnID(),
 				Kind:      kind,
 				Payload:   fmt.Appendf(nil, `{"invocation":%d,"position":%d}`, invocation, position+1),
@@ -66,8 +66,8 @@ func (x *replayingExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) it
 	}
 }
 
-func streamedOnlyOnce() store.RuntimeEvent {
-	return store.RuntimeEvent{
+func streamedOnlyOnce() turn.Event {
+	return turn.Event{
 		ID:        NewTurnID(),
 		Kind:      store.EventKindADK,
 		Payload:   adkPartialStep("streamed by the first invocation only").Payload,
@@ -81,7 +81,7 @@ func (x *replayingExecutor) invocationCount() int {
 	return x.invocations
 }
 
-func (x *replayingExecutor) yieldedBy(invocation int) []store.RuntimeEvent {
+func (x *replayingExecutor) yieldedBy(invocation int) []turn.Event {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	return slices.Clone(x.yielded[invocation])
@@ -96,7 +96,7 @@ func (x *replayingExecutor) waitBlocked(t *testing.T) {
 	}
 }
 
-func turnEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func turnEventsOf(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
 	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), acceptedSessionOf(t, db, turnID), turnID)
 	if err != nil {
@@ -105,10 +105,10 @@ func turnEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent 
 	return events
 }
 
-func executorEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func executorEventsOf(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
 	events := turnEventsOf(t, db, turnID)
-	var out []store.RuntimeEvent
+	var out []turn.Event
 	for i := range events {
 		if slices.Contains(replayEventKinds, events[i].Kind) {
 			out = append(out, events[i])
@@ -117,10 +117,10 @@ func executorEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEv
 	return out
 }
 
-func terminalEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func terminalEventsOf(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
 	events := turnEventsOf(t, db, turnID)
-	var out []store.RuntimeEvent
+	var out []turn.Event
 	for i := range events {
 		if slices.Contains(terminalKinds, events[i].Kind) {
 			out = append(out, events[i])
@@ -129,7 +129,7 @@ func terminalEventsOf(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEv
 	return out
 }
 
-func invocationOf(t *testing.T, ev *store.RuntimeEvent) int {
+func invocationOf(t *testing.T, ev *turn.Event) int {
 	t.Helper()
 	var decoded struct {
 		Invocation int `json:"invocation"`
@@ -257,7 +257,7 @@ func TestDurableTurnTerminalEventHasAFixedID(t *testing.T) {
 	}
 }
 
-func idsOfKind(events []store.RuntimeEvent, kind string) []string {
+func idsOfKind(events []turn.Event, kind string) []string {
 	var ids []string
 	for i := range events {
 		if events[i].Kind == kind {
@@ -267,7 +267,7 @@ func idsOfKind(events []store.RuntimeEvent, kind string) []string {
 	return ids
 }
 
-func eventIDs(events []store.RuntimeEvent) []string {
+func eventIDs(events []turn.Event) []string {
 	ids := make([]string, 0, len(events))
 	for i := range events {
 		ids = append(ids, events[i].ID)

@@ -39,26 +39,26 @@ type fakeTurnRuntime struct {
 }
 
 type turnOutcome struct {
-	event store.RuntimeEvent
+	event turn.Event
 	err   error
 }
 
-func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	f.mu.Lock()
 	f.calls++
 	f.parts = append(f.parts, req.Parts)
 	f.sessions = append(f.sessions, req.SessionID)
 	f.mu.Unlock()
-	return func(yield func(store.RuntimeEvent, error) bool) {
+	return func(yield func(turn.Event, error) bool) {
 		if f.overload {
-			yield(store.RuntimeEvent{}, fault.New(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full"))
+			yield(turn.Event{}, fault.New(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full"))
 			return
 		}
 		outcomes := f.events(req.TurnID)
 		for i := range outcomes {
 			outcome := &outcomes[i]
 			if outcome.err != nil {
-				yield(store.RuntimeEvent{}, outcome.err)
+				yield(turn.Event{}, outcome.err)
 				return
 			}
 			event := outcome.event
@@ -86,7 +86,7 @@ func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.S
 			f.mu.Unlock()
 			if persist != nil {
 				if err := persist.Append(ctx, &event); err != nil {
-					yield(store.RuntimeEvent{}, err)
+					yield(turn.Event{}, err)
 					return
 				}
 			}
@@ -111,9 +111,9 @@ func (f *fakeTurnRuntime) submittedSessions() []string {
 
 func acceptedTurnEvents(turnID string) []turnOutcome {
 	return []turnOutcome{
-		{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
-		{event: store.RuntimeEvent{ID: "evt_msg_" + turnID, TurnID: turnID, Kind: turn.EventKindMessageCompleted}},
-		{event: store.RuntimeEvent{ID: "evt_done_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnCompleted}},
+		{event: turn.Event{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
+		{event: turn.Event{ID: "evt_msg_" + turnID, TurnID: turnID, Kind: turn.EventKindMessageCompleted}},
+		{event: turn.Event{ID: "evt_done_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnCompleted}},
 	}
 }
 
@@ -352,8 +352,8 @@ func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
 		return []turnOutcome{
-			{event: store.RuntimeEvent{ID: "evt_a_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
-			{event: store.RuntimeEvent{ID: "evt_f_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnFailed, Payload: []byte(`{"code":"model_capability_unsupported","detail":"no"}`)}},
+			{event: turn.Event{ID: "evt_a_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
+			{event: turn.Event{ID: "evt_f_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnFailed, Payload: []byte(`{"code":"model_capability_unsupported","detail":"no"}`)}},
 		}
 	}}
 	dispatcher, executions := webhookTestSetup(t, backend)
@@ -569,9 +569,9 @@ func TestWebhookDispatcherWaitTracksInFlightDrains(t *testing.T) {
 	dispatcher, _ := webhookTestSetup(t, &fakeTurnRuntime{events: acceptedTurnEvents})
 	release := make(chan struct{})
 	stopped := make(chan struct{})
-	dispatcher.startDrain(context.Background(), "exec-held", func() (store.RuntimeEvent, error, bool) {
+	dispatcher.startDrain(context.Background(), "exec-held", func() (turn.Event, error, bool) {
 		<-release
-		return store.RuntimeEvent{}, nil, false
+		return turn.Event{}, nil, false
 	}, func() { close(stopped) })
 	short, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
@@ -591,7 +591,7 @@ func TestWebhookDispatcherWaitTracksInFlightDrains(t *testing.T) {
 
 func TestWebhookDispatcher_FinishedDrainIsNotResubmittedAsOrphan(t *testing.T) {
 	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
-		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}}}
+		return []turnOutcome{{event: turn.Event{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}}}
 	}}
 	dispatcher, executions := webhookTestSetup(t, backend)
 	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())

@@ -6,11 +6,11 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func TestGradeTraceEnforcesTrajectoryAndPolicySignals(t *testing.T) {
-	trace := NewTrace("exec-linux", "completed", []store.RuntimeEvent{
+	trace := NewTrace("exec-linux", "completed", []turn.Event{
 		{Sequence: 1, Kind: "turn.accepted"},
 		{Sequence: 2, Kind: "tool.requested"},
 		{Sequence: 3, Kind: "tool.completed"},
@@ -36,7 +36,7 @@ func TestGradeTraceEnforcesTrajectoryAndPolicySignals(t *testing.T) {
 }
 
 func TestGradeTraceRejectsExtraAndReorderedSteps(t *testing.T) {
-	trace := NewTrace("core", "completed", []store.RuntimeEvent{
+	trace := NewTrace("core", "completed", []turn.Event{
 		{Sequence: 1, Kind: "turn.accepted"},
 		{Sequence: 2, Kind: "tool.completed"},
 		{Sequence: 3, Kind: "tool.requested"},
@@ -47,7 +47,7 @@ func TestGradeTraceRejectsExtraAndReorderedSteps(t *testing.T) {
 	if grade.Passed {
 		t.Fatalf("grade = %+v, want reordered trajectory rejected", grade)
 	}
-	trace.Events = append(trace.Events, store.RuntimeEvent{Sequence: 5, Kind: "unexpected"})
+	trace.Events = append(trace.Events, turn.Event{Sequence: 5, Kind: "unexpected"})
 	grade = GradeTrace(trace, &TraceExpectation{Profile: "core", Outcome: "completed", ExpectedKinds: []string{
 		"turn.accepted", "tool.completed", "tool.requested", "turn.completed",
 	}, MinScore: 100})
@@ -57,13 +57,13 @@ func TestGradeTraceRejectsExtraAndReorderedSteps(t *testing.T) {
 }
 
 func TestGradeTraceEnforcesIdentityAndPayloadSignals(t *testing.T) {
-	event := func(sequence uint64, kind string, payload string) store.RuntimeEvent {
-		return store.RuntimeEvent{
+	event := func(sequence uint64, kind string, payload string) turn.Event {
+		return turn.Event{
 			Sequence: sequence, Kind: kind, SessionID: "session-1", TurnID: "turn-1", InvocationID: "invocation-1", Author: "owner",
 			Payload: json.RawMessage(payload),
 		}
 	}
-	trace := NewTrace("core", "completed", []store.RuntimeEvent{
+	trace := NewTrace("core", "completed", []turn.Event{
 		event(1, "tool.requested", `{"tool_name":"files.read","policy":"policy-1"}`),
 		event(2, "approval.required", `{"grant_id":"grant-1"}`),
 		event(3, "handoff.completed", `{"target":"researcher"}`),
@@ -96,7 +96,7 @@ func TestGradeProfilesIsDeterministicAndReportsProviderErrors(t *testing.T) {
 		if profile == "native-linux" {
 			return Trace{}, errors.New("profile unavailable")
 		}
-		return NewTrace(profile, "completed", []store.RuntimeEvent{{Sequence: 1, Kind: "turn.completed"}}), nil
+		return NewTrace(profile, "completed", []turn.Event{{Sequence: 1, Kind: "turn.completed"}}), nil
 	}, &TraceExpectation{Outcome: "completed", RequiredKinds: []string{"turn.completed"}})
 	if len(grades) != 2 || grades[0].Profile != "core" || grades[1].Profile != "native-linux" {
 		t.Fatalf("grades = %+v, want sorted profile results", grades)

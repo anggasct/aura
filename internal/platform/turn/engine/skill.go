@@ -73,7 +73,7 @@ func journaledSkillActivation(scope *durable.TurnScope, render skillActivationRe
 	}
 }
 
-func (e *Engine) persistSkillActivation(ctx context.Context, req *turn.TurnRequest, render skillActivationRender, persist func(context.Context, *store.RuntimeEvent) error) error {
+func (e *Engine) persistSkillActivation(ctx context.Context, req *turn.TurnRequest, render skillActivationRender, persist func(context.Context, *turn.Event) error) error {
 	if req.Skill == nil {
 		return nil
 	}
@@ -81,7 +81,7 @@ func (e *Engine) persistSkillActivation(ctx context.Context, req *turn.TurnReque
 	if err != nil {
 		return err
 	}
-	return persist(ctx, &store.RuntimeEvent{
+	return persist(ctx, &turn.Event{
 		Kind:    turn.EventKindSkillActivated,
 		Author:  turn.AuthorSystem,
 		Payload: payload,

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -130,7 +131,7 @@ type Journal struct {
 }
 
 type EventPublisher interface {
-	Publish(*store.RuntimeEvent)
+	Publish(*turn.Event)
 }
 
 type Options struct {
@@ -286,7 +287,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 			return nil, err
 		}
 	}
-	if err := store.AppendEventTx(ctx, tx, &store.RuntimeEvent{
+	if err := store.AppendEventTx(ctx, tx, &turn.Event{
 		ID:            eventID,
 		SessionID:     req.SessionID,
 		Sequence:      sequence,
@@ -306,7 +307,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 		return nil, fmt.Errorf("effect: commit prepare: %w", err)
 	}
 	if j.events != nil {
-		j.events.Publish(&store.RuntimeEvent{
+		j.events.Publish(&turn.Event{
 			ID:            eventID,
 			SessionID:     req.SessionID,
 			Sequence:      sequence,

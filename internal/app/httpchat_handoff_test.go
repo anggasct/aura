@@ -28,10 +28,10 @@ type handoffTurnRuntime struct {
 	turns  int
 }
 
-func (r *handoffTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (r *handoffTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	r.turns++
-	return func(yield func(store.RuntimeEvent, error) bool) {
-		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
+	return func(yield func(turn.Event, error) bool) {
+		if !yield(turn.Event{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
 			return
 		}
 		text := handoffTurnHandedOff
@@ -40,12 +40,12 @@ func (r *handoffTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) ite
 		}); err != nil {
 			text = handoffTurnFailed
 		}
-		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
+		answer := turn.Event{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
 		answer.Payload, _ = json.Marshal(map[string]string{"text": text})
 		if !yield(answer, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
+		yield(turn.Event{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 

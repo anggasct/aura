@@ -21,7 +21,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -34,7 +33,7 @@ const (
 	remediationReviewProfiling = "check the profiling model route and provider health; extraction resumes on the next completed job"
 )
 
-type postTurnHook func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
+type postTurnHook func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
 
 func composePostTurnHooks(hooks ...postTurnHook) postTurnHook {
 	active := slices.DeleteFunc(slices.Clone(hooks), func(hook postTurnHook) bool { return hook == nil })
@@ -44,7 +43,7 @@ func composePostTurnHooks(hooks ...postTurnHook) postTurnHook {
 	case 1:
 		return active[0]
 	}
-	return func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+	return func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 		errs := make([]error, 0, len(active))
 		for _, hook := range active {
 			errs = append(errs, hook(ctx, req, events))
@@ -152,7 +151,7 @@ func (r *profileRuntime) check(cfg *appconfig.Config) health.RegisteredCheck {
 	}
 }
 
-func (r *profileRuntime) hook(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+func (r *profileRuntime) hook(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 	if r == nil || r.extractor == nil || req == nil {
 		return nil
 	}
@@ -194,7 +193,7 @@ func directOwnerOrigin(origin turn.Origin) bool {
 	return origin == turn.OriginTerminal || channel == principal.ChannelDiscord || channel == principal.ChannelTelegram || channel == principal.ChannelEmail
 }
 
-func profileJob(sessionID string, events []store.RuntimeEvent) (profile.Job, bool) {
+func profileJob(sessionID string, events []turn.Event) (profile.Job, bool) {
 	job := profile.Job{OwnerID: principal.OwnerID, SessionID: sessionID}
 	for i := range events {
 		event := &events[i]

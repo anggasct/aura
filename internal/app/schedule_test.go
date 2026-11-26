@@ -27,15 +27,15 @@ import (
 type fakeCronEngine struct {
 	mu      sync.Mutex
 	calls   []*turn.TurnRequest
-	batches [][]store.RuntimeEvent
+	batches [][]turn.Event
 	errs    []error
 }
 
-func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
-	var batch []store.RuntimeEvent
+	var batch []turn.Event
 	var err error
 	if len(f.batches) > 0 {
 		batch = f.batches[0]
@@ -45,9 +45,9 @@ func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2
 		err = f.errs[0]
 		f.errs = f.errs[1:]
 	}
-	return func(yield func(store.RuntimeEvent, error) bool) {
+	return func(yield func(turn.Event, error) bool) {
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		for i := range batch {
@@ -63,8 +63,8 @@ func cronTestDB(t *testing.T) *sql.DB {
 	return storetest.OpenMigrated(t)
 }
 
-func cronCompletedBatch(turnID, text string) []store.RuntimeEvent {
-	return []store.RuntimeEvent{
+func cronCompletedBatch(turnID, text string) []turn.Event {
+	return []turn.Event{
 		{Kind: turn.EventKindTurnAccepted, TurnID: turnID},
 		{Kind: "message.completed", TurnID: turnID, Payload: json.RawMessage(`{"text":"` + text + `"}`)},
 		{Kind: turn.EventKindTurnCompleted, TurnID: turnID},
@@ -73,7 +73,7 @@ func cronCompletedBatch(turnID, text string) []store.RuntimeEvent {
 
 func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	db := cronTestDB(t)
-	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{cronCompletedBatch("turn-1", "nightly done")}}
+	engine := &fakeCronEngine{batches: [][]turn.Event{cronCompletedBatch("turn-1", "nightly done")}}
 	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
@@ -96,7 +96,7 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 
 func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	db := cronTestDB(t)
-	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{
+	engine := &fakeCronEngine{batches: [][]turn.Event{
 		{
 			{Kind: turn.EventKindTurnAccepted, TurnID: "turn-9"},
 			{Kind: turn.EventKindTurnFailed, TurnID: "turn-9"},
@@ -114,7 +114,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 		t.Errorf("failed result = %+v", result)
 	}
 
-	starved := &fakeCronEngine{batches: [][]store.RuntimeEvent{
+	starved := &fakeCronEngine{batches: [][]turn.Event{
 		{{Kind: turn.EventKindTurnAccepted, TurnID: "turn-8"}},
 	}}
 	starvedRunner := &engineTurnRunner{engine: starved, sessions: store.NewSessionService(db)}

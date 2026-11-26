@@ -12,7 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func journaledRequest() *adkmodel.LLMRequest {
@@ -158,13 +158,13 @@ func TestJournaledModelStopsCleanlyWhenTheConsumerStops(t *testing.T) {
 }
 
 func TestDurableExecutorStreamsPartialsWithoutChangingTheJournal(t *testing.T) {
-	run := func(t *testing.T, streamPartial bool, inv *journalInvocation, model *streamingADKModel) []store.RuntimeEvent {
+	run := func(t *testing.T, streamPartial bool, inv *journalInvocation, model *streamingADKModel) []turn.Event {
 		t.Helper()
 		modelName, models := streamingModelSet(model)
 		executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 		mustCreateSession(t, db, "session-1")
 		req := streamTurn("turn-1", streamPartial, 0)
-		var events []store.RuntimeEvent
+		var events []turn.Event
 		for ev, err := range executor.Execute(scopedContext(t, inv), req) {
 			if err != nil {
 				t.Fatalf("Execute: %v", err)

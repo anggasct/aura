@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func FuzzEventPayload(f *testing.F) {
@@ -17,7 +18,7 @@ func FuzzEventPayload(f *testing.F) {
 	f.Add([]byte(``), uint64(0), uint16(0))
 	f.Add([]byte(`null`), uint64(1)<<62, uint16(1))
 	f.Fuzz(func(t *testing.T, payload []byte, sequence uint64, schemaVersion uint16) {
-		e := &RuntimeEvent{
+		e := &turn.Event{
 			ID:            "fuzz",
 			SessionID:     "session",
 			TurnID:        "turn",

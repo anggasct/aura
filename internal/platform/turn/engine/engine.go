@@ -17,7 +17,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type Deps struct {
@@ -30,14 +29,14 @@ type Deps struct {
 	Personas       turn.Personas
 	Skills         SkillRenderer
 	Durable        *DurableConfig
-	PostTurnHook   func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error
+	PostTurnHook   func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
 	CountTurn      func(ctx context.Context, req *turn.TurnRequest)
 	LiveEvents     LiveEventSource
 	Channels       []runtimechannelhost.ChannelPort
 }
 
 type LiveEventSource interface {
-	Subscribe(handler func(*store.RuntimeEvent)) error
+	Subscribe(handler func(*turn.Event)) error
 }
 
 const HandlerName = "turn"
@@ -48,7 +47,7 @@ type DurableConfig struct {
 }
 
 type TurnExecutor interface {
-	Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error]
 }
 
 type Engine struct {
@@ -78,15 +77,15 @@ type Engine struct {
 }
 
 type EventStore interface {
-	Append(ctx context.Context, e *store.RuntimeEvent) error
-	AppendSequenced(ctx context.Context, sessionID string, e *store.RuntimeEvent) (uint64, error)
-	UpsertEvent(ctx context.Context, e *store.RuntimeEvent) (uint64, bool, error)
+	Append(ctx context.Context, e *turn.Event) error
+	AppendSequenced(ctx context.Context, sessionID string, e *turn.Event) (uint64, error)
+	UpsertEvent(ctx context.Context, e *turn.Event) (uint64, bool, error)
 	LastSequence(ctx context.Context, sessionID string) (uint64, error)
 }
 
 type DedupeStore interface {
-	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *store.RuntimeEvent) (originalTurnID string, created bool, err error)
-	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]store.RuntimeEvent, error)
+	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *turn.Event) (originalTurnID string, created bool, err error)
+	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]turn.Event, error)
 }
 
 func New(deps *Deps) (*Engine, error) {
@@ -166,7 +165,7 @@ type sessionQueue struct {
 type turnState struct {
 	req          turn.TurnRequest
 	turnID       string
-	accepted     store.RuntimeEvent
+	accepted     turn.Event
 	subs         map[*subscriber]struct{}
 	cancel       context.CancelFunc
 	start        func()
@@ -177,7 +176,7 @@ type turnState struct {
 }
 
 type subscriber struct {
-	events  chan store.RuntimeEvent
+	events  chan turn.Event
 	done    chan struct{}
 	once    sync.Once
 	mu      sync.Mutex
@@ -186,7 +185,7 @@ type subscriber struct {
 	lastSeq uint64
 }
 
-func (s *subscriber) trackLocked(ev *store.RuntimeEvent) bool {
+func (s *subscriber) trackLocked(ev *turn.Event) bool {
 	if ev == nil {
 		return false
 	}
@@ -203,7 +202,7 @@ const subscriberBufferSize = 64
 
 func newSubscriber() *subscriber {
 	return &subscriber{
-		events: make(chan store.RuntimeEvent, subscriberBufferSize),
+		events: make(chan turn.Event, subscriberBufferSize),
 		done:   make(chan struct{}),
 	}
 }
@@ -212,7 +211,7 @@ func (s *subscriber) stop() {
 	s.once.Do(func() { close(s.done) })
 }
 
-func (s *subscriber) send(ev *store.RuntimeEvent) {
+func (s *subscriber) send(ev *turn.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || !s.trackLocked(ev) {
@@ -238,7 +237,7 @@ func (s *subscriber) send(ev *store.RuntimeEvent) {
 }
 
 func (s *subscriber) makeRoomLocked() bool {
-	queued := make([]store.RuntimeEvent, 0, len(s.events))
+	queued := make([]turn.Event, 0, len(s.events))
 	removedDelta := false
 	for {
 		select {
@@ -257,7 +256,7 @@ func (s *subscriber) makeRoomLocked() bool {
 	}
 }
 
-func (s *subscriber) sendContext(ctx context.Context, ev *store.RuntimeEvent) bool {
+func (s *subscriber) sendContext(ctx context.Context, ev *turn.Event) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.closed || !s.trackLocked(ev) {
@@ -291,12 +290,12 @@ func (s *subscriber) wasGapped() bool {
 
 var _ turn.AgentRuntime = (*Engine)(nil)
 
-func (e *Engine) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (e *Engine) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		copyReq := *req
 		sub, err := e.submit(ctx, &copyReq)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		defer sub.stop()
@@ -329,7 +328,7 @@ func (e *Engine) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store
 	}
 }
 
-func (e *Engine) drainUntilTerminal(ctx context.Context, req *turn.TurnRequest, sub *subscriber, yield func(store.RuntimeEvent, error) bool) {
+func (e *Engine) drainUntilTerminal(ctx context.Context, req *turn.TurnRequest, sub *subscriber, yield func(turn.Event, error) bool) {
 	var lastSequence uint64
 	for ev := range sub.events {
 		if ev.Sequence != 0 {
@@ -347,7 +346,7 @@ func (e *Engine) drainUntilTerminal(ctx context.Context, req *turn.TurnRequest, 
 	}
 }
 
-func (e *Engine) replayAfterGap(ctx context.Context, req *turn.TurnRequest, afterSequence uint64, yield func(store.RuntimeEvent, error) bool) {
+func (e *Engine) replayAfterGap(ctx context.Context, req *turn.TurnRequest, afterSequence uint64, yield func(turn.Event, error) bool) {
 	e.mu.Lock()
 	t, live := e.turns[req.TurnID]
 	e.mu.Unlock()
@@ -357,7 +356,7 @@ func (e *Engine) replayAfterGap(ctx context.Context, req *turn.TurnRequest, afte
 
 	events, err := e.dedupe.ListTurnEvents(context.WithoutCancel(ctx), req.SessionID, req.TurnID)
 	if err != nil {
-		yield(store.RuntimeEvent{Kind: turn.EventKindTurnFailed, Payload: failedPayload(turn.ErrorCodeRuntimeInternal, "failed to replay the live turn", err, "")}, nil)
+		yield(turn.Event{Kind: turn.EventKindTurnFailed, Payload: failedPayload(turn.ErrorCodeRuntimeInternal, "failed to replay the live turn", err, "")}, nil)
 		return
 	}
 	for i := range events {
@@ -381,31 +380,31 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-func (e *Engine) claim(ctx context.Context, req *turn.TurnRequest, sub *subscriber) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
+func (e *Engine) claim(ctx context.Context, req *turn.TurnRequest, sub *subscriber) (accepted turn.Event, originalTurnID string, replay, granted bool, err error) {
 	if req == nil {
-		return store.RuntimeEvent{}, "", false, false, invalidArgument("turn request must not be nil")
+		return turn.Event{}, "", false, false, invalidArgument("turn request must not be nil")
 	}
 	if req.SessionID == "" {
-		return store.RuntimeEvent{}, "", false, false, invalidArgument("session id must not be empty")
+		return turn.Event{}, "", false, false, invalidArgument("session id must not be empty")
 	}
 	if req.Origin == "" {
-		return store.RuntimeEvent{}, "", false, false, invalidArgument("origin must not be empty")
+		return turn.Event{}, "", false, false, invalidArgument("origin must not be empty")
 	}
 	if req.TurnID == "" {
 		req.TurnID = NewTurnID()
 	}
 	if err := e.stampPersona(req); err != nil {
-		return store.RuntimeEvent{}, "", false, false, err
+		return turn.Event{}, "", false, false, err
 	}
 
 	e.mu.Lock()
 	if e.shutdown {
 		e.mu.Unlock()
-		return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
+		return turn.Event{}, "", false, false, codedError(turn.ErrorCodeRuntimeOverloaded, "runtime is shutting down", nil)
 	}
 	if e.pending >= e.cfg.MaxPendingTurns {
 		e.mu.Unlock()
-		return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
+		return turn.Event{}, "", false, false, codedError(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
 	}
 	e.pending++
 	e.mu.Unlock()
@@ -425,7 +424,7 @@ func (e *Engine) claim(ctx context.Context, req *turn.TurnRequest, sub *subscrib
 	accepted, err = acceptedEvent(req, 0)
 	if err != nil {
 		e.releasePending()
-		return store.RuntimeEvent{}, "", false, false, err
+		return turn.Event{}, "", false, false, err
 	}
 	var queued bool
 	if req.IdempotencyKey != "" {
@@ -445,7 +444,7 @@ func (e *Engine) claim(ctx context.Context, req *turn.TurnRequest, sub *subscrib
 		})
 		if err != nil {
 			e.releasePending()
-			return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "dedupe claim failed", err)
+			return turn.Event{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "dedupe claim failed", err)
 		}
 	} else {
 		err = sq.lock(func() error {
@@ -462,7 +461,7 @@ func (e *Engine) claim(ctx context.Context, req *turn.TurnRequest, sub *subscrib
 		})
 		if err != nil {
 			e.releasePending()
-			return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
+			return turn.Event{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "failed to persist the accepted turn", err)
 		}
 	}
 	if queued {
@@ -471,7 +470,7 @@ func (e *Engine) claim(ctx context.Context, req *turn.TurnRequest, sub *subscrib
 	return accepted, originalTurnID, replay, false, nil
 }
 
-func (e *Engine) enqueue(ctx context.Context, req *turn.TurnRequest, accepted *store.RuntimeEvent, sub *subscriber) bool {
+func (e *Engine) enqueue(ctx context.Context, req *turn.TurnRequest, accepted *turn.Event, sub *subscriber) bool {
 	subs := map[*subscriber]struct{}{}
 	if sub != nil {
 		subs[sub] = struct{}{}
@@ -524,12 +523,12 @@ func (e *Engine) releasePending() {
 	e.mu.Unlock()
 }
 
-func acceptedEvent(req *turn.TurnRequest, seq uint64) (store.RuntimeEvent, error) {
+func acceptedEvent(req *turn.TurnRequest, seq uint64) (turn.Event, error) {
 	payload, err := turn.AcceptedPayload(string(req.Origin), req.PrincipalID, req.AgentID, req.Persona)
 	if err != nil {
-		return store.RuntimeEvent{}, invalidArgument("turn accepted payload is not encodable")
+		return turn.Event{}, invalidArgument("turn accepted payload is not encodable")
 	}
-	return store.RuntimeEvent{
+	return turn.Event{
 		ID:            NewTurnID(),
 		SessionID:     req.SessionID,
 		Sequence:      seq,
@@ -634,7 +633,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
 
-	persistEvent := func(ctx context.Context, ev *store.RuntimeEvent) error {
+	persistEvent := func(ctx context.Context, ev *turn.Event) error {
 		e.fillTurnEvent(t, ev)
 		err := e.sessionQueue(t.req.SessionID).lock(func() error {
 			seq, err := e.nextSequence(ctx, t.req.SessionID)
@@ -652,7 +651,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	}
 
 	emit := func(ctx context.Context, kind string, payload []byte) error {
-		ev := &store.RuntimeEvent{Kind: kind, Payload: payload}
+		ev := &turn.Event{Kind: kind, Payload: payload}
 		return persistEvent(ctx, ev)
 	}
 
@@ -661,7 +660,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 
 	var terminalKind string
 	var terminalPayload []byte
-	var executed []store.RuntimeEvent
+	var executed []turn.Event
 	execErr := e.persistSkillActivation(ctx, &t.req, e.renderSkillActivation, persistEvent)
 	if execErr == nil {
 		var nextDelta uint64
@@ -730,13 +729,13 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	}
 }
 
-func (e *Engine) broadcast(t *turnState, ev *store.RuntimeEvent) {
+func (e *Engine) broadcast(t *turnState, ev *turn.Event) {
 	for sub := range t.subs {
 		sub.send(ev)
 	}
 }
 
-func (e *Engine) relay(ev *store.RuntimeEvent) {
+func (e *Engine) relay(ev *turn.Event) {
 	if ev == nil || ev.TurnID == "" {
 		return
 	}
@@ -825,7 +824,7 @@ func (e *Engine) replay(ctx context.Context, original turnRef, sub *subscriber) 
 	}
 	events, err := e.dedupe.ListTurnEvents(ctx, original.sessionID, original.turnID)
 	if err != nil {
-		sub.sendContext(ctx, &store.RuntimeEvent{Kind: turn.EventKindTurnFailed, Payload: failedPayload(turn.ErrorCodeRuntimeInternal, "failed to replay the original turn", err, "")})
+		sub.sendContext(ctx, &turn.Event{Kind: turn.EventKindTurnFailed, Payload: failedPayload(turn.ErrorCodeRuntimeInternal, "failed to replay the original turn", err, "")})
 		return
 	}
 	for i := range events {
@@ -918,7 +917,7 @@ func (e *Engine) cancelRunning() {
 }
 
 func (e *Engine) terminateQueued(ctx context.Context, t *turnState) {
-	terminal := &store.RuntimeEvent{
+	terminal := &turn.Event{
 		ID:            NewTurnID(),
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,
@@ -978,7 +977,7 @@ func (e *Engine) terminateDropped(ctx context.Context, desc *runtimesessions.Des
 		return
 	}
 	req := turnRequestFromDescriptor(desc)
-	terminal := &store.RuntimeEvent{
+	terminal := &turn.Event{
 		ID:            NewTurnID(),
 		SessionID:     req.SessionID,
 		TurnID:        req.TurnID,

@@ -57,7 +57,7 @@ type ChatOptions struct {
 	Handoffs           access.HandoffGate
 	Approvals          *approval.OwnerRoute
 	Denied             func(ctx context.Context, reason string)
-	AnswerTexts        func(events []store.RuntimeEvent) []string
+	AnswerTexts        func(events []turn.Event) []string
 	MaxHistoryMessages int
 	MaxHistoryBytes    int
 	KeepaliveInterval  time.Duration
@@ -73,7 +73,7 @@ type Chat struct {
 	handoffs    access.HandoffGate
 	approvals   *approval.OwnerRoute
 	denied      func(ctx context.Context, reason string)
-	answerTexts func(events []store.RuntimeEvent) []string
+	answerTexts func(events []turn.Event) []string
 	maxMessages int
 	maxBytes    int
 	keepalive   time.Duration
@@ -305,7 +305,7 @@ func (c *Chat) checkHandoff(ctx context.Context, caller *Principal, sessionID st
 
 type turnOutcome struct {
 	turnID   string
-	events   []store.RuntimeEvent
+	events   []turn.Event
 	terminal string
 	failure  turn.ErrorCode
 }
@@ -423,7 +423,7 @@ func (c *Chat) writeCompletion(w http.ResponseWriter, caller *Principal, outcome
 	})
 }
 
-func tokenUsage(events []store.RuntimeEvent) usage {
+func tokenUsage(events []turn.Event) usage {
 	var total usage
 	for i := range events {
 		if len(events[i].ProviderUsage) == 0 {
@@ -444,7 +444,7 @@ func tokenUsage(events []store.RuntimeEvent) usage {
 	return total
 }
 
-func finishReason(events []store.RuntimeEvent) string {
+func finishReason(events []turn.Event) string {
 	for i := len(events) - 1; i >= 0; i-- {
 		if events[i].Kind != store.EventKindADK {
 			continue

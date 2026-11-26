@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -265,7 +266,7 @@ func ensureBroadcastSession(ctx context.Context, sessions store.SessionService, 
 		}
 	}
 	now := time.Now().UTC()
-	err := sessions.Create(ctx, &store.Session{
+	err := sessions.Create(ctx, &turn.Session{
 		ID:        sessionID,
 		OwnerID:   "broadcast",
 		Metadata:  json.RawMessage(`{}`),

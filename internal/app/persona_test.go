@@ -99,7 +99,7 @@ func TestResolveChatPersona(t *testing.T) {
 	db := discordTestDB(t)
 	sessions := store.NewSessionService(db)
 	now := time.Now().UTC()
-	if err := sessions.Create(t.Context(), &store.Session{ID: "term-kuma", OwnerID: "local-owner", AgentID: "kuma", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "term-kuma", OwnerID: "local-owner", AgentID: "kuma", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func wantCode(t *testing.T, err error, want ErrorCode) {
@@ -318,7 +319,7 @@ func TestSessionCreateDuplicateReturnsConflict(t *testing.T) {
 	db := newTestDB(t)
 	mustCreateSession(t, db, "session-1")
 
-	wantCode(t, NewSessionService(db).Create(ctx, &Session{ID: "session-1"}), ErrorCodeSessionIDConflict)
+	wantCode(t, NewSessionService(db).Create(ctx, &turn.Session{ID: "session-1"}), ErrorCodeSessionIDConflict)
 }
 
 func TestListEventsRejectsNegativeLimit(t *testing.T) {
@@ -445,7 +446,7 @@ func assertMode(t *testing.T, path string, want os.FileMode) {
 func TestWorkflowSessionPrefixIsReserved(t *testing.T) {
 	db := newTestDB(t)
 	ctx := t.Context()
-	wantCode(t, NewSessionService(db).Create(ctx, &Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeInvalidArgument)
+	wantCode(t, NewSessionService(db).Create(ctx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeInvalidArgument)
 	if got := countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'wf-x'`); got != 0 {
 		t.Fatalf("a refused reserved id left %d session rows", got)
 	}
@@ -454,10 +455,10 @@ func TestWorkflowSessionPrefixIsReserved(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := CreateSessionTx(ctx, tx, &Session{ID: "wf-x", OwnerID: "discord:1"}); err != nil {
+	if err := CreateSessionTx(ctx, tx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}); err != nil {
 		t.Fatalf("CreateSessionTx of a reserved id: %v", err)
 	}
-	wantCode(t, CreateSessionTx(ctx, tx, &Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeSessionIDConflict)
+	wantCode(t, CreateSessionTx(ctx, tx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeSessionIDConflict)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -74,7 +75,7 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 	db := storetest.OpenMigrated(t)
 	now := time.Now().UTC()
 	for _, id := range []string{"session-1", "session-2"} {
-		if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func validChannelPrepare(key string) *PrepareRequest {
@@ -139,7 +139,7 @@ func TestPrepare_ChannelReplayAndConflict(t *testing.T) {
 
 func TestPrepare_ChannelPublishesLiveEvent(t *testing.T) {
 	t.Parallel()
-	published := make(chan *store.RuntimeEvent, 1)
+	published := make(chan *turn.Event, 1)
 	j, db := newTestJournalWithEvents(t, &channelPublisher{events: published})
 
 	req := validChannelPrepare("chan-live")
@@ -148,7 +148,7 @@ func TestPrepare_ChannelPublishesLiveEvent(t *testing.T) {
 		t.Fatalf("Prepare: %v", err)
 	}
 
-	var live *store.RuntimeEvent
+	var live *turn.Event
 	select {
 	case live = <-published:
 	case <-time.After(2 * time.Second):

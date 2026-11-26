@@ -20,7 +20,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type askedRequest struct {
@@ -259,9 +258,9 @@ type decidingRuntime struct {
 	decide toolbroker.ApprovalDecider
 }
 
-func (r decidingRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
-		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
+func (r decidingRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
+		if !yield(turn.Event{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
 			return
 		}
 		accepted, err := r.decide(ctx, &toolbroker.ApprovalPrompt{
@@ -278,12 +277,12 @@ func (r decidingRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Se
 		if err != nil || !accepted {
 			text = "the tool was denied"
 		}
-		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
+		answer := turn.Event{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
 		answer.Payload, _ = json.Marshal(map[string]string{"text": text})
 		if !yield(answer, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
+		yield(turn.Event{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 

@@ -18,6 +18,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -33,12 +34,12 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	sessions := store.NewSessionService(db)
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-bk", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-bk", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	events := store.NewEventStore(db)
 	for i, text := range []string{"i write backends in Go", "also rust sometimes", "my editor is neovim"} {
-		if _, err := events.AppendSequenced(t.Context(), "sess-bk", &store.RuntimeEvent{
+		if _, err := events.AppendSequenced(t.Context(), "sess-bk", &turn.Event{
 			ID: fmt.Sprintf("evt-bk-%d", i+1), SessionID: "sess-bk", TurnID: "t1", InvocationID: "inv-1",
 			Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 			Payload: []byte(`{"text":"` + text + `"}`), CreatedAt: now,

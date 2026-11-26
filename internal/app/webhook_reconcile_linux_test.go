@@ -45,7 +45,7 @@ func TestCompositionServerRegistersTheWebhookReconcile(t *testing.T) {
 func admitLeftWebhookTurn(t *testing.T, db *sql.DB) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: recoveredWebhookSessionID, OwnerID: "webhook:primary", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)

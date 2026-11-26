@@ -94,7 +94,7 @@ type fakeBroker struct {
 }
 
 type liveEventPublisher interface {
-	Publish(*store.RuntimeEvent)
+	Publish(*turn.Event)
 }
 
 type fakeBuiltinExecutor struct {
@@ -122,7 +122,7 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		if err != nil {
 			return nil, err
 		}
-		event := &store.RuntimeEvent{
+		event := &turn.Event{
 			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: last + 1,
 			TurnID: request.TurnID, InvocationID: request.EventInvocation, Author: request.EventAuthor,
 			Kind: turn.EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
@@ -189,7 +189,7 @@ func TestADKExecutorRunsTurnAndPersists(t *testing.T) {
 		Origin:      turn.OriginTerminal,
 		Parts:       []runtimeingress.InputPart{{Text: "hello"}},
 	}
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)

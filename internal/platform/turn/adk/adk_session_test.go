@@ -33,7 +33,7 @@ func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventS
 
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	sess := store.Session{ID: id, OwnerID: "user-1"}
+	sess := turn.Session{ID: id, OwnerID: "user-1"}
 	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
@@ -161,7 +161,7 @@ func TestADKSessionHistoryIgnoresSkillActivations(t *testing.T) {
 	db, sessions, events := newSessionTestDB(t)
 	mustCreateSession(t, db, "session-1")
 	payload := []byte(`{"skill_id":"local/pdf@0123456789ab","body":"SKILL-RULES"}`)
-	if _, err := events.AppendSequenced(context.Background(), "session-1", &store.RuntimeEvent{
+	if _, err := events.AppendSequenced(context.Background(), "session-1", &turn.Event{
 		ID: "ev-skill", SessionID: "session-1", TurnID: "turn-1", Author: turn.AuthorSystem,
 		Kind: turn.EventKindSkillActivated, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
 	}); err != nil {

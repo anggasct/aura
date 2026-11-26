@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -25,7 +26,7 @@ func succeededGeneratedRun(t *testing.T, controller *workflowToolController, run
 	}
 	now := time.Now().UTC()
 	sessionID := "main/terminal:owner"
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	digest, err := workflow.Digest(generated)

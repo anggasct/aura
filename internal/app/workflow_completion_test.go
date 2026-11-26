@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -38,7 +39,7 @@ func completionFixture(t *testing.T) *completionHarness {
 	t.Helper()
 	controller, runs, db := workflowToolFixture(t, "book_visit")
 	visitor := caller(principal.ClassPublic, "discord:111")
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: visitor.SessionID, OwnerID: visitor.PrincipalID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: visitor.SessionID, OwnerID: visitor.PrincipalID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	controller.targets = []replyTargeter{fixedTarget{sessions: map[string]access.HandoffTarget{visitor.SessionID: {Channel: "discord", Account: "front", ChannelID: "333"}, "lobby/telegram:pocket/chat:5": {Channel: "telegram", Account: "pocket", ChannelID: "5"}}}}

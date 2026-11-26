@@ -27,7 +27,7 @@ type executionDerivation struct {
 	completedMessage string
 }
 
-func (d *executionDerivation) next(event *store.RuntimeEvent) (outcome executionOutcome, terminal bool) {
+func (d *executionDerivation) next(event *turn.Event) (outcome executionOutcome, terminal bool) {
 	switch event.Kind {
 	case turn.EventKindTurnAccepted:
 		return executionOutcome{}, false

@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -57,7 +58,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 			}
 			const sessionID = "main/telegram:pocket/chat:5"
 			now := time.Now().UTC()
-			if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: "telegram:5", AgentID: auraagent.DefaultID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+			if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: "telegram:5", AgentID: auraagent.DefaultID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 				t.Fatalf("Create session: %v", err)
 			}
 			executor, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, telegramOriginAccess{})

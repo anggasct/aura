@@ -110,7 +110,7 @@ type admission struct {
 func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool, error) {
 	desc := &a.req.Turn
 	if desc.IdempotencyKey != "" {
-		original, created, err := store.ClaimDedupeTx(ctx, a.tx, &store.DedupeClaim{
+		original, created, err := store.ClaimDedupeTx(ctx, a.tx, &turn.DedupeClaim{
 			Source:     desc.Origin,
 			ExternalID: desc.IdempotencyKey,
 			TurnID:     desc.TurnID,
@@ -159,7 +159,7 @@ func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool,
 	return result, true, nil
 }
 
-func (a *admission) appendAccepted(ctx context.Context) (*store.RuntimeEvent, error) {
+func (a *admission) appendAccepted(ctx context.Context) (*turn.Event, error) {
 	desc := &a.req.Turn
 	payload, err := turn.AcceptedPayload(desc.Origin, desc.PrincipalID, desc.AgentID, desc.Persona)
 	if err != nil {
@@ -169,7 +169,7 @@ func (a *admission) appendAccepted(ctx context.Context) (*store.RuntimeEvent, er
 	if err != nil {
 		return nil, fmt.Errorf("durable session admit: %w", err)
 	}
-	accepted := &store.RuntimeEvent{
+	accepted := &turn.Event{
 		ID:            a.req.AcceptedEventID,
 		SessionID:     desc.SessionID,
 		Sequence:      sequence,

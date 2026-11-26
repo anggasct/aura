@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type FakeExecutor struct {
@@ -34,8 +33,8 @@ func NewFakeExecutor(script []FakeStep) *FakeExecutor {
 	return &FakeExecutor{script: script}
 }
 
-func (f *FakeExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (f *FakeExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		f.mu.Lock()
 		f.starts = append(f.starts, startRecord{turnID: req.TurnID, startedAt: time.Now()})
 		f.mu.Unlock()
@@ -43,14 +42,14 @@ func (f *FakeExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.
 		seq := uint64(0)
 		for _, step := range f.script {
 			if err := ctx.Err(); err != nil {
-				yield(store.RuntimeEvent{}, err)
+				yield(turn.Event{}, err)
 				return
 			}
 			if step.Block != nil {
 				select {
 				case <-step.Block:
 				case <-ctx.Done():
-					yield(store.RuntimeEvent{}, ctx.Err())
+					yield(turn.Event{}, ctx.Err())
 					return
 				}
 			}
@@ -58,13 +57,13 @@ func (f *FakeExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.
 				select {
 				case <-time.After(step.Wait):
 				case <-ctx.Done():
-					yield(store.RuntimeEvent{}, ctx.Err())
+					yield(turn.Event{}, ctx.Err())
 					return
 				}
 			}
 			if step.Kind != "" {
 				seq++
-				if !yield(store.RuntimeEvent{
+				if !yield(turn.Event{
 					ID:            req.TurnID + "-step-" + strconv.FormatUint(seq, 10),
 					Sequence:      seq,
 					TurnID:        req.TurnID,

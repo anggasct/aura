@@ -16,7 +16,6 @@ import (
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/tool"
 )
@@ -83,8 +82,8 @@ func knowledgeParts(model *capturingModel) []string {
 	return found
 }
 
-func retrievedEvents(events []store.RuntimeEvent) []store.RuntimeEvent {
-	var found []store.RuntimeEvent
+func retrievedEvents(events []turn.Event) []turn.Event {
+	var found []turn.Event
 	for i := range events {
 		if events[i].Kind == turn.EventKindKnowledgeRetrieved {
 			found = append(found, events[i])
@@ -93,7 +92,7 @@ func retrievedEvents(events []store.RuntimeEvent) []store.RuntimeEvent {
 	return found
 }
 
-func decodeRetrieved(t *testing.T, event *store.RuntimeEvent) knowledgeRetrievedPayload {
+func decodeRetrieved(t *testing.T, event *turn.Event) knowledgeRetrievedPayload {
 	t.Helper()
 	var payload knowledgeRetrievedPayload
 	if err := json.Unmarshal(event.Payload, &payload); err != nil {

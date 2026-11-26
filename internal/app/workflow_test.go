@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -392,7 +393,7 @@ func seedRunSession(t *testing.T, db *sql.DB, call *workflow.StepCall) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	sess := &store.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
+	sess := &turn.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
 	if err := store.CreateSessionTx(t.Context(), tx, sess); err != nil {
 		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 			return

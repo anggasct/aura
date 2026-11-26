@@ -59,7 +59,7 @@ type e2eSessions struct {
 }
 
 func (s e2eSessions) Create(ctx context.Context, owner, agentID string) (terminal.Session, error) {
-	internal := &store.Session{ID: "e2e-session", OwnerID: owner, AgentID: agentID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	internal := &turn.Session{ID: "e2e-session", OwnerID: owner, AgentID: agentID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.sessions.Create(ctx, internal); err != nil {
 		return terminal.Session{}, err
 	}
@@ -142,7 +142,7 @@ func TestTerminalReplayCompletedEventWins(t *testing.T) {
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	if err := sessions.Create(context.Background(), &store.Session{ID: "e2e-replay", OwnerID: "e2e-owner", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := sessions.Create(context.Background(), &turn.Session{ID: "e2e-replay", OwnerID: "e2e-owner", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	runner := e2eRunner{engine: engine}

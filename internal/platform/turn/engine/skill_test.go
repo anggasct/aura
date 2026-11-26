@@ -39,12 +39,12 @@ type pinRecordingExecutor struct {
 	pins []*turn.SkillPin
 }
 
-func (x *pinRecordingExecutor) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (x *pinRecordingExecutor) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	x.mu.Lock()
 	x.pins = append(x.pins, req.Skill)
 	x.mu.Unlock()
-	return func(yield func(store.RuntimeEvent, error) bool) {
-		yield(store.RuntimeEvent{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}, nil)
+	return func(yield func(turn.Event, error) bool) {
+		yield(turn.Event{Kind: turn.EventKindMessageCompleted, Payload: []byte(`{}`)}, nil)
 	}
 }
 
@@ -64,7 +64,7 @@ func pinnedRequest(sessionID, turnID string) *turn.TurnRequest {
 	return req
 }
 
-func kinds(events []store.RuntimeEvent) []string {
+func kinds(events []turn.Event) []string {
 	out := make([]string, len(events))
 	for i := range events {
 		out[i] = events[i].Kind
@@ -72,7 +72,7 @@ func kinds(events []store.RuntimeEvent) []string {
 	return out
 }
 
-func assertActivation(t *testing.T, ev *store.RuntimeEvent, turnID, body string) {
+func assertActivation(t *testing.T, ev *turn.Event, turnID, body string) {
 	t.Helper()
 	if ev.Kind != turn.EventKindSkillActivated || ev.Author != turn.AuthorSystem || ev.TurnID != turnID {
 		t.Fatalf("activation event = %+v", ev)
@@ -187,7 +187,7 @@ func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 	req := pinnedRequest("session-a", "turn-1")
 	attempt := func() error {
 		scope := durable.NewTurnScope(inv)
-		persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+		persist := func(ctx context.Context, ev *turn.Event) error {
 			ev.ID = scope.NextEventID(req.TurnID)
 			ev.SessionID, ev.TurnID, ev.SchemaVersion, ev.CreatedAt = req.SessionID, req.TurnID, 1, time.Unix(0, 0).UTC()
 			_, _, err := events.UpsertEvent(ctx, ev)
@@ -225,7 +225,7 @@ func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
 	req := pinnedRequest("session-a", "turn-1")
 	attempt := func() error {
 		scope := durable.NewTurnScope(inv)
-		persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+		persist := func(ctx context.Context, ev *turn.Event) error {
 			ev.ID = scope.NextEventID(req.TurnID)
 			ev.SessionID, ev.TurnID, ev.SchemaVersion, ev.CreatedAt = req.SessionID, req.TurnID, 1, time.Unix(0, 0).UTC()
 			_, _, err := events.UpsertEvent(ctx, ev)
@@ -274,7 +274,7 @@ func TestDurablePinnedTurnRecordsOneActivation(t *testing.T) {
 		t.Fatalf("accept: %v", err)
 	}
 	events := collectDurableTerminal(t, db, ref.TurnID)
-	var activations []store.RuntimeEvent
+	var activations []turn.Event
 	for i := range events {
 		if events[i].Kind == turn.EventKindSkillActivated {
 			activations = append(activations, events[i])
@@ -369,7 +369,7 @@ func TestDurableReplayReusesTheJournaledActivation(t *testing.T) {
 	req := pinnedRequest("session-a", "turn-1")
 	attempt := func() error {
 		scope := durable.NewTurnScope(inv)
-		persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+		persist := func(ctx context.Context, ev *turn.Event) error {
 			ev.ID = scope.NextEventID(req.TurnID)
 			ev.SessionID, ev.TurnID, ev.SchemaVersion, ev.CreatedAt = req.SessionID, req.TurnID, 1, time.Unix(0, 0).UTC()
 			_, _, err := events.UpsertEvent(ctx, ev)

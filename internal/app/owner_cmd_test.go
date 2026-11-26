@@ -11,6 +11,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -116,7 +117,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 		"dm:" + testOwnerDiscordID:   testOwnerDiscordID,
 		"dm:" + testTrustedDiscordID: testTrustedDiscordID,
 	} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}

@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const (
@@ -25,7 +26,7 @@ func NewSessionService(db *sql.DB) SessionService {
 	return &sqliteSessionService{db: db}
 }
 
-func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error {
+func (s *sqliteSessionService) Create(ctx context.Context, sess *turn.Session) error {
 	if sess == nil {
 		return errNilArgument("session")
 	}
@@ -49,7 +50,7 @@ func (s *sqliteSessionService) Create(ctx context.Context, sess *Session) error 
 	return nil
 }
 
-func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *Session) error {
+func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *turn.Session) error {
 	if sess == nil {
 		return errNilArgument("session")
 	}
@@ -77,26 +78,26 @@ func CreateSessionTx(ctx context.Context, tx *sql.Tx, sess *Session) error {
 	return nil
 }
 
-func (s *sqliteSessionService) Get(ctx context.Context, id string) (Session, error) {
-	var sess Session
+func (s *sqliteSessionService) Get(ctx context.Context, id string) (turn.Session, error) {
+	var sess turn.Session
 	var metadata, createdAt, updatedAt string
 	err := s.db.QueryRowContext(ctx,
 		`SELECT id, owner_id, agent_id, metadata_json, created_at, updated_at FROM session WHERE id = ?`, id,
 	).Scan(&sess.ID, &sess.OwnerID, &sess.AgentID, &metadata, &createdAt, &updatedAt)
 	if err != nil {
-		return Session{}, classify(fmt.Errorf("get session %s: %w", id, err))
+		return turn.Session{}, classify(fmt.Errorf("get session %s: %w", id, err))
 	}
 	sess.Metadata = json.RawMessage(metadata)
 	if sess.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
-		return Session{}, fmt.Errorf("parse created_at for session %s: %w", id, err)
+		return turn.Session{}, fmt.Errorf("parse created_at for session %s: %w", id, err)
 	}
 	if sess.UpdatedAt, err = time.Parse(time.RFC3339Nano, updatedAt); err != nil {
-		return Session{}, fmt.Errorf("parse updated_at for session %s: %w", id, err)
+		return turn.Session{}, fmt.Errorf("parse updated_at for session %s: %w", id, err)
 	}
 	return sess, nil
 }
 
-func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]RuntimeEvent, error) {
+func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]turn.Event, error) {
 	if limit < 0 {
 		return nil, fault.New(
 			ErrorCodeInvalidArgument,
@@ -120,7 +121,7 @@ func (s *sqliteSessionService) ListEvents(ctx context.Context, sessionID string,
 	}
 	defer func() { _ = rows.Close() }()
 
-	var events []RuntimeEvent
+	var events []turn.Event
 	for rows.Next() {
 		e, err := scanRuntimeEvent(rows)
 		if err != nil {

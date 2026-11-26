@@ -138,7 +138,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	wiring := r.wiring

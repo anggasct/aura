@@ -10,7 +10,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type stopClockExecutor struct {
@@ -26,8 +25,8 @@ func newStopClockExecutor() *stopClockExecutor {
 	return &stopClockExecutor{started: make(chan struct{}), release: make(chan struct{})}
 }
 
-func (x *stopClockExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(func(store.RuntimeEvent, error) bool) {
+func (x *stopClockExecutor) Execute(ctx context.Context, _ *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(func(turn.Event, error) bool) {
 		stop := context.AfterFunc(ctx, func() {
 			x.mu.Lock()
 			x.cancelledAt = time.Now()

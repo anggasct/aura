@@ -151,7 +151,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_skill", OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess_skill", OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	return h

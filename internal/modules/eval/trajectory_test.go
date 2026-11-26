@@ -33,7 +33,7 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: migrate: %w", err)
 	}
-	session := store.Session{ID: SessionID, OwnerID: "eval"}
+	session := turn.Session{ID: SessionID, OwnerID: "eval"}
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: create session: %w", err)
@@ -46,9 +46,9 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 	return engine, cleanup, nil
 }
 
-func RunTrajectory(ctx context.Context, rt turn.AgentRuntime, turnID string) ([]store.RuntimeEvent, error) {
+func RunTrajectory(ctx context.Context, rt turn.AgentRuntime, turnID string) ([]turn.Event, error) {
 	req := &turn.TurnRequest{TurnID: turnID, SessionID: SessionID, PrincipalID: "eval", Origin: turn.OriginInternal}
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range rt.Run(ctx, req) {
 		if err != nil {
 			return events, err
@@ -58,7 +58,7 @@ func RunTrajectory(ctx context.Context, rt turn.AgentRuntime, turnID string) ([]
 	return events, nil
 }
 
-func CheckTrajectory(events []store.RuntimeEvent, want []string) error {
+func CheckTrajectory(events []turn.Event, want []string) error {
 	got := make([]string, len(events))
 	for i := range events {
 		got[i] = events[i].Kind

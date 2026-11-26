@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
 
@@ -24,9 +25,9 @@ type ADKSessionService struct {
 }
 
 type SessionPort interface {
-	Create(ctx context.Context, sess *store.Session) error
-	Get(ctx context.Context, sessionID string) (store.Session, error)
-	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]store.RuntimeEvent, error)
+	Create(ctx context.Context, sess *turn.Session) error
+	Get(ctx context.Context, sessionID string) (turn.Session, error)
+	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]turn.Event, error)
 }
 
 func NewADKSessionService(sessions SessionPort) (*ADKSessionService, error) {
@@ -198,7 +199,7 @@ func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateReque
 		return nil, fmt.Errorf("marshal adk session state: %w", err)
 	}
 	now := time.Now().UTC()
-	stored := &store.Session{
+	stored := &turn.Session{
 		ID:        id,
 		OwnerID:   req.UserID,
 		Metadata:  metadata,
