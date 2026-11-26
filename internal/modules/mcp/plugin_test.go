@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -58,10 +58,10 @@ func pluginServer(id string, approved ...string) PluginServer {
 	return plugin
 }
 
-func startPluginManager(t *testing.T, broker *toolbroker.Broker, servers []config.MCPServer, starter SessionStarter, plugins ...PluginServer) *Manager {
+func startPluginManager(t *testing.T, broker *toolbroker.Broker, servers []ServerConfig, starter SessionStarter, plugins ...PluginServer) *Manager {
 	t.Helper()
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: servers},
+		Config:         &Config{Servers: servers},
 		Broker:         broker,
 		TrustRegistry:  NewMemoryTrustRegistry(),
 		SessionStarter: starter,
@@ -201,7 +201,7 @@ func TestPluginAndServerWithTheSameNameCoexist(t *testing.T) {
 		"plugin-weather": &scriptedSession{toolNames: []string{"forecast"}},
 	}}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{cfg}},
+		Config:         &Config{Servers: []ServerConfig{cfg}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: starter,
@@ -261,7 +261,7 @@ func TestManagerHonoursThePluginCapabilityGate(t *testing.T) {
 	broker := countingBroker(t, &prompts)
 	starter := &stubSessionStarter{}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:            &config.MCP{},
+		Config:            &Config{},
 		Broker:            broker,
 		SessionStarter:    starter,
 		Plugins:           []PluginServer{pluginServer("weather", "forecast")},
@@ -287,10 +287,10 @@ func TestNewManagerRejectsUnsafePlugins(t *testing.T) {
 	duplicateTool := pluginServer("weather", "forecast", "forecast")
 	emptyTool := pluginServer("weather", "")
 	sse := pluginServer("weather", "forecast")
-	sse.Server.Transport = config.MCPTransportLegacySSE
+	sse.Server.Transport = TransportLegacySSE
 	cases := map[string]struct {
 		plugins []PluginServer
-		servers []config.MCPServer
+		servers []ServerConfig
 	}{
 		"invalid id":       {plugins: []PluginServer{badID}},
 		"duplicate id":     {plugins: []PluginServer{good, good}},
@@ -298,13 +298,13 @@ func TestNewManagerRejectsUnsafePlugins(t *testing.T) {
 		"duplicate tool":   {plugins: []PluginServer{duplicateTool}},
 		"empty tool name":  {plugins: []PluginServer{emptyTool}},
 		"legacy sse":       {plugins: []PluginServer{sse}},
-		"name collision":   {plugins: []PluginServer{good}, servers: []config.MCPServer{startableStdioConfig("plugin-weather")}},
+		"name collision":   {plugins: []PluginServer{good}, servers: []ServerConfig{startableStdioConfig("plugin-weather")}},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			var prompts int
-			_, err := NewManager(&ManagerOptions{Config: &config.MCP{Servers: tc.servers}, Broker: countingBroker(t, &prompts), Plugins: tc.plugins})
-			if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+			_, err := NewManager(&ManagerOptions{Config: &Config{Servers: tc.servers}, Broker: countingBroker(t, &prompts), Plugins: tc.plugins})
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 				t.Fatalf("NewManager error = %v, want %s", err, ErrConfigInvalid)
 			}
 		})
@@ -373,8 +373,8 @@ func TestNewManagerRejectsInvalidPluginDisplayNames(t *testing.T) {
 			server := pluginServer("mailer", "send")
 			server.Tools[0].Display = display
 			var prompts int
-			_, err := NewManager(&ManagerOptions{Config: &config.MCP{}, Broker: countingBroker(t, &prompts), Plugins: []PluginServer{server}})
-			if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+			_, err := NewManager(&ManagerOptions{Config: &Config{}, Broker: countingBroker(t, &prompts), Plugins: []PluginServer{server}})
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 				t.Fatalf("NewManager error = %v, want %s", err, ErrConfigInvalid)
 			}
 		})

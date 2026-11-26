@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -36,7 +36,7 @@ func TestConnectAfterCloseFails(t *testing.T) {
 	}
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("connect after close accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 }
@@ -51,10 +51,10 @@ func TestConnectCloseCycleLeaksNothing(t *testing.T) {
 	httpServer := httptest.NewServer(handler)
 	t.Cleanup(httpServer.Close)
 
-	serverCfg := &config.MCPServer{
-		Name: "cycle", Transport: config.MCPTransportStreamableHTTP, URL: httpServer.URL,
+	serverCfg := &ServerConfig{
+		Name: "cycle", Transport: TransportStreamableHTTP, URL: httpServer.URL,
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}

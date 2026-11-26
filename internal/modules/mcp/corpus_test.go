@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -47,10 +47,10 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 	go func() { _ = server.Run(ctx, serverTransport) }()
 
 	serverName = "hostile"
-	mcpCfg := &config.MCP{
-		Servers: []config.MCPServer{{
+	mcpCfg := &Config{
+		Servers: []ServerConfig{{
 			Name:           serverName,
-			Transport:      config.MCPTransportStdio,
+			Transport:      TransportStdio,
 			Capabilities:   []string{"workspace-read"},
 			RequestTimeout: configkit.Duration(5 * time.Second),
 			StartupTimeout: configkit.Duration(5 * time.Second),
@@ -67,7 +67,7 @@ func startHostileManager(ctx context.Context, t *testing.T, broker *toolbroker.B
 	mgr.SetCustomTransport(serverName, clientTransport)
 	if err := mgr.Start(ctx); err == nil {
 		t.Fatal("untrusted server registered without review")
-	} else if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	approveConfigDigest(ctx, t, registry, &mcpCfg.Servers[0])
@@ -163,7 +163,7 @@ func TestMalformedDiscoverySchemaFails(t *testing.T) {
 	} {
 		if err := validateToolSchema("broken", json.RawMessage(schema)); err == nil {
 			t.Errorf("schema %q accepted", schema)
-		} else if code, ok := CodeOf(err); !ok || code != ErrSchemaInvalid {
+		} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrSchemaInvalid {
 			t.Errorf("schema %q code = %v, %v", schema, code, ok)
 		}
 	}

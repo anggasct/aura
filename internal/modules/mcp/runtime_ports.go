@@ -1,11 +1,12 @@
-package app
+package mcp
 
 import (
 	"context"
+	"maps"
 	"net/http"
+	"slices"
 	"strings"
 
-	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
@@ -13,11 +14,15 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 )
 
-type mcpEndpointPolicy struct {
+type egressEndpointPolicy struct {
 	resolver egress.Resolver
 }
 
-func (p mcpEndpointPolicy) ValidateEndpoint(ctx context.Context, rawURL string) error {
+func NewEndpointPolicy(resolver egress.Resolver) EndpointPolicy {
+	return egressEndpointPolicy{resolver: resolver}
+}
+
+func (p egressEndpointPolicy) ValidateEndpoint(ctx context.Context, rawURL string) error {
 	if ctx == nil {
 		return egress.Errorf(egress.ErrorCodeEgressDenied, "context must not be nil")
 	}
@@ -31,33 +36,29 @@ func (p mcpEndpointPolicy) ValidateEndpoint(ctx context.Context, rawURL string) 
 	return err
 }
 
-type mcpSecretResolver struct{}
+type defaultSecretResolver struct{}
 
-func staticCredentialReference(ref string) (secret.Reference, bool) {
-	switch {
-	case strings.HasPrefix(ref, "env://"):
-		return secret.Reference{Env: strings.TrimPrefix(ref, "env://")}, true
-	case strings.HasPrefix(ref, "file://"):
-		return secret.Reference{File: strings.TrimPrefix(ref, "file://")}, true
-	}
-	return secret.Reference{}, false
+func NewSecretResolver() SecretResolver {
+	return defaultSecretResolver{}
 }
 
-func (mcpSecretResolver) ResolveSecret(_ context.Context, ref string) (string, error) {
-	source, known := staticCredentialReference(ref)
-	if !known {
-		return "", mcp.Errorf(mcp.ErrConfigInvalid, "credential reference must use env:// or file://")
+func (defaultSecretResolver) ResolveSecret(_ context.Context, ref string) (string, error) {
+	parsed, err := secret.ParseRef(ref)
+	if err != nil || parsed.IsZero() {
+		return "", Errorf(ErrConfigInvalid, "credential reference must use env:// or file://")
 	}
-	token, err := source.Resolve()
+	token, err := parsed.Reference().Resolve()
 	if err != nil || strings.TrimSpace(token) == "" {
-		return "", mcp.Errorf(mcp.ErrAuthRequired, "credential is unavailable")
+		return "", Errorf(ErrAuthRequired, "credential is unavailable")
 	}
 	return token, nil
 }
 
-func mcpHTTPClient(resolver egress.Resolver) *http.Client {
+func NewHTTPClient(resolver egress.Resolver) *http.Client {
 	return egress.NewClient(resolver)
 }
+
+type SandboxSessionStart func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error)
 
 type sandboxSessionAdapter struct {
 	session *sandbox.Session
@@ -65,7 +66,7 @@ type sandboxSessionAdapter struct {
 
 func (a *sandboxSessionAdapter) Request(ctx context.Context, payload []byte) ([]byte, error) {
 	if a.session == nil {
-		return nil, mcp.Errorf(mcp.ErrServerUnavailable, "contained session is not available")
+		return nil, Errorf(ErrServerUnavailable, "contained session is not available")
 	}
 	out, err := a.session.Request(ctx, payload)
 	if err != nil {
@@ -82,34 +83,35 @@ func (a *sandboxSessionAdapter) Close(ctx context.Context) error {
 }
 
 func translateSessionError(err error) error {
-	code, ok := fault.CodeOf[sandbox.ErrorCode](err)
-	if !ok {
-		return mcp.Errorf(mcp.ErrServerUnavailable, "contained session exchange failed")
+	if fault.HasCode(err, sandbox.ErrorCodeSandboxOutputExceeded) {
+		return Errorf(ErrMessageTooLarge, "contained session response exceeds the message bound")
 	}
-	switch code {
-	case sandbox.ErrorCodeSandboxOutputExceeded:
-		return mcp.Errorf(mcp.ErrMessageTooLarge, "contained session response exceeds the message bound")
-	default:
-		return mcp.Errorf(mcp.ErrServerUnavailable, "contained session exchange failed")
-	}
+	return Errorf(ErrServerUnavailable, "contained session exchange failed")
 }
 
-func newMCPSessionStarter(start sandboxSessionStart) mcp.SessionStarter {
-	return mcpSessionStarterFunc(func(ctx context.Context, req *mcp.ContainedSessionRequest) (mcp.ContainedSession, error) {
+type sessionStarterFunc func(ctx context.Context, req *ContainedSessionRequest) (ContainedSession, error)
+
+func (f sessionStarterFunc) StartSession(ctx context.Context, req *ContainedSessionRequest) (ContainedSession, error) {
+	return f(ctx, req)
+}
+
+func NewSandboxSessionStarter(start SandboxSessionStart) SessionStarter {
+	if start == nil {
+		start = sandbox.Start
+	}
+	return sessionStarterFunc(func(ctx context.Context, req *ContainedSessionRequest) (ContainedSession, error) {
 		if req == nil {
-			return nil, mcp.Errorf(mcp.ErrConfigInvalid, "session request must not be nil")
+			return nil, Errorf(ErrConfigInvalid, "session request must not be nil")
 		}
 		environment := make(map[string]string, len(req.Environment))
-		for key, value := range req.Environment {
-			environment[key] = value
-		}
+		maps.Copy(environment, req.Environment)
 		session, err := start(ctx, &sandbox.SessionRequest{
 			RequestID:   req.RequestID,
 			SessionID:   "mcp-stdio-" + req.ServerName,
 			PrincipalID: "mcp-stdio-" + req.ServerName,
 			ToolName:    "mcp-stdio-server",
 			Executable:  req.Executable,
-			Arguments:   append([]string(nil), req.Arguments...),
+			Arguments:   slices.Clone(req.Arguments),
 			WorkingDir:  req.WorkingDir,
 			Environment: environment,
 			Limits: sandbox.Limits{
@@ -125,17 +127,14 @@ func newMCPSessionStarter(start sandboxSessionStart) mcp.SessionStarter {
 	})
 }
 
-type mcpSessionStarterFunc func(ctx context.Context, req *mcp.ContainedSessionRequest) (mcp.ContainedSession, error)
-
-func (f mcpSessionStarterFunc) StartSession(ctx context.Context, req *mcp.ContainedSessionRequest) (mcp.ContainedSession, error) {
-	return f(ctx, req)
-}
-
-func mcpRecorderObserver(recorder *telemetry.MCPRecorder) mcp.Observer {
+func NewTelemetryObserver(recorder *telemetry.MCPRecorder) Observer {
 	if recorder == nil {
 		return nil
 	}
-	return func(ctx context.Context, observation *mcp.Observation) {
+	return func(ctx context.Context, observation *Observation) {
+		if observation == nil {
+			return
+		}
 		recorder.Record(ctx, &telemetry.MCPObservation{
 			Server:    observation.Server,
 			Transport: observation.Transport,

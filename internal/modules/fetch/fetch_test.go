@@ -47,7 +47,7 @@ func cannedResponse(req *http.Request, contentType, body string) *http.Response 
 }
 
 func TestFetchBoundsBodyAndRejectsBinaryContent(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -81,7 +81,7 @@ func TestFetchBoundsBodyAndRejectsBinaryContent(t *testing.T) {
 }
 
 func TestFetchLimitsRedirects(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    0,
 		MaxEncodedBytes: 1024,
@@ -108,7 +108,7 @@ func TestFetchLimitsRedirects(t *testing.T) {
 
 func TestFetchSendsTheQueryAndDropsTheFragment(t *testing.T) {
 	var sent *http.Request
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxEncodedBytes: 1024,
 		MaxDecodedBytes: 1024,
@@ -137,7 +137,7 @@ func TestFetchSendsTheQueryAndDropsTheFragment(t *testing.T) {
 }
 
 func TestFetchDeniesUnsafeDestinationsCarryingAQuery(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxEncodedBytes: 1024,
 		MaxDecodedBytes: 1024,
@@ -173,7 +173,7 @@ func TestFetchFollowsOnlySameOriginRedirectsToAQuery(t *testing.T) {
 				}
 				return cannedResponse(req, "text/plain", "ok"), nil
 			})
-			adapter, err := New(Options{Timeout: time.Second, MaxRedirects: 2, MaxEncodedBytes: 1024, MaxDecodedBytes: 1024, client: client})
+			adapter, err := NewAdapter(Options{Timeout: time.Second, MaxRedirects: 2, MaxEncodedBytes: 1024, MaxDecodedBytes: 1024, client: client})
 			if err != nil {
 				t.Fatalf("New: %v", err)
 			}
@@ -189,7 +189,7 @@ func TestFetchFollowsOnlySameOriginRedirectsToAQuery(t *testing.T) {
 }
 
 func TestFetchTransportErrorsCarryNoURL(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxEncodedBytes: 1024,
 		MaxDecodedBytes: 1024,
@@ -212,7 +212,7 @@ func TestFetchMediatedClientDeniesUnsafeDestinations(t *testing.T) {
 		resolutions++
 		return publicResolverWithPrivate().LookupIP(ctx, host)
 	})
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -264,7 +264,7 @@ func chunkedClient(contentType, body string) *http.Client {
 }
 
 func TestFetchEnforcesEncodedLimitForChunkedResponses(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -284,7 +284,7 @@ func TestFetchEnforcesEncodedLimitForChunkedResponses(t *testing.T) {
 }
 
 func TestFetchEnforcesEncodedLimitWhenDecodedCapIsLower(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -304,7 +304,7 @@ func TestFetchEnforcesEncodedLimitWhenDecodedCapIsLower(t *testing.T) {
 }
 
 func TestFetchRejectsCompressedResponses(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -325,7 +325,7 @@ func TestFetchRejectsCompressedResponses(t *testing.T) {
 }
 
 func TestFetchAcceptsTransparentlyDecompressedBody(t *testing.T) {
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 1024,
@@ -359,7 +359,7 @@ func TestFetchConvertsHTMLToMarkdown(t *testing.T) {
 		`<script>alert("x")</script><style>h1{}</style>` +
 		`<pre>line one
 line two</pre></body></html>`
-	adapter, err := New(Options{
+	adapter, err := NewAdapter(Options{
 		Timeout:         time.Second,
 		MaxRedirects:    2,
 		MaxEncodedBytes: 8192,
@@ -391,7 +391,7 @@ line two</pre></body></html>`
 
 func TestFetchLeavesNonHTMLBodiesUnchanged(t *testing.T) {
 	for _, contentType := range []string{"text/plain", "application/json"} {
-		adapter, err := New(Options{
+		adapter, err := NewAdapter(Options{
 			Timeout:         time.Second,
 			MaxRedirects:    2,
 			MaxEncodedBytes: 8192,
@@ -421,7 +421,7 @@ func TestNewRejectsInvalidLimits(t *testing.T) {
 		{Timeout: time.Second, MaxRedirects: 11, MaxEncodedBytes: 1, MaxDecodedBytes: 1},
 		{Timeout: time.Second, MaxRedirects: 1, MaxEncodedBytes: 0, MaxDecodedBytes: 1},
 	} {
-		if _, err := New(options); err == nil {
+		if _, err := NewAdapter(options); err == nil {
 			t.Errorf("New(%+v) accepted invalid options", options)
 		}
 	}

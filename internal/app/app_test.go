@@ -211,8 +211,8 @@ func TestCompositionCommandBuildsOnlyStorage(t *testing.T) {
 	result := loadCompositionConfig(t, writeCommandCompositionConfig(t, validWorkflowYAML))
 	app := buildApp(t, commandCompositionOptions(result, &syncBuffer{}))
 	requireNames(t, "entries", app.group.Names(), []string{"sqlite"})
-	if app.runtime != nil || app.interpreter != nil || app.models != nil || app.knowledge != nil || app.memory != nil || app.profile != nil {
-		t.Fatalf("an unnamed part was built: runtime=%v interpreter=%v models=%v knowledge=%v memory=%v profile=%v", app.runtime, app.interpreter, app.models, app.knowledge, app.memory, app.profile)
+	if app.runtime != nil || app.interpreter != nil || app.models != nil || app.knowledge != nil || app.memory != nil || app.profile != nil || app.plugins != nil {
+		t.Fatalf("an unnamed part was built: runtime=%v interpreter=%v models=%v knowledge=%v memory=%v profile=%v plugins=%v", app.runtime, app.interpreter, app.models, app.knowledge, app.memory, app.profile, app.plugins)
 	}
 	if err := app.Run(t.Context()); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("Run on a command app = %v, want %s", err, ErrorCodeInvalidArgument)
@@ -226,17 +226,18 @@ func TestCompositionCommandBuildsOnlyStorage(t *testing.T) {
 
 func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 	cases := []struct {
-		name                                                     string
-		parts                                                    []Part
-		runtime, interpreter, models, knowledge, memory, profile bool
+		name                                                              string
+		parts                                                             []Part
+		runtime, interpreter, models, knowledge, memory, profile, plugins bool
 	}{
-		{"durable", []Part{PartDurable}, true, false, false, false, false, false},
-		{"workflows", []Part{PartWorkflows}, true, true, false, false, false, false},
-		{"models", []Part{PartModels}, false, false, true, false, false, false},
-		{"knowledge", []Part{PartKnowledge}, false, false, false, true, false, false},
-		{"memory", []Part{PartMemory}, false, false, false, false, true, false},
-		{"profile", []Part{PartProfile}, false, false, false, false, false, true},
-		{"models, workflows, durable, knowledge, memory, profile", []Part{PartModels, PartWorkflows, PartDurable, PartKnowledge, PartMemory, PartProfile}, true, true, true, true, true, true},
+		{"durable", []Part{PartDurable}, true, false, false, false, false, false, false},
+		{"workflows", []Part{PartWorkflows}, true, true, false, false, false, false, false},
+		{"models", []Part{PartModels}, false, false, true, false, false, false, false},
+		{"knowledge", []Part{PartKnowledge}, false, false, false, true, false, false, false},
+		{"memory", []Part{PartMemory}, false, false, false, false, true, false, false},
+		{"profile", []Part{PartProfile}, false, false, false, false, false, true, false},
+		{"plugins", []Part{PartPlugins}, false, false, false, false, false, false, true},
+		{"models, workflows, durable, knowledge, memory, profile, plugins", []Part{PartModels, PartWorkflows, PartDurable, PartKnowledge, PartMemory, PartProfile, PartPlugins}, true, true, true, true, true, true, true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -263,7 +264,24 @@ func TestCompositionCommandBuildsNamedParts(t *testing.T) {
 			if got := app.profile != nil; got != tc.profile {
 				t.Errorf("profile service built = %t, want %t", got, tc.profile)
 			}
+			if got := app.plugins != nil; got != tc.plugins {
+				t.Errorf("plugin service built = %t, want %t", got, tc.plugins)
+			}
 		})
+	}
+}
+
+func TestRootCommandMountsPluginCommands(t *testing.T) {
+	root := NewRootCommand()
+	cmd, _, err := root.Find([]string{"plugin"})
+	if err != nil || cmd == nil || cmd.Name() != "plugin" {
+		t.Fatalf("root.Find(plugin) = %v, %v", cmd, err)
+	}
+	for _, sub := range []string{"list", "install", "review", "approve", "disable", "remove", "login", "logout"} {
+		found, _, err := root.Find([]string{"plugin", sub})
+		if err != nil || found == nil || found.Name() != sub {
+			t.Fatalf("root.Find(plugin %s) = %v, %v", sub, found, err)
+		}
 	}
 }
 

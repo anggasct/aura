@@ -19,6 +19,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -178,10 +179,10 @@ type processStarter struct {
 	mu       sync.Mutex
 	failure  error
 	sessions []*processSession
-	requests []mcp.ContainedSessionRequest
+	requests []connector.SessionRequest
 }
 
-func (p *processStarter) StartSession(ctx context.Context, req *mcp.ContainedSessionRequest) (mcp.ContainedSession, error) {
+func (p *processStarter) StartSession(ctx context.Context, req *connector.SessionRequest) (connector.Session, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.requests = append(p.requests, *req)
@@ -191,9 +192,6 @@ func (p *processStarter) StartSession(ctx context.Context, req *mcp.ContainedSes
 	cmd := exec.CommandContext(ctx, req.Executable, req.Arguments...)
 	cmd.Dir = req.WorkingDir
 	cmd.Env = []string{}
-	for key, value := range req.Environment {
-		cmd.Env = append(cmd.Env, key+"="+value)
-	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		return nil, err
@@ -284,8 +282,7 @@ type connectorFixture struct {
 	h       *mcpHarness
 	api     *connectorAPI
 	service *plugin.Service
-	runtime *pluginRuntime
-	manager *connector.Manager
+	module  *plugin.Module
 	starter *processStarter
 }
 
@@ -297,9 +294,9 @@ func newConnectorFixture(t *testing.T, manifest string, prepare func(f *connecto
 func newConnectorFixtureWith(t *testing.T, manifest string, executable []byte, prepare func(f *connectorFixture)) *connectorFixture {
 	t.Helper()
 	f := &connectorFixture{h: newMCPHarness(t, nil), api: newConnectorAPI(t), starter: &processStarter{}}
-	service, err := newPluginService(&f.h.cfg, f.h.db, f.h.executor.Broker())
+	service, err := openPluginService(&f.h.cfg, f.h.db, f.h.executor.Broker())
 	if err != nil {
-		t.Fatalf("newPluginService: %v", err)
+		t.Fatalf("openPluginService: %v", err)
 	}
 	f.service = service
 	installed, err := service.Install(t.Context(), writeConnectorPluginBundle(t, strings.ReplaceAll(manifest, "API_HOST", f.api.host()), executable))
@@ -315,22 +312,32 @@ func newConnectorFixtureWith(t *testing.T, manifest string, executable []byte, p
 	return f
 }
 
-func (f *connectorFixture) start(t *testing.T) {
+func (f *connectorFixture) startWithStarter(t *testing.T, starter connector.Starter) {
 	t.Helper()
-	plan, err := f.service.Plan(t.Context())
+	dataRoot, err := resolveDataRoot(&f.h.cfg)
 	if err != nil {
-		t.Fatalf("Plan: %v", err)
+		t.Fatalf("resolveDataRoot: %v", err)
 	}
-	f.runtime = &pluginRuntime{service: f.service, plan: plan, installed: 1}
-	f.manager, err = startConnectorPlugins(t.Context(), &connectorRuntimeOptions{
-		Broker: f.h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), Starter: f.starter,
-		HTTPClient: f.api.server.Client(), Plugins: f.runtime.connectorPlugins(),
+	mod, err := plugin.New(t.Context(), &plugin.ModuleDeps{
+		Config:              f.h.cfg.Plugins,
+		DB:                  f.h.db,
+		DataRoot:            dataRoot,
+		Broker:              f.h.executor.Broker(),
+		Validator:           mcp.MakeValidator,
+		ConnectorHTTPClient: f.api.server.Client(),
+		Starter:             starter,
+		Logger:              slog.New(slog.DiscardHandler),
 	})
 	if err != nil {
-		t.Fatalf("startConnectorPlugins: %v", err)
+		t.Fatalf("plugin.New: %v", err)
 	}
-	f.runtime.connectors = f.manager
-	t.Cleanup(func() { _ = f.manager.Close(context.WithoutCancel(t.Context())) })
+	f.module = mod
+	t.Cleanup(func() { _ = mod.Close(context.WithoutCancel(t.Context())) })
+}
+
+func (f *connectorFixture) start(t *testing.T) {
+	t.Helper()
+	f.startWithStarter(t, f.starter)
 }
 
 func (f *connectorFixture) call(t *testing.T, tool, id string, class principal.Class, arguments map[string]any) (json.RawMessage, error) {
@@ -376,11 +383,11 @@ func TestConnectorPluginRunsEndToEndThroughTheBrokerWithoutAuth(t *testing.T) {
 	if !slices.Contains(names, "plugin_mailer_search") || !slices.Contains(names, "plugin_mailer_send") || slices.Contains(names, "plugin_mailer_export_all") {
 		t.Fatalf("tools = %v", names)
 	}
-	statuses := f.manager.Statuses()
+	statuses := f.module.ConnectorStatuses()
 	if len(statuses) != 1 || statuses[0].Code != "" || !slices.Equal(statuses[0].Drift, []string{"export_all"}) {
 		t.Fatalf("statuses = %+v", statuses)
 	}
-	check, ok, err := f.runtime.healthCheck(&f.h.cfg, f.h.db, nil)
+	check, ok, err := pluginHealthCheck(f.module, nil, time.Duration(f.h.cfg.Health.CheckTimeout))
 	if err != nil || !ok {
 		t.Fatalf("healthCheck = %v, %v", ok, err)
 	}
@@ -417,13 +424,14 @@ func TestConnectorPluginRunsEndToEndThroughTheBrokerWithoutAuth(t *testing.T) {
 	if err := json.Unmarshal(env, &seen); err != nil || len(seen.Env) != 0 || len(seen.Args) != 0 {
 		t.Fatalf("connector process environment = %s (%v)", env, err)
 	}
-	pluginsDir, err := pluginDirectory(&f.h.cfg, pluginDirName)
+	dataRoot, err := resolveDataRoot(&f.h.cfg)
 	if err != nil {
-		t.Fatalf("pluginDirectory: %v", err)
+		t.Fatalf("resolveDataRoot: %v", err)
 	}
+	pluginsDir := filepath.Join(dataRoot, "plugins")
 	f.starter.mu.Lock()
 	for _, request := range f.starter.requests {
-		if len(request.Environment) != 0 || request.WorkingDir != filepath.Join(pluginsDir, "mailer", "1.0.0") {
+		if request.WorkingDir != filepath.Join(pluginsDir, "mailer", "1.0.0") {
 			t.Errorf("session request = %+v", request)
 		}
 	}
@@ -524,23 +532,11 @@ func TestConnectorPluginThatCannotStartStaysOffWithBackendUnavailable(t *testing
 	f := newConnectorFixture(t, connectorNoAuthManifest, func(f *connectorFixture) {
 		f.starter.failure = errors.New("containment is unavailable")
 	})
-	plan, err := f.service.Plan(t.Context())
-	if err != nil {
-		t.Fatalf("Plan: %v", err)
-	}
-	f.runtime = &pluginRuntime{service: f.service, plan: plan, installed: 1}
-	f.manager, err = startConnectorPlugins(t.Context(), &connectorRuntimeOptions{
-		Broker: f.h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), Starter: f.starter, HTTPClient: f.api.server.Client(), Plugins: f.runtime.connectorPlugins(),
-	})
-	if err != nil {
-		t.Fatalf("startConnectorPlugins: %v", err)
-	}
-	t.Cleanup(func() { _ = f.manager.Close(context.WithoutCancel(t.Context())) })
-	f.runtime.connectors = f.manager
+	f.start(t)
 	if names := f.h.toolNames(); slices.Contains(names, "plugin_mailer_search") {
 		t.Fatalf("tools of a plugin that stays off = %v", names)
 	}
-	check, ok, err := f.runtime.healthCheck(&f.h.cfg, f.h.db, nil)
+	check, ok, err := pluginHealthCheck(f.module, nil, time.Duration(f.h.cfg.Health.CheckTimeout))
 	if err != nil || !ok {
 		t.Fatalf("healthCheck = %v, %v", ok, err)
 	}
@@ -616,7 +612,7 @@ func TestConnectorPluginWithOAuth2CarriesTheBearerWithoutExposingIt(t *testing.T
 	f.starter.mu.Lock()
 	defer f.starter.mu.Unlock()
 	for _, request := range f.starter.requests {
-		if len(request.Environment) != 0 || len(request.Arguments) != 0 {
+		if len(request.Arguments) != 0 {
 			t.Fatalf("session request = %+v", request)
 		}
 	}

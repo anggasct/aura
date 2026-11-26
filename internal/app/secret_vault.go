@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -115,7 +115,7 @@ func additionalConfiguredSecrets(cfg *appconfig.Config) []configuredSecret {
 	if cfg.Tools != nil {
 		if ref := cfg.Tools.WebSearch.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 			entry := referenceSecret("web_search_credential", ref)
-			entry.optional = cfg.Tools.WebSearch.CredentialRef == config.DefaultWebSearchCredentialRef(cfg.Tools.WebSearch.Provider)
+			entry.optional = cfg.Tools.WebSearch.CredentialRef == search.DefaultCredentialRef(cfg.Tools.WebSearch.Provider)
 			secrets = append(secrets, entry)
 		}
 	}
@@ -137,12 +137,14 @@ func additionalConfiguredSecrets(cfg *appconfig.Config) []configuredSecret {
 				continue
 			}
 			if static := server.Auth.Static; static != nil {
-				if ref, known := staticCredentialReference(static.CredentialRef); known && (ref.Env != "" || ref.File != "") {
+				if ref := static.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 					secrets = append(secrets, referenceSecret("mcp_credential_"+server.Name, ref))
 				}
 			}
-			if oauth := server.Auth.OAuth; oauth != nil && oauth.ClientSecretEnv != "" {
-				secrets = append(secrets, environmentSecret("mcp_client_secret_"+server.Name, oauth.ClientSecretEnv))
+			if oauth := server.Auth.OAuth; oauth != nil {
+				if ref := oauth.ClientSecretRef.Reference(); ref.Env != "" || ref.File != "" {
+					secrets = append(secrets, referenceSecret("mcp_client_secret_"+server.Name, ref))
+				}
 			}
 		}
 	}

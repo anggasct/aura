@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -80,8 +81,8 @@ func TestLoadMCPAcceptsValidStreamableHTTP(t *testing.T) {
       url: https://mcp.example.com/mcp
       auth:
         oauth:
-          client_id_env: AURA_MCP_CLIENT_ID
-          client_secret_env: AURA_MCP_CLIENT_SECRET
+          client_id_ref: env://AURA_MCP_CLIENT_ID
+          client_secret_ref: env://AURA_MCP_CLIENT_SECRET
           token_store: keyring
       capabilities: ["external.read"]
       connect_timeout: 5s
@@ -98,63 +99,84 @@ func TestLoadMCPAcceptsValidStreamableHTTP(t *testing.T) {
 	if server.URL != "https://mcp.example.com/mcp" {
 		t.Errorf("unexpected url: %s", server.URL)
 	}
-	if server.Auth == nil || server.Auth.OAuth == nil || server.Auth.OAuth.ClientIDEnv != "AURA_MCP_CLIENT_ID" {
+	if server.Auth == nil || server.Auth.OAuth == nil || server.Auth.OAuth.ClientIDRef.String() != "env://AURA_MCP_CLIENT_ID" {
 		t.Errorf("unexpected auth: %+v", server.Auth)
+	}
+	if server.ConnectTimeout == nil || time.Duration(*server.ConnectTimeout) != 5*time.Second {
+		t.Errorf("unexpected connect_timeout: %v", server.ConnectTimeout)
 	}
 }
 
 func TestLoadMCPValidationErrors(t *testing.T) {
 	cases := []struct {
-		name string
-		yaml string
+		name     string
+		yaml     string
+		wantText string
 	}{
 		{
-			name: "invalid_server_name",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: INVALID_NAME\n      transport: stdio\n      command: /bin/ls\n",
+			name:     "invalid_server_name",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: INVALID_NAME\n      transport: stdio\n      command: /bin/ls\n",
+			wantText: "mcp.servers[0].name",
 		},
 		{
-			name: "duplicate_server_name",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n    - name: srv\n      transport: stdio\n      command: /bin/echo\n",
+			name:     "duplicate_server_name",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n    - name: srv\n      transport: stdio\n      command: /bin/echo\n",
+			wantText: "mcp.servers[1].name",
 		},
 		{
-			name: "unknown_transport",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: websocket\n      command: /bin/ls\n",
+			name:     "unknown_transport",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: websocket\n      command: /bin/ls\n",
+			wantText: "mcp.servers[srv].transport",
 		},
 		{
-			name: "stdio_relative_command",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: bin/ls\n",
+			name:     "stdio_relative_command",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: bin/ls\n",
+			wantText: "mcp.servers[srv].command",
 		},
 		{
-			name: "stdio_with_url",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n      url: https://example.com\n",
+			name:     "stdio_with_url",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n      url: https://example.com\n",
+			wantText: "mcp.servers[srv].url",
 		},
 		{
-			name: "stdio_with_auth",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n      auth:\n        static:\n          credential_ref: secret://key\n",
+			name:     "stdio_with_auth",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n      auth:\n        static:\n          credential_ref: env://TEST_KEY\n",
+			wantText: "mcp.servers[srv].auth",
 		},
 		{
-			name: "streamable_http_missing_url",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n",
+			name:     "streamable_http_missing_url",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n",
+			wantText: "mcp.servers[srv].url",
 		},
 		{
-			name: "streamable_http_with_command",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: https://example.com/mcp\n      command: /bin/ls\n",
+			name:     "streamable_http_with_command",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: https://example.com/mcp\n      command: /bin/ls\n",
+			wantText: "mcp.servers[srv].command",
 		},
 		{
-			name: "streamable_http_plain_http_non_loopback",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: http://example.com/mcp\n",
+			name:     "streamable_http_plain_http_non_loopback",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: http://example.com/mcp\n",
+			wantText: "mcp.servers[srv].url",
 		},
 		{
-			name: "legacy_sse_without_ack",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: legacy_sse\n      url: https://example.com/sse\n",
+			name:     "legacy_sse_without_ack",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: legacy_sse\n      url: https://example.com/sse\n",
+			wantText: "mcp.servers[srv]",
 		},
 		{
-			name: "auth_both_oauth_and_static",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: https://example.com/mcp\n      auth:\n        oauth:\n          client_id_env: ID\n          client_secret_env: SEC\n        static:\n          credential_ref: key\n",
+			name:     "auth_both_oauth_and_static",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: https://example.com/mcp\n      auth:\n        oauth:\n          client_id_ref: env://ID\n          client_secret_ref: env://SEC\n        static:\n          credential_ref: env://KEY\n",
+			wantText: "mcp.servers[srv].auth",
 		},
 		{
-			name: "unknown_key_inside_server",
-			yaml: "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n      bogus_field: value\n",
+			name:     "static_invalid_credential_ref_scheme",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: streamable_http\n      url: https://example.com/mcp\n      auth:\n        static:\n          credential_ref: secret://key\n",
+			wantText: "mcp.servers[0].auth.static.credential_ref",
+		},
+		{
+			name:     "unknown_key_inside_server",
+			yaml:     "version: 1\nmcp:\n  servers:\n    - name: srv\n      transport: stdio\n      command: /bin/ls\n      bogus_field: value\n",
+			wantText: "bogus_field",
 		},
 	}
 
@@ -168,6 +190,9 @@ func TestLoadMCPValidationErrors(t *testing.T) {
 			_, err := Load(path)
 			if err == nil {
 				t.Fatalf("expected config error for case %s, got nil", tc.name)
+			}
+			if tc.wantText != "" && !strings.Contains(err.Error(), tc.wantText) {
+				t.Fatalf("error for %s = %v, want substring %q", tc.name, err, tc.wantText)
 			}
 		})
 	}

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -117,11 +116,12 @@ func TestAdapterOversizedResultFails(t *testing.T) {
 	})
 	clientTransport, serverTransport := sdk.NewInMemoryTransports()
 	go func() { _ = server.Run(ctx, serverTransport) }()
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:           "big-server",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		RequestTimeout: configkit.Duration(5 * time.Second),
 		StartupTimeout: configkit.Duration(5 * time.Second),
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 	client, err := NewClient(serverCfg, nil)
 	if err != nil {

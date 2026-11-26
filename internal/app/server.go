@@ -17,6 +17,8 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/handoff"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -70,7 +72,7 @@ type serverBuild struct {
 	accessRecorder     *telemetry.AccessRecorder
 	commandTurns       *deferredCommandTurns
 	commandSkills      *deferredCommandSkills
-	mcp                *mcpRuntime
+	mcp                *mcp.Module
 	personaRecorder    *telemetry.PersonaRecorder
 	durableConfig      *runtimeengine.DurableConfig
 	host               *runtimeengine.Host
@@ -191,23 +193,34 @@ func (b *build) buildServerTools(ctx context.Context) error {
 		return err
 	}
 	b.builtin.SetEmailOutbox(&emailOutbox{adapters: s.emailMailboxes})
-	plugins, err := planPlugins(ctx, cfg, db, b.builtin.Broker())
+	pluginMod, err := buildPluginModule(ctx, cfg, db, b.builtin.Broker(), b.result.CapabilityReport, b.logger)
 	if err != nil {
 		return err
 	}
-	plugins.warnUnavailablePlugins(ctx, b.logger, b.registry.Definitions())
-	if err := b.startConnectorPlugins(ctx, plugins); err != nil {
+	if err := b.registerModule("plugin", pluginMod); err != nil {
 		return err
 	}
-	if err := b.startMCPServers(ctx, plugins); err != nil {
+	pluginMod.WarnUnavailable(ctx, b.registry.Definitions())
+	if pluginMod.HasConnectors() {
+		logger := b.logger
+		if err := b.group.Defer("plugin_connector", func(ctx context.Context) error {
+			if err := pluginMod.Close(ctx); err != nil {
+				logger.WarnContext(ctx, "connector plugin shutdown", "component", "plugin_connector", "error", err)
+			}
+			return nil
+		}); err != nil {
+			return err
+		}
+	}
+	if err := b.startMCPServers(ctx, pluginMod); err != nil {
 		return err
 	}
-	pluginCheck, pluginChecked, err := plugins.healthCheck(cfg, db, s.mcp)
+	pluginCheck, pluginChecked, err := pluginHealthCheck(pluginMod, s.mcp, time.Duration(cfg.Health.CheckTimeout))
 	if err != nil {
 		return err
 	}
 	if pluginChecked {
-		s.checks = append(s.checks, pluginCheck)
+		b.addHealthCheck(&pluginCheck)
 	}
 	if b.primaryModel() == "" {
 		return configkit.Invalid("models.definitions.primary.model", "is required for the server runtime")
@@ -215,49 +228,41 @@ func (b *build) buildServerTools(ctx context.Context) error {
 	return nil
 }
 
-func (b *build) startConnectorPlugins(ctx context.Context, plugins *pluginRuntime) error {
-	connectorPlugins := plugins.connectorPlugins()
-	if len(connectorPlugins) == 0 {
-		return nil
-	}
-	logger := b.logger
-	connectors, err := startConnectorPlugins(ctx, &connectorRuntimeOptions{
-		Broker: b.builtin.Broker(), Logger: logger, Capabilities: b.result.CapabilityReport, Plugins: connectorPlugins,
-	})
-	if err != nil {
-		return err
-	}
-	plugins.connectors = connectors
-	return b.group.Defer("plugin_connector", func(ctx context.Context) error {
-		if err := connectors.Close(ctx); err != nil {
-			logger.WarnContext(ctx, "connector plugin shutdown", "component", "plugin_connector", "error", err)
-		}
-		return nil
-	})
-}
-
-func (b *build) startMCPServers(ctx context.Context, plugins *pluginRuntime) error {
+func (b *build) startMCPServers(ctx context.Context, plugins *plugin.Module) error {
 	cfg, logger := b.cfg, b.logger
-	if !mcpServersConfigured(cfg) && len(plugins.mcpPlugins()) == 0 {
+	mcpPlugins := mcpPluginsFromBackends(plugins.MCPBackends())
+	if len(configuredMCPServers(cfg)) == 0 && len(mcpPlugins) == 0 {
 		return nil
 	}
-	mcpServers, err := startConfiguredMCP(ctx, cfg, b.builtin.Broker(), logger, b.meters(), b.result.CapabilityReport, b.registry.Definitions(), plugins.mcpPlugins())
+	trustPath, err := mcpTrustRegistryPath(cfg)
 	if err != nil {
 		return err
 	}
-	b.server.mcp = mcpServers
-	if err := b.group.Defer("mcp", func(ctx context.Context) error {
-		if err := mcpServers.Close(ctx); err != nil {
+	mod, err := mcp.New(ctx, &mcp.ModuleDeps{
+		Config:       cfg.MCP,
+		Plugins:      mcpPlugins,
+		Broker:       b.builtin.Broker(),
+		TrustPath:    trustPath,
+		Meters:       b.meters(),
+		Capabilities: b.result.CapabilityReport,
+		Personas:     b.registry.Definitions(),
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       logger,
+	})
+	if err != nil {
+		return err
+	}
+	b.server.mcp = mod
+	if err := b.registerModule("mcp", mod); err != nil {
+		_ = mod.Close(context.WithoutCancel(ctx))
+		return err
+	}
+	return b.group.Defer("mcp", func(ctx context.Context) error {
+		if err := mod.Close(ctx); err != nil {
 			logger.WarnContext(ctx, "mcp shutdown", "component", "mcp", "error", err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	if mcpServers.hasCheck {
-		b.server.checks = append(b.server.checks, mcpServers.check)
-	}
-	return nil
+	})
 }
 
 func (b *build) buildServerDurable() error {

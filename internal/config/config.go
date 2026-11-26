@@ -5,7 +5,10 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/fetch"
 	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/search"
+	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -199,107 +202,25 @@ type Terminal struct {
 }
 
 type Tools struct {
-	Workspace            string        `json:"workspace"`
-	MaxInlineResultBytes int64         `json:"max_inline_result_bytes"`
-	Exec                 ToolExec      `json:"exec"`
-	Fetch                ToolFetch     `json:"fetch"`
-	WebSearch            ToolWebSearch `json:"web_search"`
-	GitHub               github.Config `json:"github,omitzero"`
-}
-
-type ToolExec struct {
-	Timeout        configkit.Duration `json:"timeout"`
-	MaxStdoutBytes int64              `json:"max_stdout_bytes"`
-	MaxStderrBytes int64              `json:"max_stderr_bytes"`
-}
-
-type ToolFetch struct {
-	Timeout         configkit.Duration `json:"timeout"`
-	MaxRedirects    int                `json:"max_redirects"`
-	MaxEncodedBytes int64              `json:"max_encoded_bytes"`
-	MaxDecodedBytes int64              `json:"max_decoded_bytes"`
-}
-
-type ToolWebSearch struct {
-	Provider      string     `json:"provider"`
-	CredentialRef secret.Ref `json:"credential_ref,omitzero"`
-	Endpoint      string     `json:"endpoint,omitempty"`
-	MaxResults    int        `json:"max_results"`
-}
-
-const (
-	MCPTransportStdio          = "stdio"
-	MCPTransportStreamableHTTP = "streamable_http"
-	MCPTransportLegacySSE      = "legacy_sse"
-)
-
-type MCP struct {
-	Servers []MCPServer `json:"servers"`
-}
-
-type MCPServer struct {
-	Name             string             `json:"name"`
-	Transport        string             `json:"transport"`
-	Command          string             `json:"command,omitempty"`
-	Args             []string           `json:"args,omitempty"`
-	Environment      map[string]string  `json:"environment,omitempty"`
-	Capabilities     []string           `json:"capabilities,omitempty"`
-	StartupTimeout   configkit.Duration `json:"startup_timeout,omitempty"`
-	RequestTimeout   configkit.Duration `json:"request_timeout,omitempty"`
-	MaxMessageSize   configkit.ByteSize `json:"max_message_size,omitempty"`
-	Restart          *MCPRestart        `json:"restart,omitempty"`
-	URL              string             `json:"url,omitempty"`
-	Auth             *MCPAuth           `json:"auth,omitempty"`
-	ConnectTimeout   configkit.Duration `json:"connect_timeout,omitempty"`
-	AllowRedirects   *bool              `json:"allow_redirects,omitempty"`
-	CompatibilityAck bool               `json:"compatibility_ack,omitempty"`
-}
-
-type MCPRestart struct {
-	MaxAttempts int                `json:"max_attempts"`
-	Window      configkit.Duration `json:"window"`
-}
-
-type MCPAuth struct {
-	OAuth  *MCPOAuth      `json:"oauth,omitempty"`
-	Static *MCPStaticAuth `json:"static,omitempty"`
-}
-
-type MCPOAuth struct {
-	ClientIDEnv     string `json:"client_id_env"`
-	ClientSecretEnv string `json:"client_secret_env"`
-	TokenStore      string `json:"token_store"`
-}
-
-type MCPStaticAuth struct {
-	Header        string `json:"header,omitempty"`
-	CredentialRef string `json:"credential_ref"`
+	Workspace            string           `json:"workspace"`
+	MaxInlineResultBytes int64            `json:"max_inline_result_bytes"`
+	Exec                 shellexec.Config `json:"exec"`
+	Fetch                fetch.Config     `json:"fetch"`
+	WebSearch            search.Config    `json:"web_search"`
+	GitHub               github.Config    `json:"github,omitzero"`
 }
 
 var (
-	mcpServerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
-	syncBranchPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+	syncBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
 
 func DefaultTools() *Tools {
 	return &Tools{
 		Workspace:            "/srv/aura/workspace",
 		MaxInlineResultBytes: 65536,
-		Exec: ToolExec{
-			Timeout:        configkit.Duration(30 * time.Second),
-			MaxStdoutBytes: 65536,
-			MaxStderrBytes: 65536,
-		},
-		Fetch: ToolFetch{
-			Timeout:         configkit.Duration(30 * time.Second),
-			MaxRedirects:    5,
-			MaxEncodedBytes: 2097152,
-			MaxDecodedBytes: 8388608,
-		},
-		WebSearch: ToolWebSearch{
-			Provider:   WebSearchProviderDuckDuckGo,
-			MaxResults: 5,
-		},
+		Exec:                 shellexec.Default(),
+		Fetch:                fetch.Default(),
+		WebSearch:            search.Default(),
 	}
 }
 

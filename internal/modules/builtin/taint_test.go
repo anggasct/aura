@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -20,7 +21,7 @@ import (
 func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 	db := storetest.OpenMigrated(t)
 	toolsCfg := config.DefaultTools()
-	toolsCfg.WebSearch = config.ToolWebSearch{Provider: "brave", CredentialRef: secrettest.Ref("env://AURA_TEST_TAINT_SEARCH_UNSET"), MaxResults: 5}
+	toolsCfg.WebSearch = search.Config{Provider: "brave", CredentialRef: secrettest.Ref("env://AURA_TEST_TAINT_SEARCH_UNSET"), MaxResults: 5}
 	toolsCfg.Workspace = t.TempDir()
 	dataRoot := t.TempDir()
 	decisions := 0
