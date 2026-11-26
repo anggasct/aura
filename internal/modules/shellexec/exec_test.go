@@ -3,6 +3,7 @@ package shellexec
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,16 +20,16 @@ func TestNewRejectsUnsafeOptions(t *testing.T) {
 		{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1, MaxStderrBytes: 1, Environment: []string{"BAD-KEY=value"}},
 	}
 	for _, options := range cases {
-		if _, err := New(options); err == nil {
-			t.Errorf("New(%+v) accepted invalid options", options)
+		if _, err := NewAdapter(options); err == nil {
+			t.Errorf("NewAdapter(%+v) accepted invalid options", options)
 		}
 	}
 }
 
 func TestAdapterRejectsRemoteCommandsBeforeSandbox(t *testing.T) {
-	adapter, err := New(Options{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1024, MaxStderrBytes: 1024})
+	adapter, err := NewAdapter(Options{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1024, MaxStderrBytes: 1024})
 	if err != nil {
-		t.Fatalf("New: %v", err)
+		t.Fatalf("NewAdapter: %v", err)
 	}
 	for _, raw := range []string{`{"command":["ssh","host"]}`, `{"command":["ssh host"],"shell":true}`} {
 		request := &toolbroker.ToolRequest{
@@ -37,8 +38,8 @@ func TestAdapterRejectsRemoteCommandsBeforeSandbox(t *testing.T) {
 			Arguments:   json.RawMessage(raw),
 		}
 		_, err = adapter(context.Background(), request, approval.Constraints{})
-		if err == nil {
-			t.Errorf("remote command %s was accepted", raw)
+		if err == nil || !strings.Contains(err.Error(), "remote command execution is not allowed") {
+			t.Errorf("remote command %s err = %v, want remote command rejection", raw, err)
 		}
 	}
 }

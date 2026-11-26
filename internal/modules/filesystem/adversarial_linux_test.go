@@ -45,7 +45,7 @@ func TestFilesystemRejectsSymlinkChainsAndMagicLinks(t *testing.T) {
 	if err := os.Symlink("/proc/self", filepath.Join(workspace, "proc-self")); err != nil {
 		t.Fatalf("symlink proc-self: %v", err)
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 4096, MaxDirEntries: 100})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 4096, MaxDirEntries: 100})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -73,7 +73,7 @@ func TestFilesystemRejectsTraversalSpellings(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(outside, "secret"), []byte("secret"), 0o600); err != nil {
 		t.Fatalf("write outside: %v", err)
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -126,7 +126,7 @@ func TestFilesystemRaceAgainstEntrySwapping(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "dir", "swap"), []byte("INSIDE"), 0o600); err != nil {
 		t.Fatalf("write nested: %v", err)
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 100})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 100})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestFilesystemRaceAgainstDirectoryRenaming(t *testing.T) {
 			t.Fatalf("write file: %v", err)
 		}
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 100})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 100})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
