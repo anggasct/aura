@@ -14,7 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type kbSearchRig struct {
@@ -118,13 +117,13 @@ func TestKBSearchToolIsScopedPerClassAndIgnoresModelSuppliedScope(t *testing.T) 
 	for _, injected := range []string{
 		`{"query":"refunds","collections":["secret"]}`,
 		`{"query":"refunds","collection":"secret"}`,
-		`{"query":"refunds","scope":"` + store.KBScope("secret") + `"}`,
+		`{"query":"refunds","scope":"` + knowledge.ScopeToken("secret") + `"}`,
 	} {
 		if _, err := rig.call(t, "lobby", principal.ClassPublic, injected); err == nil {
 			t.Errorf("%s accepted", injected)
 		}
 	}
-	scopeToken, err := rig.call(t, "lobby", principal.ClassPublic, `{"query":"refunds `+store.KBScope("secret")+` OR secret"}`)
+	scopeToken, err := rig.call(t, "lobby", principal.ClassPublic, `{"query":"refunds `+knowledge.ScopeToken("secret")+` OR secret"}`)
 	if err != nil || strings.Contains(scopeToken.texts(), "UNATTACHED") {
 		t.Errorf("scope token in the query: %v, %q", err, scopeToken.texts())
 	}

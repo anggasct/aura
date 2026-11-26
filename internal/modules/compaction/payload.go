@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type summarySource struct {
@@ -40,7 +42,7 @@ type summaryPayload struct {
 
 func (s *Summary) payload() ([]byte, error) {
 	if s == nil {
-		return nil, errNilArgument("summary")
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary must not be nil")
 	}
 	encoded, err := json.Marshal(summaryPayload{
 		Source: summarySource{
@@ -68,7 +70,7 @@ func (s *Summary) payload() ([]byte, error) {
 		Schema:      SummarySchema,
 	})
 	if err != nil {
-		return nil, Errorf(ErrorCodeSummaryInvalid, "summary payload is not encodable")
+		return nil, fault.New(ErrorCodeSummaryInvalid, "summary payload is not encodable")
 	}
 	return encoded, nil
 }
@@ -76,20 +78,20 @@ func (s *Summary) payload() ([]byte, error) {
 func parsePayload(raw []byte) (*Summary, error) {
 	var decoded summaryPayload
 	if err := json.Unmarshal(raw, &decoded); err != nil {
-		return nil, Errorf(ErrorCodeSummaryInvalid, "stored summary is not valid JSON")
+		return nil, fault.New(ErrorCodeSummaryInvalid, "stored summary is not valid JSON")
 	}
 	if decoded.Kind != SummaryKind || decoded.Schema != SummarySchema {
-		return nil, Errorf(ErrorCodeSummaryStale, "stored summary uses an unsupported envelope")
+		return nil, fault.New(ErrorCodeSummaryStale, "stored summary uses an unsupported envelope")
 	}
 	if Trust(decoded.Trust) != TrustDerivedUntrusted {
-		return nil, Errorf(ErrorCodeSummaryInvalid, "stored summary carries unexpected trust")
+		return nil, fault.New(ErrorCodeSummaryInvalid, "stored summary carries unexpected trust")
 	}
 	if strings.TrimSpace(decoded.Source.Digest) == "" || strings.TrimSpace(decoded.Producer.Model) == "" {
-		return nil, Errorf(ErrorCodeSummaryInvalid, "stored summary misses provenance")
+		return nil, fault.New(ErrorCodeSummaryInvalid, "stored summary misses provenance")
 	}
 	generated, err := time.Parse(time.RFC3339Nano, decoded.GeneratedAt)
 	if err != nil {
-		return nil, Errorf(ErrorCodeSummaryInvalid, "stored summary carries no valid timestamp")
+		return nil, fault.New(ErrorCodeSummaryInvalid, "stored summary carries no valid timestamp")
 	}
 	return &Summary{
 		StartSequence: decoded.Source.StartSequence,

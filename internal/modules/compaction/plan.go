@@ -2,6 +2,8 @@ package compaction
 
 import (
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type Capability struct {
@@ -45,10 +47,10 @@ type Planner struct {
 
 func NewPlanner(safetyMarginTokens int, conservativeRatio float64, counter TokenCounter) (*Planner, error) {
 	if safetyMarginTokens <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "safety margin must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "safety margin must be positive")
 	}
 	if conservativeRatio <= 0 || conservativeRatio >= 1 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "conservative ratio must be in (0,1)")
+		return nil, fault.New(ErrorCodeInvalidArgument, "conservative ratio must be in (0,1)")
 	}
 	if counter == nil {
 		counter = ConservativeEstimator{}
@@ -62,13 +64,13 @@ func NewPlanner(safetyMarginTokens int, conservativeRatio float64, counter Token
 
 func (p *Planner) Plan(capability Capability, invocation Invocation, events []Event) (*Plan, error) {
 	if p == nil {
-		return nil, errNilArgument("planner")
+		return nil, fault.New(ErrorCodeInvalidArgument, "planner must not be nil")
 	}
 	if strings.TrimSpace(capability.ID) == "" || capability.ContextTokens <= 0 {
-		return nil, Errorf(ErrorCodeCapabilityMissing, "model capability carries no usable input budget")
+		return nil, fault.New(ErrorCodeCapabilityMissing, "model capability carries no usable input budget")
 	}
 	if invocation.MaxOutputTokens < 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "reserved output must not be negative")
+		return nil, fault.New(ErrorCodeInvalidArgument, "reserved output must not be negative")
 	}
 	systemTokens, err := sumCounts(p.counter, []string{invocation.SystemText})
 	if err != nil {
@@ -92,7 +94,7 @@ func (p *Planner) Plan(capability Capability, invocation Invocation, events []Ev
 	}
 	usable := capability.ContextTokens - head
 	if usable <= 0 {
-		return nil, Errorf(ErrorCodeBudgetExceeded, "reserves leave no usable input budget")
+		return nil, fault.New(ErrorCodeBudgetExceeded, "reserves leave no usable input budget")
 	}
 	groups, err := GroupEvents(events, p.counter, invocation.InvocationID)
 	if err != nil {

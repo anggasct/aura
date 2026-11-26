@@ -19,7 +19,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const knowledgeOwnerActionKind = "kb.owner_action.v1"
@@ -31,17 +30,21 @@ func newKnowledgeService(cfg *appconfig.Config, db *sql.DB, resolver egress.Reso
 	if db == nil {
 		return nil, errors.New("knowledge database must not be nil")
 	}
+	kbStore, err := knowledge.NewSQLiteStore(db)
+	if err != nil {
+		return nil, err
+	}
 	wiring, err := newKnowledgeEmbedding(cfg, resolver)
 	if err != nil {
 		return nil, err
 	}
 	return knowledge.NewService(&knowledge.Deps{
-		Store:     &knowledgeStore{store: store.NewKBStore(db)},
+		Store:     kbStore,
 		Secrets:   &knowledgeSecrets{cfg: cfg},
 		Reducer:   toolsbuiltin.ReduceHTML,
 		HTTP:      newKnowledgeHTTPClient(resolver),
 		Actions:   &knowledgeActions{db: db},
-		Vectors:   &knowledgeVectors{store: store.NewKBEmbeddingStore(db)},
+		Vectors:   kbStore,
 		Embedder:  wiring.embedder,
 		Embedding: wiring.settings,
 	})
@@ -126,117 +129,6 @@ func (a *knowledgeActions) RecordOwnerAction(ctx context.Context, action *knowle
 	return err
 }
 
-type knowledgeStore struct {
-	store store.KBStore
-}
-
-func translateKnowledgeStoreError(err error) error {
-	code, ok := fault.CodeOf[store.ErrorCode](err)
-	if !ok {
-		return err
-	}
-	switch code {
-	case store.ErrorCodeKBCapExceeded:
-		return knowledge.Errorf(knowledge.ErrorCodeCapExceeded, "chunk cap would be exceeded")
-	case store.ErrorCodeKBEmbeddingStale:
-		return knowledge.Errorf(knowledge.ErrorCodeEmbeddingFailed, "the collection or its opt-in changed while vectors were computed; rerun to resume")
-	case store.ErrorCodeKBSourceNotFound:
-		return knowledge.Errorf(knowledge.ErrorCodeSourceNotFound, "source does not exist in the collection")
-	default:
-		return err
-	}
-}
-
-func (s *knowledgeStore) ReplaceSource(ctx context.Context, write *knowledge.SourceWrite) (knowledge.WriteResult, error) {
-	if write == nil {
-		return knowledge.WriteResult{}, knowledge.Errorf(knowledge.ErrorCodeInvalidArgument, "write must not be nil")
-	}
-	chunks := make([]store.KBChunk, 0, len(write.Chunks))
-	for i := range write.Chunks {
-		chunks = append(chunks, store.KBChunk{
-			Ordinal: write.Chunks[i].Ordinal, Heading: write.Chunks[i].Heading,
-			Content: write.Chunks[i].Content, SHA256: write.Chunks[i].SHA256,
-		})
-	}
-	result, err := s.store.ReplaceSource(ctx, &store.KBSourceWrite{
-		Collection: write.Collection, Kind: write.Kind, URI: write.URI, Label: write.Label,
-		ContentSHA256: write.ContentSHA256, IngestVersion: write.IngestVersion, IngestedAt: write.IngestedAt,
-		Chunks: chunks, Limits: store.KBLimits{CollectionChunks: write.CollectionCap, TotalChunks: write.TotalCap},
-	})
-	if err != nil {
-		return knowledge.WriteResult{}, translateKnowledgeStoreError(err)
-	}
-	return knowledge.WriteResult{
-		Status: result.Status, SourceID: result.SourceID, Chunks: result.Chunks,
-		ChunksAdded: result.ChunksAdded, ChunksRemoved: result.ChunksRemoved, ChunksKept: result.ChunksKept,
-	}, nil
-}
-
-func (s *knowledgeStore) ListCollections(ctx context.Context) ([]knowledge.CollectionSummary, error) {
-	collections, err := s.store.ListCollections(ctx)
-	if err != nil {
-		return nil, translateKnowledgeStoreError(err)
-	}
-	out := make([]knowledge.CollectionSummary, 0, len(collections))
-	for i := range collections {
-		out = append(out, knowledge.CollectionSummary{
-			ID: collections[i].ID, Generation: collections[i].Generation, Sources: collections[i].Sources,
-			Chunks: collections[i].Chunks, CreatedAt: collections[i].CreatedAt,
-		})
-	}
-	return out, nil
-}
-
-func (s *knowledgeStore) ListSources(ctx context.Context, collection string) ([]knowledge.SourceRecord, error) {
-	sources, err := s.store.ListSources(ctx, collection)
-	if err != nil {
-		return nil, translateKnowledgeStoreError(err)
-	}
-	out := make([]knowledge.SourceRecord, 0, len(sources))
-	for i := range sources {
-		out = append(out, knowledge.SourceRecord{
-			ID: sources[i].ID, Collection: sources[i].Collection, Kind: sources[i].Kind, URI: sources[i].URI,
-			Label: sources[i].Label, ContentSHA256: sources[i].ContentSHA256, IngestVersion: sources[i].IngestVersion,
-			IngestedAt: sources[i].IngestedAt, Chunks: sources[i].Chunks,
-		})
-	}
-	return out, nil
-}
-
-func (s *knowledgeStore) RemoveSource(ctx context.Context, collection, uri string, apply bool) (knowledge.RemoveOutcome, error) {
-	result, err := s.store.RemoveSource(ctx, collection, uri, apply)
-	outcome := knowledge.RemoveOutcome{SourceID: result.SourceID, Chunks: result.Chunks, Applied: result.Applied, WALTruncated: result.WALTruncated}
-	return outcome, translateKnowledgeStoreError(err)
-}
-
-type knowledgeIndex struct {
-	index store.KBIndex
-}
-
-func (i *knowledgeIndex) ScopeChunks(ctx context.Context, collections []string) (int, error) {
-	return i.index.ScopeChunks(ctx, collections)
-}
-
-func (i *knowledgeIndex) TermFrequency(ctx context.Context, collections []string, term string, limit int) (int, error) {
-	return i.index.TermFrequency(ctx, collections, term, limit)
-}
-
-func (i *knowledgeIndex) Search(ctx context.Context, collections, terms []string, depth int) ([]knowledge.Hit, error) {
-	found, err := i.index.Search(ctx, collections, terms, depth)
-	if err != nil {
-		return nil, err
-	}
-	hits := make([]knowledge.Hit, 0, len(found))
-	for n := range found {
-		hits = append(hits, knowledge.Hit{
-			ChunkID: found[n].ChunkID, SourceID: found[n].SourceID, Collection: found[n].Collection,
-			Label: found[n].Label, Heading: found[n].Heading, Ordinal: found[n].Ordinal,
-			Content: found[n].Content, Score: found[n].Score,
-		})
-	}
-	return hits, nil
-}
-
 const knowledgeReadPoolConns = 4
 
 func openKnowledgeReadPool(ctx context.Context, dbPath string) (*sql.DB, error) {
@@ -255,7 +147,11 @@ func newKnowledgeRetriever(cfg *appconfig.Config, pool *sql.DB, opts ...knowledg
 	if pool == nil {
 		return nil, errors.New("knowledge read pool must not be nil")
 	}
-	return knowledge.NewRetriever(&knowledgeIndex{index: store.NewKBIndex(pool)}, &knowledgeSecrets{cfg: cfg}, opts...)
+	index, err := knowledge.NewSQLiteIndex(pool)
+	if err != nil {
+		return nil, err
+	}
+	return knowledge.NewRetriever(index, &knowledgeSecrets{cfg: cfg}, opts...)
 }
 
 type knowledgeRuntime struct {
@@ -338,15 +234,4 @@ func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry 
 		return nil, false, err
 	}
 	return &knowledgeRuntime{retriever: retriever, provider: provider, pool: pool, vectors: vectors}, true, nil
-}
-
-func (s *knowledgeStore) Check(ctx context.Context) (knowledge.IndexReport, error) {
-	report, err := s.store.Check(ctx)
-	if err != nil {
-		return knowledge.IndexReport{}, translateKnowledgeStoreError(err)
-	}
-	return knowledge.IndexReport{
-		Collections: report.Collections, Sources: report.Sources, Chunks: report.Chunks,
-		IndexedChunks: report.IndexedChunks, Problems: report.Problems,
-	}, nil
 }

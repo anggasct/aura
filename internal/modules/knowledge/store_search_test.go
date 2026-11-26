@@ -1,4 +1,4 @@
-package store
+package knowledge
 
 import (
 	"fmt"
@@ -8,14 +8,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
-func kbSeed(t *testing.T, kb KBStore, collection, uri string, texts ...string) {
+func kbSeed(t *testing.T, kb Store, collection, uri string, texts ...string) {
 	t.Helper()
 	if _, err := kb.ReplaceSource(t.Context(), kbWrite(collection, uri, "a", kbChunks(texts...))); err != nil {
 		t.Fatalf("seed %s: %v", collection, err)
 	}
 }
 
-func kbHitCollections(hits []KBHit) []string {
+func kbHitCollections(hits []Hit) []string {
 	seen := map[string]bool{}
 	var out []string
 	for i := range hits {
@@ -28,12 +28,12 @@ func kbHitCollections(hits []KBHit) []string {
 }
 
 func TestKBIndexSearchStemsTermsAndStaysInsideTheScope(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	kbSeed(t, kb, "support", "/docs/a.md", "Customers may request a Refund within thirty days.", "Shipping takes five days.")
 	kbSeed(t, kb, "hr-docs", "/docs/b.md", "Employees file a refund claim with finance.")
 	kbSeed(t, kb, "hrdocs", "/docs/c.md", "The refund desk is closed on Sundays.")
-	index := NewKBIndex(db)
+	index := mustNewSQLiteIndex(t, db)
 
 	hits, err := index.Search(t.Context(), []string{"support"}, []string{"refunds"}, 50)
 	if err != nil || len(hits) != 1 || hits[0].Collection != "support" || !strings.Contains(hits[0].Content, "Refund") {
@@ -69,14 +69,14 @@ func TestKBIndexSearchStemsTermsAndStaysInsideTheScope(t *testing.T) {
 }
 
 func TestKBIndexTermsCannotChangeTheQueryOrTheScope(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	kbSeed(t, kb, "support", "/docs/a.md", "Refund policy for customers.")
 	kbSeed(t, kb, "secret", "/docs/b.md", "Confidential merger plans.")
-	index := NewKBIndex(db)
+	index := mustNewSQLiteIndex(t, db)
 
 	hostile := []string{
-		`"`, `""`, `refund" OR "merger`, `scope:` + KBScope("secret"), KBScope("secret"),
+		`"`, `""`, `refund" OR "merger`, `scope:` + ScopeToken("secret"), ScopeToken("secret"),
 		`NEAR(refund merger)`, `* OR *`, `merger*`, `-merger`, `refund AND NOT policy`, `{content}:merger`, `^merger`, `)`, `(`,
 	}
 	for _, term := range hostile {
@@ -103,13 +103,13 @@ func TestKBIndexTermsCannotChangeTheQueryOrTheScope(t *testing.T) {
 }
 
 func TestKBIndexScopeTokenIsNotSearchableAsContent(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	kbSeed(t, kb, "support", "/docs/a.md", "Refund policy.")
 	kbSeed(t, kb, "other", "/docs/b.md", "Shipping policy.")
-	index := NewKBIndex(db)
+	index := mustNewSQLiteIndex(t, db)
 
-	for _, term := range []string{KBScope("other"), KBScope("support")} {
+	for _, term := range []string{ScopeToken("other"), ScopeToken("support")} {
 		count, err := index.TermFrequency(t.Context(), []string{"support"}, term, 10)
 		if err != nil || count != 0 {
 			t.Errorf("TermFrequency(scope token) = %d, %v; want 0", count, err)
@@ -122,14 +122,14 @@ func TestKBIndexScopeTokenIsNotSearchableAsContent(t *testing.T) {
 }
 
 func TestKBIndexTermFrequencyStopsAtTheLimit(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	texts := make([]string, 0, 12)
 	for i := range 12 {
 		texts = append(texts, fmt.Sprintf("common word number %d", i))
 	}
 	kbSeed(t, kb, "support", "/docs/a.md", texts...)
-	index := NewKBIndex(db)
+	index := mustNewSQLiteIndex(t, db)
 
 	for limit, want := range map[int]int{3: 3, 12: 12, 50: 12} {
 		got, err := index.TermFrequency(t.Context(), []string{"support"}, "common", limit)
@@ -143,11 +143,11 @@ func TestKBIndexTermFrequencyStopsAtTheLimit(t *testing.T) {
 }
 
 func TestKBIndexRanksRareMatchesFirstAndHonoursDepth(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	texts := []string{"refund refund refund policy for customers", "policy overview", "policy details", "policy notes", "refund note"}
 	kbSeed(t, kb, "support", "/docs/a.md", texts...)
-	index := NewKBIndex(db)
+	index := mustNewSQLiteIndex(t, db)
 
 	hits, err := index.Search(t.Context(), []string{"support"}, []string{"refund", "policy"}, 50)
 	if err != nil || len(hits) != 5 {
@@ -168,11 +168,11 @@ func TestKBIndexRanksRareMatchesFirstAndHonoursDepth(t *testing.T) {
 }
 
 func TestKBIndexCountsScopesAndSizes(t *testing.T) {
-	db := newTestDB(t)
-	kb := NewKBStore(db)
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
 	kbSeed(t, kb, "support", "/docs/a.md", "one", "two", "three")
 	kbSeed(t, kb, "other", "/docs/b.md", "four")
-	index := NewKBIndex(db)
+	index := mustNewSQLiteIndex(t, db)
 
 	tests := map[string]struct {
 		scope []string
@@ -194,13 +194,13 @@ func TestKBIndexCountsScopesAndSizes(t *testing.T) {
 }
 
 func TestKBIndexRejectsInvalidInput(t *testing.T) {
-	db := newTestDB(t)
-	index := NewKBIndex(db)
-	tooMany := make([]string, KBMaxSearchCollections+1)
+	db := newKBTestDB(t)
+	index := mustNewSQLiteIndex(t, db)
+	tooMany := make([]string, MaxSearchCollections+1)
 	for i := range tooMany {
 		tooMany[i] = fmt.Sprintf("c%d", i)
 	}
-	terms := make([]string, KBMaxSearchTerms+1)
+	terms := make([]string, MaxSearchTerms+1)
 	for i := range terms {
 		terms[i] = fmt.Sprintf("t%d", i)
 	}
@@ -212,7 +212,7 @@ func TestKBIndexRejectsInvalidInput(t *testing.T) {
 		"too many terms":      func() error { _, err := index.Search(t.Context(), []string{"a"}, terms, 10); return err },
 		"zero depth":          func() error { _, err := index.Search(t.Context(), []string{"a"}, []string{"a"}, 0); return err },
 		"deep": func() error {
-			_, err := index.Search(t.Context(), []string{"a"}, []string{"a"}, KBMaxSearchDepth+1)
+			_, err := index.Search(t.Context(), []string{"a"}, []string{"a"}, MaxSearchDepth+1)
 			return err
 		},
 		"empty term count": func() error { _, err := index.TermFrequency(t.Context(), []string{"a"}, "", 5); return err },
@@ -228,15 +228,15 @@ func TestKBIndexRejectsInvalidInput(t *testing.T) {
 			}
 		})
 	}
-	nilIndex := &sqliteKBIndex{}
+	nilIndex := &SQLiteIndex{}
 	if _, err := nilIndex.ScopeChunks(t.Context(), []string{"a"}); err == nil {
 		t.Error("nil db accepted")
 	}
 }
 
 func TestKBIndexPresentReportsAPreKnowledgeDatabase(t *testing.T) {
-	db := newTestDB(t)
-	present, err := KBIndexPresent(t.Context(), db)
+	db := newKBTestDB(t)
+	present, err := IndexPresent(t.Context(), db)
 	if err != nil || !present {
 		t.Fatalf("migrated database: present = %t, %v", present, err)
 	}
@@ -244,11 +244,11 @@ func TestKBIndexPresentReportsAPreKnowledgeDatabase(t *testing.T) {
 		if _, err := db.ExecContext(t.Context(), drop); err != nil {
 			t.Fatalf("%s: %v", drop, err)
 		}
-		if present, err := KBIndexPresent(t.Context(), db); err != nil || present {
+		if present, err := IndexPresent(t.Context(), db); err != nil || present {
 			t.Fatalf("after %q: present = %t, %v", drop, present, err)
 		}
 	}
-	if _, err := KBIndexPresent(t.Context(), nil); err == nil {
+	if _, err := IndexPresent(t.Context(), nil); err == nil {
 		t.Error("nil database accepted")
 	}
 }

@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
@@ -40,7 +41,7 @@ type Config struct {
 	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
 	Memory       legacyconfig.Memory         `json:"memory"`
 	Skills       *legacyconfig.Skills        `json:"skills,omitempty"`
-	Context      *legacyconfig.Context       `json:"context,omitempty"`
+	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
 	Owner        *principal.Owner            `json:"owner,omitempty"`
 	Children     *legacyconfig.Children      `json:"children,omitempty"`
@@ -57,6 +58,7 @@ func Default() Config {
 	defaultAgents := auraagent.Default()
 	defaultAccess := principal.Default()
 	defaultVision := vision.Default()
+	defaultContext := compaction.Default()
 	return Config{
 		Version:      1,
 		Runtime:      runtimeengine.Default(),
@@ -81,7 +83,7 @@ func Default() Config {
 		Skills:       legacyconfig.DefaultSkills(),
 		Sync:         legacyconfig.DefaultSync(),
 		Vision:       &defaultVision,
-		Context:      legacyconfig.DefaultContext(),
+		Context:      &defaultContext,
 		Profile:      legacyconfig.DefaultProfile(),
 		Children:     legacyconfig.DefaultChildren(),
 		Access:       &defaultAccess,

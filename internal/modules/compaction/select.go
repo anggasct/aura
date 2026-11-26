@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"slices"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type SelectionMode string
@@ -59,13 +61,13 @@ type SelectionPolicy struct {
 
 func ResolveSelectionPolicy(recentCompleteTurns int, highWaterRatio float64, maxExcerptBytes int) (*SelectionPolicy, error) {
 	if recentCompleteTurns <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "recent complete turns must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "recent complete turns must be positive")
 	}
 	if highWaterRatio <= 0 || highWaterRatio >= 1 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "high water ratio must be in (0,1)")
+		return nil, fault.New(ErrorCodeInvalidArgument, "high water ratio must be in (0,1)")
 	}
 	if maxExcerptBytes <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "max excerpt bytes must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "max excerpt bytes must be positive")
 	}
 	return &SelectionPolicy{
 		RecentCompleteTurns: recentCompleteTurns,
@@ -76,10 +78,10 @@ func ResolveSelectionPolicy(recentCompleteTurns int, highWaterRatio float64, max
 
 func Select(policy *SelectionPolicy, plan *Plan, counter TokenCounter) (*Selection, error) {
 	if policy == nil {
-		return nil, errNilArgument("policy")
+		return nil, fault.New(ErrorCodeInvalidArgument, "policy must not be nil")
 	}
 	if plan == nil {
-		return nil, errNilArgument("plan")
+		return nil, fault.New(ErrorCodeInvalidArgument, "plan must not be nil")
 	}
 	if counter == nil {
 		counter = ConservativeEstimator{}
@@ -113,7 +115,7 @@ func Select(policy *SelectionPolicy, plan *Plan, counter TokenCounter) (*Selecti
 		return nil, err
 	}
 	if reserved > plan.Budget.Effective {
-		return nil, Errorf(ErrorCodeBudgetExceeded, "protected content exceeds the validated budget")
+		return nil, fault.New(ErrorCodeBudgetExceeded, "protected content exceeds the validated budget")
 	}
 	remaining := plan.Budget.Effective - reserved
 	included := make(map[int]bool, len(groups))

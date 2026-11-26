@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type kbRetrievalRig struct {
@@ -96,7 +95,7 @@ func TestKnowledgeSearchNeverCrossesCollectionsEvenWithTheScopeTokenInTheQuery(t
 	scopeTokens := func(collections ...string) string {
 		var tokens []string
 		for _, collection := range collections {
-			tokens = append(tokens, store.KBScope(collection))
+			tokens = append(tokens, knowledge.ScopeToken(collection))
 		}
 		return strings.Join(tokens, " ")
 	}
@@ -167,7 +166,7 @@ func seedBulkKBScope(t testing.TB, db *sql.DB, collection string, chunks int, co
 	query := fmt.Sprintf(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < %d)
 		INSERT INTO kb_chunk (id, source_id, ordinal, heading, content, scope, content_sha256)
 		SELECT ? || i, ?, i, 'Section', %s, ?, ? FROM n`, chunks, contentSQL)
-	if _, err := db.ExecContext(ctx, query, "kbc_"+collection+"_", sourceID, store.KBScope(collection), strings.Repeat("0", 64)); err != nil {
+	if _, err := db.ExecContext(ctx, query, "kbc_"+collection+"_", sourceID, knowledge.ScopeToken(collection), strings.Repeat("0", 64)); err != nil {
 		t.Fatalf("seed chunks: %v", err)
 	}
 }

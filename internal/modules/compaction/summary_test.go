@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	stdcontext "context"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeSummarizer struct {
@@ -26,7 +28,7 @@ func (f *fakeSummarizer) Summarize(ctx stdcontext.Context, req *SummarizeRequest
 		return nil, f.err
 	}
 	if req == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "request must not be nil")
 	}
 	return &SummarizeResult{Text: f.text, Producer: f.producer}, nil
 }
@@ -61,7 +63,7 @@ func (f *fakeSummaryStore) ListSummaries(_ stdcontext.Context, sessionID string)
 
 func (f *fakeSummaryStore) UpsertSummary(_ stdcontext.Context, record *SummaryRecord) error {
 	if record == nil {
-		return Errorf(ErrorCodeInvalidArgument, "record must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "record must not be nil")
 	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -144,7 +146,7 @@ func TestPromptTextDeterministic(t *testing.T) {
 	}
 	if _, err := PromptText("v9", 2048); err == nil {
 		t.Errorf("expected prompt version rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSummaryStale {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryStale {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -283,7 +285,7 @@ func TestResolveRangeRejectsInvalidOutput(t *testing.T) {
 	service := testService(t, summarizer, store)
 	if _, err := service.ResolveRange(stdcontext.Background(), "sess-1", summaryRange(), summaryGroups()); err == nil {
 		t.Fatalf("expected rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSummaryInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryInvalid {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if store.upserts != 0 {
@@ -296,7 +298,7 @@ func TestResolveRangeRejectsUnidentifiedProducer(t *testing.T) {
 	service := testService(t, summarizer, newFakeSummaryStore())
 	if _, err := service.ResolveRange(stdcontext.Background(), "sess-1", summaryRange(), summaryGroups()); err == nil {
 		t.Fatalf("expected rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSummaryInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryInvalid {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }

@@ -1,11 +1,10 @@
-package app
+package compaction
 
 import (
 	"context"
 	"database/sql"
 	"encoding/json"
 	"iter"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -14,10 +13,11 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func contextRow(kind, payload string) *turn.Event {
@@ -30,7 +30,7 @@ func contextRow(kind, payload string) *turn.Event {
 
 func TestMapContextEventText(t *testing.T) {
 	row := contextRow("message.completed", `{"content":{"parts":[{"text":"hello "},{"text":"world"}]}}`)
-	event := mapContextEvent(row)
+	event := MapEvent(row)
 	if event.Text != "hello world" || event.ID != "evt-1" || event.Sequence != 4 || event.TurnID != "t1" {
 		t.Errorf("event = %+v", event)
 	}
@@ -49,7 +49,7 @@ func TestMapContextEventFallbacks(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := mapContextEvent(contextRow(tc.kind, tc.payload)); got.Text != tc.text {
+			if got := MapEvent(contextRow(tc.kind, tc.payload)); got.Text != tc.text {
 				t.Errorf("text = %q", got.Text)
 			}
 		})
@@ -58,90 +58,44 @@ func TestMapContextEventFallbacks(t *testing.T) {
 
 func TestMapContextEventCorrelation(t *testing.T) {
 	row := contextRow("tool.requested", `{"tool_call_id":"call-1","effect_intent_id":"intent-1","approval_id":"appr-1"}`)
-	if got := mapContextEvent(row); got.CorrelationID != "call-1" {
+	if got := MapEvent(row); got.CorrelationID != "call-1" {
 		t.Errorf("correlation = %q", got.CorrelationID)
 	}
 	row = contextRow("channel.requested", `{"effect_intent_id":"intent-2"}`)
-	if got := mapContextEvent(row); got.CorrelationID != "intent-2" {
+	if got := MapEvent(row); got.CorrelationID != "intent-2" {
 		t.Errorf("correlation = %q", got.CorrelationID)
 	}
 	row = contextRow("approval.required", `{"approval_id":"appr-3"}`)
-	if got := mapContextEvent(row); got.CorrelationID != "appr-3" {
+	if got := MapEvent(row); got.CorrelationID != "appr-3" {
 		t.Errorf("correlation = %q", got.CorrelationID)
 	}
 }
 
 func TestMapContextEventToolResults(t *testing.T) {
 	row := contextRow("tool.completed", `{"text":"output"}`)
-	if got := mapContextEvent(row); !got.ToolResult {
+	if got := MapEvent(row); !got.ToolResult {
 		t.Errorf("tool.completed not flagged: %+v", got)
 	}
 	row = contextRow("adk_event", `{"content":{"parts":[{"functionResponse":{"id":"call-9","name":"run"}}]}}`)
-	got := mapContextEvent(row)
+	got := MapEvent(row)
 	if !got.ToolResult || got.CorrelationID != "call-9" {
 		t.Errorf("function response not detected: %+v", got)
 	}
 	row = contextRow("message.completed", `{"text":"plain"}`)
-	if got := mapContextEvent(row); got.ToolResult {
+	if got := MapEvent(row); got.ToolResult {
 		t.Errorf("plain message flagged: %+v", got)
 	}
 }
 
 func TestMapContextEventMediaType(t *testing.T) {
 	row := contextRow("adk_event", `{"content":{"parts":[{"inlineData":{"mimeType":"image/png"}}]}}`)
-	if got := mapContextEvent(row); got.MediaType != "image/png" {
+	if got := MapEvent(row); got.MediaType != "image/png" {
 		t.Errorf("media = %q", got.MediaType)
 	}
 	row = contextRow("adk_event", `{"content":{"parts":[{"fileData":{"mimeType":"audio/ogg"}}]}}`)
-	if got := mapContextEvent(row); got.MediaType != "audio/ogg" {
+	if got := MapEvent(row); got.MediaType != "audio/ogg" {
 		t.Errorf("media = %q", got.MediaType)
 	}
-}
-
-func writeContextCLIConfig(t *testing.T, extra string) (cfgPath, dataRoot string) {
-	t.Helper()
-	dataRoot = t.TempDir()
-	path := dataRoot + "/config.yaml"
-	content := `version: 1
-models:
-  definitions:
-    primary:
-      protocol: openai_chat_compat
-      model: test-model
-      api_key_ref: env://AURA_TEST_MODEL_KEY
-      capabilities:
-        streaming: true
-        tools: true
-        context_tokens: 200000
-        tokenizer: test
-storage:
-  path: ` + dataRoot + `
-tools:
-  workspace: ` + dataRoot + `
-skills:
-  roots: [` + dataRoot + `]
-context:
-  recent_complete_turns: 5
-` + extra
-	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	seedConfiguredStorage(t, path)
-	return path, dataRoot
-}
-
-func openContextTestDB(t *testing.T, cfgPath string) *sql.DB {
-	t.Helper()
-	loaded, err := appconfig.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("appconfig.Load: %v", err)
-	}
-	db, err := openStorage(t.Context(), loaded.Config)
-	if err != nil {
-		t.Fatalf("openStorage: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	return db
 }
 
 func seedContextSession(t *testing.T, db *sql.DB) {
@@ -163,10 +117,12 @@ func seedContextSession(t *testing.T, db *sql.DB) {
 }
 
 func TestContextSummaryStoreRoundTrip(t *testing.T) {
-	cfgPath, _ := writeContextCLIConfig(t, "")
-	db := openContextTestDB(t, cfgPath)
+	db := storetest.OpenMigrated(t)
 	seedContextSession(t, db)
-	adapter := newContextSummaryStore(turnstore.NewSessionService(db), turnstore.NewEventStore(db))
+	adapter, err := NewEventSummaryStore(turnstore.NewSessionService(db), turnstore.NewEventStore(db))
+	if err != nil {
+		t.Fatalf("NewEventSummaryStore: %v", err)
+	}
 	listed, err := adapter.ListSummaries(t.Context(), "sess-1")
 	if err != nil {
 		t.Fatalf("ListSummaries: %v", err)
@@ -175,7 +131,7 @@ func TestContextSummaryStoreRoundTrip(t *testing.T) {
 		t.Errorf("listed = %+v", listed)
 	}
 	payload := []byte(`{"source":{"start_sequence":1,"end_sequence":2,"event_ids":[],"digest":"abc"},"producer":{"provider":"p","model":"m","model_version":"","prompt_version":"v1","prompt_digest":"d"},"tokens":{"source":4,"summary":2,"accounting":"exact"},"trust":"derived_untrusted","summary":{"goals":["g"],"decisions":[],"constraints":[],"open_work":[],"facts":[]},"generated_at":"2026-09-14T00:00:00Z","kind":"context.summary.v1","schema_version":1}`)
-	record := &compaction.SummaryRecord{ID: "ctxsum-test", SessionID: "sess-1", StartSequence: 1, EndSequence: 2, TurnID: "t1", Payload: payload, CreatedAt: time.Now().UTC()}
+	record := &SummaryRecord{ID: "ctxsum-test", SessionID: "sess-1", StartSequence: 1, EndSequence: 2, TurnID: "t1", Payload: payload, CreatedAt: time.Now().UTC()}
 	if err := adapter.UpsertSummary(t.Context(), record); err != nil {
 		t.Fatalf("UpsertSummary: %v", err)
 	}
@@ -193,20 +149,36 @@ func TestContextSummaryStoreRoundTrip(t *testing.T) {
 	if err := adapter.UpsertSummary(nilCtx, record); err == nil {
 		t.Errorf("expected nil context rejection")
 	}
-	if err := adapter.UpsertSummary(t.Context(), &compaction.SummaryRecord{ID: "x", SessionID: "sess-1"}); err == nil {
+	if err := adapter.UpsertSummary(t.Context(), &SummaryRecord{ID: "x", SessionID: "sess-1"}); err == nil {
 		t.Errorf("expected anchor turn rejection")
 	}
 }
 
-type fakeContextLLM struct {
+func TestEventSummaryStoreRefusesNilPorts(t *testing.T) {
+	db := storetest.OpenMigrated(t)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
+	if _, err := NewEventSummaryStore(nil, events); err == nil {
+		t.Errorf("expected nil lister rejection")
+	} else if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("err = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	if _, err := NewEventSummaryStore(sessions, nil); err == nil {
+		t.Errorf("expected nil upserter rejection")
+	} else if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("err = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+}
+
+type fakeLLM struct {
 	mu    sync.Mutex
 	texts []string
 	err   error
 }
 
-func (f *fakeContextLLM) Name() string { return "fake-compression" }
+func (f *fakeLLM) Name() string { return "fake-compression" }
 
-func (f *fakeContextLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+func (f *fakeLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
 		if f.err != nil {
 			yield(nil, f.err)
@@ -224,9 +196,12 @@ func (f *fakeContextLLM) GenerateContent(_ context.Context, _ *adkmodel.LLMReque
 }
 
 func TestRouterSummarizerCollectsText(t *testing.T) {
-	llm := &fakeContextLLM{texts: []string{"part one ", "part two"}}
-	summarizer := newRouterSummarizer(llm, compaction.Producer{Provider: "p", Model: "m"}, 2048)
-	result, err := summarizer.Summarize(t.Context(), &compaction.SummarizeRequest{Task: "compression", Prompt: "summarize", Sources: []string{"a", "b"}, MaxOutputTokens: 512})
+	llm := &fakeLLM{texts: []string{"part one ", "part two"}}
+	summarizer, err := NewLLMSummarizer(llm, Producer{Provider: "p", Model: "m"}, 2048)
+	if err != nil {
+		t.Fatalf("NewLLMSummarizer: %v", err)
+	}
+	result, err := summarizer.Summarize(t.Context(), &SummarizeRequest{Task: "compression", Prompt: "summarize", Sources: []string{"a", "b"}, MaxOutputTokens: 512})
 	if err != nil {
 		t.Fatalf("Summarize: %v", err)
 	}
@@ -236,84 +211,96 @@ func TestRouterSummarizerCollectsText(t *testing.T) {
 }
 
 func TestRouterSummarizerRejects(t *testing.T) {
-	good := &fakeContextLLM{texts: []string{"ok"}}
-	summarizer := newRouterSummarizer(good, compaction.Producer{Provider: "p", Model: "m"}, 2048)
+	good := &fakeLLM{texts: []string{"ok"}}
+	summarizer, err := NewLLMSummarizer(good, Producer{Provider: "p", Model: "m"}, 2048)
+	if err != nil {
+		t.Fatalf("NewLLMSummarizer: %v", err)
+	}
 	var nilCtx context.Context
-	if _, err := summarizer.Summarize(nilCtx, &compaction.SummarizeRequest{}); err == nil {
+	if _, err := summarizer.Summarize(nilCtx, &SummarizeRequest{}); err == nil {
 		t.Errorf("expected nil context rejection")
 	}
 	if _, err := summarizer.Summarize(t.Context(), nil); err == nil {
 		t.Errorf("expected nil request rejection")
 	}
-	if _, err := newRouterSummarizer(nil, compaction.Producer{}, 2048).Summarize(t.Context(), &compaction.SummarizeRequest{MaxOutputTokens: 1}); err == nil {
+	if _, err := (&LLMSummarizer{bound: OutputByteBound(2048) + 1}).Summarize(t.Context(), &SummarizeRequest{MaxOutputTokens: 1}); err == nil {
 		t.Errorf("expected missing model rejection")
 	}
-	big := &fakeContextLLM{texts: []string{strings.Repeat("x", 9000)}}
-	if _, err := newRouterSummarizer(big, compaction.Producer{}, 64).Summarize(t.Context(), &compaction.SummarizeRequest{MaxOutputTokens: 64}); err == nil {
+	big := &fakeLLM{texts: []string{strings.Repeat("x", 9000)}}
+	bigSummarizer, err := NewLLMSummarizer(big, Producer{}, 64)
+	if err != nil {
+		t.Fatalf("NewLLMSummarizer: %v", err)
+	}
+	if _, err := bigSummarizer.Summarize(t.Context(), &SummarizeRequest{MaxOutputTokens: 64}); err == nil {
 		t.Errorf("expected oversized rejection")
-	} else if code, ok := compaction.CodeOf(err); !ok || code != compaction.ErrorCodeSummaryInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryInvalid {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
-	empty := &fakeContextLLM{}
-	if _, err := newRouterSummarizer(empty, compaction.Producer{}, 2048).Summarize(t.Context(), &compaction.SummarizeRequest{MaxOutputTokens: 64}); err == nil {
+	empty := &fakeLLM{}
+	emptySummarizer, err := NewLLMSummarizer(empty, Producer{}, 2048)
+	if err != nil {
+		t.Fatalf("NewLLMSummarizer: %v", err)
+	}
+	if _, err := emptySummarizer.Summarize(t.Context(), &SummarizeRequest{MaxOutputTokens: 64}); err == nil {
 		t.Errorf("expected empty rejection")
-	} else if code, ok := compaction.CodeOf(err); !ok || code != compaction.ErrorCodeSummaryUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryUnavailable {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }
 
+func TestLLMSummarizerRefusesInvalidArgs(t *testing.T) {
+	llm := &fakeLLM{texts: []string{"ok"}}
+	if _, err := NewLLMSummarizer(nil, Producer{Provider: "p", Model: "m"}, 2048); err == nil {
+		t.Errorf("expected nil llm rejection")
+	} else if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("err = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	for name, maxTokens := range map[string]int{
+		"zero":      0,
+		"negative":  -1,
+		"oversized": maxSummarizerOutputTokens + 1,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := NewLLMSummarizer(llm, Producer{Provider: "p", Model: "m"}, maxTokens); err == nil {
+				t.Errorf("expected invalid output bound rejection")
+			} else if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+				t.Errorf("err = %v, want %s", err, ErrorCodeInvalidArgument)
+			}
+		})
+	}
+}
+
 func TestCompressionProducerResolves(t *testing.T) {
-	cfgPath, _ := writeContextCLIConfig(t, "")
-	loaded, err := appconfig.Load(cfgPath)
-	if err != nil {
-		t.Fatalf("appconfig.Load: %v", err)
+	unrouted := model.Config{
+		Definitions: map[string]model.Definition{
+			"primary": {Protocol: model.ProtocolOpenAIChatCompat, Model: "test-model"},
+		},
 	}
-	if _, err := compressionProducer(nil); err == nil {
-		t.Errorf("expected nil config rejection")
-	}
-	if _, err := compressionProducer(loaded.Config); err == nil {
+	if _, err := ResolveProducer(unrouted, nil); err == nil {
 		t.Errorf("expected missing route rejection")
 	}
-	routedDir := t.TempDir()
-	routed := routedDir + "/routed.yaml"
-	content := `version: 1
-models:
-  definitions:
-    primary:
-      protocol: openai_chat_compat
-      model: test-model
-      api_key_ref: env://AURA_TEST_MODEL_KEY
-      capabilities:
-        streaming: true
-        tools: true
-        context_tokens: 200000
-        tokenizer: test
-  routing:
-    compression: primary
-model_routes:
-  primary:
-    candidates: [primary]
-storage:
-  path: ` + routedDir + `
-tools:
-  workspace: ` + routedDir + `
-skills:
-  roots: [` + routedDir + `]
-context:
-  recent_complete_turns: 5
-`
-	if err := os.WriteFile(routed, []byte(content), 0o600); err != nil {
-		t.Fatal(err)
+	if _, err := ResolveProducer(unrouted, model.Routes{"auxiliary": {}}); err == nil {
+		t.Errorf("expected empty route candidate rejection")
 	}
-	loadedRouted, err := appconfig.Load(routed)
+	if _, err := ResolveProducer(unrouted, model.Routes{"auxiliary": {Candidates: []string{"missing"}}}); err == nil {
+		t.Errorf("expected missing candidate definition rejection")
+	}
+	routed := model.Config{
+		Definitions: map[string]model.Definition{
+			"primary": {Protocol: model.ProtocolOpenAIChatCompat, Model: "test-model"},
+		},
+		Routing: map[string]string{
+			"compression": "primary",
+		},
+	}
+	routes := model.Routes{
+		"primary": {Candidates: []string{"primary"}},
+	}
+	producer, err := ResolveProducer(routed, routes)
 	if err != nil {
-		t.Fatalf("appconfig.Load: %v", err)
+		t.Fatalf("ResolveProducer: %v", err)
 	}
-	producer, err := compressionProducer(loadedRouted.Config)
-	if err != nil {
-		t.Fatalf("compressionProducer: %v", err)
-	}
-	if producer.Model != "test-model" || producer.Provider == "" {
+	if producer.Model != "test-model" || producer.Provider != model.ProtocolOpenAIChatCompat {
 		t.Errorf("producer = %+v", producer)
 	}
 }
