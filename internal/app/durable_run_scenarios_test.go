@@ -293,7 +293,11 @@ func proofSpec(credential string) *workflow.Spec {
 
 func registerGitHubOnTheStub(t *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner {
 	t.Helper()
-	if err := githubadapter.Register(runner.in.Executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: secrettest.Ref("env://" + proofTokenEnv)}}}); err != nil {
+	provider, err := githubadapter.NewToolProvider(&githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: secrettest.Ref("env://" + proofTokenEnv)}}})
+	if err != nil {
+		t.Fatalf("build the github tools: %v", err)
+	}
+	if err := runner.in.Executor.Broker().RegisterProvider(provider); err != nil {
 		t.Fatalf("register the github tools: %v", err)
 	}
 	return runner

@@ -1,7 +1,8 @@
-package store
+package handoff
 
 import (
 	"database/sql"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,8 +10,25 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
+
+func mustCreateSession(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	sess := &turn.Session{
+		ID:        id,
+		OwnerID:   "owner-1",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  json.RawMessage(`{}`),
+	}
+	if err := turnstore.NewSessionService(db).Create(t.Context(), sess); err != nil {
+		t.Fatalf("Create session(%s): %v", id, err)
+	}
+}
 
 func appendTextEvent(t *testing.T, db *sql.DB, sessionID, id, text string, at time.Time) {
 	t.Helper()
@@ -25,48 +43,57 @@ func appendTextEvent(t *testing.T, db *sql.DB, sessionID, id, text string, at ti
 	}
 }
 
+func mustNewReplyStore(t *testing.T, db *sql.DB) *SQLiteReplyStore {
+	t.Helper()
+	s, err := NewReplyStore(turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewReplyStore: %v", err)
+	}
+	return s
+}
+
 func TestHandoffReplyEventIDIsPrefixedByTheSharedConstant(t *testing.T) {
 	at := time.Date(2026, 11, 5, 9, 0, 0, 5, time.UTC)
-	if got, want := HandoffReplyEventID(at), HandoffReplyEventPrefix+"1793869200000000005"; got != want {
-		t.Fatalf("HandoffReplyEventID = %q, want %q", got, want)
+	if got, want := ReplyEventID(at), ReplyEventPrefix+"1793869200000000005"; got != want {
+		t.Fatalf("ReplyEventID = %q, want %q", got, want)
 	}
 }
 
 func TestHandoffReplyStoreListsOnlyOwnerRepliesOfTheSession(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	ctx := t.Context()
 	mustCreateSession(t, db, "lobby/http/one")
 	mustCreateSession(t, db, "lobby/http/two")
 	base := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
 	appendTextEvent(t, db, "lobby/http/one", "turn-1-answer", "persona answer", base)
-	appendTextEvent(t, db, "lobby/http/one", HandoffReplyEventID(base.Add(time.Second)), "first reply", base.Add(time.Second))
-	appendTextEvent(t, db, "lobby/http/two", HandoffReplyEventID(base.Add(2*time.Second)), "other session reply", base.Add(2*time.Second))
+	appendTextEvent(t, db, "lobby/http/one", ReplyEventID(base.Add(time.Second)), "first reply", base.Add(time.Second))
+	appendTextEvent(t, db, "lobby/http/two", ReplyEventID(base.Add(2*time.Second)), "other session reply", base.Add(2*time.Second))
 	appendTextEvent(t, db, "lobby/http/one", "turn-2-answer", "later persona answer", base.Add(3*time.Second))
-	appendTextEvent(t, db, "lobby/http/one", HandoffReplyEventID(base.Add(4*time.Second)), "second reply", base.Add(4*time.Second))
-	replies := NewHandoffReplyStore(db)
+	appendTextEvent(t, db, "lobby/http/one", ReplyEventID(base.Add(4*time.Second)), "second reply", base.Add(4*time.Second))
+	replies := mustNewReplyStore(t, db)
 
 	tests := []struct {
 		name  string
 		after uint64
 		limit int
-		want  []HandoffReply
+		want  []Reply
 	}{
 		{
 			name: "all owner replies oldest first", limit: 10,
-			want: []HandoffReply{
+			want: []Reply{
 				{Sequence: 2, Text: "first reply", CreatedAt: base.Add(time.Second)},
 				{Sequence: 4, Text: "second reply", CreatedAt: base.Add(4 * time.Second)},
 			},
 		},
 		{
 			name: "after skips seen replies", after: 2, limit: 10,
-			want: []HandoffReply{{Sequence: 4, Text: "second reply", CreatedAt: base.Add(4 * time.Second)}},
+			want: []Reply{{Sequence: 4, Text: "second reply", CreatedAt: base.Add(4 * time.Second)}},
 		},
 		{
 			name: "limit is applied to replies not to events", limit: 1,
-			want: []HandoffReply{{Sequence: 2, Text: "first reply", CreatedAt: base.Add(time.Second)}},
+			want: []Reply{{Sequence: 2, Text: "first reply", CreatedAt: base.Add(time.Second)}},
 		},
-		{name: "after the last reply", after: 4, limit: 10, want: []HandoffReply{}},
+		{name: "after the last reply", after: 4, limit: 10, want: []Reply{}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -87,16 +114,14 @@ func TestHandoffReplyStoreListsOnlyOwnerRepliesOfTheSession(t *testing.T) {
 }
 
 func TestHandoffReplyStoreRejectsInvalidBounds(t *testing.T) {
-	replies := NewHandoffReplyStore(newTestDB(t))
-	if _, err := replies.List(t.Context(), "lobby/http/one", 0, 0); !hasCode(err, ErrorCodeInvalidArgument) {
+	if _, err := NewReplyStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewReplyStore(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	replies := mustNewReplyStore(t, storetest.OpenMigrated(t))
+	if _, err := replies.List(t.Context(), "lobby/http/one", 0, 0); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("zero limit err = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 	if _, err := replies.List(t.Context(), "lobby/http/one", ^uint64(0), 1); !fault.HasCode(err, turnstore.ErrorCodeEventSequenceInvalid) {
 		t.Fatalf("oversized cursor err = %v, want %s", err, turnstore.ErrorCodeEventSequenceInvalid)
 	}
-}
-
-func hasCode(err error, want ErrorCode) bool {
-	code, ok := fault.CodeOf[ErrorCode](err)
-	return ok && code == want
 }

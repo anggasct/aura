@@ -6,8 +6,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"log/slog"
-	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -18,17 +16,17 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
-	accessActionHandoffReply   = "handoff_reply"
-	accessActionHandoffRelease = "handoff_release"
+	accessActionHandoffReply   = handoff.ActionReply
+	accessActionHandoffRelease = handoff.ActionRelease
 	handoffReplyAuthorFallback = "aura"
 )
 
@@ -38,66 +36,103 @@ var (
 	deliverEmailText    = email.DeliverText
 )
 
-type handoffNotifier interface {
+type channelHandoffTarget interface {
 	NotifyHandoff(ctx context.Context, sessionID, reason string) (access.HandoffTarget, error)
 }
 
-type handoffService struct {
-	handoffs  store.HandoffStore
-	notifiers []handoffNotifier
-	now       func() time.Time
+type channelHandoffNotifier struct {
+	target channelHandoffTarget
 }
 
-func newHandoffService(db *sql.DB, notifiers []handoffNotifier) *handoffService {
-	return &handoffService{handoffs: store.NewHandoffStore(db), notifiers: notifiers, now: time.Now}
-}
-
-func (s *handoffService) OpenHandoff(ctx context.Context, request *toolsbuiltin.HandoffRequest) error {
-	for _, notifier := range s.notifiers {
-		target, err := notifier.NotifyHandoff(ctx, request.SessionID, request.Reason)
-		if errors.Is(err, access.ErrNoHandoffTarget) {
-			continue
-		}
-		if err != nil {
-			return err
-		}
-		return s.handoffs.Open(ctx, &store.Handoff{
-			SessionID: request.SessionID, Reason: request.Reason, PrincipalID: request.PrincipalID, AgentID: request.AgentID,
-			Account: target.Account, Channel: target.Channel, ReplyChannelID: target.ChannelID, ReplyThreadID: target.ThreadID, OpenedAt: s.now().UTC(),
-		})
+func (n *channelHandoffNotifier) NotifyHandoff(ctx context.Context, sessionID, reason string) (handoff.Target, error) {
+	target, err := n.target.NotifyHandoff(ctx, sessionID, reason)
+	if errors.Is(err, access.ErrNoHandoffTarget) {
+		return handoff.Target{}, handoff.ErrNoTarget
 	}
-	return errors.New("handoff: no channel knows where this session's requester is")
-}
-
-type handoffGate struct {
-	handoffs store.HandoffStore
-	timeout  time.Duration
-	now      func() time.Time
-}
-
-func (g *handoffGate) Check(ctx context.Context, sessionID string) (string, error) {
-	state, _, err := g.handoffs.Check(ctx, sessionID, g.timeout, g.now().UTC())
 	if err != nil {
-		return access.HandoffStateNone, err
+		return handoff.Target{}, err
 	}
-	switch state {
-	case store.HandoffOpen:
-		return access.HandoffStateOpen, nil
-	case store.HandoffExpired:
-		return access.HandoffStateExpired, nil
-	default:
-		return access.HandoffStateNone, nil
-	}
+	return handoff.Target{
+		Channel:   target.Channel,
+		Account:   target.Account,
+		ChannelID: target.ChannelID,
+		ThreadID:  target.ThreadID,
+	}, nil
 }
 
-func handoffNotifiers(ports []runtimechannelhost.ChannelPort) []handoffNotifier {
-	var notifiers []handoffNotifier
+func handoffNotifiers(ports []runtimechannelhost.ChannelPort) []handoff.Notifier {
+	var notifiers []handoff.Notifier
 	for _, port := range ports {
-		if notifier, ok := port.(handoffNotifier); ok {
-			notifiers = append(notifiers, notifier)
+		if target, ok := port.(channelHandoffTarget); ok {
+			notifiers = append(notifiers, &channelHandoffNotifier{target: target})
 		}
 	}
 	return notifiers
+}
+
+type ownerHandoffNotifier interface {
+	personaServer
+	NotifyOwnerHandoff(ctx context.Context, requester *approval.Requester, sessionID, reason string) error
+}
+
+type ownerHandoffAdapter struct {
+	notifier ownerHandoffNotifier
+}
+
+func (a *ownerHandoffAdapter) ServesPersona(persona string) bool {
+	return a.notifier.ServesPersona(persona)
+}
+
+func (a *ownerHandoffAdapter) NotifyOwnerHandoff(ctx context.Context, requester *handoff.OwnerRequester, sessionID, reason string) error {
+	return a.notifier.NotifyOwnerHandoff(ctx, &approval.Requester{
+		Principal: requester.Principal,
+		Class:     requester.Class,
+		Persona:   requester.Persona,
+	}, sessionID, reason)
+}
+
+type emailOwnerHandoffRouter struct {
+	router *handoff.OwnerRouter
+}
+
+func (r *emailOwnerHandoffRouter) NotifyOwner(ctx context.Context, requester *approval.Requester, sessionID, reason string) error {
+	return r.router.NotifyOwner(ctx, &handoff.OwnerRequester{
+		Principal: requester.Principal,
+		Class:     requester.Class,
+		Persona:   requester.Persona,
+	}, sessionID, reason)
+}
+
+func newOwnerHandoffRouter(notifiers []ownerHandoffNotifier) *handoff.OwnerRouter {
+	adapted := make([]handoff.OwnerNotifier, 0, len(notifiers))
+	for _, notifier := range notifiers {
+		adapted = append(adapted, &ownerHandoffAdapter{notifier: notifier})
+	}
+	return handoff.NewOwnerRouter(adapted)
+}
+
+type httpRequesters interface {
+	RequesterOf(sessionID string) (approval.Requester, bool)
+}
+
+type httpRequesterLookupAdapter struct {
+	requesters httpRequesters
+}
+
+func (a *httpRequesterLookupAdapter) RequesterOf(sessionID string) (handoff.OwnerRequester, bool) {
+	req, ok := a.requesters.RequesterOf(sessionID)
+	if !ok {
+		return handoff.OwnerRequester{}, false
+	}
+	return handoff.OwnerRequester{Principal: req.Principal, Class: req.Class, Persona: req.Persona}, true
+}
+
+func newHTTPHandoffNotifier(requesters httpRequesters, adapters []approvalAdapter) (*handoff.HTTPNotifier, error) {
+	notifiers := make([]ownerHandoffNotifier, 0, len(adapters))
+	for _, adapter := range adapters {
+		notifiers = append(notifiers, adapter)
+	}
+	return handoff.NewHTTPNotifier(&httpRequesterLookupAdapter{requesters: requesters}, newOwnerHandoffRouter(notifiers))
 }
 
 func discordAccount(cfg *appconfig.Config, name string) (*config.DiscordAccount, bool) {
@@ -127,46 +162,35 @@ func emailAccount(cfg *appconfig.Config, name string) (*config.EmailAccount, boo
 	return nil, false
 }
 
-func deliverToHandoff(ctx context.Context, cfg *appconfig.Config, handoff *store.Handoff, text string) error {
-	switch handoff.Channel {
-	case store.HandoffChannelTelegram:
-		account, ok := telegramAccount(cfg, handoff.Account)
+func deliverToHandoff(ctx context.Context, cfg *appconfig.Config, h *handoff.Handoff, text string) error {
+	switch h.Channel {
+	case handoff.ChannelTelegram:
+		account, ok := telegramAccount(cfg, h.Account)
 		if !ok {
-			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
+			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", h.Account)}
 		}
-		return deliverTelegramText(ctx, account, handoff.ReplyChannelID, handoff.ReplyThreadID, text)
-	case store.HandoffChannelHTTP:
+		return deliverTelegramText(ctx, account, h.ReplyChannelID, h.ReplyThreadID, text)
+	case handoff.ChannelHTTP:
 		return nil
-	case store.HandoffChannelEmail:
-		account, ok := emailAccount(cfg, handoff.Account)
+	case handoff.ChannelEmail:
+		account, ok := emailAccount(cfg, h.Account)
 		if !ok {
-			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
+			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", h.Account)}
 		}
-		return deliverEmailText(ctx, account, &email.TextReply{To: handoff.ReplyChannelID, Thread: email.ParseThreadReference(handoff.ReplyThreadID), Text: text})
-	case store.HandoffChannelDiscord:
-		account, ok := discordAccount(cfg, handoff.Account)
+		return deliverEmailText(ctx, account, &email.TextReply{To: h.ReplyChannelID, Thread: email.ParseThreadReference(h.ReplyThreadID), Text: text})
+	case handoff.ChannelDiscord:
+		account, ok := discordAccount(cfg, h.Account)
 		if !ok {
-			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", handoff.Account)}
+			return &exitCodeError{code: 1, err: fmt.Errorf("handoff account %q is not configured", h.Account)}
 		}
-		return deliverText(ctx, account, handoff.ReplyChannelID, text)
+		return deliverText(ctx, account, h.ReplyChannelID, text)
 	default:
-		return &exitCodeError{code: 1, err: fmt.Errorf("handoff channel %q is not supported", handoff.Channel)}
+		return &exitCodeError{code: 1, err: fmt.Errorf("handoff channel %q is not supported", h.Channel)}
 	}
 }
 
-func openHandoff(ctx context.Context, db *sql.DB, sessionID string) (store.Handoff, error) {
-	handoff, found, err := store.NewHandoffStore(db).Get(ctx, sessionID)
-	if err != nil {
-		return store.Handoff{}, err
-	}
-	if !found || !handoff.ReleasedAt.IsZero() {
-		return store.Handoff{}, &exitCodeError{code: 1, err: errors.New("handoff_not_open: this session has no open handoff")}
-	}
-	return handoff, nil
-}
-
-func appendPersonaReply(ctx context.Context, db *sql.DB, handoff *store.Handoff, author, text string, at time.Time) error {
-	return appendSessionText(ctx, db, handoff.SessionID, store.HandoffReplyEventID(at), author, text, at)
+func appendPersonaReply(ctx context.Context, db *sql.DB, h *handoff.Handoff, author, text string, at time.Time) error {
+	return appendSessionText(ctx, db, h.SessionID, handoff.ReplyEventID(at), author, text, at)
 }
 
 func sessionEventWithText(id, author, text string, at time.Time) *session.Event {
@@ -175,95 +199,47 @@ func sessionEventWithText(id, author, text string, at time.Time) *session.Event 
 	return event
 }
 
-func newReplyCmd(gf *globalFlags) *cobra.Command {
-	return &cobra.Command{
-		Use:   "reply <session> <text>",
-		Short: "Reply as the persona in a handed-off session",
-		Args:  cobra.MinimumNArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			text := strings.TrimSpace(strings.Join(args[1:], " "))
-			if text == "" {
-				return &usageError{err: errors.New("reply text must not be empty")}
+func handoffOpener(gf *globalFlags) handoff.CommandOpener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, deps *handoff.CommandDeps) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		return withApp(cmd, &commandInput{result: &result}, func(ctx context.Context, app *App) error {
+			store, err := handoff.NewSQLiteStore(app.db)
+			if err != nil {
+				return err
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
-				handoff, err := openHandoff(ctx, db, args[0])
-				if err != nil {
-					return err
-				}
-				if err := deliverToHandoff(ctx, cfg, &handoff, text); err != nil {
-					return err
-				}
-				now := time.Now().UTC()
-				registry, err := buildAgentRegistry(cfg)
-				if err != nil {
-					return err
-				}
-				definition, _ := registry.Lookup(handoff.AgentID)
-				if err := appendPersonaReply(ctx, db, &handoff, cmp.Or(definition.Name, handoffReplyAuthorFallback), text, now); err != nil {
-					return err
-				}
-				if err := recordAccessAction(ctx, db, &accessAction{Action: accessActionHandoffReply, Principal: handoff.PrincipalID, Persona: handoff.AgentID, Account: handoff.Account}, "reply-"+handoff.SessionID+"-"+now.Format(time.RFC3339Nano), now); err != nil {
-					return err
-				}
-				return writeChildLines(cmd, []string{"replied in " + handoff.SessionID})
+			registry, err := buildAgentRegistry(result.Config)
+			if err != nil {
+				return err
+			}
+			return fn(ctx, &handoff.CommandDeps{
+				Store: store,
+				Deliver: func(ctx context.Context, h *handoff.Handoff, text string) error {
+					return deliverToHandoff(ctx, result.Config, h, text)
+				},
+				PersonaAuthor: func(agentID string) string {
+					definition, _ := registry.Lookup(agentID)
+					return cmp.Or(definition.Name, handoffReplyAuthorFallback)
+				},
+				ClosedMessage: func(agentID string) string {
+					definition, _ := registry.Lookup(agentID)
+					return definition.Message(auraagent.MessageHandoffClosed)
+				},
+				AppendReply: func(ctx context.Context, h *handoff.Handoff, author, text string, at time.Time) error {
+					return appendPersonaReply(ctx, app.db, h, author, text, at)
+				},
+				RecordAction: func(ctx context.Context, action string, h *handoff.Handoff, eventID string, at time.Time) error {
+					return recordAccessAction(ctx, app.db, &accessAction{
+						Action:    action,
+						Principal: h.PrincipalID,
+						Persona:   h.AgentID,
+						Account:   h.Account,
+					}, eventID, at)
+				},
+				Logger: app.logger,
 			})
-		},
+		})
 	}
-}
-
-func newHandoffCmd(gf *globalFlags) *cobra.Command {
-	cmd := &cobra.Command{Use: "handoff", Short: "Inspect and release sessions handed off to the owner"}
-	cmd.AddCommand(&cobra.Command{
-		Use:   "list",
-		Short: "List open handoffs",
-		Args:  cobra.NoArgs,
-		RunE: func(cmd *cobra.Command, _ []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
-				open, err := store.NewHandoffStore(db).ListOpen(ctx)
-				if err != nil {
-					return err
-				}
-				if len(open) == 0 {
-					return writeChildLines(cmd, []string{"no open handoffs"})
-				}
-				lines := []string{"SESSION\tPRINCIPAL\tPERSONA\tOPENED\tREASON"}
-				for i := range open {
-					lines = append(lines, fmt.Sprintf("%s\t%s\t%s\t%s\t%s", open[i].SessionID, open[i].PrincipalID, open[i].AgentID, open[i].OpenedAt.UTC().Format(time.RFC3339), open[i].Reason))
-				}
-				return writeChildLines(cmd, lines)
-			})
-		},
-	}, &cobra.Command{
-		Use:   "release <session>",
-		Short: "Hand the conversation back to the persona",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			return withStorage(cmd, gf, true, func(ctx context.Context, logger *slog.Logger, cfg *appconfig.Config, db *sql.DB) error {
-				if _, err := openHandoff(ctx, db, args[0]); err != nil {
-					return err
-				}
-				now := time.Now().UTC()
-				handoff, released, err := store.NewHandoffStore(db).Release(ctx, args[0], now)
-				if err != nil {
-					return err
-				}
-				if !released {
-					return &exitCodeError{code: 1, err: errors.New("handoff_not_open: this session has no open handoff")}
-				}
-				registry, err := buildAgentRegistry(cfg)
-				if err != nil {
-					return err
-				}
-				definition, _ := registry.Lookup(handoff.AgentID)
-				if err := deliverToHandoff(ctx, cfg, &handoff, definition.Message(auraagent.MessageHandoffClosed)); err != nil {
-					logger.WarnContext(ctx, "handoff release notice failed", "component", "access")
-				}
-				if err := recordAccessAction(ctx, db, &accessAction{Action: accessActionHandoffRelease, Principal: handoff.PrincipalID, Persona: handoff.AgentID, Account: handoff.Account}, "release-"+handoff.SessionID+"-"+now.Format(time.RFC3339Nano), now); err != nil {
-					return err
-				}
-				return writeChildLines(cmd, []string{"released " + handoff.SessionID})
-			})
-		},
-	})
-	return cmd
 }

@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -162,7 +163,11 @@ func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 			settings.Evals = &personaEvalGate{registry: registry, results: store.NewPersonaEvalStore(db)}
 		}
 		if cfg.Access != nil {
-			settings.Handoffs = &handoffGate{handoffs: store.NewHandoffStore(db), timeout: time.Duration(cfg.Access.HandoffTimeout), now: time.Now}
+			if handoffStore, err := handoff.NewSQLiteStore(db); err == nil {
+				if gate, err := handoff.NewGate(handoffStore, time.Duration(cfg.Access.HandoffTimeout), time.Now); err == nil {
+					settings.Handoffs = gate
+				}
+			}
 		}
 	}
 	return settings
