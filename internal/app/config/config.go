@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -46,7 +47,7 @@ type Config struct {
 	Access       *principal.Config           `json:"access,omitempty"`
 	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
-	Knowledge    *legacyconfig.Knowledge     `json:"knowledge,omitempty"`
+	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
 	Interpreter  legacyconfig.Interpreter    `json:"interpreter"`
 	Channels     legacyconfig.Channels       `json:"channels"`
 	Bindings     auraagent.Bindings          `json:"bindings,omitempty"`

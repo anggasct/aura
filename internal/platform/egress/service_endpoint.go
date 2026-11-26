@@ -1,14 +1,12 @@
-package config
+package egress
 
 import (
+	"errors"
 	"net/netip"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
-
-	"github.com/anggasct/aura/internal/platform/configkit"
-	"github.com/anggasct/aura/internal/platform/egress"
 )
 
 const (
@@ -39,34 +37,34 @@ func joinHostPort(host, port string) string {
 	return host + ":" + port
 }
 
-func parseServiceEndpoint(field, raw string) (ServiceEndpoint, error) {
+func ParseServiceEndpoint(raw string) (ServiceEndpoint, error) {
 	if raw == "" || strings.TrimSpace(raw) != raw {
-		return ServiceEndpoint{}, configkit.Invalid(field, "must be set and carry no surrounding whitespace")
+		return ServiceEndpoint{}, errors.New("must be set and carry no surrounding whitespace")
 	}
 	u, err := url.Parse(raw)
 	if err != nil {
-		return ServiceEndpoint{}, configkit.Invalid(field, "is not a valid URL")
+		return ServiceEndpoint{}, errors.New("is not a valid URL")
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
-		return ServiceEndpoint{}, configkit.Invalid(field, "scheme must be http or https")
+		return ServiceEndpoint{}, errors.New("scheme must be http or https")
 	}
 	switch {
 	case u.Opaque != "" || u.Host == "":
-		return ServiceEndpoint{}, configkit.Invalid(field, "must have a host")
+		return ServiceEndpoint{}, errors.New("must have a host")
 	case u.User != nil:
-		return ServiceEndpoint{}, configkit.Invalid(field, "must not embed credentials")
+		return ServiceEndpoint{}, errors.New("must not embed credentials")
 	case u.RawQuery != "" || u.ForceQuery || u.Fragment != "":
-		return ServiceEndpoint{}, configkit.Invalid(field, "must not carry a query or fragment")
+		return ServiceEndpoint{}, errors.New("must not carry a query or fragment")
 	}
 	host := u.Hostname()
 	if host == "" || strings.ContainsAny(host, "%\\") {
-		return ServiceEndpoint{}, configkit.Invalid(field, "host is not valid")
+		return ServiceEndpoint{}, errors.New("host is not valid")
 	}
-	port, err := servicePort(field, u)
+	port, err := servicePort(u)
 	if err != nil {
 		return ServiceEndpoint{}, err
 	}
-	endpointPath, err := servicePath(field, u)
+	endpointPath, err := servicePath(u)
 	if err != nil {
 		return ServiceEndpoint{}, err
 	}
@@ -75,22 +73,22 @@ func parseServiceEndpoint(field, raw string) (ServiceEndpoint, error) {
 		endpoint.Loopback = true
 		return endpoint, nil
 	}
-	if err := rejectLoopbackLookalike(field, host); err != nil {
+	if err := rejectLoopbackLookalike(host); err != nil {
 		return ServiceEndpoint{}, err
 	}
 	if u.Scheme != "https" {
-		return ServiceEndpoint{}, configkit.Invalid(field, "must use https unless the host is exactly 127.0.0.1 or ::1")
+		return ServiceEndpoint{}, errors.New("must use https unless the host is exactly 127.0.0.1 or ::1")
 	}
 	endpoint.Host = strings.ToLower(host)
 	if _, err := netip.ParseAddr(host); err == nil {
-		if err := egress.ValidateLiteralDestination(endpoint.URL()); err != nil {
-			return ServiceEndpoint{}, configkit.Invalid(field, "address is not a permitted destination")
+		if err := ValidateLiteralDestination(endpoint.URL()); err != nil {
+			return ServiceEndpoint{}, errors.New("address is not a permitted destination")
 		}
 	}
 	return endpoint, nil
 }
 
-func servicePort(field string, u *url.URL) (string, error) {
+func servicePort(u *url.URL) (string, error) {
 	port := u.Port()
 	if port == "" {
 		if u.Scheme == "https" {
@@ -100,36 +98,36 @@ func servicePort(field string, u *url.URL) (string, error) {
 	}
 	number, err := strconv.Atoi(port)
 	if err != nil || number < 1 || number > 65535 || strconv.Itoa(number) != port {
-		return "", configkit.Invalid(field, "port must be between 1 and 65535")
+		return "", errors.New("port must be between 1 and 65535")
 	}
 	return port, nil
 }
 
-func servicePath(field string, u *url.URL) (string, error) {
+func servicePath(u *url.URL) (string, error) {
 	escaped := strings.TrimRight(u.EscapedPath(), "/")
 	if escaped == "" {
 		return "", nil
 	}
 	if strings.Contains(escaped, "%") || strings.Contains(escaped, "//") || path.Clean(escaped) != escaped {
-		return "", configkit.Invalid(field, "path must be plain and normalized")
+		return "", errors.New("path must be plain and normalized")
 	}
 	return escaped, nil
 }
 
-func rejectLoopbackLookalike(field, host string) error {
+func rejectLoopbackLookalike(host string) error {
 	name := strings.ToLower(strings.TrimSuffix(host, "."))
 	if name == "localhost" || strings.HasSuffix(name, ".localhost") {
-		return configkit.Invalid(field, "must use the literal 127.0.0.1 or ::1 for a local server, not a loopback name")
+		return errors.New("must use the literal 127.0.0.1 or ::1 for a local server, not a loopback name")
 	}
 	if addr, err := netip.ParseAddr(name); err == nil {
 		if addr.Unmap().IsLoopback() {
-			return configkit.Invalid(field, "loopback address must be written exactly as 127.0.0.1 or ::1")
+			return errors.New("loopback address must be written exactly as 127.0.0.1 or ::1")
 		}
 		return nil
 	}
 	last := name[strings.LastIndexByte(name, '.')+1:]
 	if last == "" || isNumericLabel(last) {
-		return configkit.Invalid(field, "host form is not accepted")
+		return errors.New("host form is not accepted")
 	}
 	return nil
 }

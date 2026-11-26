@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
@@ -23,7 +22,7 @@ const (
 	defaultRequestTimeout = 60 * time.Second
 	maxBytesPerValue      = 40
 	responseSlackBytes    = 1 << 20
-	maxProviderBatch      = config.MaxEmbeddingBatchSize
+	maxProviderBatch      = MaxBatchSize
 )
 
 type Client struct {
@@ -39,11 +38,11 @@ type Client struct {
 	timeout         time.Duration
 }
 
-func New(cfg *config.KnowledgeEmbedding, credential string, resolver egress.Resolver) (*Client, error) {
+func New(cfg *Config, credential string, resolver egress.Resolver) (*Client, error) {
 	if cfg == nil {
 		return nil, Errorf(ErrorCodeConfigInvalid, "embedding configuration must not be nil")
 	}
-	endpoint, err := cfg.Endpoint()
+	endpoint, err := egress.ParseServiceEndpoint(cfg.BaseURL)
 	if err != nil {
 		return nil, Errorf(ErrorCodeConfigInvalid, "%v", err)
 	}
@@ -53,7 +52,7 @@ func New(cfg *config.KnowledgeEmbedding, credential string, resolver egress.Reso
 	return newClient(cfg, endpoint, credential, newRemoteClient(resolver)), nil
 }
 
-func newClient(cfg *config.KnowledgeEmbedding, endpoint config.ServiceEndpoint, credential string, httpClient *http.Client) *Client {
+func newClient(cfg *Config, endpoint egress.ServiceEndpoint, credential string, httpClient *http.Client) *Client {
 	return &Client{
 		http:            httpClient,
 		url:             endpoint.URL() + "/embeddings",
@@ -125,7 +124,7 @@ func (c *Client) input(role Role, texts []string) ([]string, error) {
 		return nil, Errorf(ErrorCodeRequestInvalid, "an embedding request carries between 1 and %d texts", maxProviderBatch)
 	}
 	prefix := ""
-	if c.roleStyle == config.EmbeddingRolePrefix {
+	if c.roleStyle == RoleStylePrefix {
 		prefix = c.documentPrefix
 		if role == RoleQuery {
 			prefix = c.queryPrefix
@@ -147,7 +146,7 @@ func (c *Client) requestBody(role Role, input []string) ([]byte, error) {
 		"input":           input,
 		c.dimensionsField: c.dimensions,
 	}
-	if c.roleStyle == config.EmbeddingRoleInputType {
+	if c.roleStyle == RoleStyleInputType {
 		payload["input_type"] = string(role)
 	}
 	body, err := json.Marshal(payload)
