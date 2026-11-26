@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeRunStore struct {
@@ -647,7 +648,7 @@ func TestSubmit_StartsRun(t *testing.T) {
 	store := newFakeItemStore()
 	var started []string
 	var mu sync.Mutex
-	broadcaster, err := New(
+	broadcaster, err := NewBroadcaster(
 		testPolicy(),
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		store,
@@ -675,7 +676,7 @@ func TestSubmit_StartsRun(t *testing.T) {
 	if len(started) != 2 {
 		t.Errorf("replay did not restart the run: %v", started)
 	}
-	failing, err := New(
+	failing, err := NewBroadcaster(
 		testPolicy(),
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
@@ -687,7 +688,7 @@ func TestSubmit_StartsRun(t *testing.T) {
 	}
 	if _, _, err := failing.Submit(t.Context(), testNotification()); err == nil {
 		t.Error("starter failure accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeUnavailable {
 		t.Errorf("starter failure code = %v, %v", code, ok)
 	}
 }

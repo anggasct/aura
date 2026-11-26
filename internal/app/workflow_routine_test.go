@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -122,7 +124,7 @@ func TestScheduleAddNeedsOneKnownTarget(t *testing.T) {
 		"bad input":        {args: []string{"--workflow", "ghost", "--input", `{"permissions":["exec"]}`}, want: "--input must be a JSON object"},
 	} {
 		args := append([]string{"add", "--name", "n", "--schedule", "0 3 * * 1", "--channel", "discord", "--destination", "default"}, tc.args...)
-		_, err := runAccessCommand(t, newScheduleCmd, cfg, args...)
+		_, err := runAccessCommand(t, func(gf *globalFlags) *cobra.Command { return schedule.Commands(scheduleOpener(gf))[0] }, cfg, args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", label, err, tc.want)
 		}

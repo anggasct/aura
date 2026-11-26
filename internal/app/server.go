@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"time"
@@ -73,9 +74,8 @@ type serverBuild struct {
 	host               *runtimeengine.Host
 	broadcastRuntime   durable.Runtime
 	hostedHandlers     []string
-	broadcastWiring    *broadcastChannels
-	broadcastRunner    *broadcast.Runner
-	scheduleRunner     *schedule.Runner
+	broadcastMod       *broadcast.Module
+	scheduleMod        *schedule.Module
 	scheduledWorkflows *scheduleWorkflows
 	erasureRuns        *erasureRuns
 	childLedger        child.BudgetLedger
@@ -323,12 +323,8 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	s.broadcastWiring = buildBroadcastSenders(s.channels, broadcastEffects, b.sessions)
+	senders := buildBroadcastSenders(s.channels, broadcastEffects, b.sessions)
 	broadcastRecorder, err := telemetry.NewBroadcastRecorder(b.meters())
-	if err != nil {
-		return err
-	}
-	s.broadcastRunner, err = buildBroadcastRunner(cfg, db, logger, s.broadcastWiring, broadcastRecorderObserver(broadcastRecorder))
 	if err != nil {
 		return err
 	}
@@ -336,13 +332,26 @@ func (b *build) buildBroadcast() error {
 	if err != nil {
 		return err
 	}
-	if err := registerBroadcastHandler(s.broadcastRuntime, s.broadcastRunner); err != nil {
+	s.broadcastMod, err = broadcast.New(&broadcast.ModuleDeps{
+		Config:   cfg.Broadcast,
+		DB:       db,
+		Senders:  senders,
+		Runtime:  s.broadcastRuntime,
+		Logger:   logger,
+		Observer: broadcastRecorderObserver(broadcastRecorder),
+	})
+	if err != nil {
 		return err
 	}
+	registrar, ok := s.broadcastRuntime.(durable.HandlerRegistrar)
+	if !ok || registrar == nil {
+		return errors.New("broadcast handler target does not accept handlers")
+	}
+	registrar.RegisterHandler(broadcast.HandlerName, s.broadcastMod.Handle)
 	s.hostedHandlers = append(s.hostedHandlers, broadcast.HandlerName)
-	runtime := s.broadcastRuntime
+	broadcastMod := s.broadcastMod
 	return b.group.Add(&lifecycleStage{name: "broadcast_resume", start: func(ctx context.Context) error {
-		resumed, err := resumeBroadcastRunners(ctx, runtime, db)
+		resumed, err := broadcastMod.Resume(ctx)
 		if err != nil {
 			return err
 		}
@@ -355,26 +364,28 @@ func (b *build) buildBroadcast() error {
 
 func (b *build) buildSchedule() error {
 	cfg, db, logger, s := b.cfg, b.db, b.logger, b.server
-	cronBroadcaster, err := buildCronBroadcaster(cfg, db, s.broadcastRuntime, s.broadcastWiring)
-	if err != nil {
-		return err
-	}
 	scheduleRecorder, err := telemetry.NewScheduleRecorder(b.meters())
 	if err != nil {
 		return err
 	}
 	s.scheduledWorkflows = &scheduleWorkflows{}
-	s.scheduleRunner, err = buildScheduleRunner(&scheduleRunnerInput{
-		db: db, logger: logger, engine: b.engine, broadcaster: cronBroadcaster,
-		retention: time.Duration(cfg.Scheduler.OccurrenceRetention), observer: scheduleRecorderObserver(scheduleRecorder),
-		workflows: s.scheduledWorkflows, starter: s.broadcastRuntime,
+	s.scheduleMod, err = schedule.New(&schedule.ModuleDeps{
+		Config:   cfg.Scheduler,
+		DB:       db,
+		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows},
+		Notify:   &cronNotifier{broadcaster: s.broadcastMod.Broadcaster()},
+		Starter:  s.broadcastRuntime,
+		Logger:   logger,
+		Observer: scheduleRecorderObserver(scheduleRecorder),
 	})
 	if err != nil {
 		return err
 	}
-	if err := registerScheduleHandler(s.broadcastRuntime, s.scheduleRunner); err != nil {
-		return err
+	registrar, ok := s.broadcastRuntime.(durable.HandlerRegistrar)
+	if !ok || registrar == nil {
+		return errors.New("schedule handler target does not accept handlers")
 	}
+	registrar.RegisterHandler(schedule.HandlerName, s.scheduleMod.Handle)
 	s.hostedHandlers = append(s.hostedHandlers, schedule.HandlerName)
 	s.childLedger = child.NewLedger(nil, 0)
 	if cfg.Children != nil && cfg.Children.Enabled {
@@ -387,9 +398,9 @@ func (b *build) buildSchedule() error {
 		}
 		s.hostedHandlers = append(s.hostedHandlers, child.HandlerName)
 	}
-	runtime, host := s.broadcastRuntime, s.host
+	scheduleMod, host := s.scheduleMod, s.host
 	if err := b.group.Add(&lifecycleStage{name: "schedule_resume", start: func(ctx context.Context) error {
-		resumed, err := resumeScheduleRuns(ctx, runtime, db)
+		resumed, err := scheduleMod.Resume(ctx)
 		if err != nil {
 			return err
 		}
@@ -400,8 +411,7 @@ func (b *build) buildSchedule() error {
 	}}); err != nil {
 		return err
 	}
-	pass := &schedulePass{runtime: runtime, db: db, logger: logger, interval: schedulePassInterval}
-	if err := b.group.Add(server.Background("schedule_pass", pass.run)); err != nil {
+	if err := b.group.Add(server.Background("schedule_pass", scheduleMod.RunPass)); err != nil {
 		return err
 	}
 	recovery := &turnRecovery{recoverer: b.engine, logger: logger, interval: turnRecoveryInterval}

@@ -6,8 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"strings"
 	"time"
 )
@@ -35,37 +33,6 @@ const maxAliasRunes = 64
 const maxProducerRunes = 128
 
 const maxKeyRunes = 256
-
-type ErrorCode string
-
-const (
-	ErrorCodeInvalidArgument ErrorCode = "invalid_argument"
-	ErrorCodeUnknownAlias    ErrorCode = "unknown_alias"
-	ErrorCodeChannelUnknown  ErrorCode = "channel_unknown"
-	ErrorCodeConflict        ErrorCode = "conflict"
-	ErrorCodeUnavailable     ErrorCode = "unavailable"
-)
-
-type Error struct {
-	Code   ErrorCode
-	Detail string
-}
-
-func (e *Error) Error() string {
-	return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
-func Errorf(code ErrorCode, format string, args ...any) error {
-	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
-}
 
 type Notification struct {
 	Producer         string
@@ -140,7 +107,7 @@ type Broadcaster struct {
 	observer       Observer
 }
 
-func New(policy Policy, channels ChannelRegistry, items ItemStore, starter Starter, observer Observer) (*Broadcaster, error) {
+func NewBroadcaster(policy Policy, channels ChannelRegistry, items ItemStore, starter Starter, observer Observer) (*Broadcaster, error) {
 	if channels == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "channel registry must not be nil")
 	}

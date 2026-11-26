@@ -7,6 +7,8 @@ import (
 	"encoding/hex"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -84,6 +86,8 @@ type Occurrence struct {
 	ScheduledForUTC time.Time
 	State           string
 	TurnID          string
+	ResultEventID   string
+	SafeErrorCode   string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
 }
@@ -327,7 +331,7 @@ func (s *Service) RunNow(ctx context.Context, id string, now time.Time) (Occurre
 			return Occurrence{}, err
 		}
 		if err := s.jobs.RecordFire(ctx, &candidate); err != nil {
-			if code, ok := CodeOf(err); ok && code == ErrorCodeOccurrenceConflict {
+			if fault.HasCode(err, ErrorCodeOccurrenceConflict) {
 				continue
 			}
 			return Occurrence{}, err

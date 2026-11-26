@@ -5,7 +5,6 @@ internal/channels/kit/approval  # until this channel's errors move to platform/f
 internal/channels/kit/chatcommand  # until this channel's errors move to platform/fault with the channels
 internal/channels/kit/media  # until this channel's errors move to platform/fault with the channels
 internal/channels/telegram  # until this channel's errors move to platform/fault with the channels
-internal/modules/broadcast  # until this module's errors move to platform/fault with the module
 internal/modules/child  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec/interpreter  # until this module's errors move to platform/fault with the module
@@ -15,6 +14,5 @@ internal/modules/mcp  # until this module's errors move to platform/fault with t
 internal/modules/memory  # until this module's errors move to platform/fault with the module
 internal/modules/plugin/wire  # plugin protocol errors; plugins import only the wire contract
 internal/modules/profile  # until this module's errors move to platform/fault with the module
-internal/modules/schedule  # until this module's errors move to platform/fault with the module
 internal/modules/workflow  # until this module's errors move to platform/fault with the module
 plugins/gmail/connector  # plugin protocol errors; plugins import only the wire contract

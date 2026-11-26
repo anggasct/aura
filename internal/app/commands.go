@@ -7,13 +7,17 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/schedule"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
+	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
+	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {
