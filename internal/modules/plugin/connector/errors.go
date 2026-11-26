@@ -1,11 +1,11 @@
 package connector
 
 import (
-	"errors"
 	"fmt"
 	"slices"
 
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -25,60 +25,60 @@ const (
 	ErrAuthUnavailable    ErrorCode = ErrorCode(auth.ErrUnavailable)
 )
 
-type Error struct {
-	Code        ErrorCode
-	Detail      string
-	Reported    string
-	RequestSent bool
-	Err         error
+type callFailure struct {
+	code        ErrorCode
+	detail      string
+	reported    string
+	requestSent bool
+	cause       error
 }
 
-func (e *Error) Error() string {
+func (e *callFailure) Error() string {
 	if e == nil {
 		return "<nil>"
 	}
-	text := string(e.Code)
-	if e.Reported != "" {
-		text += ": " + e.Reported
+	text := string(e.code)
+	if e.reported != "" {
+		text += ": " + e.reported
 	}
-	if e.Detail != "" {
-		text += ": " + e.Detail
+	if e.detail != "" {
+		text += ": " + e.detail
 	}
 	return text
 }
 
-func (e *Error) Unwrap() error {
+func (e *callFailure) Unwrap() error {
 	if e == nil {
 		return nil
 	}
-	return e.Err
+	return fault.Wrap(e.code, e.detail, contextCause(e.cause))
 }
 
-func (e *Error) Public() string {
-	if e.Reported != "" {
-		return string(e.Code) + ": " + e.Reported
+func (e *callFailure) Public() string {
+	if e.reported != "" {
+		return string(e.code) + ": " + e.reported
 	}
-	return string(e.Code)
+	return string(e.code)
 }
 
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if errors.As(err, &target) && target != nil {
-		return target.Code, true
-	}
-	return "", false
+func failf(code ErrorCode, detail string) *callFailure {
+	return &callFailure{code: code, detail: detail}
 }
 
-func Errorf(code ErrorCode, format string, args ...any) *Error {
-	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
+func wrapFailure(code ErrorCode, err error, detail string) *callFailure {
+	return &callFailure{code: code, detail: detail, cause: err}
 }
 
-func Wrap(code ErrorCode, err error, detail string) *Error {
-	return &Error{Code: code, Detail: detail, Err: err}
+func Errorf(code ErrorCode, format string, args ...any) error {
+	return fault.New(code, fmt.Sprintf(format, args...))
+}
+
+func Wrap(code ErrorCode, err error, detail string) error {
+	return fault.Wrap(code, detail, contextCause(err))
 }
 
 func authCode(err error) (ErrorCode, bool) {
-	code, ok := auth.CodeOf(err)
+	code, ok := fault.CodeOf[auth.ErrorCode](err)
 	if !ok {
 		return "", false
 	}

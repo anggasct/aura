@@ -13,10 +13,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -24,7 +24,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
 	"google.golang.org/adk/v2/agent"
@@ -102,7 +101,7 @@ type skillHarness struct {
 	skillID string
 }
 
-func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills) *skillHarness {
+func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config) *skillHarness {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
 	root := t.TempDir()
@@ -121,7 +120,11 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 	if err != nil {
 		t.Fatalf("buildSkillRuntime: %v", err)
 	}
-	records, err := (&skillStoreRegistry{inner: store.NewSkillStore(db)}).ListAll(t.Context(), 16)
+	skillStore, err := skills.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("new skill store: %v", err)
+	}
+	records, err := skillStore.ListAll(t.Context(), 16)
 	if err != nil {
 		t.Fatalf("list skills: %v", err)
 	}
@@ -198,8 +201,8 @@ func (h *skillHarness) activations(t *testing.T) []turn.SkillActivation {
 	return activations
 }
 
-func defaultSkillConfig() *config.Skills {
-	return &config.Skills{MaxIndexedSkills: 16, MaxInstructionTokens: 100, MaxSessionContextTokens: 300, MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1)}
+func defaultSkillConfig() *skills.Config {
+	return &skills.Config{MaxIndexedSkills: 16, MaxInstructionTokens: 100, MaxSessionContextTokens: 300, MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1)}
 }
 
 func TestSkillActivationReachesTheModelAndPersistsInTheSession(t *testing.T) {
@@ -284,7 +287,7 @@ func TestBuildSkillRuntimeRejectsASessionBoundBelowOneActivation(t *testing.T) {
 	cfg.Enabled, cfg.Roots, cfg.MaxSessionContextTokens = true, []string{t.TempDir()}, 99
 	if _, err := buildSkillRuntime(t.Context(), cfg, db, nil); err == nil {
 		t.Fatal("session bound below max_instruction_tokens accepted")
-	} else if code, ok := skills.CodeOf(err); !ok || code != skills.ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[skills.ErrorCode](err); !ok || code != skills.ErrorCodeInvalidArgument {
 		t.Fatalf("err = %v", err)
 	}
 }

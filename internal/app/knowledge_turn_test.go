@@ -10,7 +10,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -20,6 +19,7 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -322,7 +322,7 @@ func TestKnowledgeTurnHostileDocumentCannotCloseTheBlockOrHideText(t *testing.T)
 func TestKnowledgeTurnContinuesWhenRetrievalFails(t *testing.T) {
 	rig := newKnowledgeTurnRig(t)
 	rig.add(t, "support", "support.md", "Refunds for premium plans: FAIL-OPEN-ANSWER.")
-	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_UNSET_TURN_SECRET"}}
+	rig.cfg.Webhook.Keys = []platformwebhook.Key{{ID: "late", SecretEnv: "KB_TEST_UNSET_TURN_SECRET"}}
 
 	rig.turn(t, "lobby", principal.ClassOwner, "How do refunds work?")
 	got := rig.model.last(t)

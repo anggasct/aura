@@ -142,7 +142,7 @@ func (m *Manager) Start(ctx context.Context) error {
 	return errors.Join(errs...)
 }
 
-func (m *Manager) startPlugin(ctx context.Context, e *entry) *Error {
+func (m *Manager) startPlugin(ctx context.Context, e *entry) error {
 	fail := m.bringUp(ctx, e)
 	if fail == nil {
 		return nil
@@ -150,14 +150,14 @@ func (m *Manager) startPlugin(ctx context.Context, e *entry) *Error {
 	m.mu.Lock()
 	e.code = ErrBackendUnavailable
 	m.mu.Unlock()
-	m.logger.WarnContext(ctx, "connector plugin start failed", "component", "plugin_connector", "plugin", e.cfg.ID, "code", string(fail.Code))
+	m.logger.WarnContext(ctx, "connector plugin start failed", "component", "plugin_connector", "plugin", e.cfg.ID, "code", string(fail.code))
 	return Wrap(ErrBackendUnavailable, fail, "the plugin could not start")
 }
 
-func (m *Manager) bringUp(ctx context.Context, e *entry) *Error {
+func (m *Manager) bringUp(ctx context.Context, e *entry) *callFailure {
 	if m.capability != nil && len(e.cfg.Capabilities) > 0 {
 		if err := m.capability(e.cfg.Capabilities); err != nil {
-			return Wrap(ErrBackendUnavailable, err, "a required capability is unavailable")
+			return wrapFailure(ErrBackendUnavailable, err, "a required capability is unavailable")
 		}
 	}
 	runner := newHost(&e.cfg, m.starter, m.client, m.logger)
@@ -170,14 +170,14 @@ func (m *Manager) bringUp(ctx context.Context, e *entry) *Error {
 	registered, err := m.register(runner, &e.cfg, exposed)
 	if err != nil {
 		_ = runner.close(ctx)
-		return Wrap(ErrBackendUnavailable, err, "the tools could not be registered")
+		return wrapFailure(ErrBackendUnavailable, err, "the tools could not be registered")
 	}
 	m.mu.Lock()
 	if m.closed {
 		m.mu.Unlock()
 		m.unregister(registered)
 		_ = runner.close(ctx)
-		return Errorf(ErrBackendUnavailable, "the manager is closed")
+		return failf(ErrBackendUnavailable, "the manager is closed")
 	}
 	e.host, e.registered, e.drift, e.started, e.code = runner, registered, drift, true, ""
 	m.mu.Unlock()
@@ -270,14 +270,14 @@ func contextCause(err error) error {
 	return nil
 }
 
-func toolFailure(tool *Tool, fail *Error) error {
-	cause := contextCause(fail.Err)
-	if tool.Effect && fail.RequestSent {
+func toolFailure(tool *Tool, fail *callFailure) error {
+	cause := contextCause(fail.cause)
+	if tool.Effect && fail.requestSent {
 		return fault.Wrap(toolbroker.ResultExecutionFailed, "plugin tool outcome is unknown and the request was not retried: "+fail.Public(), cause)
 	}
 	failure := fault.Wrap(toolbroker.ResultExecutionFailed, "plugin tool failed: "+fail.Public(), cause)
 	if tool.Effect {
-		return toolbroker.NotPerformed(string(fail.Code), failure)
+		return toolbroker.NotPerformed(string(fail.code), failure)
 	}
 	return failure
 }

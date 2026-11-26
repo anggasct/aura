@@ -25,26 +25,29 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type webhookDispatcher struct {
 	mu         sync.Mutex
 	sessions   turnstore.SessionService
-	executions store.WebhookExecutionStore
+	executions platformwebhook.ExecutionStore
 	backend    turn.AgentRuntime
 	retention  time.Duration
 	clock      func() time.Time
 	logger     *slog.Logger
 	github     *github.Adapter
-	reconciler *webhookReconciler
+	reconciler *platformwebhook.Reconciler
 	drains     sync.WaitGroup
 }
 
-func newWebhookDispatcher(sessions turnstore.SessionService, executions store.WebhookExecutionStore, backend turn.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
+func newWebhookDispatcher(sessions turnstore.SessionService, events platformwebhook.EventLister, executions platformwebhook.ExecutionStore, backend turn.AgentRuntime, retention time.Duration, clock func() time.Time, logger *slog.Logger) (*webhookDispatcher, error) {
 	if sessions == nil {
 		return nil, errors.New("webhook dispatcher requires a session store")
+	}
+	if events == nil {
+		return nil, errors.New("webhook dispatcher requires an event lister")
 	}
 	if executions == nil {
 		return nil, errors.New("webhook dispatcher requires an execution store")
@@ -61,6 +64,15 @@ func newWebhookDispatcher(sessions turnstore.SessionService, executions store.We
 	if logger == nil {
 		logger = slog.Default()
 	}
+	reconciler, err := platformwebhook.NewReconciler(&platformwebhook.ReconcilerDeps{
+		Events:     events,
+		Executions: executions,
+		Clock:      clock,
+		EventPage:  platformwebhook.DefaultReconcileEventPage,
+	})
+	if err != nil {
+		return nil, err
+	}
 	return &webhookDispatcher{
 		sessions:   sessions,
 		executions: executions,
@@ -68,13 +80,24 @@ func newWebhookDispatcher(sessions turnstore.SessionService, executions store.We
 		retention:  retention,
 		clock:      clock,
 		logger:     logger,
-		reconciler: &webhookReconciler{sessions: sessions, executions: executions, clock: clock, page: webhookReconcileEventPage},
+		reconciler: reconciler,
 	}, nil
 }
 
-func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.AcceptedEvent) (gatewaywebhook.ExecutionRef, error) {
+func (d *webhookDispatcher) reconcilePass() (*platformwebhook.ReconcilePass, error) {
+	return platformwebhook.NewReconcilePass(&platformwebhook.ReconcilePassOptions{
+		Executions: d.executions,
+		Reconciler: d.reconciler,
+		Clock:      d.clock,
+		Batch:      platformwebhook.DefaultReconcileBatch,
+		Interval:   platformwebhook.DefaultReconcileInterval,
+		Logger:     d.logger,
+	})
+}
+
+func (d *webhookDispatcher) Dispatch(ctx context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
 	if event == nil {
-		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidArgument, "event must not be nil")
+		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "event must not be nil")
 	}
 	if d.github != nil {
 		handled, ref, err := d.github.Handle(ctx, event)
@@ -85,27 +108,27 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	if ref, err := d.replayIdentical(ctx, event); err != nil || ref != (gatewaywebhook.ExecutionRef{}) {
+	if ref, err := d.replayIdentical(ctx, event); err != nil || ref != (platformwebhook.ExecutionRef{}) {
 		return ref, err
 	}
 
 	now := d.clock().UTC()
 	executionID, err := newWebhookID("whex_")
 	if err != nil {
-		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
+		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 	turnID, err := newWebhookID("turn_")
 	if err != nil {
-		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
+		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 	sessionID, err := newWebhookID("sess_")
 	if err != nil {
-		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
+		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 	if err := d.createSession(ctx, sessionID, event.KeyID, now); err != nil {
-		return gatewaywebhook.ExecutionRef{}, err
+		return platformwebhook.ExecutionRef{}, err
 	}
-	execution := &store.WebhookExecution{
+	execution := &platformwebhook.Execution{
 		ID:         executionID,
 		KeyID:      event.KeyID,
 		EventID:    event.Envelope.EventID,
@@ -113,16 +136,16 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 		BodyDigest: event.BodyDigest,
 		TurnID:     turnID,
 		SessionID:  sessionID,
-		State:      store.WebhookExecutionStateAccepted,
+		State:      platformwebhook.StateAccepted,
 		CreatedAt:  now,
 		UpdatedAt:  now,
 		ExpiresAt:  now.Add(d.retention),
 	}
 	if err := d.executions.InsertExecution(ctx, execution); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeWebhookExecutionConflict {
+		if fault.HasCode(err, platformwebhook.ErrorCodeExecutionConflict) {
 			return d.replayIdentical(ctx, event)
 		}
-		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
+		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 
 	turnRequest := webhookTurnRequest(sessionID, turnID, event)
@@ -134,38 +157,38 @@ func (d *webhookDispatcher) Dispatch(ctx context.Context, event *gatewaywebhook.
 			"error", err,
 		)
 		_ = d.executions.DeleteExecution(context.WithoutCancel(ctx), executionID)
-		return gatewaywebhook.ExecutionRef{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeRuntimeOverloaded, "runtime did not accept the turn")
+		return platformwebhook.ExecutionRef{}, platformwebhook.Errorf(platformwebhook.ErrorCodeRuntimeOverloaded, "runtime did not accept the turn")
 	}
 	d.startDrain(context.WithoutCancel(ctx), executionID, next, stop)
 
-	return gatewaywebhook.ExecutionRef{ExecutionID: executionID, TurnID: turnID}, nil
+	return platformwebhook.ExecutionRef{ExecutionID: executionID, TurnID: turnID}, nil
 }
 
-func (d *webhookDispatcher) replayIdentical(ctx context.Context, event *gatewaywebhook.AcceptedEvent) (gatewaywebhook.ExecutionRef, error) {
-	empty := gatewaywebhook.ExecutionRef{}
+func (d *webhookDispatcher) replayIdentical(ctx context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
+	empty := platformwebhook.ExecutionRef{}
 	previous, found, err := d.executions.ExecutionByNonce(ctx, event.KeyID, event.Nonce)
 	if err != nil {
-		return empty, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be read")
+		return empty, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be read")
 	}
 	if !found {
 		previous, found, err = d.executions.ExecutionByEvent(ctx, event.KeyID, event.Envelope.EventID)
 		if err != nil {
-			return empty, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be read")
+			return empty, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be read")
 		}
 		if !found {
 			return empty, nil
 		}
 	}
 	if previous.BodyDigest != event.BodyDigest {
-		return empty, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeReplayConflict, "identity was already used with different content")
+		return empty, platformwebhook.Errorf(platformwebhook.ErrorCodeReplayConflict, "identity was already used with different content")
 	}
-	if previous.State == store.WebhookExecutionStateAccepted || previous.State == store.WebhookExecutionStateRunning {
+	if previous.State == platformwebhook.StateAccepted || previous.State == platformwebhook.StateRunning {
 		d.settleReplayed(ctx, &previous, event)
 	}
-	return gatewaywebhook.ExecutionRef{ExecutionID: previous.ID, TurnID: previous.TurnID}, nil
+	return platformwebhook.ExecutionRef{ExecutionID: previous.ID, TurnID: previous.TurnID}, nil
 }
 
-func (d *webhookDispatcher) settleReplayed(ctx context.Context, previous *store.WebhookExecution, event *gatewaywebhook.AcceptedEvent) {
+func (d *webhookDispatcher) settleReplayed(ctx context.Context, previous *platformwebhook.Execution, event *platformwebhook.AcceptedEvent) {
 	if err := d.reconcileReplayed(ctx, previous, event); err != nil {
 		d.logger.WarnContext(ctx, "webhook replay reconcile failed",
 			"component", "webhook",
@@ -175,9 +198,9 @@ func (d *webhookDispatcher) settleReplayed(ctx context.Context, previous *store.
 	}
 }
 
-func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *store.WebhookExecution, event *gatewaywebhook.AcceptedEvent) error {
-	result, err := d.reconciler.reconcile(ctx, previous)
-	if err != nil || result.admitted {
+func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *platformwebhook.Execution, event *platformwebhook.AcceptedEvent) error {
+	result, err := d.reconciler.Reconcile(ctx, previous)
+	if err != nil || result.Admitted {
 		return err
 	}
 	if err := d.createSession(ctx, previous.SessionID, event.KeyID, d.clock().UTC()); err != nil {
@@ -203,7 +226,7 @@ func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID 
 		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return nil
 		}
-		return gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
+		return platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "execution identity could not be created")
 	}
 	return nil
 }
@@ -228,13 +251,13 @@ func (d *webhookDispatcher) Wait(ctx context.Context) error {
 
 func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next turnStep, stop func()) {
 	defer stop()
-	var derivation executionDerivation
+	var derivation platformwebhook.ExecutionDerivation
 	for {
 		event, err, ok := next()
 		if !ok || err != nil {
 			return
 		}
-		outcome, terminal := derivation.next(&event)
+		outcome, terminal := derivation.Next(&event)
 		if terminal && event.ID == "" {
 			return
 		}
@@ -245,11 +268,11 @@ func (d *webhookDispatcher) drain(ctx context.Context, executionID string, next 
 	}
 }
 
-func (d *webhookDispatcher) transition(ctx context.Context, executionID string, outcome *executionOutcome) {
-	if _, err := d.reconciler.write(ctx, executionID, outcome); err != nil {
+func (d *webhookDispatcher) transition(ctx context.Context, executionID string, outcome *platformwebhook.ExecutionOutcome) {
+	if _, err := d.reconciler.Write(ctx, executionID, outcome); err != nil {
 		d.logger.WarnContext(ctx, "webhook state transition failed",
 			"component", "webhook",
-			"state", outcome.state,
+			"state", outcome.State,
 			"error", err,
 		)
 	}
@@ -279,7 +302,7 @@ func startTurn(ctx context.Context, backend turn.AgentRuntime, turnRequest *turn
 	return next, release, nil
 }
 
-func webhookTurnRequest(sessionID, turnID string, event *gatewaywebhook.AcceptedEvent) *turn.TurnRequest {
+func webhookTurnRequest(sessionID, turnID string, event *platformwebhook.AcceptedEvent) *turn.TurnRequest {
 	return &turn.TurnRequest{
 		TurnID:         turnID,
 		SessionID:      sessionID,
@@ -291,7 +314,7 @@ func webhookTurnRequest(sessionID, turnID string, event *gatewaywebhook.Accepted
 	}
 }
 
-func webhookTurnParts(event *gatewaywebhook.AcceptedEvent) []runtimeingress.InputPart {
+func webhookTurnParts(event *platformwebhook.AcceptedEvent) []runtimeingress.InputPart {
 	parts := []runtimeingress.InputPart{
 		{Text: event.Envelope.Subject},
 		{Text: string(event.Envelope.Payload)},
@@ -304,25 +327,6 @@ func webhookTurnParts(event *gatewaywebhook.AcceptedEvent) []runtimeingress.Inpu
 	return parts
 }
 
-func failedEventCode(payload []byte) string {
-	var decoded struct {
-		Code string `json:"code"`
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil || decoded.Code == "" {
-		return string(turn.ErrorCodeRuntimeInternal)
-	}
-	return decoded.Code
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
-}
-
 func newWebhookID(prefix string) (string, error) {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err != nil {
@@ -332,18 +336,18 @@ func newWebhookID(prefix string) (string, error) {
 }
 
 type webhookStatusStore struct {
-	executions store.WebhookExecutionStore
+	executions platformwebhook.ExecutionStore
 }
 
-func (s *webhookStatusStore) ExecutionStatus(ctx context.Context, id string) (gatewaywebhook.ExecutionStatus, error) {
+func (s *webhookStatusStore) ExecutionStatus(ctx context.Context, id string) (platformwebhook.ExecutionStatus, error) {
 	execution, err := s.executions.Execution(ctx, id)
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeWebhookExecutionNotFound {
-			return gatewaywebhook.ExecutionStatus{}, gatewaywebhook.Errorf(gatewaywebhook.ErrorCodeExecutionNotFound, "unknown execution")
+		if fault.HasCode(err, platformwebhook.ErrorCodeExecutionNotFound) {
+			return platformwebhook.ExecutionStatus{}, platformwebhook.Errorf(platformwebhook.ErrorCodeExecutionNotFound, "unknown execution")
 		}
-		return gatewaywebhook.ExecutionStatus{}, err
+		return platformwebhook.ExecutionStatus{}, err
 	}
-	return gatewaywebhook.ExecutionStatus{
+	return platformwebhook.ExecutionStatus{
 		ExecutionID:   execution.ID,
 		TurnID:        execution.TurnID,
 		State:         execution.State,
@@ -442,13 +446,17 @@ func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	executions := store.NewWebhookExecutionStore(db)
-	sessions := turnstore.NewSessionService(db)
-	dispatcher, err := newWebhookDispatcher(sessions, executions, backend, time.Duration(cfg.Webhook.ReplayRetention), time.Now, logger)
+	executions, err := platformwebhook.NewSQLiteStore(db)
 	if err != nil {
 		return nil, err
 	}
-	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	sessions := turnstore.NewSessionService(db)
+	turns := turnstore.NewTurnStore(db)
+	dispatcher, err := newWebhookDispatcher(sessions, turns, executions, backend, time.Duration(cfg.Webhook.ReplayRetention), time.Now, logger)
+	if err != nil {
+		return nil, err
+	}
+	runs, err := workflow.NewStore(db, turns)
 	if err != nil {
 		return nil, err
 	}
@@ -469,7 +477,7 @@ func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
 		return nil, err
 	}
 	mux := http.NewServeMux()
-	mux.Handle(gatewaywebhook.StatusPathPrefix, status)
+	mux.Handle(platformwebhook.StatusPathPrefix, status)
 	mux.Handle("/", handler)
 	return &webhookListener{listen: cfg.Webhook.Listen, handler: mux, dispatcher: dispatcher}, nil
 }

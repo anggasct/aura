@@ -13,6 +13,10 @@ const (
 
 var envNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
+func ValidEnvName(name string) bool {
+	return envNamePattern.MatchString(name)
+}
+
 type Ref struct {
 	text string
 }

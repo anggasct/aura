@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const baseManifest = `api_version: aura.plugin/v1
@@ -265,8 +266,7 @@ func (e *testEnv) approve(id string, result *InstallResult) {
 }
 
 func hasCode(err error, want ErrorCode) bool {
-	code, ok := CodeOf(err)
-	return ok && code == want
+	return fault.HasCode(err, want)
 }
 
 func replaceOnce(t *testing.T, text, old, replacement string) string {

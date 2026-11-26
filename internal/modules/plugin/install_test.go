@@ -192,12 +192,25 @@ func mustSymlink(t *testing.T, target, link string) {
 
 func TestInstallRejectsAMissingSourceDirectory(t *testing.T) {
 	env := newTestEnv(t)
-	_, err := env.service.Install(t.Context(), filepath.Join(t.TempDir(), "missing"))
+	missing := filepath.Join(t.TempDir(), "missing")
+	_, err := env.service.Install(t.Context(), missing)
 	if !hasCode(err, ErrPathInvalid) {
 		t.Fatalf("Install error = %v", err)
 	}
-	if strings.Contains(err.Error(), t.TempDir()) {
+	if strings.Contains(err.Error(), missing) {
 		t.Fatalf("error names a path: %v", err)
+	}
+}
+
+func TestInstallErrorsDoNotLeakHostPaths(t *testing.T) {
+	env := newTestEnv(t)
+	writeFile(t, env.dir, "not a directory", 0o600)
+	_, err := env.service.Install(t.Context(), writeBundle(t, baseManifest, serverFiles()))
+	if !hasCode(err, ErrStorage) {
+		t.Fatalf("Install error = %v, want %s", err, ErrStorage)
+	}
+	if strings.Contains(err.Error(), env.dir) {
+		t.Fatalf("error leaks host path %q: %v", env.dir, err)
 	}
 }
 

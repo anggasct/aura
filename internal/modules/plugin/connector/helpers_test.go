@@ -304,14 +304,14 @@ func effectTool(h *host) *Tool {
 	return &h.cfg.Tools[1]
 }
 
-func invokeTool(t *testing.T, h *host, tool *Tool) (json.RawMessage, *Error) {
+func invokeTool(t *testing.T, h *host, tool *Tool) (json.RawMessage, *callFailure) {
 	t.Helper()
 	return h.invoke(t.Context(), &call{tool: tool, arguments: json.RawMessage(`{"q":"hello"}`), idempotencyKey: "key-1"})
 }
 
-func mustCode(t *testing.T, fail *Error, want ErrorCode) {
+func mustCode(t *testing.T, fail *callFailure, want ErrorCode) {
 	t.Helper()
-	if fail == nil || fail.Code != want {
+	if fail == nil || fail.code != want {
 		t.Fatalf("failure = %v, want %s", fail, want)
 	}
 }

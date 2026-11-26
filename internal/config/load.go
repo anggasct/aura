@@ -3,7 +3,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -255,87 +254,6 @@ func ValidateTerminal(t Terminal) error {
 	return nil
 }
 
-func listenAddressProblem(field, address string) error {
-	host, portText, err := net.SplitHostPort(address)
-	if err != nil {
-		return configkit.Invalid(field, "must be host:port")
-	}
-	port, err := strconv.Atoi(portText)
-	if err != nil || port < 1 || port > 65535 {
-		return configkit.Invalid(field, "port must be between 1 and 65535")
-	}
-	if host == "" {
-		return configkit.Invalid(field, "must include a host")
-	}
-	return nil
-}
-
-func ValidateWebhook(w *Webhook) error {
-	if err := listenAddressProblem("webhook.listen_address", w.Listen); err != nil {
-		return err
-	}
-	if w.MaxBodySize <= 0 {
-		return configkit.Invalid("webhook.max_body_size", "must be positive")
-	}
-	if w.TimestampTolerance <= 0 {
-		return configkit.Invalid("webhook.timestamp_tolerance", "must be positive")
-	}
-	if w.ReplayRetention <= 0 {
-		return configkit.Invalid("webhook.replay_retention", "must be positive")
-	}
-	if w.RequestsPerMinute < 1 {
-		return configkit.Invalid("webhook.requests_per_minute", "must be at least 1")
-	}
-	seen := make(map[string]bool, len(w.Keys))
-	var problems []error
-	for i, key := range w.Keys {
-		field := fmt.Sprintf("webhook.keys[%d]", i)
-		switch {
-		case key.ID == "":
-			problems = append(problems, configkit.Invalid(field+".id", "must not be empty"))
-			continue
-		case seen[key.ID]:
-			problems = append(problems, configkit.Invalid(field+".id", fmt.Sprintf("%q is configured more than once", key.ID)))
-			continue
-		}
-		seen[key.ID] = true
-		if !envNamePattern.MatchString(key.SecretEnv) {
-			problems = append(problems, configkit.Invalid(field+".secret_env", fmt.Sprintf("%q is not a valid environment variable name", key.SecretEnv)))
-		}
-		if key.AcceptUntil != "" {
-			if _, err := time.Parse(time.RFC3339, key.AcceptUntil); err != nil {
-				problems = append(problems, configkit.Invalid(field+".accept_until", "must be an RFC3339 timestamp or empty"))
-			}
-		}
-	}
-	if err := errors.Join(problems...); err != nil {
-		return err
-	}
-	if !w.Enabled {
-		return nil
-	}
-	if len(w.Keys) == 0 {
-		return configkit.Invalid("webhook.enabled", "requires at least one key")
-	}
-	now := time.Now().UTC()
-	active := false
-	for _, key := range w.Keys {
-		if key.AcceptUntil == "" {
-			active = true
-			break
-		}
-		until, err := time.Parse(time.RFC3339, key.AcceptUntil)
-		if err == nil && until.After(now) {
-			active = true
-			break
-		}
-	}
-	if !active {
-		return configkit.Invalid("webhook.enabled", "requires at least one key whose accept_until has not passed")
-	}
-	return nil
-}
-
 var discordAccountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 func ValidateDiscord(discord *Discord) error {
@@ -449,7 +367,7 @@ func ValidateTelegram(telegram *Telegram) error {
 
 func ValidateHTTP(http *HTTP) error {
 	var problems []error
-	if err := listenAddressProblem("channels.http.listen_address", http.ListenAddress); err != nil {
+	if err := configkit.ValidateListenAddress("channels.http.listen_address", http.ListenAddress); err != nil {
 		problems = append(problems, err)
 	}
 	if http.MaxBodyBytes < 1 || http.MaxBodyBytes > HTTPMaxBodyCeiling {
@@ -496,7 +414,7 @@ func telegramModeProblems(field string, account *TelegramAccount, tokenRefs map[
 func telegramWebhookProblems(telegram *Telegram) []error {
 	var problems []error
 	webhook := &telegram.Webhook
-	if err := listenAddressProblem("channels.telegram.webhook.listen_address", webhook.ListenAddress); err != nil {
+	if err := configkit.ValidateListenAddress("channels.telegram.webhook.listen_address", webhook.ListenAddress); err != nil {
 		problems = append(problems, err)
 	}
 	if webhook.MaxBodyBytes < 1 || webhook.MaxBodyBytes > TelegramWebhookMaxBodyCeiling {
@@ -684,44 +602,6 @@ func ValidateMemory(memory *Memory) error {
 	}
 	if strings.TrimSpace(memory.Locale) != "" {
 		problems = append(problems, configkit.Invalid("memory.locale", "is not supported by this build"))
-	}
-	return errors.Join(problems...)
-}
-
-func ValidateSkills(skillsConfig *Skills) error {
-	if skillsConfig == nil {
-		return nil
-	}
-	var problems []error
-	if len(skillsConfig.Roots) == 0 {
-		problems = append(problems, configkit.Invalid("skills.roots", "must list at least one directory"))
-	}
-	for _, root := range skillsConfig.Roots {
-		switch {
-		case strings.TrimSpace(root) == "":
-			problems = append(problems, configkit.Invalid("skills.roots", "entries must not be empty"))
-		case !filepath.IsAbs(root):
-			problems = append(problems, configkit.Invalid("skills.roots", "entries must be absolute paths"))
-		case filepath.Clean(root) != root:
-			problems = append(problems, configkit.Invalid("skills.roots", "entries must be clean paths"))
-		}
-	}
-	if skillsConfig.MaxIndexedSkills <= 0 || skillsConfig.MaxIndexedSkills > 4096 {
-		problems = append(problems, configkit.Invalid("skills.max_indexed_skills", "must be between 1 and 4096"))
-	}
-	if skillsConfig.MaxInstructionTokens <= 0 || skillsConfig.MaxInstructionTokens > 128000 {
-		problems = append(problems, configkit.Invalid("skills.max_instruction_tokens", "must be between 1 and 128000"))
-	}
-	if skillsConfig.MaxSessionContextTokens <= 0 {
-		problems = append(problems, configkit.Invalid("skills.max_session_context_tokens", "must be positive"))
-	} else if skillsConfig.MaxSessionContextTokens < skillsConfig.MaxInstructionTokens {
-		problems = append(problems, configkit.Invalid("skills.max_session_context_tokens", "must be at least skills.max_instruction_tokens"))
-	}
-	if skillsConfig.MaxResourceBytes <= 0 || skillsConfig.MaxResourceBytes > 1<<30 {
-		problems = append(problems, configkit.Invalid("skills.max_resource_bytes", "must be between 1 and 1073741824"))
-	}
-	if skillsConfig.QuarantineRetention <= 0 {
-		problems = append(problems, configkit.Invalid("skills.quarantine_retention", "must be positive"))
 	}
 	return errors.Join(problems...)
 }

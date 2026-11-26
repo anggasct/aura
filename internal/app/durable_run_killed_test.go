@@ -9,12 +9,12 @@ import (
 	"os"
 	"testing"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/effect"
+	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store"
 )
 
