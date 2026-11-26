@@ -11,6 +11,4 @@ internal/modules/codeexec/interpreter  # until this module's errors move to plat
 internal/modules/fetch  # until this module's errors move to platform/fault with the module
 internal/modules/gitsync  # until this module's errors move to platform/fault with the module
 internal/modules/mcp  # until this module's errors move to platform/fault with the module
-internal/modules/plugin/wire  # plugin protocol errors; plugins import only the wire contract
 internal/modules/workflow  # until this module's errors move to platform/fault with the module
-plugins/gmail/connector  # plugin protocol errors; plugins import only the wire contract

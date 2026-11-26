@@ -161,7 +161,7 @@ func receiverName(expr ast.Expr) string {
 func findCodedErrors(packages []sourcePackage) []finding {
 	var findings []finding
 	for _, pkg := range packages {
-		if isTestKit(pkg.name) || within(pkg.path, faultPackage) {
+		if isTestKit(pkg.name) || within(pkg.path, faultPackage) || within(pkg.path, pluginWire) || classify(pkg.path).kind == kindPlugin {
 			continue
 		}
 		for _, file := range pkg.files {

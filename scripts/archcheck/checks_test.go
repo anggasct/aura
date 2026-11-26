@@ -323,6 +323,45 @@ func TestCodedErrorsReportsCopiedErrorTypesOutsideFault(t *testing.T) {
 	}
 }
 
+func TestCodedErrorsExemptsPluginWireProtocolBoundary(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		dir    string
+		source string
+		want   []string
+	}{
+		{name: "plugin wire contract", dir: pluginWire, source: "type Error struct{}\nfunc CodeOf(err error) string { return \"\" }\n"},
+		{name: "out-of-process plugin connector", dir: "plugins/gmail/connector", source: "type Error struct{}\n"},
+		{
+			name:   "plugin module is still checked",
+			dir:    "internal/modules/plugin",
+			source: "type Error struct{}\nfunc CodeOf(err error) string { return \"\" }\n",
+			want: []string{
+				"codederrors: internal/modules/plugin declares its own CodeOf; use fault.CodeOf",
+				"codederrors: internal/modules/plugin declares its own Error type; use platform/fault",
+			},
+		},
+		{
+			name:   "plugin connector host is still checked",
+			dir:    "internal/modules/plugin/connector",
+			source: "type Error struct{}\n",
+			want: []string{
+				"codederrors: internal/modules/plugin/connector declares its own Error type; use platform/fault",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := fixtureViolations("codederrors.allow", 1, findCodedErrors([]sourcePackage{sourceFixture(t, tc.dir, tc.source)}))
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("findCodedErrors = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBaselinesReportStaleDuplicateAndMalformedEntries(t *testing.T) {
 	t.Parallel()
 	setters := baseline{file: "setters.allow", fields: 2}
