@@ -57,7 +57,6 @@ type ADKExecutor struct {
 	ownerContext      string
 	profile           ProfileContextProvider
 	skills            SkillContextProvider
-	knowledge         KnowledgeContextProvider
 	providers         []turn.ContextProvider
 }
 
@@ -372,26 +371,6 @@ func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRe
 			Order:   turn.ContextOrderSkills,
 			Content: skills,
 		})
-	}
-	knowledgeTurn, knowledgeRan := x.knowledgeContextFor(ctx, req)
-	if len(req.Knowledge) > 0 || knowledgeTurn.Block != "" || knowledgeRan {
-		var knowledgeEvents []turn.Event
-		if knowledgeRan {
-			retrieved, err := knowledgeRetrievedEvent(&knowledgeTurn)
-			if err != nil {
-				return nil, err
-			}
-			knowledgeEvents = []turn.Event{retrieved}
-		}
-		block := turn.ContextBlock{
-			Order:   turn.ContextOrderKnowledge,
-			Content: knowledgeTurn.Block,
-			Events:  knowledgeEvents,
-		}
-		if len(req.Knowledge) > 0 {
-			block.Caveat = knowledgeCaveat
-		}
-		blocks = append(blocks, block)
 	}
 	for _, provider := range x.providers {
 		provided, err := provider.TurnContext(ctx, req)

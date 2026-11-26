@@ -3,14 +3,17 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -97,17 +100,30 @@ func (r *knowledgeTurnRig) lastMode(t *testing.T) string {
 
 func (r *knowledgeTurnRig) toolSearch(t *testing.T, scope []string, query string, class principal.Class) (mode string, results int) {
 	t.Helper()
-	searcher := &knowledgeToolSearcher{retriever: r.retriever}
-	raw, err := searcher.SearchKnowledge(t.Context(), scope, query, 5, class)
+	adapter := knowledge.NewToolAdapter(r.retriever)
+	args, err := json.Marshal(struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}{Query: query, Limit: 5})
 	if err != nil {
-		t.Fatalf("SearchKnowledge: %v", err)
+		t.Fatalf("marshal args: %v", err)
+	}
+	res, err := adapter(t.Context(), &toolbroker.ToolRequest{
+		ToolName:       "kb_search",
+		ToolVersion:    "v1",
+		Arguments:      args,
+		Knowledge:      scope,
+		PrincipalClass: class,
+	}, approval.Constraints{})
+	if err != nil {
+		t.Fatalf("kb_search adapter: %v", err)
 	}
 	var output struct {
 		Mode    string            `json:"mode"`
 		Results []json.RawMessage `json:"results"`
 	}
-	if err := json.Unmarshal(raw, &output); err != nil {
-		t.Fatalf("decode output %s: %v", raw, err)
+	if err := json.Unmarshal(res.Output, &output); err != nil {
+		t.Fatalf("decode output %s: %v", res.Output, err)
 	}
 	return output.Mode, len(output.Results)
 }
@@ -175,9 +191,26 @@ func TestKnowledgeSearchToolReturnsTheModeAndFindsAChunkByMeaning(t *testing.T) 
 	}
 }
 
+func decodeContextEventPayload(t *testing.T, blocks []turn.ContextBlock) (mode string, retrieved int) {
+	t.Helper()
+	if len(blocks) != 1 || len(blocks[0].Events) != 1 {
+		t.Fatalf("blocks = %+v, want 1 block with 1 event", blocks)
+	}
+	var payload struct {
+		Mode   string `json:"mode"`
+		Counts struct {
+			Retrieved int `json:"retrieved"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(blocks[0].Events[0].Payload, &payload); err != nil {
+		t.Fatalf("decode event payload: %v", err)
+	}
+	return payload.Mode, payload.Counts.Retrieved
+}
+
 func TestKnowledgeQueriesLeaveTheHostOnlyWhenEveryGateHolds(t *testing.T) {
 	rig := newEmbeddedRig(t, "")
-	provider, err := knowledge.NewContextProvider(rig.retriever)
+	provider, err := knowledge.NewContextProvider(rig.retriever, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
@@ -195,12 +228,16 @@ func TestKnowledgeQueriesLeaveTheHostOnlyWhenEveryGateHolds(t *testing.T) {
 	for name, test := range tests {
 		t.Run("turn context "+name, func(t *testing.T) {
 			rig.provider.reset()
-			evidence, err := provider.KnowledgeContext(t.Context(), &turn.TurnRequest{
+			blocks, err := provider.TurnContext(t.Context(), &turn.TurnRequest{
 				Knowledge: []string{"support", "faq"}, PrincipalClass: test.class,
 				Parts: []runtimeingress.InputPart{{Text: meaningQuery}},
 			})
-			if err != nil || evidence.Mode != test.wantMode || rig.queriesSent() != test.wantSends {
-				t.Fatalf("evidence mode %q, sends %d, error %v; want %q and %d", evidence.Mode, rig.queriesSent(), err, test.wantMode, test.wantSends)
+			if err != nil {
+				t.Fatalf("TurnContext: %v", err)
+			}
+			gotMode, _ := decodeContextEventPayload(t, blocks)
+			if gotMode != test.wantMode || rig.queriesSent() != test.wantSends {
+				t.Fatalf("mode %q, sends %d; want %q and %d", gotMode, rig.queriesSent(), test.wantMode, test.wantSends)
 			}
 		})
 		t.Run("kb_search "+name, func(t *testing.T) {
@@ -422,16 +459,20 @@ func TestKnowledgeSlowEmbeddingProviderFallsBackToLexicalWithinTheBudget(t *test
 
 	budgeted, cancel := context.WithTimeout(t.Context(), knowledge.RetrievalBudget)
 	defer cancel()
-	provider, err := knowledge.NewContextProvider(rig.retriever)
+	provider, err := knowledge.NewContextProvider(rig.retriever, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
-	evidence, err := provider.KnowledgeContext(budgeted, &turn.TurnRequest{
+	blocks, err := provider.TurnContext(budgeted, &turn.TurnRequest{
 		Knowledge: []string{"support"}, PrincipalClass: principal.ClassOwner,
 		Parts: []runtimeingress.InputPart{{Text: meaningQuery}},
 	})
-	if err != nil || evidence.Mode != knowledge.ModeLexicalFallback || evidence.Retrieved == 0 {
-		t.Fatalf("turn context = %+v, %v, want lexical hits in fallback mode", evidence, err)
+	if err != nil {
+		t.Fatalf("TurnContext: %v", err)
+	}
+	gotMode, gotRetrieved := decodeContextEventPayload(t, blocks)
+	if gotMode != knowledge.ModeLexicalFallback || gotRetrieved == 0 {
+		t.Fatalf("turn context = mode %q retrieved %d, want lexical hits in fallback mode", gotMode, gotRetrieved)
 	}
 	once.Do(func() { close(release) })
 }
@@ -439,7 +480,7 @@ func TestKnowledgeSlowEmbeddingProviderFallsBackToLexicalWithinTheBudget(t *test
 func TestBuildKnowledgeRuntimeStopsItsLoaderWithTheRuntime(t *testing.T) {
 	rig := newVectorTurnRig(t, "")
 	registry := personaRegistry(t, rig.cfgPath)
-	runtimeState, enabled, err := buildKnowledgeRuntime(t.Context(), rig.cfg, registry)
+	runtimeState, enabled, err := buildKnowledgeRuntime(t.Context(), rig.cfg, registry, slog.New(slog.DiscardHandler))
 	if err != nil || !enabled || runtimeState.vectors == nil {
 		t.Fatalf("buildKnowledgeRuntime = %v, %v, vectors %v", enabled, err, runtimeState.vectors)
 	}

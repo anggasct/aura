@@ -106,7 +106,7 @@ func (b *build) buildSkills(ctx context.Context) error {
 }
 
 func (b *build) buildKnowledge(ctx context.Context) error {
-	runtime, enabled, err := buildKnowledgeRuntime(ctx, b.cfg, b.registry)
+	runtime, enabled, err := buildKnowledgeRuntime(ctx, b.cfg, b.registry, b.logger)
 	if err != nil {
 		return err
 	}
@@ -120,8 +120,10 @@ func (b *build) buildKnowledge(ctx context.Context) error {
 		runtime.close()
 		return err
 	}
-	runtime.attachSearch(b.builtin)
-	b.execOpts = append(b.execOpts, runtimeadk.WithKnowledgeContext(runtime.provider))
+	if err := runtime.attachSearch(b.builtin); err != nil {
+		return err
+	}
+	b.execOpts = append(b.execOpts, runtimeadk.WithContextProvider(runtime.provider))
 	return nil
 }
 

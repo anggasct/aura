@@ -443,7 +443,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 		opts = append(opts, runtimeadk.WithSkillContext(wiring.skillContext))
 	}
 	if wiring.knowledge != nil {
-		opts = append(opts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
+		opts = append(opts, runtimeadk.WithContextProvider(wiring.knowledge))
 	}
 	executor := newLedgerExecutor(t, db, &ledgerTurn{scenario: scenario, ledger: ledger, options: opts})
 	events := turnstore.NewEventStore(db)

@@ -37,7 +37,9 @@ func newKBSearchRig(t *testing.T) *kbSearchRig {
 	if err != nil {
 		t.Fatalf("toolsbuiltin.New: %v", err)
 	}
-	builtin.SetKnowledgeSearcher(&knowledgeToolSearcher{retriever: rig.retriever})
+	if err := builtin.Broker().RegisterProvider(knowledge.NewToolProvider(rig.retriever)); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
+	}
 	return &kbSearchRig{knowledgeTurnRig: rig, builtin: builtin, personas: registryPersonas{registry: registry}}
 }
 

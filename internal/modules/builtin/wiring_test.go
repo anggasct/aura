@@ -24,11 +24,12 @@ import (
 func TestWiringRegistersEveryBuiltinAdapter(t *testing.T) {
 	toolsCfg := config.DefaultTools()
 	toolsCfg.Workspace = t.TempDir()
-	adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &knowledgeHolder{}, &codeHolder{})
+	adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &codeHolder{})
 	if err != nil {
 		t.Fatalf("builtinAdapters: %v", err)
 	}
 	want := tools.DefinitionsByKey()
+	delete(want, tools.KBSearchToolName+"@"+tools.Version)
 	if len(adapters) != len(want) {
 		t.Fatalf("registered adapters = %d, want %d", len(adapters), len(want))
 	}

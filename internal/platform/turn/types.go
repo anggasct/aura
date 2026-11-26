@@ -92,13 +92,6 @@ type UntrustedDocument struct {
 	Content      string
 }
 
-type KnowledgeEvidence struct {
-	Block     string
-	ChunkIDs  []string
-	Retrieved int
-	Mode      string
-}
-
 type UntrustedRecall struct {
 	Query     string
 	Summary   string
@@ -119,8 +112,6 @@ const (
 	EventKindTurnFailed       = "turn.failed"
 	EventKindTurnCancelled    = "turn.cancelled"
 	EventKindSkillActivated   = "skill.activated.v1"
-
-	EventKindKnowledgeRetrieved = "kb.retrieved.v1"
 )
 
 const AuthorSystem = "system"
@@ -151,9 +142,6 @@ const (
 
 	SkillContextStart = "[untrusted_skill_context"
 	SkillContextEnd   = "[/untrusted_skill_context]"
-
-	KnowledgeContextStart = "[untrusted_knowledge"
-	KnowledgeContextEnd   = "[/untrusted_knowledge]"
 )
 
 type AgentRuntime interface {

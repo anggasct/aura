@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"time"
 
@@ -161,27 +162,11 @@ type knowledgeRuntime struct {
 	vectors   *knowledgeVectorRuntime
 }
 
-type knowledgeToolSearcher struct {
-	retriever *knowledge.Retriever
-}
-
-func (s *knowledgeToolSearcher) SearchKnowledge(ctx context.Context, scope []string, query string, limit int, class principal.Class) (json.RawMessage, error) {
-	budgeted, cancel := context.WithTimeout(ctx, knowledge.RetrievalBudget)
-	defer cancel()
-	found, err := s.retriever.Search(budgeted, &knowledge.SearchRequest{Scope: scope, Query: query, Depth: knowledge.SearchDepth, Class: class})
-	if err != nil {
-		return nil, err
-	}
-	output := knowledge.ShapeSearch(found.Hits, limit)
-	output.Mode = found.Mode
-	return json.Marshal(output)
-}
-
-func (r *knowledgeRuntime) attachSearch(builtin *toolsbuiltin.Executor) {
+func (r *knowledgeRuntime) attachSearch(builtin *toolsbuiltin.Executor) error {
 	if r == nil || builtin == nil {
-		return
+		return nil
 	}
-	builtin.SetKnowledgeSearcher(&knowledgeToolSearcher{retriever: r.retriever})
+	return builtin.Broker().RegisterProvider(knowledge.NewToolProvider(r.retriever))
 }
 
 func (r *knowledgeRuntime) close() {
@@ -204,7 +189,7 @@ func personasListKnowledge(registry *auraagent.Registry) bool {
 	return false
 }
 
-func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry *auraagent.Registry) (rt *knowledgeRuntime, enabled bool, err error) {
+func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry *auraagent.Registry, logger *slog.Logger) (rt *knowledgeRuntime, enabled bool, err error) {
 	if !personasListKnowledge(registry) {
 		return nil, false, nil
 	}
@@ -227,7 +212,7 @@ func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry 
 		_ = pool.Close()
 		return nil, false, err
 	}
-	provider, err := knowledge.NewContextProvider(retriever)
+	provider, err := knowledge.NewContextProvider(retriever, logger)
 	if err != nil {
 		vectors.close()
 		_ = pool.Close()
