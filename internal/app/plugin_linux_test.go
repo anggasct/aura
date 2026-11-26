@@ -31,17 +31,17 @@ func installApprovedCLIPlugin(t *testing.T, h *mcpHarness, manifest string) *plu
 	return service
 }
 
-func (h *mcpHarness) startPlugins(t *testing.T, starter mcp.SessionStarter, plugins *plugin.Module) *mcpRuntime {
+func (h *mcpHarness) startPlugins(t *testing.T, starter mcp.SessionStarter, plugins *plugin.Module) *mcp.Module {
 	t.Helper()
 	trustPath, err := mcpTrustRegistryPath(&h.cfg)
 	if err != nil {
 		t.Fatalf("mcpTrustRegistryPath: %v", err)
 	}
-	started, err := startMCPRuntime(t.Context(), &mcpRuntimeOptions{
-		Config: &h.cfg, Broker: h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), SessionStarter: starter, TrustPath: trustPath, Plugins: mcpPluginsFromBackends(plugins.MCPBackends()),
+	started, err := mcp.New(t.Context(), &mcp.ModuleDeps{
+		Config: h.cfg.MCP, Broker: h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), SessionStarter: starter, TrustPath: trustPath, Plugins: mcpPluginsFromBackends(plugins.MCPBackends()),
 	})
 	if err != nil {
-		t.Fatalf("startMCPRuntime: %v", err)
+		t.Fatalf("mcp.New: %v", err)
 	}
 	t.Cleanup(func() { _ = started.Close(context.WithoutCancel(t.Context())) })
 	return started
@@ -75,13 +75,13 @@ func TestPluginRuntimeExposesOnlyApprovedToolsOfAnApprovedPlugin(t *testing.T) {
 	}
 	starter := newFixtureStarter(map[string][]string{"plugin-demo": {"forecast", "export_all"}})
 	started := h.startPlugins(t, starter, plugins)
-	if started.hasCheck {
+	if len(started.HealthChecks()) != 0 {
 		t.Fatal("a plugin-only runtime registered the mcp server check")
 	}
 	if names := h.toolNames(); !slices.Contains(names, "plugin_demo_forecast") || slices.Contains(names, "plugin_demo_export_all") {
 		t.Fatalf("tools = %v", names)
 	}
-	statuses := started.manager.PluginStatuses()
+	statuses := started.PluginStatuses()
 	if len(statuses) != 1 || !slices.Equal(statuses[0].Drift, []string{"export_all"}) {
 		t.Fatalf("statuses = %+v", statuses)
 	}

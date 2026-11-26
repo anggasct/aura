@@ -10,6 +10,8 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const maxInlineOutputBytes = 64 << 10
@@ -241,7 +243,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 	approval, err := e.interpreter.requireApproval(ctx, e.spec.ID, e.spec.Version, e.definitionDigest)
 	if err != nil {
 		code := ErrorCodeStepFailed
-		if coded, ok := CodeOf(err); ok {
+		if coded, ok := fault.CodeOf[ErrorCode](err); ok {
 			code = coded
 		}
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
@@ -255,7 +257,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 	output, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
 		code := ErrorCodeStepFailed
-		if coded, ok := CodeOf(err); ok {
+		if coded, ok := fault.CodeOf[ErrorCode](err); ok {
 			code = coded
 		}
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
@@ -370,38 +372,26 @@ func (e *stepExecution) terminal(ctx context.Context, stepID string, update *ste
 		e.statuses[stepID] = update.Status
 		e.mu.Unlock()
 	}
-	// The whole transaction runs under writeMu, acquired before the
-	// transaction opens: a writeMu holder therefore never owns the SQLite
-	// write lock while waiting on the mutex, and a mutex holder never
-	// waits on a SQLite lock the next writeMu waiter owns. Without this
-	// ordering a step transaction holding the SQLite write lock would
-	// deadlock against a suspend/resume status write busy-waiting for it.
 	e.interpreter.writeMu.Lock()
 	defer e.interpreter.writeMu.Unlock()
-	tx, err := e.interpreter.store.BeginStepTransaction(context.WithoutCancel(ctx))
-	if err != nil {
-		return fmt.Errorf("begin step %s transition: %w", stepID, err)
-	}
-	if err := UpdateStep(context.WithoutCancel(ctx), tx, e.runID, stepID, update); err != nil {
-		_ = tx.Rollback()
-		return err
-	}
-	if update.Status == StepSucceeded || update.Status == StepFailed || update.Status == StepSkipped {
-		e.statusMu.Lock()
-		runStatus := RunRunning
-		if len(e.awaiting) > 0 {
-			runStatus = RunSuspended
-		}
-		e.statusMu.Unlock()
-		if err := e.interpreter.store.SetRunStatusTx(context.WithoutCancel(ctx), tx, e.runID, runStatus); err != nil {
-			_ = tx.Rollback()
+	persistCtx := context.WithoutCancel(ctx)
+	return sqlite.RunInTx(persistCtx, e.interpreter.store.db, func(txCtx context.Context) error {
+		if err := e.interpreter.store.updateStep(txCtx, e.runID, stepID, update); err != nil {
 			return err
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit step %s transition: %w", stepID, err)
-	}
-	return nil
+		if update.Status == StepSucceeded || update.Status == StepFailed || update.Status == StepSkipped {
+			e.statusMu.Lock()
+			runStatus := RunRunning
+			if len(e.awaiting) > 0 {
+				runStatus = RunSuspended
+			}
+			e.statusMu.Unlock()
+			if err := e.interpreter.store.SetRunStatus(txCtx, e.runID, runStatus); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (e *stepExecution) failRun(ctx context.Context, stepID string, err error) {
@@ -578,9 +568,9 @@ func finalFailure(code string) bool {
 	}
 }
 
-func finalStepError(stepID string, attempt int, code string) *Error {
+func finalStepError(stepID string, attempt int, code string) error {
 	if finalFailure(code) {
-		return &Error{Code: ErrorCode(code), Detail: fmt.Sprintf("step %s failed with %s, which is not retried", stepID, code)}
+		return codedError(ErrorCode(code), fmt.Sprintf("step %s failed with %s, which is not retried", stepID, code))
 	}
-	return &Error{Code: ErrorCode(code), Detail: fmt.Sprintf("step %s exhausted %d attempts", stepID, attempt+1)}
+	return codedError(ErrorCode(code), fmt.Sprintf("step %s exhausted %d attempts", stepID, attempt+1))
 }

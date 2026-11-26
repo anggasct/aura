@@ -14,8 +14,8 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -24,7 +24,7 @@ import (
 const toolVersion = "v1"
 
 type ManagerOptions struct {
-	Config            *config.MCP
+	Config            *Config
 	Broker            *toolbroker.Broker
 	TrustRegistry     TrustRegistry
 	TrustRegistryPath string
@@ -39,7 +39,7 @@ type ManagerOptions struct {
 }
 
 type Manager struct {
-	cfg               *config.MCP
+	cfg               *Config
 	broker            *toolbroker.Broker
 	trustRegistry     TrustRegistry
 	httpClient        *http.Client
@@ -227,7 +227,7 @@ func (m *Manager) recordOutcome(ctx context.Context, serverName string, err erro
 	if err == nil {
 		return
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		code = ErrServerUnavailable
 	}
@@ -328,7 +328,7 @@ func (m *Manager) startServer(ctx context.Context, target *startTarget, transpor
 	return nil
 }
 
-func (m *Manager) requireConfigTrust(ctx context.Context, serverCfg *config.MCPServer) error {
+func (m *Manager) requireConfigTrust(ctx context.Context, serverCfg *ServerConfig) error {
 	configDigest, err := ComputeConfigDigest(serverCfg)
 	if err != nil {
 		return err
@@ -343,7 +343,7 @@ func (m *Manager) requireConfigTrust(ctx context.Context, serverCfg *config.MCPS
 	return nil
 }
 
-func (m *Manager) pinToolSurface(ctx context.Context, serverCfg *config.MCPServer, discovered []DiscoveredTool) error {
+func (m *Manager) pinToolSurface(ctx context.Context, serverCfg *ServerConfig, discovered []DiscoveredTool) error {
 	digest, err := ComputeTrustDigest(serverCfg, discovered)
 	if err != nil {
 		return err

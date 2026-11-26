@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -34,7 +33,7 @@ func TestApprovedProposalRunKeepsTheProposalTaint(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runID, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+			runID, err := workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposed.ProposalID, h.showCall, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -88,7 +87,7 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 		t.Run("scheduled start/"+tc.name, func(t *testing.T) {
 			controller, runs, _ := workflowToolFixture(t, "book_visit")
 			workflows := &scheduleWorkflows{}
-			workflows.set(controller.interpreter)
+			workflows.set(controller.Interpreter())
 			turns := &engineTurnRunner{workflows: workflows}
 			fired, err := turns.RunTurn(t.Context(), &schedule.TurnRequest{PrincipalID: tc.principal, IdempotencyKey: "cron/job-1/2026-11-13T03:00:00Z", WorkflowID: "book_visit"})
 			if tc.refused {
@@ -126,8 +125,8 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 		t.Run("card/"+tc.name, func(t *testing.T) {
 			h := proposalFixture(t)
 			bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-			h.controller.enableProposalCards(h.cfg, []proposalOfferer{bound}, slog.New(slog.DiscardHandler))
-			go h.controller.runProposalCards(t.Context())
+			h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+			go h.controller.RunProposalCards(t.Context())
 			owner := *h.owner
 			owner.Tainted = tc.tainted
 			proposed, err := h.controller.Propose(t.Context(), &owner, json.RawMessage(coveredProposal))

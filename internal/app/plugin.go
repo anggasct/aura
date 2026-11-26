@@ -8,7 +8,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -61,8 +60,8 @@ func buildPluginModule(ctx context.Context, cfg *appconfig.Config, db *sql.DB, b
 	})
 }
 
-func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
-	return legacyconfig.MCPServer{
+func mcpServerFromBackend(s *plugin.BackendServer) mcp.ServerConfig {
+	out := mcp.ServerConfig{
 		Name:           s.Name,
 		Transport:      s.Transport,
 		Command:        s.Command,
@@ -70,10 +69,14 @@ func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
 		URL:            s.URL,
 		StartupTimeout: s.StartupTimeout,
 		RequestTimeout: s.RequestTimeout,
-		ConnectTimeout: s.ConnectTimeout,
 		MaxMessageSize: s.MaxMessageSize,
 		Capabilities:   slices.Clone(s.Capabilities),
 	}
+	if s.ConnectTimeout > 0 {
+		ct := s.ConnectTimeout
+		out.ConnectTimeout = &ct
+	}
+	return out
 }
 
 func mcpPluginsFromBackends(backends []plugin.Active) []mcp.PluginServer {
@@ -100,11 +103,11 @@ func mcpPluginsFromBackends(backends []plugin.Active) []mcp.PluginServer {
 	return servers
 }
 
-func mcpPluginStatuses(mcpServers *mcpRuntime) []plugin.RuntimeStatus {
-	if mcpServers == nil || mcpServers.manager == nil {
+func mcpPluginStatuses(mcpServers *mcp.Module) []plugin.RuntimeStatus {
+	if mcpServers == nil {
 		return nil
 	}
-	statuses := mcpServers.manager.PluginStatuses()
+	statuses := mcpServers.PluginStatuses()
 	out := make([]plugin.RuntimeStatus, 0, len(statuses))
 	for _, status := range statuses {
 		out = append(out, plugin.RuntimeStatus{
@@ -116,7 +119,7 @@ func mcpPluginStatuses(mcpServers *mcpRuntime) []plugin.RuntimeStatus {
 	return out
 }
 
-func pluginHealthCheck(mod *plugin.Module, mcpServers *mcpRuntime, timeout time.Duration) (health.RegisteredCheck, bool, error) {
+func pluginHealthCheck(mod *plugin.Module, mcpServers *mcp.Module, timeout time.Duration) (health.RegisteredCheck, bool, error) {
 	if mod == nil {
 		return health.RegisteredCheck{}, false, nil
 	}

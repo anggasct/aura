@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
@@ -34,7 +33,7 @@ func (s stubEgressResolver) LookupIP(_ context.Context, _ string) ([]net.IP, err
 }
 
 func TestMCPEndpointPolicyLoopback(t *testing.T) {
-	policy := mcpEndpointPolicy{}
+	policy := mcp.NewEndpointPolicy(nil)
 	for _, raw := range []string{
 		"http://127.0.0.1:8080/mcp",
 		"http://localhost:8080/mcp",
@@ -62,7 +61,7 @@ func TestMCPEndpointPolicyLoopback(t *testing.T) {
 
 func TestMCPEndpointPolicyRemote(t *testing.T) {
 	public := stubEgressResolver{ips: []net.IP{net.ParseIP("93.184.216.34")}}
-	policy := mcpEndpointPolicy{resolver: public}
+	policy := mcp.NewEndpointPolicy(public)
 	if err := policy.ValidateEndpoint(t.Context(), "https://example.com/mcp"); err != nil {
 		t.Errorf("public https rejected: %v", err)
 	}
@@ -70,14 +69,14 @@ func TestMCPEndpointPolicyRemote(t *testing.T) {
 		t.Error("plain http accepted for remote host")
 	}
 	private := stubEgressResolver{ips: []net.IP{net.ParseIP("10.0.0.5")}}
-	if err := (mcpEndpointPolicy{resolver: private}).ValidateEndpoint(t.Context(), "https://internal.example/mcp"); err == nil {
+	if err := mcp.NewEndpointPolicy(private).ValidateEndpoint(t.Context(), "https://internal.example/mcp"); err == nil {
 		t.Error("private address accepted")
 	}
 }
 
 func TestMCPSecretResolver(t *testing.T) {
 	t.Setenv("MCP_CLI_TEST_TOKEN", "token-value")
-	resolver := mcpSecretResolver{}
+	resolver := mcp.NewSecretResolver()
 	token, err := resolver.ResolveSecret(t.Context(), "env://MCP_CLI_TEST_TOKEN")
 	if err != nil || token != "token-value" {
 		t.Errorf("env resolve = %q, %v", token, err)
@@ -98,7 +97,7 @@ func TestMCPSecretResolver(t *testing.T) {
 }
 
 func TestMCPHTTPClientValidates(t *testing.T) {
-	client := mcpHTTPClient(stubEgressResolver{ips: []net.IP{net.ParseIP("93.184.216.34")}})
+	client := mcp.NewHTTPClient(stubEgressResolver{ips: []net.IP{net.ParseIP("93.184.216.34")}})
 	if client == nil {
 		t.Fatal("client missing")
 	}
@@ -108,7 +107,7 @@ func TestMCPHTTPClientValidates(t *testing.T) {
 }
 
 func TestMCPRecorderObserverBridge(t *testing.T) {
-	if observer := mcpRecorderObserver(nil); observer != nil {
+	if observer := mcp.NewTelemetryObserver(nil); observer != nil {
 		t.Error("nil recorder produced an observer")
 	}
 	reader := sdkmetric.NewManualReader()
@@ -116,7 +115,7 @@ func TestMCPRecorderObserverBridge(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMCPRecorder(): %v", err)
 	}
-	observer := mcpRecorderObserver(recorder)
+	observer := mcp.NewTelemetryObserver(recorder)
 	if observer == nil {
 		t.Fatal("observer missing")
 	}
@@ -182,12 +181,13 @@ func TestMCPRecorderBridgeCarriesProtocolAndSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewMCPRecorder(): %v", err)
 	}
-	client, err := mcp.NewClient(&config.MCPServer{
+	client, err := mcp.NewClient(&mcp.ServerConfig{
 		Name:           "bridge-e2e",
-		Transport:      config.MCPTransportStdio,
+		Transport:      mcp.TransportStdio,
 		RequestTimeout: configkit.Duration(5 * time.Second),
 		StartupTimeout: configkit.Duration(5 * time.Second),
-	}, nil, mcp.WithObserver(mcpRecorderObserver(recorder)))
+		MaxMessageSize: mcp.DefaultMaxMessageSize,
+	}, nil, mcp.WithObserver(mcp.NewTelemetryObserver(recorder)))
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}

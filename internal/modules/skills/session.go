@@ -5,11 +5,16 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
-const MaxSessionActivations = 256
+const (
+	MaxSessionActivations = 256
+	skillContextAction    = "skill-context"
+)
 
 type ActivationLog interface {
 	Activations(ctx context.Context, sessionID string, limit int) ([]turn.SkillActivation, error)
@@ -55,13 +60,17 @@ func (e *Engine) pinned(pin *turn.SkillPin) (string, bool) {
 	return loaded.manifest.Body, true
 }
 
+func unavailableRenderError(detail string) error {
+	return fault.Wrap(turn.ErrorCodeSkillUnavailable, "skill is not available", fault.New(ErrorCodeSkillUnavailable, detail))
+}
+
 func (s *SessionContext) RenderSkill(ctx context.Context, sessionID string, pin *turn.SkillPin) (caveat, body string, err error) {
 	if pin == nil {
 		return "", "", errNilArgument("skill pin")
 	}
 	body, ok := s.engine.pinned(pin)
 	if !ok {
-		return "", "", Errorf(ErrorCodeSkillUnavailable, "skill is not available at the pinned digest")
+		return "", "", unavailableRenderError("skill is not available at the pinned digest")
 	}
 	if utf8.RuneCountInString(body) > s.engine.maxRunes {
 		return "", "", Errorf(ErrorCodeSkillInvalid, "skill instructions exceed the activation bound")
@@ -71,7 +80,7 @@ func (s *SessionContext) RenderSkill(ctx context.Context, sessionID string, pin 
 		return "", "", err
 	}
 	if !current {
-		return "", "", Errorf(ErrorCodeSkillUnavailable, "skill is not active at the pinned digest")
+		return "", "", unavailableRenderError("skill is not active at the pinned digest")
 	}
 	history, err := s.log.Activations(ctx, sessionID, MaxSessionActivations)
 	if err != nil {
@@ -82,6 +91,45 @@ func (s *SessionContext) RenderSkill(ctx context.Context, sessionID string, pin 
 	}
 	return activationCaveat, body, nil
 }
+
+func (s *SessionContext) Required(_ *turn.TurnRequest) bool {
+	return false
+}
+
+func (s *SessionContext) TurnContext(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req == nil || req.PrincipalClass != principal.ClassOwner {
+		return nil, nil
+	}
+	render := func(ctx context.Context) ([]byte, error) {
+		block, err := s.SkillContext(ctx, req)
+		if err != nil {
+			s.engine.logger.WarnContext(ctx, "skill context unavailable", "component", "skills", "error", err, "turn_id", req.TurnID)
+			return []byte{}, nil
+		}
+		return []byte(strings.TrimSpace(block)), nil
+	}
+	var raw []byte
+	if scope, ok := durable.TurnScopeFrom(ctx); ok {
+		var err error
+		raw, err = scope.Invocation().RunAction(ctx, skillContextAction, render)
+		if err != nil {
+			s.engine.logger.WarnContext(ctx, "skill context journal failed", "component", "skills", "error", err, "turn_id", req.TurnID)
+			return nil, nil
+		}
+	} else {
+		raw, _ = render(ctx)
+	}
+	block := strings.TrimSpace(string(raw))
+	if block == "" {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{
+		Order:   turn.ContextOrderSkills,
+		Content: block,
+	}}, nil
+}
+
+var _ turn.ContextProvider = (*SessionContext)(nil)
 
 func (s *SessionContext) SkillContext(ctx context.Context, req *turn.TurnRequest) (string, error) {
 	if req == nil {

@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -61,8 +60,8 @@ func TestProposalCardsOfferTheBoundAccountAndDecideThroughTheCLIPath(t *testing.
 	h := proposalFixture(t)
 	other := &fakeOfferer{}
 	bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-	h.controller.enableProposalCards(h.cfg, []proposalOfferer{other, bound}, slog.New(slog.DiscardHandler))
-	go h.controller.runProposalCards(t.Context())
+	h.rebuildController(t, &discordProposalOffererAdapter{offerer: other}, &discordProposalOffererAdapter{offerer: bound})
+	go h.controller.RunProposalCards(t.Context())
 	proposed, err := h.controller.Propose(t.Context(), h.owner, json.RawMessage(coveredProposal))
 	if err != nil {
 		t.Fatal(err)
@@ -99,8 +98,8 @@ func TestProposalCardsOfferTheBoundAccountAndDecideThroughTheCLIPath(t *testing.
 func TestProposalIsKeptWhenNoCardCanBeOffered(t *testing.T) {
 	h := proposalFixture(t)
 	failing := &fakeOfferer{fail: errors.New("owner has no discord identity")}
-	h.controller.enableProposalCards(h.cfg, []proposalOfferer{failing}, slog.New(slog.DiscardHandler))
-	go h.controller.runProposalCards(t.Context())
+	h.rebuildController(t, &discordProposalOffererAdapter{offerer: failing})
+	go h.controller.RunProposalCards(t.Context())
 	proposed, err := h.controller.Propose(t.Context(), h.owner, json.RawMessage(coveredProposal))
 	if err != nil {
 		t.Fatal(err)

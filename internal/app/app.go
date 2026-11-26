@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -59,6 +60,7 @@ const (
 	PartMemory    Part = "memory"
 	PartProfile   Part = "profile"
 	PartPlugins   Part = "plugins"
+	PartSkills    Part = "skills"
 )
 
 type Options struct {
@@ -102,21 +104,23 @@ const (
 )
 
 type App struct {
-	surface     Surface
-	group       *server.LifecycleGroup
-	builtin     *toolsbuiltin.Executor
-	serve       func(ctx context.Context) error
-	logger      *slog.Logger
-	db          *sql.DB
-	turns       *turnstore.TurnStore
-	result      *appconfig.LoadResult
-	runtime     durable.Runtime
-	interpreter *workflow.Interpreter
-	models      *model.Registry
-	knowledge   *knowledge.Service
-	memory      *memory.Service
-	profile     *profile.Service
-	plugins     *plugin.Service
+	surface      Surface
+	group        *server.LifecycleGroup
+	builtin      *toolsbuiltin.Executor
+	serve        func(ctx context.Context) error
+	logger       *slog.Logger
+	db           *sql.DB
+	turns        *turnstore.TurnStore
+	result       *appconfig.LoadResult
+	runtime      durable.Runtime
+	interpreter  *workflow.Interpreter
+	models       *model.Registry
+	knowledge    *knowledge.Service
+	memory       *memory.Service
+	profile      *profile.Service
+	plugins      *plugin.Service
+	skillsEngine *skills.Engine
+	skillsRoot   string
 
 	mu    sync.Mutex
 	state appState
@@ -138,7 +142,8 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile, plugins: b.plugins,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile,
+		plugins: b.plugins, skillsEngine: b.skillsEngine, skillsRoot: b.skillsRoot,
 	}, nil
 }
 
@@ -242,7 +247,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile, PartPlugins:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile, PartPlugins, PartSkills:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -340,11 +345,14 @@ type build struct {
 	prices       *usage.PriceRegistry
 	models       *model.Registry
 	runtime      durable.Runtime
+	workflowMod  *workflow.Module
 	interpreter  *workflow.Interpreter
 	knowledge    *knowledge.Service
 	memory       *memory.Service
 	profile      *profile.Service
 	plugins      *plugin.Service
+	skillsEngine *skills.Engine
+	skillsRoot   string
 	quarantined  []workflow.Quarantined
 	artifactRoot string
 
@@ -461,6 +469,24 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.plugins = service
+	}
+	if slices.Contains(parts, PartSkills) {
+		if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {
+			return errors.New("skills are not enabled")
+		}
+		mod, err := skills.New(ctx, &skills.ModuleDeps{
+			Config:      b.cfg.Skills,
+			DB:          b.db,
+			Activations: &skillActivationLog{events: turnstore.NewEventKindReader(b.db)},
+			Logger:      b.logger,
+		})
+		if err != nil {
+			return err
+		}
+		b.skillsEngine = mod.Engine()
+		if len(b.cfg.Skills.Roots) > 0 {
+			b.skillsRoot = b.cfg.Skills.Roots[0]
+		}
 	}
 	return nil
 }

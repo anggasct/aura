@@ -39,7 +39,7 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	shown := propose("prop-shown", "Show the plan")
 	listed := propose("prop-listed", "Ship\x1b[2Jit")
 
-	interpreter := workflow.NewInterpreter(runs, queuedRuntime{durabletest.NewFake()}, nil)
+	interpreter := mustWorkflowInterpreter(t, runs, queuedRuntime{durabletest.NewFake()}, nil)
 	spec := &workflow.Spec{ID: "terminal_demo", Goal: "Run the demo", Version: 1, Source: workflow.SourceDefined, Steps: []workflow.StepSpec{{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: time.Minute}}}
 	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatal(err)
@@ -79,7 +79,7 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	}
 	t.Run("proposal show of a goal that is out of rule prints only its stored plan", func(t *testing.T) {
 		out, err := runWorkflowCommand(t, gf, "proposal", "show", listed.ID)
-		if err != nil || strings.ContainsRune(out, 0x1b) || !strings.Contains(out, planNotStoredLine) {
+		if err != nil || strings.ContainsRune(out, 0x1b) || !strings.Contains(out, "plan: not stored; this proposal predates plan storage; propose it again") {
 			t.Fatalf("proposal show = %q, %v, want the escaped headers and the not-stored line", out, err)
 		}
 	})

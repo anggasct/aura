@@ -54,7 +54,7 @@ func NewRootCommand() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newWorkflowCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newAPIKeyCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newAPIKeyCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
 	mountCommands(root, gf)
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageError{err}

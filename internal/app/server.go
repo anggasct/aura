@@ -17,6 +17,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/handoff"
+	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -69,7 +70,7 @@ type serverBuild struct {
 	ownerRoute         *approval.OwnerRoute
 	workflowRoute      *approval.OwnerRoute
 	accessRecorder     *telemetry.AccessRecorder
-	mcp                *mcpRuntime
+	mcp                *mcp.Module
 	personaRecorder    *telemetry.PersonaRecorder
 	durableConfig      *runtimeengine.DurableConfig
 	host               *runtimeengine.Host
@@ -239,26 +240,38 @@ func (b *build) buildServerTools(ctx context.Context) error {
 func (b *build) startMCPServers(ctx context.Context, plugins *plugin.Module) error {
 	cfg, logger := b.cfg, b.logger
 	mcpPlugins := mcpPluginsFromBackends(plugins.MCPBackends())
-	if !mcpServersConfigured(cfg) && len(mcpPlugins) == 0 {
+	if len(configuredMCPServers(cfg)) == 0 && len(mcpPlugins) == 0 {
 		return nil
 	}
-	mcpServers, err := startConfiguredMCP(ctx, cfg, b.builtin.Broker(), logger, b.meters(), b.result.CapabilityReport, b.registry.Definitions(), mcpPlugins)
+	trustPath, err := mcpTrustRegistryPath(cfg)
 	if err != nil {
 		return err
 	}
-	b.server.mcp = mcpServers
-	if err := b.group.Defer("mcp", func(ctx context.Context) error {
-		if err := mcpServers.Close(ctx); err != nil {
+	mod, err := mcp.New(ctx, &mcp.ModuleDeps{
+		Config:       cfg.MCP,
+		Plugins:      mcpPlugins,
+		Broker:       b.builtin.Broker(),
+		TrustPath:    trustPath,
+		Meters:       b.meters(),
+		Capabilities: b.result.CapabilityReport,
+		Personas:     b.registry.Definitions(),
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       logger,
+	})
+	if err != nil {
+		return err
+	}
+	b.server.mcp = mod
+	if err := b.registerModule("mcp", mod); err != nil {
+		_ = mod.Close(context.WithoutCancel(ctx))
+		return err
+	}
+	return b.group.Defer("mcp", func(ctx context.Context) error {
+		if err := mod.Close(ctx); err != nil {
 			logger.WarnContext(ctx, "mcp shutdown", "component", "mcp", "error", err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	if mcpServers.hasCheck {
-		b.server.checks = append(b.server.checks, mcpServers.check)
-	}
-	return nil
+	})
 }
 
 func (b *build) buildServerDurable() error {
@@ -504,24 +517,13 @@ func (b *build) newProbeListener() (*probeListener, error) {
 }
 
 func (b *build) wireWorkflowParts() error {
-	cfg, db, s := b.cfg, b.db, b.server
-	if b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
+	s := b.server
+	if b.workflowMod == nil || b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
 		return invalidOptions("the server's workflow parts need an interpreter and the surface tool executor")
 	}
-	runs, err := workflow.NewStore(db, b.turns)
-	if err != nil {
+	if err := b.group.Add(server.Background("workflow_proposal_cards", b.workflowMod.ProposalCardsRunner())); err != nil {
 		return err
 	}
-	controller, err := newWorkflowToolController(b.interpreter, runs, b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
-	if err != nil {
-		return err
-	}
-	controller.enableProposalCards(cfg, proposalOfferers(s.channels), b.logger)
-	controller.enableCallDisplay(b.builtin.Broker().ExactCallText)
-	if err := b.group.Add(server.Background("workflow_proposal_cards", controller.runProposalCards)); err != nil {
-		return err
-	}
-	b.builtin.SetWorkflowController(controller)
 	s.scheduledWorkflows.set(b.interpreter)
 	return nil
 }
@@ -543,14 +545,12 @@ func (b *build) registerSweeps() error {
 	if err := b.registerRunRetention(); err != nil {
 		return err
 	}
-	notifier, err := newWorkflowCompletionNotifier(cfg, db, b.turns, registry, logger)
-	if err != nil {
-		return err
-	}
-	if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
-		notifier.run(ctx, workflowCompletionInterval)
-	})); err != nil {
-		return err
+	if b.workflowMod != nil {
+		if run := b.workflowMod.CompletionRunner(); run != nil {
+			if err := b.group.Add(server.Background("workflow_completion", run)); err != nil {
+				return err
+			}
+		}
 	}
 	configPath := b.result.Path
 	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}

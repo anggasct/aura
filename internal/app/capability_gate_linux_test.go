@@ -4,6 +4,7 @@ package app
 
 import (
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"os"
 	"path/filepath"
 	"testing"
@@ -83,7 +84,7 @@ func TestWorkflowToolRunnerFollowsTheHostCapabilitySet(t *testing.T) {
 			_, invokeErr := runner.Invoke(stepCallContext(t, db), tc.tool, json.RawMessage(tc.arguments))
 			_, statErr := os.Stat(filepath.Join(result.Config.Tools.Workspace, tc.effect))
 			if tc.wantDenied {
-				if code, ok := workflow.CodeOf(invokeErr); !ok || code != workflow.ErrorCodeCapabilityUnavailable {
+				if code, ok := fault.CodeOf[workflow.ErrorCode](invokeErr); !ok || code != workflow.ErrorCodeCapabilityUnavailable {
 					t.Fatalf("Invoke error = %v, want capability_unavailable", invokeErr)
 				}
 				if statErr == nil {

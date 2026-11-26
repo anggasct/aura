@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type journaledAttempt struct {
@@ -289,7 +290,7 @@ func (e *stepExecution) bindWaitCorrelation(ctx context.Context, step *StepSpec,
 		DedupeKey:  "",
 	})
 	if err != nil {
-		if code, ok := CodeOf(err); ok && code == ErrorCodeCorrelationConflict {
+		if fault.HasCode(err, ErrorCodeCorrelationConflict) {
 			return nil, false
 		}
 		return &stepUpdate{Status: StepFailed, Attempt: attempt + 1, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr()}, true

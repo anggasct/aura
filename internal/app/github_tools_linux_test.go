@@ -111,7 +111,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	}
 	bare, bareDB, _ := newWorkflowToolRunnerFixture(t)
 	_, err = bare.Invoke(stepCallContext(t, bareDB), github.ToolComment, comment("ci"))
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
 		t.Errorf("no credentials err = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
 	}
 }

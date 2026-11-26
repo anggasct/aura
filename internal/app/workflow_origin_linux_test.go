@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -32,7 +33,13 @@ func TestWorkflowStartCarriesTheCallerTaint(t *testing.T) {
 			if err != nil {
 				t.Fatalf("toolsbuiltin.New: %v", err)
 			}
-			executor.SetWorkflowController(controller)
+			provider, err := workflow.NewToolProvider(controller)
+			if err != nil {
+				t.Fatalf("NewToolProvider: %v", err)
+			}
+			if err := executor.Broker().RegisterProvider(provider); err != nil {
+				t.Fatalf("RegisterProvider: %v", err)
+			}
 			result, err := executor.Broker().Execute(t.Context(), &toolbroker.ToolRequest{
 				RequestID: "request-1", TurnID: "turn-1", SessionID: "lobby/terminal:owner", PrincipalID: principal.OwnerID,
 				PrincipalClass: principal.ClassOwner, AgentID: "lobby", ToolName: "workflow_start", ToolVersion: "v1",

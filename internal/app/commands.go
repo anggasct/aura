@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -11,10 +12,18 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
+)
+
+const (
+	mcpTrustDirName  = "mcp"
+	mcpTrustFileName = "trust.json"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
@@ -25,6 +34,54 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
 	root.AddCommand(plugin.Commands(pluginOpener(gf))...)
+	root.AddCommand(mcp.Commands(mcpOpener(gf))...)
+	root.AddCommand(skills.Commands(skillsOpener(gf))...)
+	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
+}
+
+func mcpTrustRegistryPath(cfg *appconfig.Config) (string, error) {
+	dataRoot, err := resolveDataRoot(cfg)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataRoot, mcpTrustDirName, mcpTrustFileName), nil
+}
+
+func configuredMCPServers(cfg *appconfig.Config) []mcp.ServerConfig {
+	if cfg == nil || cfg.MCP == nil {
+		return nil
+	}
+	return cfg.MCP.Servers
+}
+
+func mcpOpener(gf *globalFlags) mcp.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, servers []mcp.ServerConfig, registry *mcp.FileTrustRegistry) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		trustPath, err := mcpTrustRegistryPath(result.Config)
+		if err != nil {
+			return err
+		}
+		registry, err := mcp.NewFileTrustRegistry(trustPath)
+		if err != nil {
+			return err
+		}
+		return fn(cmd.Context(), configuredMCPServers(result.Config), registry)
+	}
+}
+
+func skillsOpener(gf *globalFlags) skills.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, engine *skills.Engine, defaultRoot string) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartSkills}}, func(ctx context.Context, app *App) error {
+			return fn(ctx, app.skillsEngine, app.skillsRoot)
+		})
+	}
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {

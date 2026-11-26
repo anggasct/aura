@@ -55,9 +55,7 @@ type Interpreter struct {
 	inflight chan struct{}
 	depsMu   sync.Mutex
 	deps     ValidationDeps
-	// writeMu serializes run-status writes across step goroutines; it is
-	// never held while another mutex is acquired.
-	writeMu sync.Mutex
+	writeMu  sync.Mutex
 }
 
 type definitionRegistry struct {
@@ -98,7 +96,13 @@ func (r *definitionRegistry) list() []*Spec {
 	return specs
 }
 
-func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *Interpreter {
+func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) (*Interpreter, error) {
+	if store == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "workflow interpreter requires a store")
+	}
+	if runtime == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "workflow interpreter requires a durable runtime")
+	}
 	if options == nil {
 		options = &Options{}
 	}
@@ -121,7 +125,7 @@ func NewInterpreter(store *Store, runtime durable.Runtime, options *Options) *In
 	if registrar, ok := runtime.(durable.HandlerRegistrar); ok {
 		registrar.RegisterHandler(options.HandlerName, interpreter.handlerFor(options.Driver))
 	}
-	return interpreter
+	return interpreter, nil
 }
 
 func (i *Interpreter) handlerFor(driver Driver) durable.Handler {
@@ -432,8 +436,6 @@ type stepExecution struct {
 	failedStep       string
 	budget           *runBudget
 	mu               sync.Mutex
-	// statusMu guards the in-memory awaiting set of steps currently
-	// suspended on a signal; it is never held across a database write.
-	statusMu sync.Mutex
-	awaiting map[string]bool
+	statusMu         sync.Mutex
+	awaiting         map[string]bool
 }

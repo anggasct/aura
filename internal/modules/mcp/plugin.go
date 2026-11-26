@@ -3,7 +3,6 @@ package mcp
 import (
 	"slices"
 
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -22,7 +21,7 @@ type PluginTool struct {
 
 type PluginServer struct {
 	ID         string
-	Server     config.MCPServer
+	Server     ServerConfig
 	Authorizer RequestAuthorizer
 	Tools      []PluginTool
 }
@@ -37,7 +36,7 @@ type PluginStatus struct {
 
 type startTarget struct {
 	key    string
-	server *config.MCPServer
+	server *ServerConfig
 	plugin *PluginServer
 }
 
@@ -83,7 +82,7 @@ func clonePluginServers(plugins []PluginServer) []PluginServer {
 	return cloned
 }
 
-func validatePluginServers(plugins []PluginServer, cfg *config.MCP) error {
+func validatePluginServers(plugins []PluginServer, cfg *Config) error {
 	seen := make(map[string]bool, len(plugins))
 	for i := range plugins {
 		plugin := &plugins[i]
@@ -97,10 +96,10 @@ func validatePluginServers(plugins []PluginServer, cfg *config.MCP) error {
 			}
 		}
 		server := plugin.Server
-		if err := config.ValidateMCPServer(&server, "plugin backend"); err != nil {
+		if err := ValidateServer(&server, "plugin backend"); err != nil {
 			return Errorf(ErrConfigInvalid, "plugin %q has an invalid backend", plugin.ID)
 		}
-		if server.Transport == config.MCPTransportLegacySSE {
+		if server.Transport == TransportLegacySSE {
 			return Errorf(ErrConfigInvalid, "plugin %q uses an unsupported transport", plugin.ID)
 		}
 		names := make(map[string]bool, len(plugin.Tools))

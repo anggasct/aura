@@ -95,7 +95,7 @@ func (r skillRequest) joined() string { return strings.Join(r.texts, "\n") }
 
 type skillHarness struct {
 	db      *sql.DB
-	runtime *skillRuntime
+	module  *skills.Module
 	engine  *runtimeengine.Engine
 	model   *skillCapturingModel
 	skillID string
@@ -116,9 +116,13 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config)
 		}
 	}
 	cfg.Enabled, cfg.Roots = true, []string{root}
-	rt, err := buildSkillRuntime(t.Context(), cfg, db, nil)
+	mod, err := skills.New(t.Context(), &skills.ModuleDeps{
+		Config:      cfg,
+		DB:          db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(db)},
+	})
 	if err != nil {
-		t.Fatalf("buildSkillRuntime: %v", err)
+		t.Fatalf("skills.New: %v", err)
 	}
 	skillStore, err := skills.NewSQLiteStore(db)
 	if err != nil {
@@ -128,9 +132,9 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config)
 	if err != nil {
 		t.Fatalf("list skills: %v", err)
 	}
-	h := &skillHarness{db: db, runtime: rt, model: &skillCapturingModel{}}
+	h := &skillHarness{db: db, module: mod, model: &skillCapturingModel{}}
 	for i := range records {
-		if _, err := rt.engine.Accept(t.Context(), records[i].ID, records[i].Digest, nil); err != nil {
+		if _, err := mod.Engine().Accept(t.Context(), records[i].ID, records[i].Digest, nil); err != nil {
 			t.Fatalf("accept %s: %v", records[i].Name, err)
 		}
 		if records[i].Name == "review-pr" {
@@ -147,11 +151,11 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config)
 	}
 	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
 	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
-		runtimeadk.WithSkillContext(rt.context))
+		runtimeadk.WithContextProvider(mod))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: rt.context, LiveEvents: turn.NewEventBus(nil)})
+	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: mod.Renderer(), LiveEvents: turn.NewEventBus(nil)})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}
@@ -163,7 +167,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config)
 
 func (h *skillHarness) pin(t *testing.T, name string) *command.SkillPin {
 	t.Helper()
-	pin, err := h.runtime.bridge.Activate(t.Context(), name)
+	pin, err := h.module.ChatCommands().Activate(t.Context(), name)
 	if err != nil {
 		t.Fatalf("activate %s: %v", name, err)
 	}
@@ -248,14 +252,14 @@ func TestSkillActivationReachesTheModelAndPersistsInTheSession(t *testing.T) {
 		t.Fatal("skill block reached a non-owner turn")
 	}
 
-	if err := h.runtime.engine.Disable(t.Context(), h.skillID); err != nil {
+	if err := h.module.Engine().Disable(t.Context(), h.skillID); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	h.turn(t, "after quarantine", principal.ClassOwner, nil)
 	if after := h.model.last(t); strings.Contains(after.joined(), skillBodyMarker) {
 		t.Fatalf("disabled skill still injected:\n%s", after.joined())
 	}
-	if _, err := h.runtime.bridge.Activate(t.Context(), "review-pr"); err == nil {
+	if _, err := h.module.ChatCommands().Activate(t.Context(), "review-pr"); err == nil {
 		t.Fatal("disabled skill activated")
 	}
 }
@@ -285,7 +289,11 @@ func TestBuildSkillRuntimeRejectsASessionBoundBelowOneActivation(t *testing.T) {
 	db := storetest.OpenMigrated(t)
 	cfg := defaultSkillConfig()
 	cfg.Enabled, cfg.Roots, cfg.MaxSessionContextTokens = true, []string{t.TempDir()}, 99
-	if _, err := buildSkillRuntime(t.Context(), cfg, db, nil); err == nil {
+	if _, err := skills.New(t.Context(), &skills.ModuleDeps{
+		Config:      cfg,
+		DB:          db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(db)},
+	}); err == nil {
 		t.Fatal("session bound below max_instruction_tokens accepted")
 	} else if code, ok := fault.CodeOf[skills.ErrorCode](err); !ok || code != skills.ErrorCodeInvalidArgument {
 		t.Fatalf("err = %v", err)

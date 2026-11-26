@@ -32,7 +32,7 @@ func budgetInterpreter(t *testing.T, budget Budget, options *Options) (*Interpre
 	options.GeneratedBudget = budget
 	options.MaxConcurrentSteps = 2
 	options.Driver = DriverConcurrent
-	return NewInterpreter(disk, fake, options), disk, fake
+	return mustNewInterpreter(t, disk, fake, options), disk, fake
 }
 
 func stepByID(t *testing.T, disk *Store, runID, stepID string) *StepRun {

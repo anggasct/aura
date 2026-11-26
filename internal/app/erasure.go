@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
@@ -24,7 +25,6 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -52,12 +52,16 @@ func erasureParticipants(db *sql.DB) ([]principal.Eraser, error) {
 	if err != nil {
 		return nil, err
 	}
+	workflowEraser, err := workflow.NewEraser(db, turns, runs, sessionApprovals)
+	if err != nil {
+		return nil, err
+	}
 	memoryEraser, err := memory.NewEraser(db)
 	if err != nil {
 		return nil, err
 	}
 	return []principal.Eraser{
-		store.NewWorkflowEraser(db),
+		workflowEraser,
 		effect.NewEmailEffectEraser(db),
 		memoryEraser,
 		sessionApprovals,
@@ -68,6 +72,14 @@ func erasureParticipants(db *sql.DB) ([]principal.Eraser, error) {
 		principal.NewAccessEraser(db),
 		usage.NewUsageLinkEraser(db),
 	}, nil
+}
+
+func liveWorkflowRuns(ctx context.Context, db *sql.DB, principalID string) ([]string, error) {
+	runs, err := durablesqlite.New(&durablesqlite.Options{DB: db})
+	if err != nil {
+		return nil, err
+	}
+	return workflow.LiveWorkflowRuns(ctx, db, principalID, turnstore.NewTurnStore(db), runs)
 }
 
 func erasePrincipal(ctx context.Context, db *sql.DB, scope principal.ErasureScope, artifactRoot string) (principal.ErasureReport, int, error) {
@@ -117,7 +129,7 @@ func (r *erasureRuns) set(canceller runCanceller) {
 func (r *erasureRuns) settings() (live func(ctx context.Context, db *sql.DB, principalID string) ([]string, error), poll, bound time.Duration) {
 	live, poll, bound = r.live, r.poll, r.bound
 	if live == nil {
-		live = store.LiveWorkflowRuns
+		live = liveWorkflowRuns
 	}
 	if poll <= 0 {
 		poll = erasureRunPoll

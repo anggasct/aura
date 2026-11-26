@@ -12,7 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func requireErasureReport(t *testing.T, got principal.ErasureReport, want map[string]int) {
@@ -389,7 +388,7 @@ func TestErasureRefusesWhileARunItTouchesIsLive(t *testing.T) {
 			tc.seed(t, db)
 			before := workflowDataRows(t, db)
 
-			live, err := store.LiveWorkflowRuns(t.Context(), db, principalID)
+			live, err := liveWorkflowRuns(t.Context(), db, principalID)
 			if err != nil || !slices.Equal(live, tc.wantLive) {
 				t.Fatalf("LiveWorkflowRuns = %v, %v; want %v", live, err, tc.wantLive)
 			}
@@ -445,7 +444,7 @@ func TestErasureReconcilesStaleRunRows(t *testing.T) {
 			seedWorkflowRun(t, db, &seededRun{id: "run-child", definition: "own", principal: principalID, status: "running", parent: "run-root"})
 			seedWorkflowRun(t, db, &seededRun{id: "run-child-done", definition: "own", principal: principalID, status: "succeeded", parent: "run-root"})
 
-			live, err := store.LiveWorkflowRuns(t.Context(), db, principalID)
+			live, err := liveWorkflowRuns(t.Context(), db, principalID)
 			if err != nil || len(live) != 0 {
 				t.Fatalf("LiveWorkflowRuns = %v, %v; want none", live, err)
 			}

@@ -70,3 +70,50 @@ func TestRuntimeDeleteRunsDeletesOnlyTheNamedKeys(t *testing.T) {
 		t.Fatalf("remaining keys = %v, want [k2]", keys)
 	}
 }
+
+func TestRuntimeRunStatesByKeysAndDeleteHandlerRunsScopeByHandler(t *testing.T) {
+	db := openDB(t, newDatabaseFile(t))
+	rt := newRuntime(t, db, nil)
+	ctx := t.Context()
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	for _, row := range []struct {
+		key, handler, state string
+	}{
+		{"wf-1", "workflow", "running"},
+		{"wf-2", "workflow", "cancelled"},
+		{"turn-1", "turn", "running"},
+	} {
+		if _, err := db.ExecContext(ctx,
+			`INSERT INTO durable_run (key, handler, payload, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+			row.key, row.handler, []byte(`{}`), row.state, now, now,
+		); err != nil {
+			t.Fatalf("seed run %s: %v", row.key, err)
+		}
+	}
+
+	empty, err := rt.RunStatesByKeys(ctx, "workflow", nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("RunStatesByKeys(nil) = %v, %v; want empty", empty, err)
+	}
+	states, err := rt.RunStatesByKeys(ctx, "workflow", []string{"wf-1", "wf-2", "turn-1", "missing"})
+	if err != nil {
+		t.Fatalf("RunStatesByKeys: %v", err)
+	}
+	if len(states) != 2 || states["wf-1"] != "running" || states["wf-2"] != "cancelled" {
+		t.Fatalf("RunStatesByKeys = %v, want wf-1=running, wf-2=cancelled", states)
+	}
+	if err := rt.DeleteHandlerRuns(ctx, "workflow", nil); err != nil {
+		t.Fatalf("DeleteHandlerRuns(nil): %v", err)
+	}
+	if err := rt.DeleteHandlerRuns(ctx, "workflow", []string{"wf-1", "turn-1"}); err != nil {
+		t.Fatalf("DeleteHandlerRuns: %v", err)
+	}
+	wfRemaining, err := rt.RunsOf(ctx, "workflow")
+	if err != nil || len(wfRemaining) != 1 || wfRemaining[0].Key != "wf-2" {
+		t.Fatalf("remaining workflow runs = %+v, %v; want [wf-2]", wfRemaining, err)
+	}
+	turnRemaining, err := rt.RunsOf(ctx, "turn")
+	if err != nil || len(turnRemaining) != 1 || turnRemaining[0].Key != "turn-1" {
+		t.Fatalf("turn run was deleted: %+v, %v", turnRemaining, err)
+	}
+}

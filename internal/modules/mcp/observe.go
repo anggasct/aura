@@ -3,6 +3,8 @@ package mcp
 import (
 	"context"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -39,7 +41,7 @@ func (c *Client) observe(ctx context.Context, observation *Observation) {
 
 func (c *Client) observeFailure(ctx context.Context, start time.Time, version, tool string, err error) {
 	code := string(ErrServerUnavailable)
-	if failureCode, ok := CodeOf(err); ok {
+	if failureCode, ok := fault.CodeOf[ErrorCode](err); ok {
 		code = string(failureCode)
 	}
 	c.observe(ctx, &Observation{

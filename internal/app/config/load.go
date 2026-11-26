@@ -15,9 +15,11 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -145,8 +147,8 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),
 		legacyconfig.ValidateTerminal(cfg.Terminal),
-		legacyconfig.ValidateWorkflows(cfg.Workflows),
-		legacyconfig.ValidateMCP(cfg.MCP),
+		validateWorkflows(cfg.Workflows),
+		validateMCP(cfg.MCP),
 		validatePlugins(cfg.Plugins),
 		configkit.Under("webhook", cfg.Webhook.Validate()),
 		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
@@ -385,15 +387,11 @@ func configuredSecretValues(cfg *Config) []string {
 				continue
 			}
 			if oauth := auth.OAuth; oauth != nil {
-				if oauth.ClientIDEnv != "" {
-					add(os.Getenv(oauth.ClientIDEnv))
-				}
-				if oauth.ClientSecretEnv != "" {
-					add(os.Getenv(oauth.ClientSecretEnv))
-				}
+				add(resolveSecretRef(oauth.ClientIDRef))
+				add(resolveSecretRef(oauth.ClientSecretRef))
 			}
 			if static := auth.Static; static != nil {
-				add(resolveStaticCredential(static.CredentialRef))
+				add(resolveSecretRef(static.CredentialRef))
 			}
 		}
 	}
@@ -405,12 +403,11 @@ func resolveSecretRef(ref secret.Ref) string {
 	return value
 }
 
-func resolveStaticCredential(raw string) string {
-	ref, err := secret.ParseRef(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
+func validateMCP(section *mcp.Config) error {
+	if section == nil {
+		return nil
 	}
-	return resolveSecretRef(ref)
+	return configkit.Under("mcp", section.Validate())
 }
 
 func checkVersion(v int) error {
@@ -453,4 +450,11 @@ func validateProfile(section *profile.Config) error {
 		return nil
 	}
 	return configkit.Under("profile", section.Validate())
+}
+
+func validateWorkflows(section *workflow.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("workflows", section.Validate())
 }

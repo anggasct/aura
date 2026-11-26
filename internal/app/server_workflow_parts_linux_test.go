@@ -78,7 +78,7 @@ func createTestSession(t *testing.T, db *sql.DB, id, owner string) {
 	}
 }
 
-func executeWorkflowTool(t *testing.T, executor *toolsbuiltin.Executor, tool string, caller *toolsbuiltin.WorkflowCaller, arguments string) json.RawMessage {
+func executeWorkflowTool(t *testing.T, executor *toolsbuiltin.Executor, tool string, caller *workflow.Caller, arguments string) json.RawMessage {
 	t.Helper()
 	output, err := executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 		RequestID: "call-" + tool, TurnID: "turn-" + tool, SessionID: caller.SessionID, PrincipalID: caller.PrincipalID,
@@ -109,10 +109,10 @@ func TestServerWorkflowToolsStartARunOnTheDefaultConfiguration(t *testing.T) {
 	srv.run(t)
 
 	db := compositionDatabase(t, path)
-	caller := &toolsbuiltin.WorkflowCaller{SessionID: "desk/discord:friend/dm", PrincipalID: "friend", PrincipalClass: principal.ClassTrusted, AgentID: "desk"}
+	caller := &workflow.Caller{SessionID: "desk/discord:friend/dm", PrincipalID: "friend", PrincipalClass: principal.ClassTrusted, AgentID: "desk"}
 	createTestSession(t, db, caller.SessionID, caller.PrincipalID)
 
-	var started toolsbuiltin.WorkflowRunState
+	var started workflow.RunState
 	if err := json.Unmarshal(executeWorkflowTool(t, srv.app.builtin, "workflow_start", caller, `{"id":"desk-reads"}`), &started); err != nil || started.RunID == "" {
 		t.Fatalf("workflow_start = %+v, %v", started, err)
 	}
@@ -123,7 +123,7 @@ func TestServerWorkflowToolsStartARunOnTheDefaultConfiguration(t *testing.T) {
 	if got, want := awaitRunEnded(t, db, durableKey), (storedRun{handler: workflow.HandlerName, state: "succeeded"}); got != want {
 		t.Fatalf("workflow run = %+v, want %+v", got, want)
 	}
-	var status toolsbuiltin.WorkflowRunState
+	var status workflow.RunState
 	if err := json.Unmarshal(executeWorkflowTool(t, srv.app.builtin, "workflow_status", caller, `{"run_id":"`+started.RunID+`"}`), &status); err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +263,7 @@ func TestServerOffersAProposalCardOnTheDefaultConfiguration(t *testing.T) {
 			t.Fatalf("build phase: %v", err)
 		}
 	}
-	owner := &toolsbuiltin.WorkflowCaller{SessionID: "main/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "main"}
+	owner := &workflow.Caller{SessionID: "main/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "main"}
 	channel := newProposalChannel(owner.SessionID)
 	b.server.channels = append(b.server.channels, channel)
 	if err := phases[len(phases)-1](); err != nil {
@@ -274,7 +274,7 @@ func TestServerOffersAProposalCardOnTheDefaultConfiguration(t *testing.T) {
 		t.Fatalf("start the lifecycle: %v", err)
 	}
 
-	var proposed toolsbuiltin.WorkflowProposal
+	var proposed workflow.ProposalSummary
 	spec := `{"spec":{"goal":"Read the note","steps":[{"id":"read","executor":{"kind":"tool","tool":"read_file","args":{"path":"first.txt"}},"timeout":60000000000}]}}`
 	if err := json.Unmarshal(executeWorkflowTool(t, b.builtin, "workflow_propose", owner, spec), &proposed); err != nil || proposed.ProposalID == "" {
 		t.Fatalf("workflow_propose = %+v, %v", proposed, err)

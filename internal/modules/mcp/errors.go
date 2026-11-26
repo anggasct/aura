@@ -1,8 +1,9 @@
 package mcp
 
 import (
-	"errors"
 	"fmt"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ErrorCode string
@@ -21,51 +22,10 @@ const (
 	ErrTrustRequired         ErrorCode = "mcp_trust_required"
 )
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-	Err    error
+func Errorf(code ErrorCode, format string, args ...any) error {
+	return fault.New(code, fmt.Sprintf(format, args...))
 }
 
-func (e *Error) Error() string {
-	if e == nil {
-		return "<nil>"
-	}
-	if e.Err != nil {
-		return fmt.Sprintf("%s: %s: %v", e.Code, e.Detail, e.Err)
-	}
-	if e.Detail != "" {
-		return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-	}
-	return string(e.Code)
-}
-
-func (e *Error) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Err
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var mcpErr *Error
-	if errors.As(err, &mcpErr) && mcpErr != nil {
-		return mcpErr.Code, true
-	}
-	return "", false
-}
-
-func Errorf(code ErrorCode, format string, args ...any) *Error {
-	return &Error{
-		Code:   code,
-		Detail: fmt.Sprintf(format, args...),
-	}
-}
-
-func Wrap(code ErrorCode, err error, detail string) *Error {
-	return &Error{
-		Code:   code,
-		Detail: detail,
-		Err:    err,
-	}
+func Wrap(code ErrorCode, err error, detail string) error {
+	return fault.Wrap(code, detail, err)
 }

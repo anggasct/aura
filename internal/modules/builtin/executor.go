@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"maps"
 	"slices"
 	"time"
 
@@ -34,7 +33,6 @@ type Executor struct {
 	broker    *toolbroker.Broker
 	journal   *effect.Journal
 	emails    *emailHolder
-	workflows *workflowHolder
 	code      *codeHolder
 	artifacts storage.ArtifactStore
 	host      []string
@@ -80,9 +78,8 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 		return nil, fault.New(turn.ErrorCodeInvalidArgument, "live events publisher must not be nil")
 	}
 	emails := &emailHolder{}
-	workflows := &workflowHolder{}
 	code := &codeHolder{}
-	adapters, err := builtinAdapters(toolsCfg, emails, workflows, code)
+	adapters, err := builtinAdapters(toolsCfg, emails, code)
 	if err != nil {
 		return nil, err
 	}
@@ -114,7 +111,7 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, emails: emails, workflows: workflows, code: code, artifacts: artifacts, host: host}, nil
+	return &Executor{broker: broker, journal: journal, emails: emails, code: code, artifacts: artifacts, host: host}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -131,7 +128,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, workflows *workflowHolder, code *codeHolder) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -184,7 +181,6 @@ func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, workflows *wor
 	adapters["web_search@v1"] = searchAdapter
 	adapters[tools.EmailSendToolName+"@"+tools.Version] = emails.adapter
 	adapters[codeKey()] = code.adapter
-	maps.Copy(adapters, workflows.adapters())
 	return adapters, nil
 }
 

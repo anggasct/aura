@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -222,38 +221,40 @@ func (f *e2eFixture) login(t *testing.T) {
 	}
 }
 
-func (f *e2eFixture) start(t *testing.T) (*plugin.Plan, *mcp.Manager) {
+func (f *e2eFixture) start(t *testing.T) (*plugin.Plan, *mcp.Module) {
 	t.Helper()
 	plan, err := f.service.Plan(t.Context())
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
-	manager, err := mcp.NewManager(&mcp.ManagerOptions{
-		Config:         &config.MCP{},
-		Plugins:        mcpPluginsFromBackends(plan.Active),
-		Broker:         f.h.executor.Broker(),
-		HTTPClient:     &http.Client{},
-		EndpointPolicy: mcpEndpointPolicy{},
-		Logger:         slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	mcpPlugins := mcpPluginsFromBackends(plan.Active)
+	if len(mcpPlugins) == 0 {
+		return plan, nil
+	}
+	mod, err := mcp.New(t.Context(), &mcp.ModuleDeps{
+		Config:     &mcp.Config{},
+		Plugins:    mcpPlugins,
+		Broker:     f.h.executor.Broker(),
+		HTTPClient: &http.Client{},
+		Logger:     slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {
-		t.Fatalf("NewManager: %v", err)
+		t.Fatalf("mcp.New: %v", err)
 	}
-	t.Cleanup(func() { _ = manager.Close(context.WithoutCancel(t.Context())) })
-	_ = manager.Start(t.Context())
-	return plan, manager
+	t.Cleanup(func() { _ = mod.Close(context.WithoutCancel(t.Context())) })
+	return plan, mod
 }
 
-func (f *e2eFixture) checkFindings(t *testing.T, plan *plugin.Plan, manager *mcp.Manager) []health.Finding {
+func (f *e2eFixture) checkFindings(t *testing.T, plan *plugin.Plan, mcpMod *mcp.Module) []health.Finding {
 	t.Helper()
 	store, err := plugin.NewSQLiteStore(f.h.db)
 	if err != nil {
 		t.Fatalf("plugin.NewSQLiteStore: %v", err)
 	}
 	var source func(context.Context) []plugin.RuntimeStatus
-	if manager != nil {
+	if mcpMod != nil {
 		source = func(ctx context.Context) []plugin.RuntimeStatus {
-			statuses := mcpPluginStatuses(&mcpRuntime{manager: manager})
+			statuses := mcpPluginStatuses(mcpMod)
 			for i := range statuses {
 				for j := range plan.Active {
 					if plan.Active[j].ID == statuses[i].ID {
@@ -305,7 +306,7 @@ func TestActiveOAuth2PluginWithoutATokenStaysOffWithAuthRequired(t *testing.T) {
 	if len(plan.Active) != 0 || len(plan.Held) != 1 || plan.Held[0].Code != plugin.ErrAuthRequired {
 		t.Fatalf("plan = %+v", plan)
 	}
-	if len(manager.PluginStatuses()) != 0 {
+	if manager != nil && len(manager.PluginStatuses()) != 0 {
 		t.Fatalf("a plugin without a token reached the mcp manager: %+v", manager.PluginStatuses())
 	}
 	findings := f.checkFindings(t, plan, nil)

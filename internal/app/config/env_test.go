@@ -231,7 +231,7 @@ func TestEnvNamedBySecretReferenceIsNotWarned(t *testing.T) {
 		},
 		{
 			name:    "mcp oauth client id",
-			content: "version: 1\nmcp:\n  servers:\n    - name: remote\n      transport: streamable_http\n      url: https://mcp.example.com/mcp\n      auth:\n        oauth:\n          client_id_env: AURA_TEST_CLIENT_ID\n          client_secret_env: AURA_TEST_CLIENT_SECRET\n          token_store: keyring\n      capabilities: [\"external.read\"]\n",
+			content: "version: 1\nmcp:\n  servers:\n    - name: remote\n      transport: streamable_http\n      url: https://mcp.example.com/mcp\n      auth:\n        oauth:\n          client_id_ref: env://AURA_TEST_CLIENT_ID\n          client_secret_ref: env://AURA_TEST_CLIENT_SECRET\n          token_store: keyring\n      capabilities: [\"external.read\"]\n",
 			set:     "AURA_TEST_CLIENT_ID",
 		},
 		{

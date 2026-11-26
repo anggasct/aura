@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/anggasct/aura/internal/platform/fault"
 	"os"
 	"path/filepath"
 	"strings"
@@ -52,7 +53,7 @@ func TestWorkflowValidateChecksTheRunAsCeiling(t *testing.T) {
 				}
 				return
 			}
-			if code, ok := workflow.CodeOf(err); !ok || code != tc.wantCode {
+			if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != tc.wantCode {
 				t.Fatalf("validate = %v, want %s", err, tc.wantCode)
 			}
 			if !strings.Contains(err.Error(), tc.wantStep) {

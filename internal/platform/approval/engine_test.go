@@ -695,3 +695,72 @@ func TestEngineRegisterRulesIsAtomicOnFailure(t *testing.T) {
 		t.Fatalf("Evaluate batch_tool_b = %+v, %v", dec, err)
 	}
 }
+
+func TestEnginePolicyReturnsIsolatedDeepCopy(t *testing.T) {
+	engine := newTestEngine(t)
+
+	snapshot := engine.Policy()
+	if snapshot.Version != "v1" {
+		t.Fatalf("Policy().Version = %q, want v1", snapshot.Version)
+	}
+	if len(snapshot.Rules) != 3 {
+		t.Fatalf("len(Policy().Rules) = %d, want 3", len(snapshot.Rules))
+	}
+
+	readRule := snapshot.Rules["read_file"]
+	readRule.RequiredCapabilities[0] = "mutated-cap"
+	readRule.AllowedTrust[0] = TrustUntrustedExternal
+	snapshot.Rules["read_file"] = Rule{ToolName: "read_file", RequiresApproval: true}
+	delete(snapshot.Rules, "exec")
+	snapshot.Rules["injected"] = Rule{ToolName: "injected"}
+
+	fresh := engine.Policy()
+	if _, exists := fresh.Rules["injected"]; exists {
+		t.Fatal("mutating returned Policy map leaked into engine")
+	}
+	if _, exists := fresh.Rules["exec"]; !exists {
+		t.Fatal("deleting from returned Policy map removed rule from engine")
+	}
+	gotRead := fresh.Rules["read_file"]
+	if gotRead.RequiresApproval {
+		t.Fatal("overwriting rule in returned Policy map mutated engine rule")
+	}
+	if !slices.Equal(gotRead.RequiredCapabilities, []string{"file-read"}) {
+		t.Fatalf("RequiredCapabilities mutated to %v", gotRead.RequiredCapabilities)
+	}
+	if !slices.Equal(gotRead.AllowedTrust, []TrustLabel{TrustOwnerInput, TrustTrustedConfiguration}) {
+		t.Fatalf("AllowedTrust mutated to %v", gotRead.AllowedTrust)
+	}
+
+	caps := []string{"web"}
+	trust := []TrustLabel{TrustOwnerInput}
+	added := Rule{
+		ToolName:             "custom_snapshot_tool",
+		ToolVersion:          "v1",
+		RequiredCapabilities: caps,
+		AllowedTrust:         trust,
+		Constraints:          Constraints{MaxOutputBytes: 4096},
+	}
+	if err := engine.RegisterRule(&added); err != nil {
+		t.Fatalf("RegisterRule: %v", err)
+	}
+	caps[0] = "tampered"
+	trust[0] = TrustUntrustedExternal
+
+	afterAdd := engine.Policy()
+	gotAdded, ok := afterAdd.Rules["custom_snapshot_tool"]
+	if !ok {
+		t.Fatal("newly registered rule missing from Policy()")
+	}
+	if !slices.Equal(gotAdded.RequiredCapabilities, []string{"web"}) {
+		t.Fatalf("registered rule aliased caller caps: %v", gotAdded.RequiredCapabilities)
+	}
+	if !slices.Equal(gotAdded.AllowedTrust, []TrustLabel{TrustOwnerInput}) {
+		t.Fatalf("registered rule aliased caller trust: %v", gotAdded.AllowedTrust)
+	}
+
+	engine.UnregisterRule("custom_snapshot_tool")
+	if _, exists := engine.Policy().Rules["custom_snapshot_tool"]; exists {
+		t.Fatal("unregistered rule still present in Policy()")
+	}
+}

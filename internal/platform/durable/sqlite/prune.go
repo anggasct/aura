@@ -103,3 +103,50 @@ func (r *Runtime) DeleteRuns(ctx context.Context, keys []string) (int, error) {
 	}
 	return int(deleted), nil
 }
+
+func (r *Runtime) RunStatesByKeys(ctx context.Context, handler string, keys []string) (map[string]string, error) {
+	states := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return states, nil
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return nil, fmt.Errorf("durable run states: encode keys: %w", err)
+	}
+	rows, err := dbsqlite.Conn(ctx, r.db).QueryContext(ctx,
+		`SELECT key, state FROM durable_run WHERE handler = ? AND key IN (SELECT value FROM json_each(?))`,
+		handler, string(encoded),
+	)
+	if err != nil {
+		return nil, dbsqlite.Classify(fmt.Errorf("durable run states: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key, state string
+		if err := rows.Scan(&key, &state); err != nil {
+			return nil, dbsqlite.Classify(fmt.Errorf("durable run states: %w", err))
+		}
+		states[key] = state
+	}
+	if err := rows.Err(); err != nil {
+		return nil, dbsqlite.Classify(fmt.Errorf("durable run states: %w", err))
+	}
+	return states, nil
+}
+
+func (r *Runtime) DeleteHandlerRuns(ctx context.Context, handler string, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return fmt.Errorf("durable delete handler runs: encode keys: %w", err)
+	}
+	if _, err := dbsqlite.Conn(ctx, r.db).ExecContext(ctx,
+		`DELETE FROM durable_run WHERE handler = ? AND key IN (SELECT value FROM json_each(?))`,
+		handler, string(encoded),
+	); err != nil {
+		return dbsqlite.Classify(fmt.Errorf("durable delete handler runs: %w", err))
+	}
+	return nil
+}

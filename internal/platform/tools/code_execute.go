@@ -37,16 +37,16 @@ func CodeRuntimes() []string {
 }
 
 func validateCodeExecute(value map[string]any) (json.RawMessage, error) {
-	if err := rejectUnknown(value, "runtime", "source", "stdin", "output_files"); err != nil {
+	if err := RejectUnknown(value, "runtime", "source", "stdin", "output_files"); err != nil {
 		return nil, err
 	}
-	if err := validateString(value, "runtime"); err != nil {
+	if err := ValidateString(value, "runtime"); err != nil {
 		return nil, err
 	}
 	if runtime, _ := value["runtime"].(string); !slices.Contains(CodeRuntimes(), runtime) {
 		return nil, fmt.Errorf("argument %q must be one of %v", "runtime", CodeRuntimes())
 	}
-	if err := validateString(value, "source"); err != nil {
+	if err := ValidateString(value, "source"); err != nil {
 		return nil, err
 	}
 	if source, _ := value["source"].(string); len(source) > MaxCodeSourceBytes {

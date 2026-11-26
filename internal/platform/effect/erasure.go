@@ -102,11 +102,28 @@ func (e *SessionApprovalEraser) ErasePrincipal(ctx context.Context, state *princ
 	if len(ids) == 0 {
 		return nil
 	}
-	encoded, err := json.Marshal(ids)
+	return DeleteApprovalsForSessions(ctx, e.db, ids)
+}
+
+func (e *SessionApprovalEraser) DeleteApprovalsForSessions(ctx context.Context, sessionIDs []string) error {
+	if e == nil || e.db == nil {
+		return fault.New(ErrorCodeInvalidArgument, "effect: database must not be nil")
+	}
+	return DeleteApprovalsForSessions(ctx, e.db, sessionIDs)
+}
+
+func DeleteApprovalsForSessions(ctx context.Context, db *sql.DB, sessionIDs []string) error {
+	if db == nil {
+		return fault.New(ErrorCodeInvalidArgument, "effect: database must not be nil")
+	}
+	if len(sessionIDs) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(sessionIDs)
 	if err != nil {
 		return fmt.Errorf("encode session ids: %w", err)
 	}
-	if _, err := sqlite.Conn(ctx, e.db).ExecContext(ctx,
+	if _, err := sqlite.Conn(ctx, db).ExecContext(ctx,
 		`DELETE FROM effect_approval WHERE intent_id IN (SELECT id FROM effect_intent WHERE session_id IN (SELECT value FROM json_each(?)))`,
 		string(encoded),
 	); err != nil {
