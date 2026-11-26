@@ -519,7 +519,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 }
 
 func TestKnowledgeHTTPClientRefusesRedirectsToDeniedDestinations(t *testing.T) {
-	client := newKnowledgeHTTPClient(privateResolver{})
+	client := knowledge.NewHTTPClient(privateResolver{})
 	cases := []struct {
 		name   string
 		target string

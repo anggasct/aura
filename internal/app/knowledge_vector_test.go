@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -60,7 +61,7 @@ func (r *knowledgeTurnRig) settle(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), vectorWait)
 	defer cancel()
-	if err := r.vectors.index.Idle(ctx); err != nil {
+	if err := r.vectors.Idle(ctx); err != nil {
 		t.Fatalf("the vector index never went idle: %v", err)
 	}
 }
@@ -317,7 +318,7 @@ func TestKnowledgeColdAndPartialScopesSendNothing(t *testing.T) {
 
 func TestKnowledgeServerStopsSendingWhenTheCLIReembedsUnderAnotherFingerprint(t *testing.T) {
 	rig := newEmbeddedRig(t, "")
-	if rig.vectors.index.Used() == 0 {
+	if rig.vectors.Used() == 0 {
 		t.Fatal("nothing was loaded")
 	}
 
@@ -337,8 +338,8 @@ func TestKnowledgeServerStopsSendingWhenTheCLIReembedsUnderAnotherFingerprint(t 
 	rig.provider.reset()
 
 	found := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner)
-	if found.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.index.Used() != faqVectorBytes {
-		t.Fatalf("after the fingerprint changed: mode %q, sends %d, memory %d", found.Mode, rig.queriesSent(), rig.vectors.index.Used())
+	if found.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.Used() != faqVectorBytes {
+		t.Fatalf("after the fingerprint changed: mode %q, sends %d, memory %d", found.Mode, rig.queriesSent(), rig.vectors.Used())
 	}
 	rig.settle(t)
 	if found := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner); found.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 {
@@ -371,8 +372,8 @@ func TestKnowledgeServerSeesACLIChangeAtItsNextRetrieval(t *testing.T) {
 	}
 	rig.provider.reset()
 	erased := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner)
-	if erased.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.index.Used() != faqVectorBytes {
-		t.Fatalf("after --off: mode %q, sends %d, memory %d", erased.Mode, rig.queriesSent(), rig.vectors.index.Used())
+	if erased.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.Used() != faqVectorBytes {
+		t.Fatalf("after --off: mode %q, sends %d, memory %d", erased.Mode, rig.queriesSent(), rig.vectors.Used())
 	}
 }
 
@@ -381,34 +382,42 @@ func TestKnowledgeOverLimitCollectionStaysLexicalAndSendsNothing(t *testing.T) {
 	rig.add(t, "support", "policy.md", returnsAndShippingDocument)
 	rig.embedAll(t, "support")
 	rig.cfg.Knowledge.Embedding.MaxMemory = 100
-	pool, err := openKnowledgeReadPool(t.Context(), rig.dbPath)
-	if err != nil {
-		t.Fatalf("openKnowledgeReadPool: %v", err)
+	mod, err := knowledge.New(t.Context(), &knowledge.ModuleDeps{
+		Config:  rig.cfg.Knowledge,
+		DBPath:  rig.dbPath,
+		Scopes:  personaKnowledgeScopes(rig.cfg.Agents),
+		Secrets: &knowledgeSecrets{cfg: rig.cfg},
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+	if err != nil || mod.VectorLoader() == nil {
+		t.Fatalf("knowledge.New = %v, loader %v", err, mod != nil && mod.VectorLoader() != nil)
 	}
-	t.Cleanup(func() { _ = pool.Close() })
-	vectors, enabled, err := startKnowledgeVectors(t.Context(), rig.cfg, pool, rig.dbPath)
-	if err != nil || !enabled {
-		t.Fatalf("startKnowledgeVectors = %v, %v", enabled, err)
-	}
-	t.Cleanup(vectors.close)
-	retriever, err := newKnowledgeRetriever(rig.cfg, pool, vectors.options()...)
-	if err != nil {
-		t.Fatalf("newKnowledgeRetriever: %v", err)
-	}
+	t.Cleanup(func() { _ = mod.Close() })
+	runCtx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mod.VectorLoader()(runCtx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	retriever := mod.Retriever()
 	rig.provider.reset()
 	for range 2 {
 		found, err := retriever.Search(t.Context(), &knowledge.SearchRequest{Scope: []string{"support"}, Query: meaningQuery, Depth: knowledge.SearchDepth, Class: principal.ClassOwner})
 		if err != nil || found.Mode != knowledge.ModeLexical {
 			t.Fatalf("Search = %+v, %v, want a lexical answer", found, err)
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), vectorWait)
-		if err := vectors.index.Idle(ctx); err != nil {
+		ctx, idleCancel := context.WithTimeout(t.Context(), vectorWait)
+		if err := mod.VectorIndex().Idle(ctx); err != nil {
 			t.Fatalf("Idle: %v", err)
 		}
-		cancel()
+		idleCancel()
 	}
-	if rig.queriesSent() != 0 || vectors.index.Used() != 0 {
-		t.Errorf("sends %d, memory %d, want nothing sent and nothing held", rig.queriesSent(), vectors.index.Used())
+	if rig.queriesSent() != 0 || mod.VectorIndex().Used() != 0 {
+		t.Errorf("sends %d, memory %d, want nothing sent and nothing held", rig.queriesSent(), mod.VectorIndex().Used())
 	}
 
 	findings := embeddingFindings(t, rig.kbRetrievalRig)
@@ -479,16 +488,37 @@ func TestKnowledgeSlowEmbeddingProviderFallsBackToLexicalWithinTheBudget(t *test
 
 func TestBuildKnowledgeRuntimeStopsItsLoaderWithTheRuntime(t *testing.T) {
 	rig := newVectorTurnRig(t, "")
-	registry := personaRegistry(t, rig.cfgPath)
-	runtimeState, enabled, err := buildKnowledgeRuntime(t.Context(), rig.cfg, registry, slog.New(slog.DiscardHandler))
-	if err != nil || !enabled || runtimeState.vectors == nil {
-		t.Fatalf("buildKnowledgeRuntime = %v, %v, vectors %v", enabled, err, runtimeState.vectors)
+	mod, err := knowledge.New(t.Context(), &knowledge.ModuleDeps{
+		Config:  rig.cfg.Knowledge,
+		DBPath:  rig.dbPath,
+		Scopes:  personaKnowledgeScopes(rig.cfg.Agents),
+		Secrets: &knowledgeSecrets{cfg: rig.cfg},
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+	if err != nil || mod.VectorLoader() == nil {
+		t.Fatalf("knowledge.New = %v, loader %v", err, mod != nil && mod.VectorLoader() != nil)
 	}
-	done := runtimeState.vectors.done
-	runtimeState.close()
+	stopped := make(chan struct{})
+	group := server.NewLifecycleGroup(server.LifecycleOptions{Logger: slog.New(slog.DiscardHandler)})
+	if err := group.Defer("knowledge", func(context.Context) error { return mod.Close() }); err != nil {
+		t.Fatalf("Defer: %v", err)
+	}
+	run := mod.VectorLoader()
+	if err := group.Add(server.Background("knowledge_vectors", func(ctx context.Context) {
+		defer close(stopped)
+		run(ctx)
+	})); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := group.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := group.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
 	select {
-	case <-done:
+	case <-stopped:
 	default:
-		t.Fatal("the loader goroutine was still running after close")
+		t.Fatal("the loader goroutine was still running after stop")
 	}
 }

@@ -2,16 +2,20 @@ package app
 
 import (
 	"context"
+	"io"
 	"time"
 
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 )
@@ -43,6 +47,38 @@ func (b *build) addHealthCheck(check *health.RegisteredCheck) {
 	if b.onServer() {
 		b.server.checks = append(b.server.checks, *check)
 	}
+}
+
+func (b *build) registerModule(name string, mod any) error {
+	if tp, ok := mod.(toolbroker.ToolProvider); ok && b.builtin != nil {
+		if err := b.builtin.Broker().RegisterProvider(tp); err != nil {
+			return err
+		}
+	}
+	if cp, ok := mod.(turn.ContextProvider); ok {
+		b.execOpts = append(b.execOpts, runtimeadk.WithContextProvider(cp))
+	}
+	if hp, ok := mod.(health.HealthProvider); ok {
+		for _, check := range hp.HealthChecks() {
+			if check.Timeout == 0 {
+				check.Timeout = time.Duration(b.cfg.Health.CheckTimeout)
+			}
+			b.addHealthCheck(&check)
+		}
+	}
+	switch m := mod.(type) {
+	case server.Lifecycle:
+		if err := b.group.Add(m); err != nil {
+			return err
+		}
+	case io.Closer:
+		if err := b.group.Defer(name, func(context.Context) error {
+			return m.Close()
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (b *build) buildMemory(ctx context.Context) error {
@@ -106,31 +142,43 @@ func (b *build) buildSkills(ctx context.Context) error {
 }
 
 func (b *build) buildKnowledge(ctx context.Context) error {
-	checks, err := knowledgeStatusChecks(b.cfg)
+	scopes := personaKnowledgeScopes(b.cfg.Agents)
+	if len(scopes) == 0 {
+		if b.cfg.Knowledge != nil && b.cfg.Knowledge.Embedding != nil {
+			checks, err := knowledgeStatusChecks(b.cfg)
+			if err != nil {
+				return err
+			}
+			for i := range checks {
+				b.addHealthCheck(&checks[i])
+			}
+		}
+		return nil
+	}
+	dbPath, _, _, err := storagePaths(b.cfg)
 	if err != nil {
 		return err
 	}
-	for i := range checks {
-		b.addHealthCheck(&checks[i])
-	}
-	runtime, enabled, err := buildKnowledgeRuntime(ctx, b.cfg, b.registry, b.logger)
+	mod, err := knowledge.New(ctx, &knowledge.ModuleDeps{
+		Config:       b.cfg.Knowledge,
+		DBPath:       dbPath,
+		Scopes:       scopes,
+		Secrets:      &knowledgeSecrets{cfg: b.cfg},
+		CheckTimeout: time.Duration(b.cfg.Health.CheckTimeout),
+		Logger:       b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	if !enabled {
-		return nil
-	}
-	if err := b.group.Defer("knowledge", func(context.Context) error {
-		runtime.close()
-		return nil
-	}); err != nil {
-		runtime.close()
+	if err := b.registerModule("knowledge", mod); err != nil {
+		_ = mod.Close()
 		return err
 	}
-	if err := runtime.attachSearch(b.builtin); err != nil {
-		return err
+	if run := mod.VectorLoader(); run != nil {
+		if err := b.group.Add(server.Background("knowledge_vectors", run)); err != nil {
+			return err
+		}
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithContextProvider(runtime.provider))
 	return nil
 }
 

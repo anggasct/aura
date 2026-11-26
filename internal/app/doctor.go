@@ -33,8 +33,8 @@ func newDoctorCmd(gf *globalFlags, negotiate func() (sandbox.Primitives, error))
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}
-			extra := append(interpreterChecks, knowledgeChecks...)
-			registry, err := buildHealthRegistry(loaded.Config, mapCapabilityStatuses(loaded.CapabilityReport), localSandboxSupport(negotiate), processProbe, extra...)
+			interpreterChecks = append(interpreterChecks, knowledgeChecks...)
+			registry, err := buildHealthRegistry(loaded.Config, mapCapabilityStatuses(loaded.CapabilityReport), localSandboxSupport(negotiate), processProbe, interpreterChecks...)
 			if err != nil {
 				return &exitCodeError{code: exitCommand, err: err}
 			}

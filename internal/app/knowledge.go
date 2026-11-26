@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
-	"net/http"
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
@@ -15,10 +13,8 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/egress"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
@@ -36,7 +32,7 @@ func newKnowledgeService(cfg *appconfig.Config, db *sql.DB, resolver egress.Reso
 	if err != nil {
 		return nil, err
 	}
-	wiring, err := newKnowledgeEmbedding(cfg, resolver)
+	wiring, err := knowledge.NewEmbeddingWiring(cfg.Knowledge, resolver)
 	if err != nil {
 		return nil, err
 	}
@@ -44,11 +40,11 @@ func newKnowledgeService(cfg *appconfig.Config, db *sql.DB, resolver egress.Reso
 		Store:     kbStore,
 		Secrets:   &knowledgeSecrets{cfg: cfg},
 		Reducer:   toolsbuiltin.ReduceHTML,
-		HTTP:      newKnowledgeHTTPClient(resolver),
+		HTTP:      knowledge.NewHTTPClient(resolver),
 		Actions:   &knowledgeActions{db: db},
 		Vectors:   kbStore,
-		Embedder:  wiring.embedder,
-		Embedding: wiring.settings,
+		Embedder:  wiring.Embedder,
+		Embedding: wiring.Settings,
 	})
 }
 
@@ -62,31 +58,6 @@ func (s *knowledgeSecrets) Snapshot(_ context.Context) (knowledge.SecretScreen, 
 		return nil, err
 	}
 	return vault, nil
-}
-
-type roundTripperFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripperFunc) RoundTrip(request *http.Request) (*http.Response, error) { return f(request) }
-
-func refuseDeniedEgress(err error) error {
-	if fault.HasCode(err, egress.ErrorCodeEgressDenied) {
-		return knowledge.Errorf(knowledge.ErrorCodeURLRefused, "destination is not permitted")
-	}
-	return err
-}
-
-func newKnowledgeHTTPClient(resolver egress.Resolver) *http.Client {
-	client := egress.NewAPIClient(resolver)
-	transport := client.Transport
-	client.Transport = roundTripperFunc(func(request *http.Request) (*http.Response, error) {
-		response, err := transport.RoundTrip(request)
-		return response, refuseDeniedEgress(err)
-	})
-	redirect := client.CheckRedirect
-	client.CheckRedirect = func(request *http.Request, via []*http.Request) error {
-		return refuseDeniedEgress(redirect(request, via))
-	}
-	return client
 }
 
 type knowledgeActions struct {
@@ -129,97 +100,6 @@ func (a *knowledgeActions) RecordOwnerAction(ctx context.Context, action *knowle
 		CreatedAt:     action.At.UTC(),
 	})
 	return err
-}
-
-const knowledgeReadPoolConns = 4
-
-func openKnowledgeReadPool(ctx context.Context, dbPath string) (*sql.DB, error) {
-	pool, err := sqlite.OpenReadOnly(ctx, dbPath)
-	if err != nil {
-		return nil, err
-	}
-	pool.SetMaxOpenConns(knowledgeReadPoolConns)
-	return pool, nil
-}
-
-func newKnowledgeRetriever(cfg *appconfig.Config, pool *sql.DB, opts ...knowledge.RetrieverOption) (*knowledge.Retriever, error) {
-	if cfg == nil {
-		return nil, errors.New("knowledge config must not be nil")
-	}
-	if pool == nil {
-		return nil, errors.New("knowledge read pool must not be nil")
-	}
-	index, err := knowledge.NewSQLiteIndex(pool)
-	if err != nil {
-		return nil, err
-	}
-	return knowledge.NewRetriever(index, &knowledgeSecrets{cfg: cfg}, opts...)
-}
-
-type knowledgeRuntime struct {
-	retriever *knowledge.Retriever
-	provider  *knowledge.ContextProvider
-	pool      *sql.DB
-	vectors   *knowledgeVectorRuntime
-}
-
-func (r *knowledgeRuntime) attachSearch(builtin *toolsbuiltin.Executor) error {
-	if r == nil || builtin == nil {
-		return nil
-	}
-	return builtin.Broker().RegisterProvider(knowledge.NewToolProvider(r.retriever))
-}
-
-func (r *knowledgeRuntime) close() {
-	if r == nil {
-		return
-	}
-	r.vectors.close()
-	if r.pool != nil {
-		_ = r.pool.Close()
-	}
-}
-
-func personasListKnowledge(registry *auraagent.Registry) bool {
-	definitions := registry.Definitions()
-	for i := range definitions {
-		if len(definitions[i].Knowledge) > 0 {
-			return true
-		}
-	}
-	return false
-}
-
-func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry *auraagent.Registry, logger *slog.Logger) (rt *knowledgeRuntime, enabled bool, err error) {
-	if !personasListKnowledge(registry) {
-		return nil, false, nil
-	}
-	dbPath, _, _, err := storagePaths(cfg)
-	if err != nil {
-		return nil, false, err
-	}
-	pool, err := openKnowledgeReadPool(ctx, dbPath)
-	if err != nil {
-		return nil, false, err
-	}
-	vectors, _, err := startKnowledgeVectors(ctx, cfg, pool, dbPath)
-	if err != nil {
-		_ = pool.Close()
-		return nil, false, err
-	}
-	retriever, err := newKnowledgeRetriever(cfg, pool, vectors.options()...)
-	if err != nil {
-		vectors.close()
-		_ = pool.Close()
-		return nil, false, err
-	}
-	provider, err := knowledge.NewContextProvider(retriever, logger)
-	if err != nil {
-		vectors.close()
-		_ = pool.Close()
-		return nil, false, err
-	}
-	return &knowledgeRuntime{retriever: retriever, provider: provider, pool: pool, vectors: vectors}, true, nil
 }
 
 func personaKnowledgeScopes(agents *auraagent.Config) []knowledge.PersonaScope {

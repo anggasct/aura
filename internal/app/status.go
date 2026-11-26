@@ -98,8 +98,8 @@ func runStatus(cmd *cobra.Command, cfg *appconfig.Config, report capability.Repo
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}
-	extra := append(interpreterChecks, knowledgeChecks...)
-	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe, extra...)
+	interpreterChecks = append(interpreterChecks, knowledgeChecks...)
+	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe, interpreterChecks...)
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}

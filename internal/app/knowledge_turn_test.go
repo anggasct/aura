@@ -81,7 +81,8 @@ type knowledgeTurnRig struct {
 	model    *knowledgeCapturingModel
 	dbPath   string
 	cfgPath  string
-	vectors  *knowledgeVectorRuntime
+	mod      *knowledge.Module
+	vectors  *knowledge.MemoryIndex
 	provider *embeddingProvider
 }
 
@@ -115,40 +116,46 @@ agents:
       instructions: Chat.
 `+extraYAML)
 	cfg, db, dbPath := kbTestStorage(t, path)
-	pool, err := openKnowledgeReadPool(t.Context(), dbPath)
+	mod, err := knowledge.New(t.Context(), &knowledge.ModuleDeps{
+		Config:  cfg.Knowledge,
+		DBPath:  dbPath,
+		Scopes:  personaKnowledgeScopes(cfg.Agents),
+		Secrets: &knowledgeSecrets{cfg: cfg},
+		Logger:  slog.New(slog.DiscardHandler),
+	})
 	if err != nil {
-		t.Fatalf("openKnowledgeReadPool: %v", err)
+		t.Fatalf("knowledge.New: %v", err)
 	}
-	t.Cleanup(func() { _ = pool.Close() })
-	vectors, _, err := startKnowledgeVectors(t.Context(), cfg, pool, dbPath)
-	if err != nil {
-		t.Fatalf("startKnowledgeVectors: %v", err)
-	}
-	t.Cleanup(vectors.close)
-	retriever, err := newKnowledgeRetriever(cfg, pool, vectors.options()...)
-	if err != nil {
-		t.Fatalf("newKnowledgeRetriever: %v", err)
+	t.Cleanup(func() { _ = mod.Close() })
+	if run := mod.VectorLoader(); run != nil {
+		runCtx, cancel := context.WithCancel(t.Context())
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			run(runCtx)
+		}()
+		t.Cleanup(func() {
+			cancel()
+			<-done
+		})
 	}
 	service, err := newKnowledgeService(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("newKnowledgeService: %v", err)
 	}
 	rig := &knowledgeTurnRig{
-		kbRetrievalRig: &kbRetrievalRig{cfg: cfg, db: db, retriever: retriever, service: service},
+		kbRetrievalRig: &kbRetrievalRig{cfg: cfg, db: db, retriever: mod.Retriever(), service: service},
 		model:          &knowledgeCapturingModel{},
 		dbPath:         dbPath,
 		cfgPath:        path,
-		vectors:        vectors,
+		mod:            mod,
+		vectors:        mod.VectorIndex(),
 		provider:       fake,
 	}
 	name := "knowledge-capturing-model"
 	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
-	provider, err := knowledge.NewContextProvider(retriever, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatalf("NewContextProvider: %v", err)
-	}
 	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, sessions, terminalBroker{}, nil, slog.New(slog.DiscardHandler),
-		runtimeadk.WithContextProvider(provider))
+		runtimeadk.WithContextProvider(mod))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
