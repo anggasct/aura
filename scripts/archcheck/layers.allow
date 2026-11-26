@@ -1,4 +1,3 @@
-internal/modules/builtin -> internal/modules/codeexec  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin -> internal/modules/fetch  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin -> internal/modules/filesystem  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin -> internal/modules/search  # builtin assembles tool adapters until each module provides its tools

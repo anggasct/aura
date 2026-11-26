@@ -71,7 +71,7 @@ func handoffNotifiers(ports []runtimechannelhost.ChannelPort) []handoff.Notifier
 }
 
 type ownerHandoffNotifier interface {
-	personaServer
+	approval.PersonaServer
 	NotifyOwnerHandoff(ctx context.Context, requester *approval.Requester, sessionID, reason string) error
 }
 

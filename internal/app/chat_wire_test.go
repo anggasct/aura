@@ -98,3 +98,13 @@ func TestShouldUseTTY(t *testing.T) {
 		})
 	}
 }
+
+func TestTerminalApprovalReachableOnlyWhenTheBridgeExists(t *testing.T) {
+	if terminalApprovalReachable(nil) != nil {
+		t.Error("a chat without an approval bridge must be unreachable")
+	}
+	reachable := terminalApprovalReachable(terminal.NewApprovalBridge())
+	if reachable == nil || !reachable("any-session") {
+		t.Error("a TTY chat with the approval bridge must be reachable for every session")
+	}
+}

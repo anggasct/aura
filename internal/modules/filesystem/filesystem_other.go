@@ -8,7 +8,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
-func New(options Options) (map[string]toolbroker.Adapter, error) {
+func NewAdapters(options Options) (map[string]toolbroker.Adapter, error) {
 	if err := validateOptions(&options); err != nil {
 		return nil, err
 	}

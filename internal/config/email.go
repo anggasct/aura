@@ -43,12 +43,11 @@ func ValidateEmail(email *Email) error {
 	for i := range email.Accounts {
 		account := &email.Accounts[i]
 		field := fmt.Sprintf("channels.email.accounts[%d]", i)
-		switch {
-		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
-		case names[account.Name]:
+		if err := configkit.ValidateAccountName(field+".name", account.Name); err != nil {
+			problems = append(problems, err)
+		} else if names[account.Name] {
 			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
-		default:
+		} else {
 			names[account.Name] = true
 		}
 		problems = append(problems, emailAccountProblems(field, account, email.Enabled)...)

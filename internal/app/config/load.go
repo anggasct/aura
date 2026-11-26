@@ -139,7 +139,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		legacyconfig.ValidateSync(cfg.Sync),
 		validateVision(cfg.Vision),
 		validateKnowledge(cfg.Knowledge),
-		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
+		configkit.Under("interpreter", cfg.Interpreter.Validate()),
 		configkit.Under("runtime", cfg.Runtime.Validate()),
 		configkit.Under("server", cfg.Server.Validate()),
 		configkit.Under("logging", cfg.Logging.Validate()),

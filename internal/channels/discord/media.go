@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -99,7 +100,7 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 	}
 	tmp, err := media.Spool(resp.Body, limit)
 	if err != nil {
-		if code, ok := media.CodeOf(err); ok && code == media.ErrorCodeSizeExceeded {
+		if fault.HasCode(err, media.ErrorCodeSizeExceeded) {
 			return nil, Errorf(ErrorCodeAttachmentRejected, "attachment size is outside the allowed bound")
 		}
 		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment download did not complete")

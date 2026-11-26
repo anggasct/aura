@@ -8,6 +8,7 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -52,7 +53,7 @@ func TestTelegramTrustedEffectfulToolFailsClosedWithoutAnApprovalTarget(t *testi
 			if err != nil {
 				t.Fatalf("buildChannelAdapters(): %v", err)
 			}
-			decider := channelApprovalDecider(approvalChannels(approvers, nil))
+			decider := kitapproval.Decider(approvalChannels(approvers, nil))
 			if (decider != nil) != tc.wantDecide {
 				t.Fatalf("decider present = %v, want %v", decider != nil, tc.wantDecide)
 			}

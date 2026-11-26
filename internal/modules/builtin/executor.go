@@ -32,7 +32,6 @@ type Executor struct {
 	broker    *toolbroker.Broker
 	journal   *effect.Journal
 	emails    *emailHolder
-	code      *codeHolder
 	artifacts storage.ArtifactStore
 	host      []string
 }
@@ -77,8 +76,7 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 		return nil, fault.New(turn.ErrorCodeInvalidArgument, "live events publisher must not be nil")
 	}
 	emails := &emailHolder{}
-	code := &codeHolder{}
-	adapters, err := builtinAdapters(toolsCfg, emails, code)
+	adapters, err := builtinAdapters(toolsCfg, emails)
 	if err != nil {
 		return nil, err
 	}
@@ -103,14 +101,13 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 		Access:               access,
 		ApprovalGuards:       map[string]toolbroker.ApprovalGuard{tools.EmailSendToolName: emails.guard},
 		HostCapabilities:     host,
-		ArgumentChecks:       map[string]toolbroker.ArgumentCheck{codeKey(): code.check},
 		ApprovalReachable:    applied.approvalReachable,
 	}
 	broker, err := toolbroker.New(brokerOptions)
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, emails: emails, code: code, artifacts: artifacts, host: host}, nil
+	return &Executor{broker: broker, journal: journal, emails: emails, artifacts: artifacts, host: host}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -127,11 +124,11 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHolder) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
-	execAdapter, err := shellexec.New(shellexec.Options{
+	execAdapter, err := shellexec.NewAdapter(shellexec.Options{
 		Workspace:      toolsCfg.Workspace,
 		Timeout:        time.Duration(toolsCfg.Exec.Timeout),
 		MaxStdoutBytes: toolsCfg.Exec.MaxStdoutBytes,
@@ -140,7 +137,7 @@ func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHold
 	if err != nil {
 		return nil, err
 	}
-	filesystemAdapters, err := filesystemTool.New(filesystemTool.Options{Workspace: toolsCfg.Workspace})
+	filesystemAdapters, err := filesystemTool.NewAdapters(filesystemTool.Options{Workspace: toolsCfg.Workspace})
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +158,6 @@ func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHold
 	adapters["web_fetch@v1"] = fetchMod.Adapter()
 	adapters["web_search@v1"] = searchMod.Adapter()
 	adapters[tools.EmailSendToolName+"@"+tools.Version] = emails.adapter
-	adapters[codeKey()] = code.adapter
 	return adapters, nil
 }
 
@@ -310,4 +306,11 @@ func (e *Executor) Broker() *toolbroker.Broker {
 		return nil
 	}
 	return e.broker
+}
+
+func (e *Executor) Artifacts() storage.ArtifactStore {
+	if e == nil {
+		return nil
+	}
+	return e.artifacts
 }

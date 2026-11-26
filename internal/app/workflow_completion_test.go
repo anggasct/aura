@@ -67,7 +67,7 @@ func completionFixture(t *testing.T) *completionHarness {
 		t.Fatal(err)
 	}
 	harness := &completionHarness{controller: controller, db: db}
-	cfg := &appconfig.Config{Channels: config.Channels{Discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "front"}}}}}
+	cfg := &appconfig.Config{Channels: appconfig.Channels{Discord: config.Discord{Accounts: []config.DiscordAccount{{Name: "front"}}}}}
 	notifier, err := workflow.NewCompletionNotifier(&workflow.CompletionNotifierDeps{
 		Runs:     runs,
 		Registry: registry,

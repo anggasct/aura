@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/url"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -118,8 +117,6 @@ func ValidateTerminal(t Terminal) error {
 	return nil
 }
 
-var discordAccountNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
-
 func ValidateDiscord(discord *Discord) error {
 	if discord == nil {
 		return configkit.Invalid("channels.discord", "must not be nil")
@@ -130,12 +127,11 @@ func ValidateDiscord(discord *Discord) error {
 	for i := range discord.Accounts {
 		account := &discord.Accounts[i]
 		field := fmt.Sprintf("channels.discord.accounts[%d]", i)
-		switch {
-		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
-		case names[account.Name]:
+		if err := configkit.ValidateAccountName(field+".name", account.Name); err != nil {
+			problems = append(problems, err)
+		} else if names[account.Name] {
 			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
-		default:
+		} else {
 			names[account.Name] = true
 		}
 		switch {
@@ -185,12 +181,11 @@ func ValidateTelegram(telegram *Telegram) error {
 	for i := range telegram.Accounts {
 		account := &telegram.Accounts[i]
 		field := fmt.Sprintf("channels.telegram.accounts[%d]", i)
-		switch {
-		case !discordAccountNamePattern.MatchString(account.Name):
-			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q must match %s", account.Name, discordAccountNamePattern.String())))
-		case names[account.Name]:
+		if err := configkit.ValidateAccountName(field+".name", account.Name); err != nil {
+			problems = append(problems, err)
+		} else if names[account.Name] {
 			problems = append(problems, configkit.Invalid(field+".name", fmt.Sprintf("%q is configured more than once", account.Name)))
-		default:
+		} else {
 			names[account.Name] = true
 		}
 		switch {
@@ -385,11 +380,8 @@ func ValidateTools(toolsConfig *Tools) error {
 	if toolsConfig.MaxInlineResultBytes <= 0 {
 		return configkit.Invalid("tools.max_inline_result_bytes", "must be positive")
 	}
-	if toolsConfig.Exec.Timeout <= 0 {
-		return configkit.Invalid("tools.exec.timeout", "must be positive")
-	}
-	if toolsConfig.Exec.MaxStdoutBytes <= 0 || toolsConfig.Exec.MaxStderrBytes <= 0 {
-		return configkit.Invalid("tools.exec", "output limits must be positive")
+	if err := configkit.Under("tools.exec", toolsConfig.Exec.Validate()); err != nil {
+		return err
 	}
 	if err := configkit.Under("tools.fetch", toolsConfig.Fetch.Validate()); err != nil {
 		return err

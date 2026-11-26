@@ -3,22 +3,20 @@ package app
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
-	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -36,27 +34,6 @@ func (c emailCursors) Load(ctx context.Context, source string) (email.Cursor, bo
 
 func (c emailCursors) Save(ctx context.Context, source string, cursor email.Cursor, at time.Time) error {
 	return c.cursors.Save(ctx, source, store.EmailCursor{UIDValidity: cursor.UIDValidity, LastUID: cursor.LastUID}, at)
-}
-
-type emailSessions struct {
-	discordSessionEnsurer
-}
-
-func (s *emailSessions) SessionOwner(ctx context.Context, sessionID string) (ownerID string, found bool, err error) {
-	if s.sessions == nil {
-		return "", false, nil
-	}
-	session, err := s.sessions.Get(ctx, sessionID)
-	if err == nil {
-		return session.OwnerID, true, nil
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionNotFound {
-		return "", false, nil
-	}
-	return "", false, err
 }
 
 type emailAdapters []*email.Adapter
@@ -82,34 +59,23 @@ func newEmailAdapter(cfg *appconfig.Config, account *config.EmailAccount, db *sq
 	if err != nil {
 		return nil, err
 	}
-	adapter, err := email.New(&cfg.Channels.Email, account, connector, mailer, emailCursors{cursors: store.NewEmailCursorStore(db)}, executor, &emailSessions{discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}}, logger)
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
 	if err != nil {
 		return nil, err
 	}
-	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))})
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, err
+	}
+	adapter, err := email.New(&cfg.Channels.Email, account, connector, mailer, emailCursors{cursors: store.NewEmailCursorStore(db)}, executor, sessions, logger)
+	if err != nil {
+		return nil, err
+	}
+	adapter.SetMediaStore(mediaStore)
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)
 	}
 	return adapter, nil
-}
-
-func wireEmailOwnerAccess(ports []runtimechannelhost.ChannelPort, route *approval.OwnerRoute, approvers []approvalAdapter) []*email.Adapter {
-	notifiers := make([]ownerHandoffNotifier, 0, len(approvers))
-	for _, approver := range approvers {
-		notifiers = append(notifiers, approver)
-	}
-	handoffs := &emailOwnerHandoffRouter{router: newOwnerHandoffRouter(notifiers)}
-	var adapters []*email.Adapter
-	for _, port := range ports {
-		adapter, ok := port.(*email.Adapter)
-		if !ok {
-			continue
-		}
-		adapter.SetOwnerRoute(route)
-		adapter.SetHandoffNotifier(handoffs)
-		adapters = append(adapters, adapter)
-	}
-	return adapters
 }
 
 type emailOutbox struct {

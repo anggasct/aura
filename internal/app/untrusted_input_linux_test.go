@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
@@ -102,7 +103,7 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	if err != nil {
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
-	rig.reachable = channelApprovalReachable(approvalChannels(approvers, route))
+	rig.reachable = approval.Reachable(approvalChannels(approvers, route))
 	decider := func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		rig.asked.Add(1)
 		return false, nil
@@ -272,5 +273,5 @@ func serverApprovalReachable(t *testing.T) func(sessionID string) bool {
 	if err != nil {
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
-	return channelApprovalReachable(approvalChannels(approvers, route))
+	return approval.Reachable(approvalChannels(approvers, route))
 }

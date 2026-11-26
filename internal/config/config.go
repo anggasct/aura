@@ -8,16 +8,10 @@ import (
 	"github.com/anggasct/aura/internal/modules/fetch"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/search"
+	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
-
-type Channels struct {
-	Discord  Discord  `json:"discord"`
-	Telegram Telegram `json:"telegram"`
-	Email    Email    `json:"email"`
-	HTTP     HTTP     `json:"http"`
-}
 
 type Sync struct {
 	Enabled            bool               `json:"enabled"`
@@ -198,18 +192,12 @@ type Terminal struct {
 }
 
 type Tools struct {
-	Workspace            string        `json:"workspace"`
-	MaxInlineResultBytes int64         `json:"max_inline_result_bytes"`
-	Exec                 ToolExec      `json:"exec"`
-	Fetch                fetch.Config  `json:"fetch"`
-	WebSearch            search.Config `json:"web_search"`
-	GitHub               github.Config `json:"github,omitzero"`
-}
-
-type ToolExec struct {
-	Timeout        configkit.Duration `json:"timeout"`
-	MaxStdoutBytes int64              `json:"max_stdout_bytes"`
-	MaxStderrBytes int64              `json:"max_stderr_bytes"`
+	Workspace            string           `json:"workspace"`
+	MaxInlineResultBytes int64            `json:"max_inline_result_bytes"`
+	Exec                 shellexec.Config `json:"exec"`
+	Fetch                fetch.Config     `json:"fetch"`
+	WebSearch            search.Config    `json:"web_search"`
+	GitHub               github.Config    `json:"github,omitzero"`
 }
 
 var (
@@ -220,13 +208,9 @@ func DefaultTools() *Tools {
 	return &Tools{
 		Workspace:            "/srv/aura/workspace",
 		MaxInlineResultBytes: 65536,
-		Exec: ToolExec{
-			Timeout:        configkit.Duration(30 * time.Second),
-			MaxStdoutBytes: 65536,
-			MaxStderrBytes: 65536,
-		},
-		Fetch:     fetch.Default(),
-		WebSearch: search.Default(),
+		Exec:                 shellexec.Default(),
+		Fetch:                fetch.Default(),
+		WebSearch:            search.Default(),
 	}
 }
 
@@ -237,41 +221,6 @@ func DefaultTerminal() Terminal {
 		InMemoryHistory:     100,
 		SecondInterruptTime: configkit.Duration(2 * time.Second),
 		PlainApproval:       "deny",
-	}
-}
-
-func DefaultChannels() Channels {
-	return Channels{
-		Discord: Discord{
-			MinEditInterval:          configkit.Duration(2 * time.Second),
-			MaxAttachmentBytes:       20971520,
-			ThreadAutoArchiveMinutes: 1440,
-		},
-		Telegram: Telegram{
-			Polling: TelegramPolling{
-				Timeout:    configkit.Duration(30 * time.Second),
-				MaxBackoff: configkit.Duration(time.Minute),
-			},
-			MinEditInterval:    configkit.Duration(2 * time.Second),
-			MaxAttachmentBytes: TelegramMaxAttachmentBytes,
-			Webhook: TelegramWebhook{
-				ListenAddress:  TelegramWebhookListenAddress,
-				MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
-				MaxConnections: TelegramWebhookMaxConnections,
-			},
-		},
-		Email: Email{
-			MaxAttachmentBytes: EmailMaxAttachmentBytes,
-		},
-		HTTP: HTTP{
-			ListenAddress:       HTTPListenAddress,
-			MaxBodyBytes:        HTTPMaxBodyBytes,
-			RequestsPerMinute:   HTTPRequestsPerMinute,
-			MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
-			MaxHistoryMessages:  HTTPMaxHistoryMessages,
-			MaxHistoryBytes:     HTTPMaxHistoryBytes,
-			KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
-		},
 	}
 }
 

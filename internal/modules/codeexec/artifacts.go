@@ -16,7 +16,7 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -112,7 +112,7 @@ func (i *importer) importAll(ctx context.Context, outputDir string, names []stri
 		case index >= i.maxFiles:
 			entries = append(entries, refused(RefusalTooMany))
 			continue
-		case tools.ValidateCodeOutputFile(name) != nil:
+		case ValidateCodeOutputFile(name) != nil:
 			entries = append(entries, refused(RefusalInvalidName))
 			continue
 		}
@@ -258,7 +258,7 @@ func openRefusal(err error) Refusal {
 }
 
 func putRefusal(err error) Refusal {
-	if code, ok := CodeOf(err); ok && code == ErrorCodeArtifactQuota {
+	if fault.HasCode(err, ErrorCodeArtifactQuota) {
 		return RefusalQuota
 	}
 	return RefusalImport

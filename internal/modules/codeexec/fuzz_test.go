@@ -39,7 +39,7 @@ func FuzzCodeExecuteRequest(f *testing.F) {
 			if int64(len(decoded.Source)) > limits.MaxSourceBytes || int64(len(decoded.Stdin)) > limits.MaxStdinBytes {
 				t.Fatalf("ArgumentCheck accepted source %d or stdin %d above the limits", len(decoded.Source), len(decoded.Stdin))
 			}
-			if err := tools.ValidateCodeOutputFiles(decoded.OutputFiles, int(limits.MaxOutputFiles)); err != nil {
+			if err := ValidateCodeOutputFiles(decoded.OutputFiles, int(limits.MaxOutputFiles)); err != nil {
 				t.Fatalf("ArgumentCheck accepted an invalid output list: %v", err)
 			}
 		} else {

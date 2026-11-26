@@ -12,6 +12,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
@@ -19,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
@@ -29,7 +31,15 @@ const (
 	mcpTrustFileName = "trust.json"
 )
 
+func usageWrap(err error) error {
+	if err == nil {
+		return nil
+	}
+	return &usageError{err}
+}
+
 func mountCommands(root *cobra.Command, gf *globalFlags) {
+	root.AddCommand(shellexec.Commands(usageWrap)...)
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
 	root.AddCommand(memory.Commands(memoryOpener(gf))...)
 	root.AddCommand(profile.Commands(profileOpener(gf))...)
@@ -40,6 +50,7 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(mcp.Commands(mcpOpener(gf))...)
 	root.AddCommand(skills.Commands(skillsOpener(gf))...)
 	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
+	root.AddCommand(codeexec.Commands(interpreterOpener(gf))...)
 	root.AddCommand(child.Commands(childOpener(gf))...)
 }
 

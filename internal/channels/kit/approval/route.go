@@ -4,6 +4,8 @@ import (
 	"context"
 	"strings"
 	"sync"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const maxRemembered = 4096
@@ -27,7 +29,7 @@ type OwnerRoute struct {
 
 func NewOwnerRoute(owners OwnerApprover) (*OwnerRoute, error) {
 	if owners == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "owner approver must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "owner approver must not be nil")
 	}
 	return &OwnerRoute{owners: owners, held: make(map[string]*heldRequester)}, nil
 }
@@ -41,13 +43,13 @@ func (r *OwnerRoute) HoldsApprovalTarget(sessionID string) bool {
 
 func (r *OwnerRoute) Decide(ctx context.Context, prompt *Prompt) (bool, error) {
 	if ctx == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if prompt == nil {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
+		return false, fault.New(ErrorCodeInvalidArgument, "approval prompt must not be nil")
 	}
 	if strings.TrimSpace(prompt.ToolName) == "" || strings.TrimSpace(prompt.SessionID) == "" || strings.TrimSpace(prompt.PrincipalID) == "" {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+		return false, fault.New(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
 	}
 	requester, ok := r.RequesterOf(prompt.SessionID)
 	if !ok || requester.Principal != prompt.PrincipalID {

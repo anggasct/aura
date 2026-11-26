@@ -19,6 +19,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -259,16 +260,20 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSessionEnsurer: %v", err)
+	}
 	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], mail, submissions,
 		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		&emailSessions{discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}},
+		sessions,
 		slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("email.New: %v", err)
 	}
 	adapter.SetPrincipalResolver(owners)
 	adapter.SetPersonaRouter(router)
-	settings := discordAccessSettings(cfg, db, nil, nil)
+	settings := channelAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
@@ -474,7 +479,10 @@ func TestRecoverEmailEffects(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			db := storetest.OpenMigrated(t)
-			ensurer := discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}
+			ensurer, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+			if err != nil {
+				t.Fatalf("NewSessionEnsurer: %v", err)
+			}
 			if err := ensurer.EnsureSession(t.Context(), "desk/email:work/thread:recover", principal.OwnerID, "desk"); err != nil {
 				t.Fatalf("EnsureSession: %v", err)
 			}

@@ -143,14 +143,9 @@ linters:
             - "**/internal/app/**"
           allow:
             - github.com/anggasct/aura/internal/modules/builtin
-            - github.com/anggasct/aura/internal/modules/codeexec/interpreter
           deny:
             - pkg: github.com/anggasct/aura/internal/platform/tools
               desc: the builtin adapter set is assembled in internal/modules/builtin; the app composition root calls that constructor instead
-            - pkg: github.com/anggasct/aura/internal/modules/codeexec
-              desc: the code execution adapter is constructed by internal/modules/builtin, not by the app composition root
-            - pkg: github.com/anggasct/aura/internal/modules/shellexec
-              desc: the exec adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/filesystem
               desc: the filesystem adapters are constructed by internal/modules/builtin, not by the app composition root
     errcheck:

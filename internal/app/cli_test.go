@@ -60,6 +60,9 @@ func TestExecStub(t *testing.T) {
 	if !strings.Contains(err.Error(), "not yet implemented") {
 		t.Errorf("unexpected exec error: %v", err)
 	}
+	if code := exitCodeOf(t, "exec", "--", "ls", "-la"); code != 1 {
+		t.Errorf("exec exit code = %d, want 1", code)
+	}
 }
 
 func TestExecRequiresArgument(t *testing.T) {
@@ -69,6 +72,9 @@ func TestExecRequiresArgument(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "requires at least one argument") {
 		t.Errorf("unexpected exec usage error: %v", err)
+	}
+	if code := exitCodeOf(t, "exec"); code != 2 {
+		t.Errorf("exec without arguments exit code = %d, want 2", code)
 	}
 }
 

@@ -22,7 +22,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -206,7 +205,7 @@ func (h *auditHarness) call(arguments any) (toolbroker.ToolResult, error) {
 	h.sequence++
 	return h.broker.Execute(h.t.Context(), &toolbroker.ToolRequest{
 		RequestID: fmt.Sprintf("call-%d", h.sequence), TurnID: "turn-1", SessionID: auditSessionID, PrincipalID: "owner-1",
-		ToolName: tools.CodeExecuteToolName, ToolVersion: "v1", Arguments: encoded, Capabilities: []string{"code-interpreter"},
+		ToolName: ToolName, ToolVersion: "v1", Arguments: encoded, Capabilities: []string{"code-interpreter"},
 		Trust: approval.TrustOwnerInput, IdempotencyKey: fmt.Sprintf("key-%d", h.sequence), EventSequence: h.sequence,
 		EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})
