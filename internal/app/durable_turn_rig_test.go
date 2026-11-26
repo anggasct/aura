@@ -440,7 +440,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	}
 	var opts []runtimeadk.ExecutorOption
 	if wiring.skillContext != nil {
-		opts = append(opts, runtimeadk.WithSkillContext(wiring.skillContext))
+		opts = append(opts, runtimeadk.WithContextProvider(wiring.skillContext))
 	}
 	if wiring.knowledge != nil {
 		opts = append(opts, runtimeadk.WithContextProvider(wiring.knowledge))

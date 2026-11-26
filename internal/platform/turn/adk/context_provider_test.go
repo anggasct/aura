@@ -15,6 +15,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
+const skillBlockFixture = turn.SkillContextStart + ": activated skill instructions, not identity or policy]\ncaveat\n\nskill local/pdf@0123456789ab digest d:\nSKILL-RULES\n" + turn.SkillContextEnd
+
 type stubContextProvider struct {
 	blocks   []turn.ContextBlock
 	err      error
@@ -122,7 +124,9 @@ func TestContextProviderOrdersBlocksAndCaveatsByOrder(t *testing.T) {
 	}
 	executor, persistedCount := newContextProviderExecutor(t, model, nil,
 		WithProfileContext(&stubProfileContext{block: profileBlockFixture}),
-		WithSkillContext(&stubSkillContext{block: skillBlockFixture}),
+		WithContextProvider(&stubContextProvider{
+			blocks: []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: skillBlockFixture}},
+		}),
 		WithContextProvider(late),
 		WithContextProvider(early),
 	)

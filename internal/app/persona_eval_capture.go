@@ -61,8 +61,15 @@ func (p markerProvider) ProfileContext(context.Context, *turn.TurnRequest) (stri
 	return p.text, nil
 }
 
-func (p markerProvider) SkillContext(context.Context, *turn.TurnRequest) (string, error) {
-	return p.text, nil
+func (p markerProvider) TurnContext(_ context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req == nil || req.PrincipalClass != principal.ClassOwner {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: p.text}}, nil
+}
+
+func (p markerProvider) Required(_ *turn.TurnRequest) bool {
+	return false
 }
 
 func (p markerProvider) RecallTurn(_ context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error) {
@@ -111,7 +118,7 @@ func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definiti
 		runtimeadk.WithAgentResolver(&staticResolver{definition: evaluated}, nil),
 		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
 		runtimeadk.WithProfileContext(markerProvider{text: personaeval.MarkerProfile}),
-		runtimeadk.WithSkillContext(markerProvider{text: personaeval.MarkerSkill}),
+		runtimeadk.WithContextProvider(markerProvider{text: personaeval.MarkerSkill}),
 		runtimeadk.WithRecallProvider(markerProvider{text: personaeval.MarkerRecall}),
 	)
 	if err != nil {
