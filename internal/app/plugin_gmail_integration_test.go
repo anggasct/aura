@@ -7,11 +7,12 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/modules/plugin/connector"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func TestIntegrationGmailConnectorRunsInsideTheSandbox(t *testing.T) {
-	f := newGmailFixture(t, newConnectorSessionStarter(sandbox.Start))
+	f := newGmailFixture(t, connector.NewSandboxStarter(sandbox.Start))
 	f.api.setList("m1", "m2")
 	for _, id := range []string{"m1", "m2"} {
 		f.api.setMessage(t, id, gmailMessage(id, gmailHeaders("From", "Alice <alice@example.com>", "Subject", "Café "+id, "Date", "Tue, 3 Nov 2026 10:00:00 +0000"),

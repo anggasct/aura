@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -57,6 +58,7 @@ const (
 	PartKnowledge Part = "knowledge"
 	PartMemory    Part = "memory"
 	PartProfile   Part = "profile"
+	PartPlugins   Part = "plugins"
 )
 
 type Options struct {
@@ -114,6 +116,7 @@ type App struct {
 	knowledge   *knowledge.Service
 	memory      *memory.Service
 	profile     *profile.Service
+	plugins     *plugin.Service
 
 	mu    sync.Mutex
 	state appState
@@ -135,7 +138,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile, plugins: b.plugins,
 	}, nil
 }
 
@@ -239,7 +242,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile, PartPlugins:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -341,6 +344,7 @@ type build struct {
 	knowledge    *knowledge.Service
 	memory       *memory.Service
 	profile      *profile.Service
+	plugins      *plugin.Service
 	quarantined  []workflow.Quarantined
 	artifactRoot string
 
@@ -450,6 +454,13 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.profile = service
+	}
+	if slices.Contains(parts, PartPlugins) {
+		service, err := openPluginService(b.cfg, b.db, discardRedactor{})
+		if err != nil {
+			return err
+		}
+		b.plugins = service
 	}
 	return nil
 }

@@ -94,6 +94,8 @@ func translateSessionError(err error) error {
 	}
 }
 
+type sandboxSessionStart func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error)
+
 func newMCPSessionStarter(start sandboxSessionStart) mcp.SessionStarter {
 	return mcpSessionStarterFunc(func(ctx context.Context, req *mcp.ContainedSessionRequest) (mcp.ContainedSession, error) {
 		if req == nil {

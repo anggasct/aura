@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
 )
@@ -23,6 +24,7 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
+	root.AddCommand(plugin.Commands(pluginOpener(gf))...)
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {
@@ -60,6 +62,18 @@ func profileOpener(gf *globalFlags) profile.Opener {
 		}
 		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartProfile}}, func(ctx context.Context, app *App) error {
 			return fn(ctx, app.profile)
+		})
+	}
+}
+
+func pluginOpener(gf *globalFlags) plugin.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, service *plugin.Service, audit plugin.AuditRecorder) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartPlugins}}, func(ctx context.Context, app *App) error {
+			return fn(ctx, app.plugins, &pluginAuditAdapter{db: app.db})
 		})
 	}
 }
