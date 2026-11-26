@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -111,6 +112,9 @@ func (a *skillStoreRegistry) ListAll(ctx context.Context, limit int) ([]skills.R
 }
 
 func mapSkillStoreError(err error) error {
+	if fault.HasCode(err, sqlite.ErrorCodeBusy) {
+		return err
+	}
 	code, ok := fault.CodeOf[store.ErrorCode](err)
 	if !ok {
 		return skills.Errorf(skills.ErrorCodeSkillUnavailable, "skill registry failed")
@@ -124,7 +128,7 @@ func mapSkillStoreError(err error) error {
 		return skills.Errorf(skills.ErrorCodeSkillDigestChanged, "skill content changed since review")
 	case store.ErrorCodeInvalidArgument:
 		return skills.Errorf(skills.ErrorCodeInvalidArgument, "skill argument is not valid")
-	case store.ErrorCodeStorageUnavailable, store.ErrorCodeStorageBusy:
+	case store.ErrorCodeStorageUnavailable:
 		return err
 	default:
 		return skills.Errorf(skills.ErrorCodeSkillUnavailable, "skill registry is unavailable")

@@ -77,7 +77,7 @@ VALUES (?, ?, ?, ?, ?, ?, NULL)`,
 		case isConstraintCheck(err):
 			return codedError(ErrorCodeAPIKeyInvalid, "api key violates a storage constraint", err)
 		}
-		return classifyBusy(fmt.Errorf("create api key: %w", err))
+		return classify(fmt.Errorf("create api key: %w", err))
 	}
 	return nil
 }
@@ -89,7 +89,7 @@ func (s *sqliteAPIKeyStore) GetByID(ctx context.Context, id string) (APIKey, err
 		return APIKey{}, Errorf(ErrorCodeAPIKeyNotFound, "api key does not exist")
 	}
 	if err != nil {
-		return APIKey{}, classifyBusy(fmt.Errorf("read api key: %w", err))
+		return APIKey{}, classify(fmt.Errorf("read api key: %w", err))
 	}
 	return key, nil
 }
@@ -97,7 +97,7 @@ func (s *sqliteAPIKeyStore) GetByID(ctx context.Context, id string) (APIKey, err
 func (s *sqliteAPIKeyStore) List(ctx context.Context) ([]APIKey, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+channelKeyColumns+` FROM api_key ORDER BY created_at, id`)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list api keys: %w", err))
+		return nil, classify(fmt.Errorf("list api keys: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var keys []APIKey
@@ -109,7 +109,7 @@ func (s *sqliteAPIKeyStore) List(ctx context.Context) ([]APIKey, error) {
 		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list api keys: %w", err))
+		return nil, classify(fmt.Errorf("list api keys: %w", err))
 	}
 	return keys, nil
 }
@@ -117,11 +117,11 @@ func (s *sqliteAPIKeyStore) List(ctx context.Context) ([]APIKey, error) {
 func (s *sqliteAPIKeyStore) Revoke(ctx context.Context, id string, at time.Time) (bool, error) {
 	result, err := s.db.ExecContext(ctx, `UPDATE api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at), id)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("revoke api key: %w", err))
+		return false, classify(fmt.Errorf("revoke api key: %w", err))
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("revoke api key: %w", err)
+		return false, classify(fmt.Errorf("revoke api key: %w", err))
 	}
 	if changed == 1 {
 		return true, nil

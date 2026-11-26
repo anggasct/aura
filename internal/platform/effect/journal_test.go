@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -643,4 +644,34 @@ func TestRecoverProvider_RejectsAnEmptyProvider(t *testing.T) {
 	j, _ := newTestJournal(t)
 	_, err := j.RecoverProvider(context.Background(), "")
 	assertCode(t, err, ErrorCodeInvalidArgument)
+}
+
+func TestPrepareKeepsAPrimaryKeyCollisionRaw(t *testing.T) {
+	j, db := newTestJournal(t)
+	if _, err := db.ExecContext(t.Context(), `
+CREATE TRIGGER force_effect_pk_collision
+BEFORE INSERT ON effect_intent
+WHEN NEW.idempotency_key <> 'trigger-seed'
+BEGIN
+    INSERT INTO effect_intent (
+        id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation,
+        classification, state, request_digest, request_json, prepared_at, updated_at
+    ) VALUES (
+        NEW.id, NEW.session_id, NEW.turn_id, 'trigger-call', 'trigger-seed', NEW.provider, NEW.operation,
+        NEW.classification, NEW.state, NEW.request_digest, NEW.request_json, NEW.prepared_at, NEW.updated_at
+    );
+END;`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	_, err := j.Prepare(t.Context(), validPrepare(1))
+	if err == nil {
+		t.Fatal("expected primary-key collision error, got nil")
+	}
+	if !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintPrimaryKey) {
+		t.Fatalf("err = %v, want %s", err, sqlite.ErrorCodeConstraintPrimaryKey)
+	}
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
+		t.Fatalf("primary-key collision was remapped to effect code %s: %v", code, err)
+	}
 }

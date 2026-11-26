@@ -52,7 +52,7 @@ func (s *sqliteHandoffReplyStore) List(ctx context.Context, sessionID string, af
 		sessionID, after, EventKindADK, len(HandoffReplyEventPrefix), HandoffReplyEventPrefix, limit,
 	)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list handoff replies: %w", err))
+		return nil, classify(fmt.Errorf("list handoff replies: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	replies := make([]HandoffReply, 0, limit)
@@ -68,7 +68,7 @@ func (s *sqliteHandoffReplyStore) List(ctx context.Context, sessionID string, af
 		replies = append(replies, reply)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list handoff replies: %w", err)
+		return nil, classify(fmt.Errorf("list handoff replies: %w", err))
 	}
 	return replies, nil
 }

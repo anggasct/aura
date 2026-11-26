@@ -133,7 +133,7 @@ func (s *sqlitePluginStore) Install(ctx context.Context, in *PluginInstall) erro
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("begin plugin install: %w", err))
+		return classify(fmt.Errorf("begin plugin install: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
@@ -153,7 +153,7 @@ INSERT INTO plugin_version (plugin_id, version, digest, manifest_json, installed
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return classifyBusy(fmt.Errorf("commit plugin install: %w", err))
+		return classify(fmt.Errorf("commit plugin install: %w", err))
 	}
 	return nil
 }
@@ -167,7 +167,7 @@ func (s *sqlitePluginStore) Approve(ctx context.Context, in *PluginApproval) err
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("begin plugin approval: %w", err))
+		return classify(fmt.Errorf("begin plugin approval: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	var current, digest string
@@ -179,7 +179,7 @@ WHERE p.id = ?`, in.Version, in.PluginID).Scan(&current, &digest)
 		return Errorf(ErrorCodePluginNotFound, "plugin does not exist")
 	}
 	if err != nil {
-		return classifyBusy(fmt.Errorf("read plugin for approval: %w", err))
+		return classify(fmt.Errorf("read plugin for approval: %w", err))
 	}
 	if current != in.Version || digest != in.Digest {
 		return Errorf(ErrorCodePluginConflict, "plugin changed since the review")
@@ -203,7 +203,7 @@ INSERT INTO plugin_grant (plugin_id, surface, value, fingerprint, approved_at, a
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return classifyBusy(fmt.Errorf("commit plugin approval: %w", err))
+		return classify(fmt.Errorf("commit plugin approval: %w", err))
 	}
 	return nil
 }
@@ -218,7 +218,7 @@ func (s *sqlitePluginStore) SetState(ctx context.Context, id, state string, at t
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("set plugin state: %w", err)
+		return classify(fmt.Errorf("set plugin state: %w", err))
 	}
 	if changed == 0 {
 		return Errorf(ErrorCodePluginNotFound, "plugin does not exist")
@@ -232,7 +232,7 @@ func (s *sqlitePluginStore) Get(ctx context.Context, id string) (Plugin, error) 
 		return Plugin{}, Errorf(ErrorCodePluginNotFound, "plugin does not exist")
 	}
 	if err != nil {
-		return Plugin{}, classifyBusy(fmt.Errorf("read plugin: %w", err))
+		return Plugin{}, classify(fmt.Errorf("read plugin: %w", err))
 	}
 	return plugin, nil
 }
@@ -240,7 +240,7 @@ func (s *sqlitePluginStore) Get(ctx context.Context, id string) (Plugin, error) 
 func (s *sqlitePluginStore) List(ctx context.Context) ([]Plugin, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+pluginColumns+` FROM plugin ORDER BY id`)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list plugins: %w", err))
+		return nil, classify(fmt.Errorf("list plugins: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var plugins []Plugin
@@ -252,7 +252,7 @@ func (s *sqlitePluginStore) List(ctx context.Context) ([]Plugin, error) {
 		plugins = append(plugins, plugin)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list plugins: %w", err))
+		return nil, classify(fmt.Errorf("list plugins: %w", err))
 	}
 	return plugins, nil
 }
@@ -267,7 +267,7 @@ SELECT plugin_id, version, digest, manifest_json, installed_at FROM plugin_versi
 		return PluginVersion{}, Errorf(ErrorCodePluginNotFound, "plugin version does not exist")
 	}
 	if err != nil {
-		return PluginVersion{}, classifyBusy(fmt.Errorf("read plugin version: %w", err))
+		return PluginVersion{}, classify(fmt.Errorf("read plugin version: %w", err))
 	}
 	if out.InstalledAt, err = sqlite.ParseTime(installed); err != nil {
 		return PluginVersion{}, fmt.Errorf("parse plugin version install time: %w", err)
@@ -279,7 +279,7 @@ func (s *sqlitePluginStore) Grants(ctx context.Context, id string) ([]PluginGran
 	rows, err := s.db.QueryContext(ctx, `
 SELECT plugin_id, surface, value, fingerprint, approved_at, approved_by FROM plugin_grant WHERE plugin_id = ? ORDER BY surface, value`, id)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list plugin grants: %w", err))
+		return nil, classify(fmt.Errorf("list plugin grants: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var grants []PluginGrant
@@ -287,7 +287,7 @@ SELECT plugin_id, surface, value, fingerprint, approved_at, approved_by FROM plu
 		var grant PluginGrant
 		var approved string
 		if err := rows.Scan(&grant.PluginID, &grant.Surface, &grant.Value, &grant.Fingerprint, &approved, &grant.ApprovedBy); err != nil {
-			return nil, fmt.Errorf("list plugin grants: %w", err)
+			return nil, classify(fmt.Errorf("list plugin grants: %w", err))
 		}
 		if grant.ApprovedAt, err = sqlite.ParseTime(approved); err != nil {
 			return nil, fmt.Errorf("parse plugin grant time: %w", err)
@@ -295,7 +295,7 @@ SELECT plugin_id, surface, value, fingerprint, approved_at, approved_by FROM plu
 		grants = append(grants, grant)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list plugin grants: %w", err))
+		return nil, classify(fmt.Errorf("list plugin grants: %w", err))
 	}
 	return grants, nil
 }
@@ -307,7 +307,7 @@ func (s *sqlitePluginStore) Remove(ctx context.Context, id string) error {
 	}
 	changed, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("remove plugin: %w", err)
+		return classify(fmt.Errorf("remove plugin: %w", err))
 	}
 	if changed == 0 {
 		return Errorf(ErrorCodePluginNotFound, "plugin does not exist")
@@ -322,7 +322,7 @@ func pluginWriteError(err error, action string) error {
 	case isConstraintCheck(err):
 		return codedError(ErrorCodePluginInvalid, "plugin violates a storage constraint", err)
 	}
-	return classifyBusy(fmt.Errorf("%s: %w", action, err))
+	return classify(fmt.Errorf("%s: %w", action, err))
 }
 
 func scanPlugin(row rowScanner) (Plugin, error) {

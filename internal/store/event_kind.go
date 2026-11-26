@@ -27,7 +27,7 @@ func (s *sqliteEventStore) LatestByKind(ctx context.Context, sessionID, kind str
 		sessionID, kind, limit,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list %s events for session %s: %w", kind, sessionID, err)
+		return nil, classify(fmt.Errorf("list %s events for session %s: %w", kind, sessionID, err))
 	}
 	defer func() { _ = rows.Close() }()
 	var events []RuntimeEvent
@@ -39,7 +39,7 @@ func (s *sqliteEventStore) LatestByKind(ctx context.Context, sessionID, kind str
 		events = append(events, event)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list %s events for session %s: %w", kind, sessionID, err)
+		return nil, classify(fmt.Errorf("list %s events for session %s: %w", kind, sessionID, err))
 	}
 	return events, nil
 }

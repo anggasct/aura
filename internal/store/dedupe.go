@@ -63,17 +63,17 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *DedupeClaim) (origina
 		if _, err := tx.ExecContext(ctx,
 			`DELETE FROM ingress_dedupe WHERE source = ? AND external_id = ?`, claim.Source, claim.ExternalID,
 		); err != nil {
-			return "", false, classifyBusy(fmt.Errorf("expire dedupe key: %w", err))
+			return "", false, classify(fmt.Errorf("expire dedupe key: %w", err))
 		}
 	case errors.Is(err, sql.ErrNoRows):
 	default:
-		return "", false, fmt.Errorf("read dedupe key: %w", err)
+		return "", false, classify(fmt.Errorf("read dedupe key: %w", err))
 	}
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO ingress_dedupe (source, external_id, accepted_at, expires_at, turn_id) VALUES (?, ?, ?, ?, ?)`,
 		claim.Source, claim.ExternalID, sqlite.FormatTime(claim.Now), sqlite.FormatTime(claim.ExpiresAt), claim.TurnID,
 	); err != nil {
-		return "", false, classifyBusy(fmt.Errorf("claim dedupe key: %w", err))
+		return "", false, classify(fmt.Errorf("claim dedupe key: %w", err))
 	}
 	return claim.TurnID, true, nil
 }
@@ -87,7 +87,7 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", false, fmt.Errorf("begin dedupe accept: %w", err)
+		return "", false, classify(fmt.Errorf("begin dedupe accept: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -113,7 +113,7 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return "", false, classifyBusy(fmt.Errorf("commit dedupe accept: %w", err))
+		return "", false, classify(fmt.Errorf("commit dedupe accept: %w", err))
 	}
 	return accepted.TurnID, true, nil
 }
@@ -131,7 +131,7 @@ func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID stri
 	case errors.Is(err, sql.ErrNoRows):
 		return false, nil
 	case err != nil:
-		return false, fmt.Errorf("read dedupe key: %w", err)
+		return false, classify(fmt.Errorf("read dedupe key: %w", err))
 	}
 	return expiresAtRaw >= sqlite.FormatTime(time.Now().UTC()), nil
 }
@@ -148,7 +148,7 @@ func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnI
 		sessionID, turnID,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list turn %s events: %w", turnID, err)
+		return nil, classify(fmt.Errorf("list turn %s events: %w", turnID, err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -161,7 +161,7 @@ func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnI
 		events = append(events, e)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list turn %s events: %w", turnID, err)
+		return nil, classify(fmt.Errorf("list turn %s events: %w", turnID, err))
 	}
 	return events, nil
 }

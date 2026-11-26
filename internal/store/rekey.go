@@ -35,20 +35,20 @@ func RekeyOwners(ctx context.Context, db *sql.DB, moves []OwnerMove, apply bool)
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return OwnerRekeyReport{}, classifyBusy(fmt.Errorf("rekey owners: %w", err))
+		return OwnerRekeyReport{}, classify(fmt.Errorf("rekey owners: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	var report OwnerRekeyReport
 	for _, move := range moves {
 		if err := rekeyOwner(ctx, tx, move, &report); err != nil {
-			return OwnerRekeyReport{}, classifyBusy(fmt.Errorf("rekey owners: %w", err))
+			return OwnerRekeyReport{}, classify(fmt.Errorf("rekey owners: %w", err))
 		}
 	}
 	if !apply {
 		return report, nil
 	}
 	if err := tx.Commit(); err != nil {
-		return OwnerRekeyReport{}, classifyBusy(fmt.Errorf("rekey owners: %w", err))
+		return OwnerRekeyReport{}, classify(fmt.Errorf("rekey owners: %w", err))
 	}
 	return report, nil
 }

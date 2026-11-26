@@ -96,7 +96,7 @@ func (s *sqliteWebhookExecutionStore) InsertExecution(ctx context.Context, execu
 				fmt.Sprintf("execution identity for key %q is already claimed", execution.KeyID),
 			)
 		}
-		return classifyBusy(fmt.Errorf("insert webhook execution: %w", err))
+		return classify(fmt.Errorf("insert webhook execution: %w", err))
 	}
 	return nil
 }
@@ -170,11 +170,11 @@ func (s *sqliteWebhookExecutionStore) MarkTerminal(ctx context.Context, id, stat
 func (s *sqliteWebhookExecutionStore) advanceState(ctx context.Context, query string, args ...any) (bool, error) {
 	result, err := s.db.ExecContext(ctx, query, args...)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("transition webhook execution: %w", err))
+		return false, classify(fmt.Errorf("transition webhook execution: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("transition webhook execution count: %w", err))
+		return false, classify(fmt.Errorf("transition webhook execution count: %w", err))
 	}
 	return affected > 0, nil
 }
@@ -184,7 +184,7 @@ func (s *sqliteWebhookExecutionStore) DeleteExecution(ctx context.Context, id st
 		return errNilArgument("db")
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM webhook_execution WHERE id = ?`, id); err != nil {
-		return classifyBusy(fmt.Errorf("delete webhook execution: %w", err))
+		return classify(fmt.Errorf("delete webhook execution: %w", err))
 	}
 	return nil
 }
@@ -205,7 +205,7 @@ func (s *sqliteWebhookExecutionStore) ListUnfinished(ctx context.Context, query 
 		 ORDER BY id LIMIT ?`,
 		sqlite.FormatTime(query.Now.UTC()), query.AfterID, query.Limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list unfinished webhook executions: %w", err))
+		return nil, classify(fmt.Errorf("list unfinished webhook executions: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var executions []WebhookExecution
@@ -217,7 +217,7 @@ func (s *sqliteWebhookExecutionStore) ListUnfinished(ctx context.Context, query 
 		executions = append(executions, execution)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list unfinished webhook executions: %w", err))
+		return nil, classify(fmt.Errorf("list unfinished webhook executions: %w", err))
 	}
 	return executions, nil
 }
@@ -261,7 +261,7 @@ func scanWebhookExecution(row rowScanner) (WebhookExecution, error) {
 	case errors.Is(err, sql.ErrNoRows):
 		return WebhookExecution{}, err
 	default:
-		return WebhookExecution{}, classifyBusy(fmt.Errorf("read webhook execution: %w", err))
+		return WebhookExecution{}, classify(fmt.Errorf("read webhook execution: %w", err))
 	}
 	if resultEventID.Valid {
 		execution.ResultEventID = resultEventID.String

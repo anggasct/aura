@@ -51,25 +51,25 @@ func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (Co
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return CollectionReport{}, classifyBusy(err)
+		return CollectionReport{}, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	stmt, err := tx.PrepareContext(ctx, `DELETE FROM blob WHERE digest = ? AND NOT EXISTS
 		(SELECT 1 FROM artifact_ref r WHERE r.blob_digest = ?)`)
 	if err != nil {
-		return CollectionReport{}, classifyBusy(err)
+		return CollectionReport{}, classify(err)
 	}
 	defer func() { _ = stmt.Close() }()
 
 	for _, c := range candidates {
 		res, err := stmt.ExecContext(ctx, c.digest, c.digest)
 		if err != nil {
-			return CollectionReport{}, classifyBusy(err)
+			return CollectionReport{}, classify(err)
 		}
 		matched, err := res.RowsAffected()
 		if err != nil {
-			return CollectionReport{}, fmt.Errorf("rows affected for blob %s: %w", c.digest, err)
+			return CollectionReport{}, classify(fmt.Errorf("rows affected for blob %s: %w", c.digest, err))
 		}
 		if matched == 0 {
 			continue
@@ -85,7 +85,7 @@ func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (Co
 		report.FreedBytes += c.size
 	}
 	if err := tx.Commit(); err != nil {
-		return CollectionReport{}, classifyBusy(err)
+		return CollectionReport{}, classify(err)
 	}
 	return report, nil
 }
@@ -101,7 +101,7 @@ func collectionCandidates(ctx context.Context, db *sql.DB, before time.Time) ([]
 		WHERE NOT EXISTS (SELECT 1 FROM artifact_ref r WHERE r.blob_digest = b.digest)
 		AND b.created_at < ?`, sqlite.FormatTime(before))
 	if err != nil {
-		return nil, classifyBusy(err)
+		return nil, classify(err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -109,12 +109,12 @@ func collectionCandidates(ctx context.Context, db *sql.DB, before time.Time) ([]
 	for rows.Next() {
 		var c collectionCandidate
 		if err := rows.Scan(&c.digest, &c.size, &c.relativePath); err != nil {
-			return nil, fmt.Errorf("scan collectible blob: %w", err)
+			return nil, classify(fmt.Errorf("scan collectible blob: %w", err))
 		}
 		candidates = append(candidates, c)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("scan collectible blobs: %w", err)
+		return nil, classify(fmt.Errorf("scan collectible blobs: %w", err))
 	}
 	return candidates, nil
 }

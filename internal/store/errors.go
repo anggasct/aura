@@ -3,12 +3,10 @@ package store
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 
-	"modernc.org/sqlite"
-
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ErrorCode string
@@ -27,7 +25,6 @@ const (
 	ErrorCodeBackupDestinationConflict ErrorCode = "backup_destination_conflict"
 	ErrorCodeBackupInvalid             ErrorCode = "backup_invalid"
 	ErrorCodeRestoreLocked             ErrorCode = "restore_locked"
-	ErrorCodeStorageBusy               ErrorCode = "storage_busy"
 	ErrorCodeStorageUnavailable        ErrorCode = "storage_unavailable"
 	ErrorCodeWebhookExecutionConflict  ErrorCode = "webhook_execution_conflict"
 	ErrorCodeWebhookExecutionNotFound  ErrorCode = "webhook_execution_not_found"
@@ -78,18 +75,8 @@ func errNilArgument(name string) error {
 	return fault.New(ErrorCodeInvalidArgument, name+" must not be nil")
 }
 
-const sqliteBusy = 5 // SQLITE_BUSY
-
-func isBusyError(err error) bool {
-	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteBusy
-}
-
-func classifyBusy(err error) error {
-	if err == nil || !isBusyError(err) {
-		return err
-	}
-	return codedError(ErrorCodeStorageBusy, "database is busy", err)
+func classify(err error) error {
+	return sqlite.Classify(err)
 }
 
 type rowChecker interface {

@@ -107,13 +107,13 @@ func (s *sqliteKBStore) EmbeddingState(ctx context.Context, collection, fingerpr
 		return KBEmbeddingState{}, nil
 	}
 	if err != nil {
-		return KBEmbeddingState{}, classifyBusy(fmt.Errorf("read knowledge embedding state: %w", err))
+		return KBEmbeddingState{}, classify(fmt.Errorf("read knowledge embedding state: %w", err))
 	}
 	state := KBEmbeddingState{Exists: true, Fingerprint: stored.String}
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT count(*), count(e.chunk_rowid), coalesce(sum(CASE WHEN e.chunk_rowid IS NULL THEN length(coalesce(c.heading, '')) + length(c.content) ELSE 0 END), 0) `+kbPendingJoin,
 		fingerprint, collection).Scan(&state.Chunks, &state.Covered, &state.PendingCharacters); err != nil {
-		return KBEmbeddingState{}, classifyBusy(fmt.Errorf("count knowledge embedding coverage: %w", err))
+		return KBEmbeddingState{}, classify(fmt.Errorf("count knowledge embedding coverage: %w", err))
 	}
 	return state, nil
 }
@@ -127,11 +127,11 @@ func (s *sqliteKBStore) StartEmbedding(ctx context.Context, collection, fingerpr
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE kb_collection SET embedding_fingerprint = ? WHERE id = ?`, fingerprint, collection)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("record knowledge embedding opt-in: %w", err))
+		return classify(fmt.Errorf("record knowledge embedding opt-in: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return fmt.Errorf("count knowledge embedding opt-in: %w", err)
+		return classify(fmt.Errorf("count knowledge embedding opt-in: %w", err))
 	}
 	if affected != 1 {
 		return Errorf(ErrorCodeKBSourceNotFound, "knowledge collection does not exist")
@@ -150,19 +150,19 @@ func (s *sqliteKBStore) PendingChunks(ctx context.Context, collection, fingerpri
 		`SELECT c.rowid, coalesce(c.heading, ''), c.content, c.content_sha256 `+kbPendingJoin+` AND e.chunk_rowid IS NULL AND c.rowid > ? ORDER BY c.rowid LIMIT ?`,
 		fingerprint, collection, afterRowID, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list pending knowledge chunks: %w", err))
+		return nil, classify(fmt.Errorf("list pending knowledge chunks: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var pending []KBPendingChunk
 	for rows.Next() {
 		var chunk KBPendingChunk
 		if err := rows.Scan(&chunk.RowID, &chunk.Heading, &chunk.Content, &chunk.SHA256); err != nil {
-			return nil, fmt.Errorf("scan pending knowledge chunk: %w", err)
+			return nil, classify(fmt.Errorf("scan pending knowledge chunk: %w", err))
 		}
 		pending = append(pending, chunk)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list pending knowledge chunks: %w", err))
+		return nil, classify(fmt.Errorf("list pending knowledge chunks: %w", err))
 	}
 	return pending, nil
 }
@@ -193,18 +193,18 @@ func (s *sqliteKBStore) CommitVectors(ctx context.Context, collection, fingerpri
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return KBCommitResult{}, classifyBusy(err)
+		return KBCommitResult{}, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	for i := range vectors {
 		result, err := tx.ExecContext(ctx, kbCommitVectorSQL,
 			fingerprint, encodeKBVector(vectors[i].Vector), vectors[i].RowID, vectors[i].ContentSHA256, collection, fingerprint)
 		if err != nil {
-			return KBCommitResult{}, classifyBusy(fmt.Errorf("write knowledge vector: %w", err))
+			return KBCommitResult{}, classify(fmt.Errorf("write knowledge vector: %w", err))
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {
-			return KBCommitResult{}, fmt.Errorf("count knowledge vector write: %w", err)
+			return KBCommitResult{}, classify(fmt.Errorf("count knowledge vector write: %w", err))
 		}
 		if affected != 1 {
 			return KBCommitResult{}, Errorf(ErrorCodeKBEmbeddingStale, "knowledge chunk or opt-in changed while its vector was computed")
@@ -215,7 +215,7 @@ func (s *sqliteKBStore) CommitVectors(ctx context.Context, collection, fingerpri
 		return KBCommitResult{}, err
 	}
 	if err := tx.Commit(); err != nil {
-		return KBCommitResult{}, classifyBusy(err)
+		return KBCommitResult{}, classify(err)
 	}
 	return KBCommitResult{Written: len(vectors), Completed: completed}, nil
 }
@@ -223,13 +223,13 @@ func (s *sqliteKBStore) CommitVectors(ctx context.Context, collection, fingerpri
 func completeKBEmbedding(ctx context.Context, tx *sql.Tx, collection, fingerprint string) (bool, error) {
 	var remaining bool
 	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 `+kbPendingJoin+` AND e.chunk_rowid IS NULL)`, fingerprint, collection).Scan(&remaining); err != nil {
-		return false, classifyBusy(fmt.Errorf("check knowledge embedding coverage: %w", err))
+		return false, classify(fmt.Errorf("check knowledge embedding coverage: %w", err))
 	}
 	if remaining {
 		return false, nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE kb_collection SET generation = generation + 1 WHERE id = ? AND embedding_fingerprint = ?`, collection, fingerprint); err != nil {
-		return false, classifyBusy(fmt.Errorf("advance knowledge collection generation: %w", err))
+		return false, classify(fmt.Errorf("advance knowledge collection generation: %w", err))
 	}
 	return true, nil
 }
@@ -243,7 +243,7 @@ func (s *sqliteKBStore) DisableEmbedding(ctx context.Context, collection string,
 	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return KBDisableResult{}, classifyBusy(fmt.Errorf("open knowledge connection: %w", err))
+		return KBDisableResult{}, classify(fmt.Errorf("open knowledge connection: %w", err))
 	}
 	defer func() { _ = conn.Close() }()
 	restore, err := enableSecureDelete(ctx, conn)
@@ -274,11 +274,11 @@ func (s *sqliteKBStore) previewDisableEmbedding(ctx context.Context, collection 
 		return KBDisableResult{}, Errorf(ErrorCodeKBSourceNotFound, "knowledge collection does not exist")
 	}
 	if err != nil {
-		return KBDisableResult{}, classifyBusy(fmt.Errorf("read knowledge embedding state: %w", err))
+		return KBDisableResult{}, classify(fmt.Errorf("read knowledge embedding state: %w", err))
 	}
 	result := KBDisableResult{OptedIn: stored.Valid}
 	if err := s.db.QueryRowContext(ctx, `SELECT count(*) `+kbCollectionVectorsSQL, collection).Scan(&result.Vectors); err != nil {
-		return KBDisableResult{}, classifyBusy(fmt.Errorf("count knowledge vectors: %w", err))
+		return KBDisableResult{}, classify(fmt.Errorf("count knowledge vectors: %w", err))
 	}
 	return result, nil
 }
@@ -286,7 +286,7 @@ func (s *sqliteKBStore) previewDisableEmbedding(ctx context.Context, collection 
 func deleteKBVectors(ctx context.Context, conn *sql.Conn, collection string) (KBDisableResult, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return KBDisableResult{}, classifyBusy(err)
+		return KBDisableResult{}, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	var stored sql.NullString
@@ -295,23 +295,23 @@ func deleteKBVectors(ctx context.Context, conn *sql.Conn, collection string) (KB
 		return KBDisableResult{}, Errorf(ErrorCodeKBSourceNotFound, "knowledge collection does not exist")
 	}
 	if err != nil {
-		return KBDisableResult{}, classifyBusy(fmt.Errorf("read knowledge embedding state: %w", err))
+		return KBDisableResult{}, classify(fmt.Errorf("read knowledge embedding state: %w", err))
 	}
 	deleted, err := tx.ExecContext(ctx, `DELETE `+kbCollectionVectorsSQL, collection)
 	if err != nil {
-		return KBDisableResult{}, classifyBusy(fmt.Errorf("delete knowledge vectors: %w", err))
+		return KBDisableResult{}, classify(fmt.Errorf("delete knowledge vectors: %w", err))
 	}
 	vectors, err := deleted.RowsAffected()
 	if err != nil {
-		return KBDisableResult{}, fmt.Errorf("count deleted knowledge vectors: %w", err)
+		return KBDisableResult{}, classify(fmt.Errorf("count deleted knowledge vectors: %w", err))
 	}
 	if stored.Valid || vectors > 0 {
 		if _, err := tx.ExecContext(ctx, `UPDATE kb_collection SET embedding_fingerprint = NULL, generation = generation + 1 WHERE id = ?`, collection); err != nil {
-			return KBDisableResult{}, classifyBusy(fmt.Errorf("clear knowledge embedding opt-in: %w", err))
+			return KBDisableResult{}, classify(fmt.Errorf("clear knowledge embedding opt-in: %w", err))
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return KBDisableResult{}, classifyBusy(err)
+		return KBDisableResult{}, classify(err)
 	}
 	return KBDisableResult{OptedIn: stored.Valid, Vectors: int(vectors)}, nil
 }
@@ -330,19 +330,19 @@ func (s *sqliteKBStore) EmbeddingCoverage(ctx context.Context, fingerprint strin
 		 GROUP BY k.id, k.embedding_fingerprint
 		 ORDER BY k.id`, fingerprint)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list knowledge embedding coverage: %w", err))
+		return nil, classify(fmt.Errorf("list knowledge embedding coverage: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []KBEmbeddingCoverage
 	for rows.Next() {
 		var coverage KBEmbeddingCoverage
 		if err := rows.Scan(&coverage.Collection, &coverage.Fingerprint, &coverage.Chunks, &coverage.Covered); err != nil {
-			return nil, fmt.Errorf("scan knowledge embedding coverage: %w", err)
+			return nil, classify(fmt.Errorf("scan knowledge embedding coverage: %w", err))
 		}
 		out = append(out, coverage)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list knowledge embedding coverage: %w", err))
+		return nil, classify(fmt.Errorf("list knowledge embedding coverage: %w", err))
 	}
 	return out, nil
 }
@@ -356,7 +356,7 @@ func KBEmbeddingPresent(ctx context.Context, db *sql.DB) (bool, error) {
 		`SELECT (SELECT count(*) FROM pragma_table_info('kb_collection') WHERE name = 'embedding_fingerprint')
 		      + (SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'kb_embedding')`).Scan(&present)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("probe knowledge embedding schema: %w", err))
+		return false, classify(fmt.Errorf("probe knowledge embedding schema: %w", err))
 	}
 	return present == 2, nil
 }

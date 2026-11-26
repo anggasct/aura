@@ -67,7 +67,7 @@ ON CONFLICT(circuit_key) DO UPDATE SET
 		updatedAtRaw,
 	)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("save circuit checkpoint: %w", err))
+		return classify(fmt.Errorf("save circuit checkpoint: %w", err))
 	}
 	return nil
 }
@@ -83,7 +83,7 @@ ORDER BY circuit_key ASC
 `
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("load circuit checkpoints: %w", err))
+		return nil, classify(fmt.Errorf("load circuit checkpoints: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -101,7 +101,7 @@ ORDER BY circuit_key ASC
 			&openUntilRaw,
 			&updatedAtRaw,
 		); err != nil {
-			return nil, classifyBusy(fmt.Errorf("scan circuit checkpoint: %w", err))
+			return nil, classify(fmt.Errorf("scan circuit checkpoint: %w", err))
 		}
 
 		if openUntilRaw.Valid && openUntilRaw.String != "" {
@@ -116,7 +116,7 @@ ORDER BY circuit_key ASC
 		results = append(results, cp)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("iterate circuit checkpoints: %w", err))
+		return nil, classify(fmt.Errorf("iterate circuit checkpoints: %w", err))
 	}
 	return results, nil
 }
@@ -128,7 +128,7 @@ func (s *sqliteCircuitStore) Delete(ctx context.Context, circuitKey string) erro
 	query := `DELETE FROM model_circuit_checkpoint WHERE circuit_key = ?`
 	_, err := s.db.ExecContext(ctx, query, circuitKey)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("delete circuit checkpoint: %w", err))
+		return classify(fmt.Errorf("delete circuit checkpoint: %w", err))
 	}
 	return nil
 }

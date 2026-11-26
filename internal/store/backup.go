@@ -57,7 +57,7 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 	}
 	if _, err := db.ExecContext(ctx, `VACUUM INTO ?`, tmpDest); err != nil {
 		_ = os.Remove(tmpDest)
-		return BackupManifest{}, backupFail("create backup snapshot", err, tmpDest)
+		return BackupManifest{}, classify(backupFail("create backup snapshot", err, tmpDest))
 	}
 	if err := syncPath(tmpDest); err != nil {
 		_ = os.Remove(tmpDest)
@@ -86,7 +86,7 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 
 	rows, err := snap.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob ORDER BY digest`)
 	if err != nil {
-		return BackupManifest{}, fmt.Errorf("list blobs for manifest: %w", err)
+		return BackupManifest{}, classify(fmt.Errorf("list blobs for manifest: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -94,12 +94,12 @@ func Backup(ctx context.Context, db *sql.DB, destDir string) (BackupManifest, er
 	for rows.Next() {
 		var e BackupBlobEntry
 		if err := rows.Scan(&e.Digest, &e.SizeBytes, &e.RelativePath); err != nil {
-			return BackupManifest{}, fmt.Errorf("scan blob for manifest: %w", err)
+			return BackupManifest{}, classify(fmt.Errorf("scan blob for manifest: %w", err))
 		}
 		manifest.Blobs = append(manifest.Blobs, e)
 	}
 	if err := rows.Err(); err != nil {
-		return BackupManifest{}, fmt.Errorf("list blobs for manifest: %w", err)
+		return BackupManifest{}, classify(fmt.Errorf("list blobs for manifest: %w", err))
 	}
 
 	data, err := json.MarshalIndent(manifest, "", "  ")
@@ -152,16 +152,16 @@ func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (Restore
 
 	var report RestoreReport
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM session`).Scan(&report.Sessions); err != nil {
-		return RestoreReport{}, fmt.Errorf("count sessions: %w", err)
+		return RestoreReport{}, classify(fmt.Errorf("count sessions: %w", err))
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_event`).Scan(&report.Events); err != nil {
-		return RestoreReport{}, fmt.Errorf("count events: %w", err)
+		return RestoreReport{}, classify(fmt.Errorf("count events: %w", err))
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ingress_dedupe`).Scan(&report.DedupeKeys); err != nil {
-		return RestoreReport{}, fmt.Errorf("count dedupe keys: %w", err)
+		return RestoreReport{}, classify(fmt.Errorf("count dedupe keys: %w", err))
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_ref`).Scan(&report.ArtifactRefs); err != nil {
-		return RestoreReport{}, fmt.Errorf("count artifact refs: %w", err)
+		return RestoreReport{}, classify(fmt.Errorf("count artifact refs: %w", err))
 	}
 
 	for _, blob := range manifest.Blobs {

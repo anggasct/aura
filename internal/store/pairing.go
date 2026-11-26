@@ -79,7 +79,7 @@ func (s *sqlitePairingStore) Issue(ctx context.Context, issue *PairingIssue) (st
 	now := issue.Now.UTC()
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return "", classifyBusy(fmt.Errorf("begin pairing issue: %w", err))
+		return "", classify(fmt.Errorf("begin pairing issue: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	pending, err := scanPairingRequests(ctx, tx, `SELECT principal_id, account, created_at, expires_at, code_sha256 FROM pairing_request`)
@@ -108,7 +108,7 @@ func (s *sqlitePairingStore) Issue(ctx context.Context, issue *PairingIssue) (st
 	}
 	for _, code := range stale {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM pairing_request WHERE code_sha256 = ?`, code); err != nil {
-			return "", classifyBusy(fmt.Errorf("drop stale pairing request: %w", err))
+			return "", classify(fmt.Errorf("drop stale pairing request: %w", err))
 		}
 	}
 	if _, err := tx.ExecContext(ctx, `
@@ -116,10 +116,10 @@ INSERT INTO pairing_request (code_sha256, principal_id, account, created_at, exp
 VALUES (?, ?, ?, ?, ?)`,
 		issue.CodeSHA256, issue.PrincipalID, issue.Account, sqlite.FormatTime(now), sqlite.FormatTime(now.Add(issue.TTL)),
 	); err != nil {
-		return "", classifyBusy(fmt.Errorf("record pairing request: %w", err))
+		return "", classify(fmt.Errorf("record pairing request: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
-		return "", classifyBusy(fmt.Errorf("commit pairing request: %w", err))
+		return "", classify(fmt.Errorf("commit pairing request: %w", err))
 	}
 	return PairingIssued, nil
 }
@@ -137,7 +137,7 @@ func (s *sqlitePairingStore) approve(ctx context.Context, principalPrefix, codeS
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return PairingRequest{}, false, classifyBusy(fmt.Errorf("begin pairing approval: %w", err))
+		return PairingRequest{}, false, classify(fmt.Errorf("begin pairing approval: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	rows, err := scanPairingRequests(ctx, tx, `SELECT principal_id, account, created_at, expires_at, code_sha256 FROM pairing_request WHERE code_sha256 = ?`, codeSHA256)
@@ -150,7 +150,7 @@ func (s *sqlitePairingStore) approve(ctx context.Context, principalPrefix, codeS
 	request := rows[0].PairingRequest
 	at := sqlite.FormatTime(now.UTC())
 	if _, err := tx.ExecContext(ctx, `DELETE FROM pairing_request WHERE code_sha256 = ?`, codeSHA256); err != nil {
-		return PairingRequest{}, false, classifyBusy(fmt.Errorf("consume pairing request: %w", err))
+		return PairingRequest{}, false, classify(fmt.Errorf("consume pairing request: %w", err))
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO principal_grant (principal_id, account, class, granted_at, granted_by)
@@ -161,10 +161,10 @@ ON CONFLICT(principal_id, account) DO UPDATE SET
     revoked_at = NULL`,
 		request.PrincipalID, request.Account, at, grantedBy,
 	); err != nil {
-		return PairingRequest{}, false, classifyBusy(fmt.Errorf("record principal grant: %w", err))
+		return PairingRequest{}, false, classify(fmt.Errorf("record principal grant: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
-		return PairingRequest{}, false, classifyBusy(fmt.Errorf("commit pairing approval: %w", err))
+		return PairingRequest{}, false, classify(fmt.Errorf("commit pairing approval: %w", err))
 	}
 	return request, true, nil
 }
@@ -192,7 +192,7 @@ func (s *sqlitePairingStore) Pending(ctx context.Context, now time.Time) ([]Pair
 func (s *sqlitePairingStore) ClearPending(ctx context.Context) (int64, error) {
 	result, err := s.db.ExecContext(ctx, `DELETE FROM pairing_request`)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("clear pairing requests: %w", err))
+		return 0, classify(fmt.Errorf("clear pairing requests: %w", err))
 	}
 	return result.RowsAffected()
 }
@@ -203,14 +203,14 @@ SELECT created_at FROM runtime_event
 WHERE kind = ? AND json_extract(payload_json, '$.action') = ? AND json_extract(payload_json, '$.channel') = ?`,
 		AccessOwnerActionEventKind, AccessActionPairingInvalid, channel)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read failed pairing approvals: %w", err))
+		return nil, classify(fmt.Errorf("read failed pairing approvals: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var failures []time.Time
 	for rows.Next() {
 		var raw string
 		if err := rows.Scan(&raw); err != nil {
-			return nil, fmt.Errorf("scan failed pairing approval: %w", err)
+			return nil, classify(fmt.Errorf("scan failed pairing approval: %w", err))
 		}
 		at, err := sqlite.ParseTime(raw)
 		if err != nil {
@@ -221,7 +221,7 @@ WHERE kind = ? AND json_extract(payload_json, '$.action') = ? AND json_extract(p
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read failed pairing approvals: %w", err)
+		return nil, classify(fmt.Errorf("read failed pairing approvals: %w", err))
 	}
 	slices.SortFunc(failures, time.Time.Compare)
 	return failures, nil
@@ -234,7 +234,7 @@ func (s *sqlitePairingStore) Active(ctx context.Context, principalID, account st
 		return false, nil
 	}
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("read principal grant: %w", err))
+		return false, classify(fmt.Errorf("read principal grant: %w", err))
 	}
 	return true, nil
 }
@@ -244,7 +244,7 @@ func (s *sqlitePairingStore) List(ctx context.Context) ([]PrincipalGrant, error)
 SELECT principal_id, account, class, granted_by, granted_at FROM principal_grant
 WHERE revoked_at IS NULL ORDER BY principal_id, account`)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read principal grants: %w", err))
+		return nil, classify(fmt.Errorf("read principal grants: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var grants []PrincipalGrant
@@ -252,7 +252,7 @@ WHERE revoked_at IS NULL ORDER BY principal_id, account`)
 		var grant PrincipalGrant
 		var grantedAt string
 		if err := rows.Scan(&grant.PrincipalID, &grant.Account, &grant.Class, &grant.GrantedBy, &grantedAt); err != nil {
-			return nil, fmt.Errorf("scan principal grant: %w", err)
+			return nil, classify(fmt.Errorf("scan principal grant: %w", err))
 		}
 		if grant.GrantedAt, err = sqlite.ParseTime(grantedAt); err != nil {
 			return nil, fmt.Errorf("parse principal grant time: %w", err)
@@ -260,7 +260,7 @@ WHERE revoked_at IS NULL ORDER BY principal_id, account`)
 		grants = append(grants, grant)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read principal grants: %w", err)
+		return nil, classify(fmt.Errorf("read principal grants: %w", err))
 	}
 	return grants, nil
 }
@@ -268,7 +268,7 @@ WHERE revoked_at IS NULL ORDER BY principal_id, account`)
 func (s *sqlitePairingStore) Revoke(ctx context.Context, principalID string, at time.Time) ([]string, error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("begin principal grant revoke: %w", err))
+		return nil, classify(fmt.Errorf("begin principal grant revoke: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	accounts, err := activeGrantAccounts(ctx, tx, principalID)
@@ -276,10 +276,10 @@ func (s *sqlitePairingStore) Revoke(ctx context.Context, principalID string, at 
 		return nil, err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE principal_grant SET revoked_at = ? WHERE principal_id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at.UTC()), principalID); err != nil {
-		return nil, classifyBusy(fmt.Errorf("revoke principal grant: %w", err))
+		return nil, classify(fmt.Errorf("revoke principal grant: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("commit principal grant revoke: %w", err))
+		return nil, classify(fmt.Errorf("commit principal grant revoke: %w", err))
 	}
 	return accounts, nil
 }
@@ -287,19 +287,19 @@ func (s *sqlitePairingStore) Revoke(ctx context.Context, principalID string, at 
 func activeGrantAccounts(ctx context.Context, q pairingQuerier, principalID string) ([]string, error) {
 	rows, err := q.QueryContext(ctx, `SELECT account FROM principal_grant WHERE principal_id = ? AND revoked_at IS NULL ORDER BY account`, principalID)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read principal grants: %w", err))
+		return nil, classify(fmt.Errorf("read principal grants: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var accounts []string
 	for rows.Next() {
 		var account string
 		if err := rows.Scan(&account); err != nil {
-			return nil, fmt.Errorf("scan principal grant: %w", err)
+			return nil, classify(fmt.Errorf("scan principal grant: %w", err))
 		}
 		accounts = append(accounts, account)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read principal grants: %w", err)
+		return nil, classify(fmt.Errorf("read principal grants: %w", err))
 	}
 	return accounts, nil
 }
@@ -316,7 +316,7 @@ type pairingQuerier interface {
 func scanPairingRequests(ctx context.Context, q pairingQuerier, query string, args ...any) ([]pairingRow, error) {
 	rows, err := q.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read pairing requests: %w", err))
+		return nil, classify(fmt.Errorf("read pairing requests: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var requests []pairingRow
@@ -324,7 +324,7 @@ func scanPairingRequests(ctx context.Context, q pairingQuerier, query string, ar
 		var row pairingRow
 		var createdAt, expiresAt string
 		if err := rows.Scan(&row.PrincipalID, &row.Account, &createdAt, &expiresAt, &row.code); err != nil {
-			return nil, fmt.Errorf("scan pairing request: %w", err)
+			return nil, classify(fmt.Errorf("scan pairing request: %w", err))
 		}
 		if row.CreatedAt, err = sqlite.ParseTime(createdAt); err != nil {
 			return nil, fmt.Errorf("parse pairing request time: %w", err)
@@ -335,7 +335,7 @@ func scanPairingRequests(ctx context.Context, q pairingQuerier, query string, ar
 		requests = append(requests, row)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read pairing requests: %w", err)
+		return nil, classify(fmt.Errorf("read pairing requests: %w", err))
 	}
 	return requests, nil
 }
@@ -349,14 +349,14 @@ type PrincipalActivity struct {
 func ListPrincipalActivity(ctx context.Context, db *sql.DB) ([]PrincipalActivity, error) {
 	rows, err := db.QueryContext(ctx, `SELECT owner_id, updated_at FROM session WHERE owner_id LIKE '%:%' AND id NOT GLOB 'wf-*'`)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read principal sessions: %w", err))
+		return nil, classify(fmt.Errorf("read principal sessions: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	byPrincipal := map[string]*PrincipalActivity{}
 	for rows.Next() {
 		var owner, updatedAt string
 		if err := rows.Scan(&owner, &updatedAt); err != nil {
-			return nil, fmt.Errorf("scan principal session: %w", err)
+			return nil, classify(fmt.Errorf("scan principal session: %w", err))
 		}
 		at, err := sqlite.ParseTime(updatedAt)
 		if err != nil {
@@ -373,7 +373,7 @@ func ListPrincipalActivity(ctx context.Context, db *sql.DB) ([]PrincipalActivity
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read principal sessions: %w", err)
+		return nil, classify(fmt.Errorf("read principal sessions: %w", err))
 	}
 	activities := make([]PrincipalActivity, 0, len(byPrincipal))
 	for _, activity := range byPrincipal {

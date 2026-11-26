@@ -36,7 +36,7 @@ func (s *sqliteConversationSessionStore) Resolve(ctx context.Context, conversati
 		return "", false, nil
 	}
 	if err != nil {
-		return "", false, classifyBusy(fmt.Errorf("resolve conversation session: %w", err))
+		return "", false, classify(fmt.Errorf("resolve conversation session: %w", err))
 	}
 	return sessionID, true, nil
 }
@@ -56,7 +56,7 @@ ON CONFLICT(conversation_key) DO UPDATE SET
 		if isConstraintForeignKey(err) {
 			return Errorf(ErrorCodeSessionNotFound, "pointed session does not exist")
 		}
-		return classifyBusy(fmt.Errorf("point conversation session: %w", err))
+		return classify(fmt.Errorf("point conversation session: %w", err))
 	}
 	return nil
 }
@@ -66,7 +66,7 @@ func (s *sqliteConversationSessionStore) Clear(ctx context.Context, conversation
 		return Errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM conversation_session WHERE conversation_key = ?`, conversationKey); err != nil {
-		return classifyBusy(fmt.Errorf("clear conversation session: %w", err))
+		return classify(fmt.Errorf("clear conversation session: %w", err))
 	}
 	return nil
 }

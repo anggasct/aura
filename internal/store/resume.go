@@ -69,7 +69,7 @@ ON CONFLICT(source, instance) DO UPDATE SET
 		sqlite.FormatTime(resume.UpdatedAt.UTC()),
 	)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("save channel resume: %w", err))
+		return classify(fmt.Errorf("save channel resume: %w", err))
 	}
 	return nil
 }
@@ -97,7 +97,7 @@ WHERE source = ? AND instance = ?
 		return ChannelResume{}, false, nil
 	}
 	if err != nil {
-		return ChannelResume{}, false, classifyBusy(fmt.Errorf("load channel resume: %w", err))
+		return ChannelResume{}, false, classify(fmt.Errorf("load channel resume: %w", err))
 	}
 	updatedAt, err := sqlite.ParseTime(updatedAtRaw)
 	if err != nil {
@@ -114,7 +114,7 @@ func (s *sqliteChannelResumeStore) Delete(ctx context.Context, source, instance 
 	query := `DELETE FROM channel_resume WHERE source = ? AND instance = ?`
 	_, err := s.db.ExecContext(ctx, query, source, instance)
 	if err != nil {
-		return classifyBusy(fmt.Errorf("delete channel resume: %w", err))
+		return classify(fmt.Errorf("delete channel resume: %w", err))
 	}
 	return nil
 }

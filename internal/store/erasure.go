@@ -96,7 +96,7 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return counts, classifyBusy(err)
+		return counts, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	if err := eraseWorkflowData(ctx, tx, principalID, apply, &counts); err != nil {
@@ -107,14 +107,14 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 			continue
 		}
 		if err := tx.QueryRowContext(ctx, target.count, principalID).Scan(target.field); err != nil {
-			return counts, classifyBusy(fmt.Errorf("count principal data: %w", err))
+			return counts, classify(fmt.Errorf("count principal data: %w", err))
 		}
 		if !apply || *target.field == 0 {
 			continue
 		}
 		for _, statement := range target.erase {
 			if _, err := tx.ExecContext(ctx, statement, principalID); err != nil {
-				return counts, classifyBusy(fmt.Errorf("erase principal data: %w", err))
+				return counts, classify(fmt.Errorf("erase principal data: %w", err))
 			}
 		}
 	}
@@ -122,7 +122,7 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 		return counts, nil
 	}
 	if err := tx.Commit(); err != nil {
-		return counts, classifyBusy(err)
+		return counts, classify(err)
 	}
 	if opts.ArtifactRoot != "" && (counts.Sessions > 0 || counts.RunSessions > 0 || counts.LegacyStepSessions > 0) {
 		report, err := Collect(ctx, db, opts.ArtifactRoot, time.Now().UTC().Add(time.Second))
@@ -148,11 +148,11 @@ func DeleteOrphanedTurnRuns(ctx context.Context, db *sql.DB) (int, error) {
 	}
 	result, err := db.ExecContext(ctx, orphanedTurnRunsByKey, string(encoded))
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete orphaned turn runs: %w", err))
+		return 0, classify(fmt.Errorf("delete orphaned turn runs: %w", err))
 	}
 	deleted, err := result.RowsAffected()
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete orphaned turn runs: %w", err))
+		return 0, classify(fmt.Errorf("delete orphaned turn runs: %w", err))
 	}
 	return int(deleted), nil
 }
@@ -160,19 +160,19 @@ func DeleteOrphanedTurnRuns(ctx context.Context, db *sql.DB) (int, error) {
 func readOrphanedTurnRunKeys(ctx context.Context, db *sql.DB) ([]string, error) {
 	rows, err := db.QueryContext(ctx, orphanedTurnRunKeys)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read orphaned turn runs: %w", err))
+		return nil, classify(fmt.Errorf("read orphaned turn runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var keys []string
 	for rows.Next() {
 		var key string
 		if err := rows.Scan(&key); err != nil {
-			return nil, fmt.Errorf("scan orphaned turn run: %w", err)
+			return nil, classify(fmt.Errorf("scan orphaned turn run: %w", err))
 		}
 		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read orphaned turn runs: %w", err))
+		return nil, classify(fmt.Errorf("read orphaned turn runs: %w", err))
 	}
 	return keys, nil
 }

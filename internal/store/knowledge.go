@@ -11,8 +11,7 @@ import (
 	"strings"
 	"time"
 
-	sqlitedriver "modernc.org/sqlite"
-
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -25,8 +24,6 @@ const (
 	KBWriteUnchanged = "unchanged"
 
 	kbScopeHashBytes = 16
-	kbSQLiteCorrupt  = 11
-	kbSQLitePrimary  = 0xff
 	kbSHA256HexLen   = 64
 )
 
@@ -163,19 +160,19 @@ func (s *sqliteKBStore) ReplaceSource(ctx context.Context, write *KBSourceWrite)
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return KBWriteResult{}, classifyBusy(err)
+		return KBWriteResult{}, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	result, err := replaceKBSource(ctx, tx, write)
 	if err != nil {
-		return KBWriteResult{}, classifyBusy(err)
+		return KBWriteResult{}, classify(err)
 	}
 	if result.Status == KBWriteUnchanged {
 		return result, nil
 	}
 	if err := tx.Commit(); err != nil {
-		return KBWriteResult{}, classifyBusy(err)
+		return KBWriteResult{}, classify(err)
 	}
 	return result, nil
 }
@@ -185,7 +182,7 @@ func replaceKBSource(ctx context.Context, tx *sql.Tx, write *KBSourceWrite) (KBW
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO kb_collection (id, generation, created_at) VALUES (?, 0, ?) ON CONFLICT(id) DO NOTHING`,
 		write.Collection, stamp); err != nil {
-		return KBWriteResult{}, fmt.Errorf("ensure knowledge collection: %w", err)
+		return KBWriteResult{}, classify(fmt.Errorf("ensure knowledge collection: %w", err))
 	}
 	sourceID, existingSHA, existingVersion, found, err := lookupKBSourceForWrite(ctx, tx, write)
 	if err != nil {
@@ -205,12 +202,12 @@ func replaceKBSource(ctx context.Context, tx *sql.Tx, write *KBSourceWrite) (KBW
 			`INSERT INTO kb_source (id, collection, kind, uri, label, content_sha256, ingest_version, ingested_at)
 			 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 			sourceID, write.Collection, write.Kind, write.URI, write.Label, write.ContentSHA256, write.IngestVersion, stamp); err != nil {
-			return KBWriteResult{}, fmt.Errorf("insert knowledge source: %w", err)
+			return KBWriteResult{}, classify(fmt.Errorf("insert knowledge source: %w", err))
 		}
 	} else if _, err := tx.ExecContext(ctx,
 		`UPDATE kb_source SET label = ?, content_sha256 = ?, ingest_version = ?, ingested_at = ? WHERE id = ?`,
 		write.Label, write.ContentSHA256, write.IngestVersion, stamp, sourceID); err != nil {
-		return KBWriteResult{}, fmt.Errorf("update knowledge source: %w", err)
+		return KBWriteResult{}, classify(fmt.Errorf("update knowledge source: %w", err))
 	}
 	result, err := diffKBChunks(ctx, tx, write, sourceID)
 	if err != nil {
@@ -220,7 +217,7 @@ func replaceKBSource(ctx context.Context, tx *sql.Tx, write *KBSourceWrite) (KBW
 	result.SourceID = sourceID
 	result.Chunks = len(write.Chunks)
 	if _, err := tx.ExecContext(ctx, `UPDATE kb_collection SET generation = generation + 1 WHERE id = ?`, write.Collection); err != nil {
-		return KBWriteResult{}, fmt.Errorf("advance knowledge collection generation: %w", err)
+		return KBWriteResult{}, classify(fmt.Errorf("advance knowledge collection generation: %w", err))
 	}
 	return result, nil
 }
@@ -233,7 +230,7 @@ func lookupKBSourceForWrite(ctx context.Context, tx *sql.Tx, write *KBSourceWrit
 		return "", "", 0, false, nil
 	}
 	if err != nil {
-		return "", "", 0, false, fmt.Errorf("look up knowledge source: %w", err)
+		return "", "", 0, false, classify(fmt.Errorf("look up knowledge source: %w", err))
 	}
 	return id, sha, version, true, nil
 }
@@ -243,10 +240,10 @@ func checkKBCaps(ctx context.Context, tx *sql.Tx, write *KBSourceWrite, sourceID
 	if err := tx.QueryRowContext(ctx,
 		`SELECT count(*) FROM kb_chunk c JOIN kb_source s ON s.id = c.source_id WHERE s.collection = ? AND c.source_id <> ?`,
 		write.Collection, sourceID).Scan(&inCollection); err != nil {
-		return fmt.Errorf("count collection chunks: %w", err)
+		return classify(fmt.Errorf("count collection chunks: %w", err))
 	}
 	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM kb_chunk WHERE source_id <> ?`, sourceID).Scan(&inTotal); err != nil {
-		return fmt.Errorf("count total chunks: %w", err)
+		return classify(fmt.Errorf("count total chunks: %w", err))
 	}
 	incoming := len(write.Chunks)
 	if inCollection < 0 || inCollection > write.Limits.CollectionChunks-incoming {
@@ -270,7 +267,7 @@ func diffKBChunks(ctx context.Context, tx *sql.Tx, write *KBSourceWrite, sourceI
 	var result KBWriteResult
 	remove, err := tx.PrepareContext(ctx, `DELETE FROM kb_chunk WHERE id = ?`)
 	if err != nil {
-		return KBWriteResult{}, fmt.Errorf("prepare knowledge chunk delete: %w", err)
+		return KBWriteResult{}, classify(fmt.Errorf("prepare knowledge chunk delete: %w", err))
 	}
 	defer func() { _ = remove.Close() }()
 	for key, id := range existing {
@@ -279,14 +276,14 @@ func diffKBChunks(ctx context.Context, tx *sql.Tx, write *KBSourceWrite, sourceI
 			continue
 		}
 		if _, err := remove.ExecContext(ctx, id); err != nil {
-			return KBWriteResult{}, fmt.Errorf("delete knowledge chunk: %w", err)
+			return KBWriteResult{}, classify(fmt.Errorf("delete knowledge chunk: %w", err))
 		}
 		result.ChunksRemoved++
 	}
 	insert, err := tx.PrepareContext(ctx,
 		`INSERT INTO kb_chunk (id, source_id, ordinal, heading, content, scope, content_sha256) VALUES (?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
-		return KBWriteResult{}, fmt.Errorf("prepare knowledge chunk insert: %w", err)
+		return KBWriteResult{}, classify(fmt.Errorf("prepare knowledge chunk insert: %w", err))
 	}
 	defer func() { _ = insert.Close() }()
 	scope := KBScope(write.Collection)
@@ -296,7 +293,7 @@ func diffKBChunks(ctx context.Context, tx *sql.Tx, write *KBSourceWrite, sourceI
 			continue
 		}
 		if _, err := insert.ExecContext(ctx, newKBID("kbc_"), sourceID, chunk.Ordinal, nullMemoryText(chunk.Heading), chunk.Content, scope, chunk.SHA256); err != nil {
-			return KBWriteResult{}, fmt.Errorf("insert knowledge chunk: %w", err)
+			return KBWriteResult{}, classify(fmt.Errorf("insert knowledge chunk: %w", err))
 		}
 		result.ChunksAdded++
 	}
@@ -306,7 +303,7 @@ func diffKBChunks(ctx context.Context, tx *sql.Tx, write *KBSourceWrite, sourceI
 func loadKBChunkKeys(ctx context.Context, tx *sql.Tx, sourceID string) (map[kbChunkKey]string, error) {
 	rows, err := tx.QueryContext(ctx, `SELECT id, ordinal, content_sha256 FROM kb_chunk WHERE source_id = ?`, sourceID)
 	if err != nil {
-		return nil, fmt.Errorf("list knowledge chunks: %w", err)
+		return nil, classify(fmt.Errorf("list knowledge chunks: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	keys := make(map[kbChunkKey]string)
@@ -314,12 +311,12 @@ func loadKBChunkKeys(ctx context.Context, tx *sql.Tx, sourceID string) (map[kbCh
 		var id string
 		var key kbChunkKey
 		if err := rows.Scan(&id, &key.ordinal, &key.sha256); err != nil {
-			return nil, fmt.Errorf("scan knowledge chunk: %w", err)
+			return nil, classify(fmt.Errorf("scan knowledge chunk: %w", err))
 		}
 		keys[key] = id
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list knowledge chunks: %w", err)
+		return nil, classify(fmt.Errorf("list knowledge chunks: %w", err))
 	}
 	return keys, nil
 }
@@ -336,7 +333,7 @@ func (s *sqliteKBStore) ListCollections(ctx context.Context) ([]KBCollectionSumm
 		 GROUP BY c.id, c.generation, c.created_at
 		 ORDER BY c.id`)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list knowledge collections: %w", err))
+		return nil, classify(fmt.Errorf("list knowledge collections: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []KBCollectionSummary
@@ -344,7 +341,7 @@ func (s *sqliteKBStore) ListCollections(ctx context.Context) ([]KBCollectionSumm
 		var summary KBCollectionSummary
 		var created string
 		if err := rows.Scan(&summary.ID, &summary.Generation, &created, &summary.Sources, &summary.Chunks); err != nil {
-			return nil, fmt.Errorf("scan knowledge collection: %w", err)
+			return nil, classify(fmt.Errorf("scan knowledge collection: %w", err))
 		}
 		if summary.CreatedAt, err = sqlite.ParseTime(created); err != nil {
 			return nil, fmt.Errorf("parse knowledge collection time: %w", err)
@@ -352,7 +349,7 @@ func (s *sqliteKBStore) ListCollections(ctx context.Context) ([]KBCollectionSumm
 		out = append(out, summary)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list knowledge collections: %w", err))
+		return nil, classify(fmt.Errorf("list knowledge collections: %w", err))
 	}
 	return out, nil
 }
@@ -382,7 +379,7 @@ func (s *sqliteKBStore) ListSources(ctx context.Context, collection string) ([]K
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectKBSourceColumns+` FROM kb_source s WHERE s.collection = ? ORDER BY s.uri`, collection)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list knowledge sources: %w", err))
+		return nil, classify(fmt.Errorf("list knowledge sources: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var out []KBSource
@@ -394,7 +391,7 @@ func (s *sqliteKBStore) ListSources(ctx context.Context, collection string) ([]K
 		out = append(out, source)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list knowledge sources: %w", err))
+		return nil, classify(fmt.Errorf("list knowledge sources: %w", err))
 	}
 	return out, nil
 }
@@ -409,7 +406,7 @@ func (s *sqliteKBStore) GetSource(ctx context.Context, collection, uri string) (
 		return KBSource{}, false, nil
 	}
 	if err != nil {
-		return KBSource{}, false, classifyBusy(fmt.Errorf("get knowledge source: %w", err))
+		return KBSource{}, false, classify(fmt.Errorf("get knowledge source: %w", err))
 	}
 	return source, true, nil
 }
@@ -430,7 +427,7 @@ func (s *sqliteKBStore) RemoveSource(ctx context.Context, collection, uri string
 	}
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return KBRemoveResult{}, classifyBusy(fmt.Errorf("open knowledge connection: %w", err))
+		return KBRemoveResult{}, classify(fmt.Errorf("open knowledge connection: %w", err))
 	}
 	defer func() { _ = conn.Close() }()
 	restore, err := enableSecureDelete(ctx, conn)
@@ -454,10 +451,10 @@ func (s *sqliteKBStore) RemoveSource(ctx context.Context, collection, uri string
 func enableSecureDelete(ctx context.Context, conn *sql.Conn) (restore func(), err error) {
 	var previous int
 	if err := conn.QueryRowContext(ctx, `PRAGMA secure_delete`).Scan(&previous); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read secure_delete: %w", err))
+		return nil, classify(fmt.Errorf("read secure_delete: %w", err))
 	}
 	if _, err := conn.ExecContext(ctx, `PRAGMA secure_delete = ON`); err != nil {
-		return nil, classifyBusy(fmt.Errorf("enable secure_delete: %w", err))
+		return nil, classify(fmt.Errorf("enable secure_delete: %w", err))
 	}
 	return func() {
 		_, _ = conn.ExecContext(context.WithoutCancel(ctx), fmt.Sprintf("PRAGMA secure_delete = %d", previous))
@@ -467,7 +464,7 @@ func enableSecureDelete(ctx context.Context, conn *sql.Conn) (restore func(), er
 func deleteKBSource(ctx context.Context, conn *sql.Conn, collection, uri string) (KBRemoveResult, error) {
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return KBRemoveResult{}, classifyBusy(err)
+		return KBRemoveResult{}, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	source, err := scanKBSource(tx.QueryRowContext(ctx,
@@ -476,16 +473,16 @@ func deleteKBSource(ctx context.Context, conn *sql.Conn, collection, uri string)
 		return KBRemoveResult{}, Errorf(ErrorCodeKBSourceNotFound, "knowledge source does not exist")
 	}
 	if err != nil {
-		return KBRemoveResult{}, classifyBusy(fmt.Errorf("get knowledge source: %w", err))
+		return KBRemoveResult{}, classify(fmt.Errorf("get knowledge source: %w", err))
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM kb_source WHERE id = ?`, source.ID); err != nil {
-		return KBRemoveResult{}, classifyBusy(fmt.Errorf("delete knowledge source: %w", err))
+		return KBRemoveResult{}, classify(fmt.Errorf("delete knowledge source: %w", err))
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE kb_collection SET generation = generation + 1 WHERE id = ?`, collection); err != nil {
-		return KBRemoveResult{}, classifyBusy(fmt.Errorf("advance knowledge collection generation: %w", err))
+		return KBRemoveResult{}, classify(fmt.Errorf("advance knowledge collection generation: %w", err))
 	}
 	if err := tx.Commit(); err != nil {
-		return KBRemoveResult{}, classifyBusy(err)
+		return KBRemoveResult{}, classify(err)
 	}
 	return KBRemoveResult{SourceID: source.ID, Chunks: source.Chunks}, nil
 }
@@ -493,7 +490,7 @@ func deleteKBSource(ctx context.Context, conn *sql.Conn, collection, uri string)
 func truncateWAL(ctx context.Context, conn *sql.Conn) (bool, error) {
 	var busy, logFrames, checkpointed int
 	if err := conn.QueryRowContext(ctx, `PRAGMA wal_checkpoint(TRUNCATE)`).Scan(&busy, &logFrames, &checkpointed); err != nil {
-		return false, classifyBusy(fmt.Errorf("truncate write-ahead log: %w", err))
+		return false, classify(fmt.Errorf("truncate write-ahead log: %w", err))
 	}
 	return busy == 0, nil
 }
@@ -513,7 +510,7 @@ func (s *sqliteKBStore) Check(ctx context.Context) (KBCheckReport, error) {
 		{&report.IndexedChunks, `SELECT count(*) FROM kb_chunk_fts_docsize`},
 	} {
 		if err := s.db.QueryRowContext(ctx, count.query).Scan(count.target); err != nil {
-			return KBCheckReport{}, classifyBusy(fmt.Errorf("count knowledge rows: %w", err))
+			return KBCheckReport{}, classify(fmt.Errorf("count knowledge rows: %w", err))
 		}
 	}
 	if report.Chunks != report.IndexedChunks {
@@ -539,21 +536,21 @@ func (s *sqliteKBStore) Check(ctx context.Context) (KBCheckReport, error) {
 func (s *sqliteKBStore) scopeMismatch(ctx context.Context) (bool, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT s.collection, c.scope FROM kb_chunk c JOIN kb_source s ON s.id = c.source_id`)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("list knowledge scopes: %w", err))
+		return false, classify(fmt.Errorf("list knowledge scopes: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	mismatch := false
 	for rows.Next() {
 		var collection, scope string
 		if err := rows.Scan(&collection, &scope); err != nil {
-			return false, fmt.Errorf("scan knowledge scope: %w", err)
+			return false, classify(fmt.Errorf("scan knowledge scope: %w", err))
 		}
 		if scope != KBScope(collection) {
 			mismatch = true
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return false, classifyBusy(fmt.Errorf("list knowledge scopes: %w", err))
+		return false, classify(fmt.Errorf("list knowledge scopes: %w", err))
 	}
 	return mismatch, nil
 }
@@ -563,9 +560,8 @@ func (s *sqliteKBStore) indexDamaged(ctx context.Context) (bool, error) {
 	if err == nil {
 		return false, nil
 	}
-	var sqliteErr *sqlitedriver.Error
-	if errors.As(err, &sqliteErr) && sqliteErr.Code()&kbSQLitePrimary == kbSQLiteCorrupt {
+	if fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeCorrupt) {
 		return true, nil
 	}
-	return false, classifyBusy(fmt.Errorf("check knowledge index: %w", err))
+	return false, classify(fmt.Errorf("check knowledge index: %w", err))
 }

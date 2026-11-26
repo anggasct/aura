@@ -65,7 +65,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		sqlite.FormatTime(stored.GrantedAt), sqlite.FormatTime(stored.ExpiresAt), stored.GrantedBy,
 	)
 	if err != nil {
-		return StandingGrant{}, classifyBusy(fmt.Errorf("record standing grant: %w", err))
+		return StandingGrant{}, classify(fmt.Errorf("record standing grant: %w", err))
 	}
 	return stored, nil
 }
@@ -119,11 +119,11 @@ func (s *sqliteStandingGrantStore) Revoke(ctx context.Context, id string, at tim
 	}
 	result, err := s.db.ExecContext(ctx, `UPDATE standing_grant SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at.UTC()), id)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("revoke standing grant: %w", err))
+		return false, classify(fmt.Errorf("revoke standing grant: %w", err))
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("revoke standing grant: %w", err)
+		return false, classify(fmt.Errorf("revoke standing grant: %w", err))
 	}
 	return rows == 1, nil
 }
@@ -131,7 +131,7 @@ func (s *sqliteStandingGrantStore) Revoke(ctx context.Context, id string, at tim
 func (s *sqliteStandingGrantStore) query(ctx context.Context, query string, args ...any) ([]StandingGrant, error) {
 	rows, err := s.db.QueryContext(ctx, query, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read standing grants: %w", err))
+		return nil, classify(fmt.Errorf("read standing grants: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var grants []StandingGrant
@@ -139,7 +139,7 @@ func (s *sqliteStandingGrantStore) query(ctx context.Context, query string, args
 		var grant StandingGrant
 		var grantedAt, expiresAt string
 		if err := rows.Scan(&grant.ID, &grant.PrincipalID, &grant.AgentID, &grant.ToolName, &grantedAt, &expiresAt, &grant.GrantedBy); err != nil {
-			return nil, fmt.Errorf("scan standing grant: %w", err)
+			return nil, classify(fmt.Errorf("scan standing grant: %w", err))
 		}
 		if grant.GrantedAt, err = sqlite.ParseTime(grantedAt); err != nil {
 			return nil, fmt.Errorf("parse standing grant time: %w", err)
@@ -150,7 +150,7 @@ func (s *sqliteStandingGrantStore) query(ctx context.Context, query string, args
 		grants = append(grants, grant)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("read standing grants: %w", err)
+		return nil, classify(fmt.Errorf("read standing grants: %w", err))
 	}
 	return grants, nil
 }

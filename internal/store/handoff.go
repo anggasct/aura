@@ -80,7 +80,7 @@ func (s *sqliteHandoffStore) Open(ctx context.Context, handoff *Handoff) error {
 		if isConstraintCheck(err) {
 			return codedError(ErrorCodeInvalidArgument, "open handoff: a column value violates its constraint", err)
 		}
-		return classifyBusy(fmt.Errorf("open handoff: %w", err))
+		return classify(fmt.Errorf("open handoff: %w", err))
 	}
 	return nil
 }
@@ -92,7 +92,7 @@ func (s *sqliteHandoffStore) Get(ctx context.Context, sessionID string) (Handoff
 		return Handoff{}, false, nil
 	}
 	if err != nil {
-		return Handoff{}, false, err
+		return Handoff{}, false, classify(err)
 	}
 	return handoff, true, nil
 }
@@ -115,7 +115,7 @@ func (s *sqliteHandoffStore) Check(ctx context.Context, sessionID string, timeou
 func (s *sqliteHandoffStore) Release(ctx context.Context, sessionID string, now time.Time) (Handoff, bool, error) {
 	result, err := s.db.ExecContext(ctx, `UPDATE session_handoff SET released_at = ? WHERE session_id = ? AND released_at IS NULL`, sqlite.FormatTime(now), sessionID)
 	if err != nil {
-		return Handoff{}, false, classifyBusy(fmt.Errorf("release handoff: %w", err))
+		return Handoff{}, false, classify(fmt.Errorf("release handoff: %w", err))
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
 		return Handoff{}, false, err
@@ -126,7 +126,7 @@ func (s *sqliteHandoffStore) Release(ctx context.Context, sessionID string, now 
 func (s *sqliteHandoffStore) ListOpen(ctx context.Context) ([]Handoff, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT `+handoffColumns+` FROM session_handoff WHERE released_at IS NULL ORDER BY opened_at, session_id`)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list handoffs: %w", err))
+		return nil, classify(fmt.Errorf("list handoffs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var handoffs []Handoff
@@ -138,7 +138,7 @@ func (s *sqliteHandoffStore) ListOpen(ctx context.Context) ([]Handoff, error) {
 		handoffs = append(handoffs, handoff)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("list handoffs: %w", err)
+		return nil, classify(fmt.Errorf("list handoffs: %w", err))
 	}
 	return handoffs, nil
 }

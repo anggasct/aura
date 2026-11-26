@@ -4,10 +4,8 @@ import (
 	"errors"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"modernc.org/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
-
-const sqliteConstraintUnique = 2067 // SQLITE_CONSTRAINT_UNIQUE
 
 type ErrorCode string
 
@@ -37,6 +35,5 @@ func codedError(code ErrorCode, detail string, cause error) error {
 var errIntentNotFound = errors.New("effect: intent not found")
 
 func isUniqueViolation(err error) bool {
-	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteConstraintUnique
+	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintUnique)
 }

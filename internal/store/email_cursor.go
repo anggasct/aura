@@ -39,7 +39,7 @@ func (s *sqliteEmailCursorStore) Load(ctx context.Context, source string) (curso
 		return EmailCursor{}, false, nil
 	}
 	if err != nil {
-		return EmailCursor{}, false, classifyBusy(fmt.Errorf("load email cursor: %w", err))
+		return EmailCursor{}, false, classify(fmt.Errorf("load email cursor: %w", err))
 	}
 	if validity < 0 || validity > math.MaxUint32 || lastUID < 0 || lastUID > math.MaxUint32 {
 		return EmailCursor{}, false, Errorf(ErrorCodeInvalidArgument, "stored email cursor is out of range")
@@ -65,7 +65,7 @@ ON CONFLICT(source) DO UPDATE SET
     updated_at = excluded.updated_at
 `
 	if _, err := s.db.ExecContext(ctx, query, source, int64(cursor.UIDValidity), int64(cursor.LastUID), sqlite.FormatTime(at.UTC())); err != nil {
-		return classifyBusy(fmt.Errorf("save email cursor: %w", err))
+		return classify(fmt.Errorf("save email cursor: %w", err))
 	}
 	return nil
 }

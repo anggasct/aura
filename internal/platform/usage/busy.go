@@ -3,20 +3,17 @@ package usage
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"math/rand/v2"
 	"sync"
 	"time"
 
-	"modernc.org/sqlite"
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
-const sqliteBusyCode = 5
-
 func isTransientBusy(err error) bool {
-	var sqliteErr *sqlite.Error
-	return errors.As(err, &sqliteErr) && sqliteErr.Code() == sqliteBusyCode
+	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeBusy)
 }
 
 // The DSN pins transactions to BEGIN IMMEDIATE, so BeginTx queues for the

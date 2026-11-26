@@ -18,7 +18,7 @@ type ReconcileReport struct {
 func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, error) {
 	rows, err := db.QueryContext(ctx, `SELECT digest, relative_path FROM blob`)
 	if err != nil {
-		return ReconcileReport{}, fmt.Errorf("list blobs: %w", err)
+		return ReconcileReport{}, classify(fmt.Errorf("list blobs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -27,7 +27,7 @@ func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, e
 	for rows.Next() {
 		var digest, relPath string
 		if err := rows.Scan(&digest, &relPath); err != nil {
-			return ReconcileReport{}, fmt.Errorf("scan blob row: %w", err)
+			return ReconcileReport{}, classify(fmt.Errorf("scan blob row: %w", err))
 		}
 		knownPaths[filepath.ToSlash(relPath)] = struct{}{}
 		absPath, err := resolveRootedPath(root, relPath)
@@ -50,7 +50,7 @@ func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, e
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return ReconcileReport{}, fmt.Errorf("list blobs: %w", err)
+		return ReconcileReport{}, classify(fmt.Errorf("list blobs: %w", err))
 	}
 
 	blobRoot := filepath.Join(root, "blobs")

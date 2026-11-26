@@ -79,19 +79,19 @@ func (s *sqliteKBVectorReader) CollectionVersions(ctx context.Context, collectio
 	}
 	rows, err := s.db.QueryContext(ctx, kbCollectionVersionsSQL, string(scope))
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read knowledge collection versions: %w", err))
+		return nil, classify(fmt.Errorf("read knowledge collection versions: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	versions := make([]KBCollectionVersion, 0, len(collections))
 	for rows.Next() {
 		var version KBCollectionVersion
 		if err := rows.Scan(&version.Collection, &version.Generation, &version.Fingerprint); err != nil {
-			return nil, fmt.Errorf("scan knowledge collection version: %w", err)
+			return nil, classify(fmt.Errorf("scan knowledge collection version: %w", err))
 		}
 		versions = append(versions, version)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read knowledge collection versions: %w", err))
+		return nil, classify(fmt.Errorf("read knowledge collection versions: %w", err))
 	}
 	return versions, nil
 }
@@ -105,7 +105,7 @@ func (s *sqliteKBVectorReader) VectorPage(ctx context.Context, collection, finge
 	}
 	rows, err := s.db.QueryContext(ctx, kbVectorPageSQL, afterRowID, collection, fingerprint, limit)
 	if err != nil {
-		return KBVectorPage{}, classifyBusy(fmt.Errorf("read knowledge vectors: %w", err))
+		return KBVectorPage{}, classify(fmt.Errorf("read knowledge vectors: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	page := KBVectorPage{Values: make([]float32, 0, limit*dimensions)}
@@ -114,7 +114,7 @@ func (s *sqliteKBVectorReader) VectorPage(ctx context.Context, collection, finge
 		var digest string
 		var blob []byte
 		if err := rows.Scan(&rowID, &digest, &blob); err != nil {
-			return KBVectorPage{}, fmt.Errorf("scan knowledge vector: %w", err)
+			return KBVectorPage{}, classify(fmt.Errorf("scan knowledge vector: %w", err))
 		}
 		if len(blob) != dimensions*kbVectorValueBytes {
 			return KBVectorPage{}, Errorf(ErrorCodeInvalidArgument, "knowledge vector has %d bytes, want %d", len(blob), dimensions*kbVectorValueBytes)
@@ -126,7 +126,7 @@ func (s *sqliteKBVectorReader) VectorPage(ctx context.Context, collection, finge
 		}
 	}
 	if err := rows.Err(); err != nil {
-		return KBVectorPage{}, classifyBusy(fmt.Errorf("read knowledge vectors: %w", err))
+		return KBVectorPage{}, classify(fmt.Errorf("read knowledge vectors: %w", err))
 	}
 	return page, nil
 }
@@ -144,19 +144,19 @@ func (s *sqliteKBVectorReader) ChunksByRowID(ctx context.Context, rowIDs []int64
 	}
 	rows, err := s.db.QueryContext(ctx, kbChunksByRowIDSQL, string(list))
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read knowledge chunks: %w", err))
+		return nil, classify(fmt.Errorf("read knowledge chunks: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	chunks := make([]KBVectorChunk, 0, len(rowIDs))
 	for rows.Next() {
 		var chunk KBVectorChunk
 		if err := rows.Scan(&chunk.RowID, &chunk.ChunkID, &chunk.SourceID, &chunk.Collection, &chunk.Label, &chunk.Heading, &chunk.Ordinal, &chunk.Content, &chunk.SHA256); err != nil {
-			return nil, fmt.Errorf("scan knowledge chunk: %w", err)
+			return nil, classify(fmt.Errorf("scan knowledge chunk: %w", err))
 		}
 		chunks = append(chunks, chunk)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read knowledge chunks: %w", err))
+		return nil, classify(fmt.Errorf("read knowledge chunks: %w", err))
 	}
 	return chunks, nil
 }

@@ -168,11 +168,11 @@ func (s *sqliteMemoryStore) UpsertDocument(ctx context.Context, document *Memory
 		sqlite.FormatTime(document.CreatedAt.UTC()), nullMemoryTime(document.ExpiresAt), document.SessionID,
 	)
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("upsert memory document: %w", err))
+		return false, classify(fmt.Errorf("upsert memory document: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return false, classifyBusy(fmt.Errorf("upsert memory document: %w", err))
+		return false, classify(fmt.Errorf("upsert memory document: %w", err))
 	}
 	return affected > 0, nil
 }
@@ -189,7 +189,7 @@ func (s *sqliteMemoryStore) ProjectionWatermark(ctx context.Context, sessionID s
 		`SELECT MAX(source_to_sequence) FROM memory_document WHERE session_id = ?`,
 		sessionID).Scan(&watermark)
 	if err != nil {
-		return 0, false, classifyBusy(fmt.Errorf("load projection watermark: %w", err))
+		return 0, false, classify(fmt.Errorf("load projection watermark: %w", err))
 	}
 	if !watermark.Valid {
 		return 0, false, nil
@@ -241,7 +241,7 @@ func (s *sqliteMemoryStore) Search(ctx context.Context, query *MemoryQuery) ([]M
 	args = append(args, query.Limit)
 	rows, err := s.db.QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("search memory documents: %w", err))
+		return nil, classify(fmt.Errorf("search memory documents: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	hits := []MemoryHit{}
@@ -254,7 +254,7 @@ func (s *sqliteMemoryStore) Search(ctx context.Context, query *MemoryQuery) ([]M
 		hits = append(hits, hit)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("search memory documents: %w", err))
+		return nil, classify(fmt.Errorf("search memory documents: %w", err))
 	}
 	return hits, nil
 }
@@ -271,7 +271,7 @@ func scanMemoryHit(rows *sql.Rows) (MemoryHit, error) {
 		&createdAtRaw, &expiresAtRaw, &hit.AgentID, &hit.Rank,
 	)
 	if err != nil {
-		return MemoryHit{}, classifyBusy(fmt.Errorf("scan memory hit: %w", err))
+		return MemoryHit{}, classify(fmt.Errorf("scan memory hit: %w", err))
 	}
 	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
@@ -299,7 +299,7 @@ func (s *sqliteMemoryStore) DeleteSessionDocuments(ctx context.Context, sessionI
 		return Errorf(ErrorCodeInvalidArgument, "session id must not be empty")
 	}
 	if _, err := s.db.ExecContext(ctx, `DELETE FROM memory_document WHERE session_id = ?`, sessionID); err != nil {
-		return classifyBusy(fmt.Errorf("delete session documents: %w", err))
+		return classify(fmt.Errorf("delete session documents: %w", err))
 	}
 	return nil
 }
@@ -318,11 +318,11 @@ func (s *sqliteMemoryStore) DeleteExpiredSummaries(ctx context.Context, now time
 			ORDER BY expires_at, id LIMIT ?
 		)`, MemoryKindSummary, sqlite.FormatTime(now.UTC()), limit)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete expired summaries: %w", err))
+		return 0, classify(fmt.Errorf("delete expired summaries: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete expired summaries: %w", err))
+		return 0, classify(fmt.Errorf("delete expired summaries: %w", err))
 	}
 	return int(affected), nil
 }
@@ -343,7 +343,7 @@ func (s *sqliteMemoryStore) ListSessionDocuments(ctx context.Context, ownerID, s
 		 ORDER BY d.source_from_sequence, d.id LIMIT ?`,
 		ownerID, sessionID, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list session documents: %w", err))
+		return nil, classify(fmt.Errorf("list session documents: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	documents := make([]MemoryDocument, 0, limit)
@@ -356,7 +356,7 @@ func (s *sqliteMemoryStore) ListSessionDocuments(ctx context.Context, ownerID, s
 		documents = append(documents, document)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list session documents: %w", err))
+		return nil, classify(fmt.Errorf("list session documents: %w", err))
 	}
 	return documents, nil
 }
@@ -385,7 +385,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKind(ctx context.Context, owne
 		LIMIT ?`,
 		ownerID, sessionID, kind, sqlite.FormatTime(time.Now().UTC()), limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list session documents by kind: %w", err))
+		return nil, classify(fmt.Errorf("list session documents by kind: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	documents := []MemoryDocument{}
@@ -398,7 +398,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKind(ctx context.Context, owne
 		documents = append(documents, document)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list session documents by kind: %w", err))
+		return nil, classify(fmt.Errorf("list session documents by kind: %w", err))
 	}
 	return documents, nil
 }
@@ -431,7 +431,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKindInRange(ctx context.Contex
 		LIMIT ?`,
 		ownerID, sessionID, kind, from, to, sqlite.FormatTime(time.Now().UTC()), limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list session documents in range: %w", err))
+		return nil, classify(fmt.Errorf("list session documents in range: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	documents := []MemoryDocument{}
@@ -444,7 +444,7 @@ func (s *sqliteMemoryStore) ListSessionDocumentsByKindInRange(ctx context.Contex
 		documents = append(documents, document)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list session documents in range: %w", err))
+		return nil, classify(fmt.Errorf("list session documents in range: %w", err))
 	}
 	return documents, nil
 }
@@ -461,7 +461,7 @@ func scanMemoryDocument(rows rowScanner) (MemoryDocument, error) {
 		&createdAtRaw, &expiresAtRaw, &document.AgentID,
 	)
 	if err != nil {
-		return MemoryDocument{}, classifyBusy(fmt.Errorf("scan memory document: %w", err))
+		return MemoryDocument{}, classify(fmt.Errorf("scan memory document: %w", err))
 	}
 	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
@@ -492,11 +492,11 @@ func (s *sqliteMemoryStore) DeleteSessionSummaries(ctx context.Context, ownerID,
 		`DELETE FROM memory_document WHERE owner_id = ? AND session_id = ? AND kind = ?`,
 		ownerID, sessionID, MemoryKindSummary)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete session summaries: %w", err))
+		return 0, classify(fmt.Errorf("delete session summaries: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete session summaries: %w", err))
+		return 0, classify(fmt.Errorf("delete session summaries: %w", err))
 	}
 	return int(affected), nil
 }
@@ -512,11 +512,11 @@ func (s *sqliteMemoryStore) DeleteOtherSummaries(ctx context.Context, ownerID, s
 		`DELETE FROM memory_document WHERE owner_id = ? AND session_id = ? AND kind = ? AND id != ?`,
 		ownerID, sessionID, MemoryKindSummary, keepID)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete other summaries: %w", err))
+		return 0, classify(fmt.Errorf("delete other summaries: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete other summaries: %w", err))
+		return 0, classify(fmt.Errorf("delete other summaries: %w", err))
 	}
 	return int(affected), nil
 }
@@ -558,7 +558,7 @@ func (s *sqliteMemoryStore) ListOwnerDocuments(ctx context.Context, ownerID stri
 		 ORDER BY d.session_id, d.source_from_sequence, d.id LIMIT ?`,
 		ownerID, limit)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("list owner documents: %w", err))
+		return nil, classify(fmt.Errorf("list owner documents: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	documents := make([]MemoryDocument, 0, limit)
@@ -571,7 +571,7 @@ func (s *sqliteMemoryStore) ListOwnerDocuments(ctx context.Context, ownerID stri
 		documents = append(documents, document)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("list owner documents: %w", err))
+		return nil, classify(fmt.Errorf("list owner documents: %w", err))
 	}
 	return documents, nil
 }
@@ -586,7 +586,7 @@ func (s *sqliteMemoryStore) CountSessionDocuments(ctx context.Context, sessionID
 	var total int64
 	if err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM memory_document WHERE session_id = ?`, sessionID).Scan(&total); err != nil {
-		return 0, classifyBusy(fmt.Errorf("count session documents: %w", err))
+		return 0, classify(fmt.Errorf("count session documents: %w", err))
 	}
 	if total > math.MaxInt {
 		return 0, Errorf(ErrorCodeMemoryInvalid, "session document count is out of bounds")
@@ -614,7 +614,7 @@ func (s *sqliteMemoryStore) DeleteDocumentsByIDsOwned(ctx context.Context, owner
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete owned documents: %w", err))
+		return 0, classify(fmt.Errorf("delete owned documents: %w", err))
 	}
 	defer func() { _ = tx.Rollback() }()
 	deleted := 0
@@ -622,11 +622,11 @@ func (s *sqliteMemoryStore) DeleteDocumentsByIDsOwned(ctx context.Context, owner
 		result, err := tx.ExecContext(ctx,
 			`DELETE FROM memory_document WHERE owner_id = ? AND id = ?`, ownerID, ids[i])
 		if err != nil {
-			return 0, classifyBusy(fmt.Errorf("delete owned documents: %w", err))
+			return 0, classify(fmt.Errorf("delete owned documents: %w", err))
 		}
 		affected, err := result.RowsAffected()
 		if err != nil {
-			return 0, classifyBusy(fmt.Errorf("delete owned documents: %w", err))
+			return 0, classify(fmt.Errorf("delete owned documents: %w", err))
 		}
 		if affected > math.MaxInt-int64(deleted) {
 			return 0, Errorf(ErrorCodeMemoryInvalid, "delete count is out of bounds")
@@ -634,7 +634,7 @@ func (s *sqliteMemoryStore) DeleteDocumentsByIDsOwned(ctx context.Context, owner
 		deleted += int(affected)
 	}
 	if err := tx.Commit(); err != nil {
-		return 0, classifyBusy(fmt.Errorf("delete owned documents: %w", err))
+		return 0, classify(fmt.Errorf("delete owned documents: %w", err))
 	}
 	return deleted, nil
 }

@@ -45,7 +45,7 @@ func LiveWorkflowRuns(ctx context.Context, db *sql.DB, principalID string) ([]st
 	}
 	tx, err := db.BeginTx(ctx, nil)
 	if err != nil {
-		return nil, classifyBusy(err)
+		return nil, classify(err)
 	}
 	defer func() { _ = tx.Rollback() }()
 	live, err := reconciledLiveRuns(ctx, tx, principalID)
@@ -53,7 +53,7 @@ func LiveWorkflowRuns(ctx context.Context, db *sql.DB, principalID string) ([]st
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, classifyBusy(err)
+		return nil, classify(err)
 	}
 	return live, nil
 }
@@ -67,19 +67,19 @@ func reconciledLiveRuns(ctx context.Context, conn workflowErasureConn, principal
 		WHERE d.state = 'running' AND r.id IN (`+touchedRootRuns+`)
 		ORDER BY r.id`, principalID, workflowHandler)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read live workflow runs: %w", err))
+		return nil, classify(fmt.Errorf("read live workflow runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var live []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan live workflow run: %w", err)
+			return nil, classify(fmt.Errorf("scan live workflow run: %w", err))
 		}
 		live = append(live, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read live workflow runs: %w", err))
+		return nil, classify(fmt.Errorf("read live workflow runs: %w", err))
 	}
 	return live, nil
 }
@@ -95,7 +95,7 @@ func readStaleRuns(ctx context.Context, conn workflowErasureConn, principalID st
 		WHERE r.status IN ('queued', 'running', 'suspended') AND COALESCE(d.state, '') != 'running'
 			AND r.id IN (`+touchedRootRuns+`)`, principalID, workflowHandler)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read stale workflow runs: %w", err))
+		return nil, classify(fmt.Errorf("read stale workflow runs: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var stale []staleRun
@@ -103,7 +103,7 @@ func readStaleRuns(ctx context.Context, conn workflowErasureConn, principalID st
 		var run staleRun
 		var durableState string
 		if err := rows.Scan(&run.id, &durableState); err != nil {
-			return nil, fmt.Errorf("scan stale workflow run: %w", err)
+			return nil, classify(fmt.Errorf("scan stale workflow run: %w", err))
 		}
 		switch durableState {
 		case "cancelled", "succeeded":
@@ -114,7 +114,7 @@ func readStaleRuns(ctx context.Context, conn workflowErasureConn, principalID st
 		stale = append(stale, run)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read stale workflow runs: %w", err))
+		return nil, classify(fmt.Errorf("read stale workflow runs: %w", err))
 	}
 	return stale, nil
 }
@@ -127,7 +127,7 @@ func reconcileStaleRuns(ctx context.Context, conn workflowErasureConn, principal
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, run := range stale {
 		if _, err := conn.ExecContext(ctx, reconcileRunTree, run.id, run.status, stamp); err != nil {
-			return classifyBusy(fmt.Errorf("reconcile workflow run: %w", err))
+			return classify(fmt.Errorf("reconcile workflow run: %w", err))
 		}
 	}
 	return nil
@@ -142,19 +142,19 @@ func legacyStepSessionCandidates(ctx context.Context, conn workflowErasureConn, 
 	rows, err := conn.QueryContext(ctx, `SELECT s.run_id, s.step_id FROM workflow_step_run s
 		JOIN workflow_run r ON r.id = s.run_id WHERE r.principal_id = ?`, principalID)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read workflow steps: %w", err))
+		return nil, classify(fmt.Errorf("read workflow steps: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var candidates []string
 	for rows.Next() {
 		var runID, stepID string
 		if err := rows.Scan(&runID, &stepID); err != nil {
-			return nil, fmt.Errorf("scan workflow step: %w", err)
+			return nil, classify(fmt.Errorf("scan workflow step: %w", err))
 		}
 		candidates = append(candidates, legacyStepSessionID(runID, stepID))
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read workflow steps: %w", err))
+		return nil, classify(fmt.Errorf("read workflow steps: %w", err))
 	}
 	return candidates, nil
 }
@@ -173,19 +173,19 @@ func existingLegacyStepSessions(ctx context.Context, conn workflowErasureConn, p
 	}
 	found, err := conn.QueryContext(ctx, `SELECT id FROM session WHERE owner_id = ? AND id IN (SELECT value FROM json_each(?))`, legacyStepSessionOwner, string(encoded))
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read legacy step sessions: %w", err))
+		return nil, classify(fmt.Errorf("read legacy step sessions: %w", err))
 	}
 	defer func() { _ = found.Close() }()
 	var ids []string
 	for found.Next() {
 		var id string
 		if err := found.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan legacy step session: %w", err)
+			return nil, classify(fmt.Errorf("scan legacy step session: %w", err))
 		}
 		ids = append(ids, id)
 	}
 	if err := found.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read legacy step sessions: %w", err))
+		return nil, classify(fmt.Errorf("read legacy step sessions: %w", err))
 	}
 	return ids, nil
 }
@@ -198,19 +198,19 @@ type definitionKey struct {
 func heldProposalDefinitionKeys(ctx context.Context, conn workflowErasureConn, principalID string) ([]definitionKey, error) {
 	rows, err := conn.QueryContext(ctx, heldProposalDefinitions, principalID)
 	if err != nil {
-		return nil, classifyBusy(fmt.Errorf("read held proposal definitions: %w", err))
+		return nil, classify(fmt.Errorf("read held proposal definitions: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var keys []definitionKey
 	for rows.Next() {
 		var key definitionKey
 		if err := rows.Scan(&key.id, &key.version); err != nil {
-			return nil, fmt.Errorf("scan held proposal definition: %w", err)
+			return nil, classify(fmt.Errorf("scan held proposal definition: %w", err))
 		}
 		keys = append(keys, key)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classifyBusy(fmt.Errorf("read held proposal definitions: %w", err))
+		return nil, classify(fmt.Errorf("read held proposal definitions: %w", err))
 	}
 	return keys, nil
 }
@@ -235,7 +235,7 @@ func eraseWorkflowData(ctx context.Context, conn workflowErasureConn, principalI
 		{&counts.WorkflowApprovals, `SELECT COUNT(*) FROM workflow_approval WHERE ` + heldProposalApprovals},
 	} {
 		if err := conn.QueryRowContext(ctx, count.query, principalID).Scan(count.field); err != nil {
-			return classifyBusy(fmt.Errorf("count workflow data: %w", err))
+			return classify(fmt.Errorf("count workflow data: %w", err))
 		}
 	}
 	legacy, err := existingLegacyStepSessions(ctx, conn, principalID)
@@ -262,13 +262,13 @@ func eraseWorkflowData(ctx context.Context, conn workflowErasureConn, principalI
 		`DELETE FROM workflow_approval WHERE ` + heldProposalApprovals,
 	} {
 		if _, err := conn.ExecContext(ctx, statement, principalID); err != nil {
-			return classifyBusy(fmt.Errorf("erase workflow data: %w", err))
+			return classify(fmt.Errorf("erase workflow data: %w", err))
 		}
 	}
 	for _, key := range keys {
 		if _, err := conn.ExecContext(ctx, `DELETE FROM workflow_definition WHERE id = ?1 AND version = ?2
 			AND NOT EXISTS (SELECT 1 FROM workflow_run WHERE definition_id = ?1 AND definition_version = ?2)`, key.id, key.version); err != nil {
-			return classifyBusy(fmt.Errorf("erase workflow definition: %w", err))
+			return classify(fmt.Errorf("erase workflow definition: %w", err))
 		}
 	}
 	return nil
@@ -287,7 +287,7 @@ func eraseLegacyStepSessions(ctx context.Context, conn workflowErasureConn, ids 
 		`DELETE FROM session WHERE owner_id = '` + legacyStepSessionOwner + `' AND id IN (SELECT value FROM json_each(?1))`,
 	} {
 		if _, err := conn.ExecContext(ctx, statement, string(encoded)); err != nil {
-			return classifyBusy(fmt.Errorf("erase legacy step sessions: %w", err))
+			return classify(fmt.Errorf("erase legacy step sessions: %w", err))
 		}
 	}
 	return nil
