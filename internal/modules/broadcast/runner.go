@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -349,7 +350,7 @@ func (r *Runner) releaseWindow(ctx context.Context, inv durable.Invocation, self
 		}
 		parent, replayed, err := r.createDigest(ctx, group, index)
 		if err != nil {
-			if code, ok := CodeOf(err); ok && code == ErrorCodeConflict {
+			if fault.HasCode(err, ErrorCodeConflict) {
 				continue
 			}
 			return err

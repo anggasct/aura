@@ -23,7 +23,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -51,7 +50,7 @@ const (
 )
 
 func surfacePersonas(cfg *appconfig.Config) {
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
+	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
 	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions,
 		auraagent.Persona{
@@ -90,11 +89,14 @@ func (r *surfaceRig) pointGitHubAtTheStub(t *testing.T) {
 	for _, name := range github.ToolNames() {
 		r.executor.UnregisterTool(name, github.ToolVersion)
 	}
-	err := github.Register(r.executor, &github.ToolOptions{
+	provider, err := github.NewToolProvider(&github.ToolOptions{
 		BaseURL: os.Getenv("AURA_TEST_GITHUB_BASE"), HTTPClient: &http.Client{},
 		Credentials: []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}},
 	})
 	if err != nil {
+		t.Fatalf("build the github tools on the stub: %v", err)
+	}
+	if err := r.executor.Broker().RegisterProvider(provider); err != nil {
 		t.Fatalf("register the github tools on the stub: %v", err)
 	}
 }

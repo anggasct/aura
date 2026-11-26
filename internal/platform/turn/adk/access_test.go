@@ -168,11 +168,9 @@ func TestNonOwnerTurnsCarryNoOwnerData(t *testing.T) {
 	for _, class := range []principal.Class{principal.ClassTrusted, principal.ClassPublic} {
 		t.Run(string(class), func(t *testing.T) {
 			model := &declarationModel{}
-			profile := &stubProfileContext{block: profileBlockFixture}
 			skills := &stubSkillContext{block: skillBlockFixture}
 			executor := newAccessExecutor(t, model, accessBuiltins(),
 				WithOwnerContext(RenderOwnerContext(&OwnerContext{Name: "Angga", Timezone: "Asia/Jakarta"})),
-				WithProfileContext(profile),
 				WithSkillContext(skills),
 			)
 			req := classTurn(class)
@@ -186,13 +184,13 @@ func TestNonOwnerTurnsCarryNoOwnerData(t *testing.T) {
 				}
 			}
 			text := request.String()
-			for _, owned := range []string{ownerContextHeader, "Angga", "Asia/Jakarta", turn.ProfileEvidenceStart, "neovim", turn.SkillContextStart, "SKILL-RULES"} {
+			for _, owned := range []string{ownerContextHeader, "Angga", "Asia/Jakarta", turn.SkillContextStart, "SKILL-RULES"} {
 				if strings.Contains(text, owned) {
 					t.Fatalf("%s turn carried owner data %q:\n%s", class, owned, text)
 				}
 			}
-			if profile.calls != 0 || skills.calls != 0 {
-				t.Fatalf("profile calls = %d skill calls = %d, want no retrieval for %s turns", profile.calls, skills.calls, class)
+			if skills.calls != 0 {
+				t.Fatalf("skill calls = %d, want no retrieval for %s turns", skills.calls, class)
 			}
 		})
 	}

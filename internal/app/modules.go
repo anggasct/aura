@@ -9,8 +9,10 @@ import (
 
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -19,8 +21,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
@@ -48,7 +50,6 @@ func composeTurnHooks(hooks []turn.TurnHook) func(ctx context.Context, req *turn
 }
 
 type moduleParts struct {
-	profileHook   postTurnHook
 	skillRenderer runtimeengine.SkillRenderer
 	skills        command.Skills
 }
@@ -59,6 +60,7 @@ func (b *build) buildModules(ctx context.Context) error {
 		b.buildProfile,
 		b.buildSkills,
 		b.buildKnowledge,
+		b.buildGitHub,
 		b.buildInterpreter,
 	}
 	for _, step := range steps {
@@ -83,6 +85,9 @@ func (b *build) registerModule(name string, mod any) error {
 	}
 	if cp, ok := mod.(turn.ContextProvider); ok {
 		b.execOpts = append(b.execOpts, runtimeadk.WithContextProvider(cp))
+	}
+	if th, ok := mod.(turn.TurnHook); ok {
+		b.turnHooks = append(b.turnHooks, th)
 	}
 	if hp, ok := mod.(health.HealthProvider); ok {
 		for _, check := range hp.HealthChecks() {
@@ -171,18 +176,27 @@ func (b *build) buildProfile(ctx context.Context) error {
 	if cfg.Profile == nil || !cfg.Profile.Enabled {
 		return nil
 	}
-	runtime, err := buildProfileRuntime(ctx, cfg, b.db, b.models, b.meters(), b.logger)
+	mod, err := profile.New(ctx, &profile.Deps{
+		Config:       *cfg.Profile,
+		DB:           b.db,
+		Sessions:     turnstore.NewSessionService(b.db),
+		Events:       turnstore.NewEventStore(b.db),
+		Models:       b.models,
+		ModelConfig:  cfg.Models,
+		ModelRoutes:  cfg.ModelRoutes,
+		Scanner:      buildSecretVault(cfg),
+		Owner:        cfg.Owner,
+		Meters:       b.meters(),
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithProfileContext(runtime))
-	b.modules.profileHook = runtime.hook
-	if err := b.group.Add(server.Background("profile_extraction", runtime.run)); err != nil {
+	if err := b.registerModule("profile", mod); err != nil {
 		return err
 	}
-	check := runtime.check(cfg)
-	b.addHealthCheck(&check)
-	return nil
+	return b.group.Add(server.Background("profile_extraction", mod.Run))
 }
 
 func (b *build) buildSkills(ctx context.Context) error {
@@ -238,6 +252,14 @@ func (b *build) buildKnowledge(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (b *build) buildGitHub(context.Context) error {
+	mod, err := github.New(&github.ModuleDeps{Config: githubConfig(b.cfg)})
+	if err != nil {
+		return err
+	}
+	return b.registerModule("github", mod)
 }
 
 func (b *build) buildInterpreter(ctx context.Context) error {

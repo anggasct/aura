@@ -53,12 +53,26 @@ func (r *staticResolver) Resolve([]string, *string) (auraagent.Definition, error
 	return r.definition, nil
 }
 
-type markerProvider struct {
+type profileMarkerProvider struct {
 	text string
 }
 
-func (p markerProvider) ProfileContext(context.Context, *turn.TurnRequest) (string, error) {
-	return p.text, nil
+func (p profileMarkerProvider) TurnContext(_ context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req == nil || req.PrincipalClass != principal.ClassOwner {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{
+		Order:   turn.ContextOrderProfile,
+		Content: p.text,
+	}}, nil
+}
+
+func (profileMarkerProvider) Required(*turn.TurnRequest) bool {
+	return false
+}
+
+type markerProvider struct {
+	text string
 }
 
 func (p markerProvider) SkillContext(context.Context, *turn.TurnRequest) (string, error) {
@@ -125,7 +139,7 @@ func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definiti
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(&staticResolver{definition: evaluated}, nil),
 		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
-		runtimeadk.WithProfileContext(markerProvider{text: personaeval.MarkerProfile}),
+		runtimeadk.WithContextProvider(profileMarkerProvider{text: personaeval.MarkerProfile}),
 		runtimeadk.WithSkillContext(markerProvider{text: personaeval.MarkerSkill}),
 		runtimeadk.WithContextProvider(recallMarkerProvider{text: personaeval.MarkerRecall}),
 	)

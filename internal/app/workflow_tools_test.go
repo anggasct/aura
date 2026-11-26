@@ -11,8 +11,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
@@ -196,7 +196,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 		"workflow_cancel", "workflow_propose", "workflow_save_routine",
 	}
 	configured := appconfig.Default()
-	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	configured.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	deps, err := workflowValidationDeps(&configured)
 	if err != nil {
 		t.Fatalf("workflowValidationDeps: %v", err)

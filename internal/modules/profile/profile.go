@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -69,7 +71,7 @@ type Registry interface {
 	List(ctx stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error)
 }
 
-type Config struct {
+type ServiceOptions struct {
 	MinConfidence float64
 	Scanner       SecretScanner
 	Actions       ActionSink
@@ -84,18 +86,18 @@ type Service struct {
 	observer      Observer
 }
 
-func NewService(registry Registry, config Config) (*Service, error) {
+func NewService(registry Registry, options ServiceOptions) (*Service, error) {
 	if registry == nil {
-		return nil, errNilArgument("registry")
+		return nil, fault.New(ErrorCodeInvalidArgument, "registry must not be nil")
 	}
-	if config.MinConfidence < 0 || config.MinConfidence > 1 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "minimum confidence must be in [0,1]")
+	if options.MinConfidence < 0 || options.MinConfidence > 1 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "minimum confidence must be in [0,1]")
 	}
-	scanner := config.Scanner
+	scanner := options.Scanner
 	if scanner == nil {
 		scanner = rejectAllScanner{}
 	}
-	return &Service{registry: registry, minConfidence: config.MinConfidence, scanner: scanner, actions: config.Actions, observer: config.Observer}, nil
+	return &Service{registry: registry, minConfidence: options.MinConfidence, scanner: scanner, actions: options.Actions, observer: options.Observer}, nil
 }
 
 func ConfidenceV1(evidence int) float64 {
@@ -118,7 +120,7 @@ func FactID(ownerID, category, key, digest string) string {
 
 func checkProposal(ownerID, category, key, value string) error {
 	if strings.TrimSpace(ownerID) == "" {
-		return Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+		return fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	valid := false
 	for _, categoryID := range Categories {
@@ -128,20 +130,20 @@ func checkProposal(ownerID, category, key, value string) error {
 		}
 	}
 	if !valid {
-		return Errorf(ErrorCodeInvalidArgument, "fact category is not valid")
+		return fault.New(ErrorCodeInvalidArgument, "fact category is not valid")
 	}
 	if utf8.RuneCountInString(key) < 1 || utf8.RuneCountInString(key) > maxKeyChars {
-		return Errorf(ErrorCodeInvalidArgument, "fact key length is out of range")
+		return fault.New(ErrorCodeInvalidArgument, "fact key length is out of range")
 	}
 	if utf8.RuneCountInString(value) < 1 || utf8.RuneCountInString(value) > maxValueChars {
-		return Errorf(ErrorCodeInvalidArgument, "fact value length is out of range")
+		return fault.New(ErrorCodeInvalidArgument, "fact value length is out of range")
 	}
 	return nil
 }
 
 func (s *Service) ProposeFact(ctx stdcontext.Context, ownerID, category, key, value string, evidence *Evidence, now time.Time) (Fact, error) {
 	if ctx == nil {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return Fact{}, err
@@ -150,10 +152,10 @@ func (s *Service) ProposeFact(ctx stdcontext.Context, ownerID, category, key, va
 		return Fact{}, err
 	}
 	if evidence == nil {
-		return Fact{}, errNilArgument("evidence")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "evidence must not be nil")
 	}
 	if now.IsZero() {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
 	digest := ValueDigest(value)
 	id := FactID(ownerID, category, key, digest)
@@ -193,7 +195,7 @@ func (s *Service) repropose(ctx stdcontext.Context, existing *Fact, evidence *Ev
 		}
 		for i := range known {
 			if known[i].SourceDigest == evidence.SourceDigest {
-				return Fact{}, Errorf(ErrorCodeProfileConflict, "decided value cannot be resurrected from the same source")
+				return Fact{}, fault.New(ErrorCodeProfileConflict, "decided value cannot be resurrected from the same source")
 			}
 		}
 		if err := s.registry.ReviveCandidate(ctx, existing.ID, now); err != nil {
@@ -201,19 +203,19 @@ func (s *Service) repropose(ctx stdcontext.Context, existing *Fact, evidence *Ev
 		}
 		return s.registry.Reinforce(ctx, existing.ID, evidence, s.minConfidence)
 	default:
-		return Fact{}, Errorf(ErrorCodeProfileConflict, "fact is in a terminal state")
+		return Fact{}, fault.New(ErrorCodeProfileConflict, "fact is in a terminal state")
 	}
 }
 
 func (s *Service) ReinforceFact(ctx stdcontext.Context, factID string, evidence *Evidence) (Fact, error) {
 	if ctx == nil {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if strings.TrimSpace(factID) == "" {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "fact id must not be empty")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "fact id must not be empty")
 	}
 	if evidence == nil {
-		return Fact{}, errNilArgument("evidence")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "evidence must not be nil")
 	}
 	return s.registry.Reinforce(ctx, factID, evidence, s.minConfidence)
 }
@@ -227,7 +229,7 @@ func (s *Service) DeleteFact(ctx stdcontext.Context, ownerID, factID string, now
 		return err
 	}
 	if !found || fact.OwnerID != ownerID {
-		return Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	if fact.Status == StatusDeleted {
 		return nil
@@ -240,10 +242,10 @@ func (s *Service) DeleteFact(ctx stdcontext.Context, ownerID, factID string, now
 
 func (s *Service) ExpireFacts(ctx stdcontext.Context, now time.Time) ([]Fact, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if now.IsZero() {
-		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+		return nil, fault.New(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
 	expired, err := s.registry.Expire(ctx, now)
 	if err != nil {
@@ -264,20 +266,20 @@ func (s *Service) ExpireFacts(ctx stdcontext.Context, now time.Time) ([]Fact, er
 
 func (s *Service) GetFact(ctx stdcontext.Context, ownerID, factID string) (Fact, error) {
 	if ctx == nil {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return Fact{}, err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(factID) == "" {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "owner and fact id must not be empty")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "owner and fact id must not be empty")
 	}
 	fact, found, err := s.registry.Get(ctx, factID)
 	if err != nil {
 		return Fact{}, err
 	}
 	if !found || fact.OwnerID != ownerID {
-		return Fact{}, Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return Fact{}, fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	return fact, nil
 }
@@ -288,17 +290,17 @@ func (rejectAllScanner) Contains(string) bool { return false }
 
 func (s *Service) ListFacts(ctx stdcontext.Context, ownerID, status, category string, limit int) ([]Fact, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if limit <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "fact list limit must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "fact list limit must be positive")
 	}
 	return s.registry.List(ctx, ownerID, status, category, limit)
 }
 
 func (s *Service) EvidenceFor(ctx stdcontext.Context, factID string) ([]Evidence, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	return s.registry.Evidence(ctx, factID)
 }

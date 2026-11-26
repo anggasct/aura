@@ -2,6 +2,8 @@ package schedule
 
 import (
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestParseExpressionFields(t *testing.T) {
@@ -70,7 +72,7 @@ func TestParseExpressionRejectsInvalid(t *testing.T) {
 	} {
 		if _, err := ParseExpression(raw); err == nil {
 			t.Errorf("expression %q accepted", raw)
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeExpressionInvalid {
+		} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeExpressionInvalid {
 			t.Errorf("expression %q code = %v, %v", raw, code, ok)
 		}
 	}

@@ -2,10 +2,13 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/skills"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
@@ -41,12 +44,12 @@ type Config struct {
 	Health       health.Config               `json:"health"`
 	Terminal     legacyconfig.Terminal       `json:"terminal"`
 	Webhook      platformwebhook.Config      `json:"webhook"`
-	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
-	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
+	Broadcast    broadcast.Config            `json:"broadcast"`
+	Scheduler    schedule.Config             `json:"scheduler"`
 	Memory       memory.Config               `json:"memory"`
 	Skills       *skills.Config              `json:"skills,omitempty"`
 	Context      *compaction.Config          `json:"context,omitempty"`
-	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
+	Profile      *profile.Config             `json:"profile,omitempty"`
 	Owner        *principal.Owner            `json:"owner,omitempty"`
 	Children     *legacyconfig.Children      `json:"children,omitempty"`
 	Access       *principal.Config           `json:"access,omitempty"`
@@ -64,6 +67,7 @@ func Default() Config {
 	defaultVision := vision.Default()
 	defaultSkills := skills.Default()
 	defaultContext := compaction.Default()
+	defaultProfile := profile.Default()
 	return Config{
 		Version:      1,
 		Runtime:      runtimeengine.Default(),
@@ -81,15 +85,15 @@ func Default() Config {
 		Terminal:     legacyconfig.DefaultTerminal(),
 		Webhook:      platformwebhook.Default(),
 		Channels:     legacyconfig.DefaultChannels(),
-		Broadcast:    legacyconfig.DefaultBroadcast(),
-		Scheduler:    legacyconfig.DefaultScheduler(),
+		Broadcast:    broadcast.Default(),
+		Scheduler:    schedule.Default(),
 		Memory:       memory.Default(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),
 		Skills:       &defaultSkills,
 		Sync:         legacyconfig.DefaultSync(),
 		Vision:       &defaultVision,
 		Context:      &defaultContext,
-		Profile:      legacyconfig.DefaultProfile(),
+		Profile:      &defaultProfile,
 		Children:     legacyconfig.DefaultChildren(),
 		Access:       &defaultAccess,
 	}

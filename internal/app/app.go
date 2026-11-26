@@ -4,12 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -22,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -57,6 +56,7 @@ const (
 	PartModels    Part = "models"
 	PartKnowledge Part = "knowledge"
 	PartMemory    Part = "memory"
+	PartProfile   Part = "profile"
 )
 
 type Options struct {
@@ -113,6 +113,7 @@ type App struct {
 	models      *model.Registry
 	knowledge   *knowledge.Service
 	memory      *memory.Service
+	profile     *profile.Service
 
 	mu    sync.Mutex
 	state appState
@@ -134,7 +135,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile,
 	}, nil
 }
 
@@ -238,7 +239,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -284,33 +285,21 @@ func newToolExecutor(in *toolExecutorInput) (*toolsbuiltin.Executor, error) {
 	for _, value := range githubCredentialSecrets(in.result.Config) {
 		executor.Broker().RegisterSecret(value)
 	}
-	if credentials := githubCredentials(in.result.Config); len(credentials) > 0 {
-		if err := github.Register(executor, &github.ToolOptions{Credentials: credentials}); err != nil {
-			return nil, fmt.Errorf("register github tools: %w", err)
-		}
-	}
 	return executor, nil
 }
 
 func githubCredentialSecrets(cfg *appconfig.Config) []string {
-	var values []string
-	for _, credential := range githubCredentials(cfg) {
-		if value, err := credential.Ref.Reference().Resolve(); err == nil && strings.TrimSpace(value) != "" {
-			values = append(values, value)
-		}
+	if cfg == nil || cfg.Tools == nil {
+		return nil
 	}
-	return values
+	return cfg.Tools.GitHub.SecretValues()
 }
 
 func githubCredentials(cfg *appconfig.Config) []github.Credential {
-	if cfg.Tools == nil {
+	if cfg == nil || cfg.Tools == nil {
 		return nil
 	}
-	var credentials []github.Credential
-	for _, entry := range cfg.Tools.GitHub.Credentials {
-		credentials = append(credentials, github.Credential(entry))
-	}
-	return credentials
+	return cfg.Tools.GitHub.Credentials
 }
 
 type lifecycleStage struct {
@@ -351,6 +340,7 @@ type build struct {
 	interpreter  *workflow.Interpreter
 	knowledge    *knowledge.Service
 	memory       *memory.Service
+	profile      *profile.Service
 	quarantined  []workflow.Quarantined
 	artifactRoot string
 
@@ -438,6 +428,28 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.memory = service
+	}
+	if slices.Contains(parts, PartProfile) {
+		store, err := profile.NewSQLiteStore(b.db)
+		if err != nil {
+			return err
+		}
+		sink, err := profile.NewActionSink(turnstore.NewSessionService(b.db), turnstore.NewEventStore(b.db))
+		if err != nil {
+			return err
+		}
+		minConfidence := profile.Default().CandidateMinConfidence
+		if b.cfg.Profile != nil {
+			minConfidence = b.cfg.Profile.CandidateMinConfidence
+		}
+		service, err := profile.NewService(store, profile.ServiceOptions{
+			MinConfidence: minConfidence,
+			Actions:       sink,
+		})
+		if err != nil {
+			return err
+		}
+		b.profile = service
 	}
 	return nil
 }
@@ -620,9 +632,6 @@ func (b *build) buildTurnRuntime() error {
 	}
 	b.executor = executor
 	hooks := slices.Clone(b.turnHooks)
-	if b.modules.profileHook != nil {
-		hooks = append(hooks, turnHookFunc(b.modules.profileHook))
-	}
 	var durableConfig *runtimeengine.DurableConfig
 	var countTurn func(context.Context, *turn.TurnRequest)
 	var channels []runtimechannelhost.ChannelPort

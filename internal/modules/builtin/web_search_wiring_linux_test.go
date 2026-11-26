@@ -30,7 +30,7 @@ func TestEveryConfiguredWebSearchProviderBuildsAnAdapter(t *testing.T) {
 			if provider == config.WebSearchProviderSearXNG {
 				toolsCfg.WebSearch.Endpoint = "https://search.example.com/search"
 			}
-			adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &codeHolder{})
+			adapters, err := builtinAdapters(toolsCfg, &emailHolder{}, &workflowHolder{}, &codeHolder{})
 			if err != nil {
 				t.Fatalf("builtinAdapters: %v", err)
 			}
@@ -60,7 +60,7 @@ func TestSearXNGToolsConfigReachesALoopbackServerThroughTheExecutorAdapters(t *t
 		CredentialRef: secrettest.Ref("env://AURA_TEST_SEARXNG_TOKEN"),
 		MaxResults:    5,
 	}
-	adapters, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &codeHolder{})
+	adapters, err := builtinAdapters(toolsCfg, &emailHolder{}, &workflowHolder{}, &codeHolder{})
 	if err != nil {
 		t.Fatalf("builtinAdapters: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestExecutorRejectsASearchEndpointItCannotParse(t *testing.T) {
 	toolsCfg := config.DefaultTools()
 	toolsCfg.Workspace = t.TempDir()
 	toolsCfg.WebSearch = config.ToolWebSearch{Provider: config.WebSearchProviderSearXNG, Endpoint: "http://localhost:8888/search", MaxResults: 5}
-	if _, err := builtinAdapters(toolsCfg, &handoffHolder{}, &emailHolder{}, &workflowHolder{}, &codeHolder{}); err == nil {
+	if _, err := builtinAdapters(toolsCfg, &emailHolder{}, &workflowHolder{}, &codeHolder{}); err == nil {
 		t.Fatal("builtinAdapters accepted a loopback name endpoint")
 	}
 }

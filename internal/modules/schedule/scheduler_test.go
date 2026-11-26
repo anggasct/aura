@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeJobStore struct {
@@ -136,7 +138,7 @@ func TestService_CreateAndGet(t *testing.T) {
 	}
 	if _, err := service.Get(t.Context(), "missing"); err == nil {
 		t.Error("missing job accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeJobNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeJobNotFound {
 		t.Errorf("missing code = %v, %v", code, ok)
 	}
 }
@@ -163,7 +165,7 @@ func TestService_CreateRejectsInvalid(t *testing.T) {
 			tc.mutate(spec)
 			if _, err := service.Create(t.Context(), spec); err == nil {
 				t.Errorf("invalid spec accepted: %+v", spec)
-			} else if code, ok := CodeOf(err); !ok || code != tc.code {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != tc.code {
 				t.Errorf("code = %v, %v; want %v", code, ok, tc.code)
 			}
 		})
@@ -224,7 +226,7 @@ func TestService_SetStateTransitions(t *testing.T) {
 	}
 	if err := service.SetState(t.Context(), created.ID, "flying"); err == nil {
 		t.Error("invalid state accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeJobStateInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeJobStateInvalid {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }

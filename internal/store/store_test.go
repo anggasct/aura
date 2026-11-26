@@ -3,17 +3,13 @@ package store
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/history"
 )
 
@@ -57,37 +53,4 @@ func newTestDB(t *testing.T) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
-}
-
-func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
-	t.Helper()
-	ctx := context.Background()
-	db, err := sqlite.Open(ctx, path, sqlite.Options{})
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:upTo]); err != nil {
-		t.Fatalf("migrate to v%d: %v", upTo, err)
-	}
-	return db
-}
-
-func newSession(id string) turn.Session {
-	now := time.Now().UTC().Truncate(time.Millisecond)
-	return turn.Session{
-		ID:        id,
-		OwnerID:   "owner-1",
-		CreatedAt: now,
-		UpdatedAt: now,
-		Metadata:  json.RawMessage(`{"k":"v"}`),
-	}
-}
-
-func mustCreateSession(t *testing.T, db *sql.DB, id string) {
-	t.Helper()
-	sess := newSession(id)
-	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
-		t.Fatalf("create session %s: %v", id, err)
-	}
 }

@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeItemStore struct {
@@ -75,7 +77,7 @@ func testPolicy() Policy {
 }
 
 func testBroadcaster() *Broadcaster {
-	broadcaster, err := New(
+	broadcaster, err := NewBroadcaster(
 		testPolicy(),
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
@@ -152,7 +154,7 @@ func TestSubmit_MismatchedReuseConflicts(t *testing.T) {
 	changed.ContentJSON = `{"text":"different"}`
 	if _, _, err := broadcaster.Submit(t.Context(), changed); err == nil {
 		t.Fatal("mismatched reuse accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Errorf("mismatch code = %v, %v; want conflict", code, ok)
 	}
 }
@@ -181,13 +183,13 @@ func TestSubmit_RejectsUnconfiguredOrUnknown(t *testing.T) {
 	notification.DestinationAlias = "missing"
 	if _, _, err := broadcaster.Submit(t.Context(), notification); err == nil {
 		t.Error("unknown alias accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeUnknownAlias {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeUnknownAlias {
 		t.Errorf("unknown alias code = %v, %v", code, ok)
 	}
 
 	foreignPolicy := testPolicy()
 	foreignPolicy.Destinations = map[string]string{"default": "telegram:owner"}
-	foreign, err := New(
+	foreign, err := NewBroadcaster(
 		foreignPolicy,
 		&fakeRegistry{registered: map[string]bool{"discord": true}},
 		newFakeItemStore(),
@@ -199,7 +201,7 @@ func TestSubmit_RejectsUnconfiguredOrUnknown(t *testing.T) {
 	}
 	if _, _, err := foreign.Submit(t.Context(), testNotification()); err == nil {
 		t.Error("unregistered channel accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChannelUnknown {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChannelUnknown {
 		t.Errorf("unregistered channel code = %v, %v", code, ok)
 	}
 }
@@ -257,30 +259,30 @@ func TestSubmit_RejectsInvalidNotifications(t *testing.T) {
 }
 
 func TestNew_RejectsBadWiring(t *testing.T) {
-	if _, err := New(testPolicy(), nil, newFakeItemStore(), nil, nil); err == nil {
+	if _, err := NewBroadcaster(testPolicy(), nil, newFakeItemStore(), nil, nil); err == nil {
 		t.Error("nil registry accepted")
 	}
-	if _, err := New(testPolicy(), &fakeRegistry{}, nil, nil, nil); err == nil {
+	if _, err := NewBroadcaster(testPolicy(), &fakeRegistry{}, nil, nil, nil); err == nil {
 		t.Error("nil store accepted")
 	}
 	badAlias := testPolicy()
 	badAlias.Destinations = map[string]string{"BAD ALIAS": "discord"}
-	if _, err := New(badAlias, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
+	if _, err := NewBroadcaster(badAlias, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
 		t.Error("bad alias accepted")
 	}
 	badRoute := testPolicy()
 	badRoute.Destinations = map[string]string{"default": "https://evil.example/hook"}
-	if _, err := New(badRoute, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
+	if _, err := NewBroadcaster(badRoute, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
 		t.Error("credential-bearing route accepted")
 	}
 	noLimits := testPolicy()
 	noLimits.MaxDigestItems = 0
-	if _, err := New(noLimits, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
+	if _, err := NewBroadcaster(noLimits, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
 		t.Error("non-positive digest bound accepted")
 	}
 	noLocation := testPolicy()
 	noLocation.Quiet = QuietConfig{Enabled: true, StartMin: 1380, EndMin: 420}
-	if _, err := New(noLocation, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
+	if _, err := NewBroadcaster(noLocation, &fakeRegistry{}, newFakeItemStore(), nil, nil); err == nil {
 		t.Error("quiet hours without location accepted")
 	}
 }

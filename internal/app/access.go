@@ -14,7 +14,9 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -113,6 +115,27 @@ func recordAccessOwnerAction(ctx context.Context, db *sql.DB, action string, gra
 	}, grant.ID, at)
 }
 
+const profileOwnerSessionPrefix = "profile-"
+
+func ensureOwnerActionSession(ctx context.Context, db *sql.DB, ownerID string) (string, error) {
+	sessionID := profileOwnerSessionPrefix + ownerID
+	sessions := turnstore.NewSessionService(db)
+	if _, err := sessions.Get(ctx, sessionID); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		now := time.Now().UTC()
+		if err := sessions.Create(ctx, &turn.Session{
+			ID: sessionID, OwnerID: ownerID, CreatedAt: now, UpdatedAt: now, Metadata: json.RawMessage(`{}`),
+		}); err != nil {
+			if !fault.HasCode(err, turnstore.ErrorCodeSessionIDConflict) {
+				return "", err
+			}
+		}
+	}
+	return sessionID, nil
+}
+
 func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, subject string, at time.Time) error {
 	sessionID, err := ensureOwnerActionSession(ctx, db, principal.OwnerID)
 	if err != nil {
@@ -162,7 +185,11 @@ func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 			settings.Evals = &personaEvalGate{registry: registry, results: store.NewPersonaEvalStore(db)}
 		}
 		if cfg.Access != nil {
-			settings.Handoffs = &handoffGate{handoffs: store.NewHandoffStore(db), timeout: time.Duration(cfg.Access.HandoffTimeout), now: time.Now}
+			if handoffStore, err := handoff.NewSQLiteStore(db); err == nil {
+				if gate, err := handoff.NewGate(handoffStore, time.Duration(cfg.Access.HandoffTimeout), time.Now); err == nil {
+					settings.Handoffs = gate
+				}
+			}
 		}
 	}
 	return settings

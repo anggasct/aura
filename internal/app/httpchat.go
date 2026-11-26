@@ -11,6 +11,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -19,7 +20,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const httpChatDrainDivisor = 2
@@ -73,7 +73,7 @@ func (s *httpSessionStore) Create(ctx context.Context, session *httpchat.Session
 }
 
 type httpHandoffReplies struct {
-	replies store.HandoffReplyStore
+	replies handoff.ReplyStore
 }
 
 func (r *httpHandoffReplies) List(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]httpchat.HandoffReply, error) {
@@ -113,10 +113,14 @@ func buildHTTPChat(cfg *appconfig.Config, db *sql.DB, backend turn.AgentRuntime,
 	if err != nil {
 		return nil, nil, err
 	}
+	replyStore, err := handoff.NewReplyStore(turnstore.NewTurnStore(db))
+	if err != nil {
+		return nil, nil, err
+	}
 	replies, err := httpchat.NewReplies(&httpchat.RepliesOptions{
 		Sessions: sessions,
 		Handoffs: gates.Handoffs,
-		Replies:  &httpHandoffReplies{replies: store.NewHandoffReplyStore(db)},
+		Replies:  &httpHandoffReplies{replies: replyStore},
 		Logger:   logger,
 	})
 	if err != nil {
