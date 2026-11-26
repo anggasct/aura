@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/codeexec"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
@@ -63,6 +64,7 @@ func (b *build) buildModules(ctx context.Context) error {
 		b.buildKnowledge,
 		b.buildGitHub,
 		b.buildInterpreter,
+		b.buildPersonaEval,
 	}
 	for _, step := range steps {
 		if err := step(ctx); err != nil {
@@ -371,4 +373,27 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 		}
 	}
 	return nil
+}
+
+func (b *build) buildPersonaEval(_ context.Context) error {
+	if !b.onServer() {
+		return nil
+	}
+	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}
+	mod, err := personaeval.New(&personaeval.ModuleDeps{
+		DB:           b.db,
+		Registry:     b.registry,
+		ConfigPath:   b.result.Path,
+		Capturer:     capturePersonaTurn,
+		Converse:     models.converse,
+		JudgeFor:     models.judge,
+		ParseCron:    parsePersonaEvalCron,
+		CheckTimeout: time.Duration(b.cfg.Health.CheckTimeout),
+		Logger:       b.logger,
+	})
+	if err != nil {
+		return err
+	}
+	b.personaEvalMod = mod
+	return b.registerModule("persona_eval", mod)
 }

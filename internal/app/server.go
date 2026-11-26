@@ -449,7 +449,6 @@ func (b *build) buildDurableHost() error {
 
 func (b *build) buildProbe() error {
 	cfg, s := b.cfg, b.server
-	s.checks = append(s.checks, personaEvalCheck(cfg, b.registry, b.db))
 	httpChat, httpChatChecks, err := buildHTTPChat(cfg, b.db, b.engine, b.registry, s.accessRecorder, s.ownerRoute, b.logger)
 	if err != nil {
 		return err
@@ -531,7 +530,7 @@ func (b *build) bindErasureRuns() error {
 }
 
 func (b *build) registerSweeps() error {
-	cfg, db, registry, logger, artifactRoot := b.cfg, b.db, b.registry, b.logger, b.artifactRoot
+	cfg, db, logger, artifactRoot := b.cfg, b.db, b.logger, b.artifactRoot
 	if err := b.group.Add(server.Background("retention_sweeps", func(ctx context.Context) {
 		runRetentionSweeps(ctx, cfg, db, artifactRoot, logger)
 	})); err != nil {
@@ -547,11 +546,10 @@ func (b *build) registerSweeps() error {
 			}
 		}
 	}
-	configPath := b.result.Path
-	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}
-	return b.group.Add(server.Background("persona_eval_schedules", func(ctx context.Context) {
-		runPersonaEvalSchedules(ctx, configPath, db, registry, models, logger, wallEvalClock)
-	}))
+	if b.personaEvalMod == nil {
+		return invalidOptions("the server's persona evaluation module is not initialized")
+	}
+	return b.group.Add(server.Background("persona_eval_schedules", b.personaEvalMod.RunSchedules))
 }
 
 func (b *build) registerRunRetention() error {

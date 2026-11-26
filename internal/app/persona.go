@@ -10,6 +10,7 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -90,7 +91,8 @@ func newPersonaCmd(gf *globalFlags) *cobra.Command {
 		Use:   "persona",
 		Short: "Inspect configured personas",
 	}
-	cmd.AddCommand(newPersonaListCmd(gf), newPersonaEvalCmd(gf), newPersonaEvalResultsCmd(gf))
+	cmd.AddCommand(newPersonaListCmd(gf))
+	cmd.AddCommand(personaeval.Commands(personaEvalOpener(gf))...)
 	return cmd
 }
 

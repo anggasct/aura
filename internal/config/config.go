@@ -1,8 +1,6 @@
 package config
 
 import (
-	"fmt"
-	"regexp"
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/fetch"
@@ -12,18 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
-
-type Sync struct {
-	Enabled            bool               `json:"enabled"`
-	Remote             string             `json:"remote"`
-	Branch             string             `json:"branch"`
-	Interval           configkit.Duration `json:"interval"`
-	TransportSecretRef secret.Ref         `json:"transport_secret_ref"`
-	KnownHostsRef      secret.Ref         `json:"known_hosts_ref"`
-	GitBinary          string             `json:"git_binary"`
-	SSHBinary          string             `json:"ssh_binary"`
-	Include            []string           `json:"include"`
-}
 
 type Telegram struct {
 	Enabled            bool               `json:"enabled"`
@@ -177,10 +163,6 @@ type Tools struct {
 	GitHub               github.Config    `json:"github,omitzero"`
 }
 
-var (
-	syncBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
-)
-
 func DefaultTools() *Tools {
 	return &Tools{
 		Workspace:            "/srv/aura/workspace",
@@ -199,33 +181,4 @@ func DefaultTerminal() Terminal {
 		SecondInterruptTime: configkit.Duration(2 * time.Second),
 		PlainApproval:       "deny",
 	}
-}
-
-func DefaultSync() *Sync {
-	return &Sync{
-		Enabled:            false,
-		Branch:             "main",
-		Interval:           configkit.Duration(15 * time.Minute),
-		TransportSecretRef: defaultSyncTransportSecretRef(),
-		KnownHostsRef:      defaultSyncKnownHostsRef(),
-		GitBinary:          "/usr/bin/git",
-		SSHBinary:          "/usr/bin/ssh",
-		Include:            []string{"skills/**", "config-templates/**"},
-	}
-}
-
-func defaultSyncTransportSecretRef() secret.Ref {
-	return mustRef(fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "TRANSPORT_SECRET"))
-}
-
-func defaultSyncKnownHostsRef() secret.Ref {
-	return mustRef(fmt.Sprintf("env://%s_%s_%s", "AURA", "SYNC", "KNOWN_HOSTS"))
-}
-
-func mustRef(text string) secret.Ref {
-	ref, err := secret.ParseRef(text)
-	if err != nil {
-		panic(err)
-	}
-	return ref
 }

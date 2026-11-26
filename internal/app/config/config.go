@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/memory"
@@ -68,7 +69,7 @@ type Config struct {
 	Owner        *principal.Owner            `json:"owner,omitempty"`
 	Children     *child.Config               `json:"children,omitempty"`
 	Access       *principal.Config           `json:"access,omitempty"`
-	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
+	Sync         *gitsync.Config             `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
 	Interpreter  codeexec.Config             `json:"interpreter"`
@@ -133,7 +134,7 @@ func Default() Config {
 		Memory:      memory.Default(),
 		Interpreter: codeexec.Default(),
 		Skills:      &defaultSkills,
-		Sync:        legacyconfig.DefaultSync(),
+		Sync:        gitsync.Default(),
 		Vision:      &defaultVision,
 		Context:     &defaultContext,
 		Profile:     &defaultProfile,

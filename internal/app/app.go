@@ -17,6 +17,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
@@ -339,22 +340,23 @@ type build struct {
 	logger *slog.Logger
 	group  *server.LifecycleGroup
 
-	db           *sql.DB
-	turns        *turnstore.TurnStore
-	pipeline     *telemetry.Pipeline
-	prices       *usage.PriceRegistry
-	models       *model.Registry
-	runtime      durable.Runtime
-	workflowMod  *workflow.Module
-	interpreter  *workflow.Interpreter
-	knowledge    *knowledge.Service
-	memory       *memory.Service
-	profile      *profile.Service
-	plugins      *plugin.Service
-	skillsEngine *skills.Engine
-	skillsRoot   string
-	quarantined  []workflow.Quarantined
-	artifactRoot string
+	db             *sql.DB
+	turns          *turnstore.TurnStore
+	pipeline       *telemetry.Pipeline
+	prices         *usage.PriceRegistry
+	models         *model.Registry
+	runtime        durable.Runtime
+	workflowMod    *workflow.Module
+	personaEvalMod *personaeval.Module
+	interpreter    *workflow.Interpreter
+	knowledge      *knowledge.Service
+	memory         *memory.Service
+	profile        *profile.Service
+	plugins        *plugin.Service
+	skillsEngine   *skills.Engine
+	skillsRoot     string
+	quarantined    []workflow.Quarantined
+	artifactRoot   string
 
 	registry   *auraagent.Registry
 	sessions   turnstore.SessionService

@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -23,7 +24,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -183,7 +183,11 @@ func channelAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 		_, artifactRoot, _, _ := storagePaths(cfg)
 		settings.Erasure = &principalEraser{db: db, artifactRoot: artifactRoot, now: time.Now, runs: runs}
 		if registry, err := buildAgentRegistry(cfg); err == nil {
-			settings.Evals = &personaEvalGate{registry: registry, results: store.NewPersonaEvalStore(db)}
+			if evalStore, err := personaeval.NewSQLiteStore(db); err == nil {
+				if gate, err := personaeval.NewGate(registry, evalStore); err == nil {
+					settings.Evals = gate
+				}
+			}
 		}
 		if cfg.Access != nil {
 			if handoffStore, err := handoff.NewSQLiteStore(db); err == nil {
