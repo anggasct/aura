@@ -385,11 +385,8 @@ func ValidateTools(toolsConfig *Tools) error {
 	if toolsConfig.MaxInlineResultBytes <= 0 {
 		return configkit.Invalid("tools.max_inline_result_bytes", "must be positive")
 	}
-	if toolsConfig.Exec.Timeout <= 0 {
-		return configkit.Invalid("tools.exec.timeout", "must be positive")
-	}
-	if toolsConfig.Exec.MaxStdoutBytes <= 0 || toolsConfig.Exec.MaxStderrBytes <= 0 {
-		return configkit.Invalid("tools.exec", "output limits must be positive")
+	if err := configkit.Under("tools.exec", toolsConfig.Exec.Validate()); err != nil {
+		return err
 	}
 	if toolsConfig.Fetch.Timeout <= 0 {
 		return configkit.Invalid("tools.fetch.timeout", "must be positive")

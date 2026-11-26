@@ -132,7 +132,7 @@ func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHold
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
-	execAdapter, err := shellexec.New(shellexec.Options{
+	execAdapter, err := shellexec.NewAdapter(shellexec.Options{
 		Workspace:      toolsCfg.Workspace,
 		Timeout:        time.Duration(toolsCfg.Exec.Timeout),
 		MaxStdoutBytes: toolsCfg.Exec.MaxStdoutBytes,
@@ -141,7 +141,7 @@ func builtinAdapters(toolsCfg *config.Tools, emails *emailHolder, code *codeHold
 	if err != nil {
 		return nil, err
 	}
-	filesystemAdapters, err := filesystemTool.New(filesystemTool.Options{Workspace: toolsCfg.Workspace})
+	filesystemAdapters, err := filesystemTool.NewAdapters(filesystemTool.Options{Workspace: toolsCfg.Workspace})
 	if err != nil {
 		return nil, err
 	}

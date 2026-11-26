@@ -38,7 +38,7 @@ type result struct {
 	Truncated  bool   `json:"truncated"`
 }
 
-func New(options Options) (toolbroker.Adapter, error) {
+func NewAdapter(options Options) (toolbroker.Adapter, error) {
 	if !filepath.IsAbs(options.Workspace) {
 		return nil, errors.New("exec: workspace must be an absolute path")
 	}

@@ -149,8 +149,6 @@ linters:
               desc: the builtin adapter set is assembled in internal/modules/builtin; the app composition root calls that constructor instead
             - pkg: github.com/anggasct/aura/internal/modules/codeexec
               desc: the code execution adapter is constructed by internal/modules/builtin, not by the app composition root
-            - pkg: github.com/anggasct/aura/internal/modules/shellexec
-              desc: the exec adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/fetch
               desc: the fetch adapter is constructed by internal/modules/builtin, not by the app composition root
             - pkg: github.com/anggasct/aura/internal/modules/filesystem

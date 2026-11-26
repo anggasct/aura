@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -206,18 +207,12 @@ type Terminal struct {
 }
 
 type Tools struct {
-	Workspace            string        `json:"workspace"`
-	MaxInlineResultBytes int64         `json:"max_inline_result_bytes"`
-	Exec                 ToolExec      `json:"exec"`
-	Fetch                ToolFetch     `json:"fetch"`
-	WebSearch            ToolWebSearch `json:"web_search"`
-	GitHub               github.Config `json:"github,omitzero"`
-}
-
-type ToolExec struct {
-	Timeout        configkit.Duration `json:"timeout"`
-	MaxStdoutBytes int64              `json:"max_stdout_bytes"`
-	MaxStderrBytes int64              `json:"max_stderr_bytes"`
+	Workspace            string           `json:"workspace"`
+	MaxInlineResultBytes int64            `json:"max_inline_result_bytes"`
+	Exec                 shellexec.Config `json:"exec"`
+	Fetch                ToolFetch        `json:"fetch"`
+	WebSearch            ToolWebSearch    `json:"web_search"`
+	GitHub               github.Config    `json:"github,omitzero"`
 }
 
 type ToolFetch struct {
@@ -242,11 +237,7 @@ func DefaultTools() *Tools {
 	return &Tools{
 		Workspace:            "/srv/aura/workspace",
 		MaxInlineResultBytes: 65536,
-		Exec: ToolExec{
-			Timeout:        configkit.Duration(30 * time.Second),
-			MaxStdoutBytes: 65536,
-			MaxStderrBytes: 65536,
-		},
+		Exec:                 shellexec.Default(),
 		Fetch: ToolFetch{
 			Timeout:         configkit.Duration(30 * time.Second),
 			MaxRedirects:    5,
