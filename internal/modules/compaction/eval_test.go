@@ -8,6 +8,8 @@ import (
 	"time"
 
 	stdcontext "context"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -23,7 +25,7 @@ type extractiveSummarizer struct {
 
 func (e *extractiveSummarizer) Summarize(_ stdcontext.Context, req *SummarizeRequest) (*SummarizeResult, error) {
 	if req == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "request must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "request must not be nil")
 	}
 	keys := []string{"goals", "decisions", "constraints", "open_work", "facts"}
 	buckets := make(map[string][]string, len(keys))
@@ -46,7 +48,7 @@ func (e *extractiveSummarizer) Summarize(_ stdcontext.Context, req *SummarizeReq
 	}
 	encoded, err := json.Marshal(buckets)
 	if err != nil {
-		return nil, Errorf(ErrorCodeSummaryUnavailable, "extractive summary is not encodable")
+		return nil, fault.New(ErrorCodeSummaryUnavailable, "extractive summary is not encodable")
 	}
 	return &SummarizeResult{Text: string(encoded), Producer: e.producer}, nil
 }

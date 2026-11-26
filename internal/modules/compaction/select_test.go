@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func selectPlanner() *Planner {
@@ -221,7 +223,7 @@ func TestSelectBudgetExceededKeepsProtectedWhole(t *testing.T) {
 	}
 	if _, err := Select(selectPolicy(), plan, exactCounter{}); err == nil {
 		t.Fatalf("expected budget error")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetExceeded {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBudgetExceeded {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -283,14 +285,14 @@ func TestSelectionNeverExceedsValidatedBudget(t *testing.T) {
 		}
 		plan, err := selectPlanner().Plan(Capability{ID: "m", ContextTokens: window}, Invocation{InvocationID: "inv-new"}, events)
 		if err != nil {
-			if code, _ := CodeOf(err); code == ErrorCodeBudgetExceeded {
+			if fault.HasCode(err, ErrorCodeBudgetExceeded) {
 				continue
 			}
 			t.Fatalf("Plan: %v", err)
 		}
 		selection, err := Select(selectPolicy(), plan, exactCounter{})
 		if err != nil {
-			if code, _ := CodeOf(err); code == ErrorCodeBudgetExceeded {
+			if fault.HasCode(err, ErrorCodeBudgetExceeded) {
 				continue
 			}
 			t.Fatalf("Select: %v", err)
@@ -340,7 +342,7 @@ func TestResolveSelectionPolicyRejects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ResolveSelectionPolicy(args.turns, args.ratio, args.excerpt); err == nil {
 				t.Errorf("expected error")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})

@@ -82,23 +82,6 @@ type Skills struct {
 	QuarantineRetention     configkit.Duration `json:"quarantine_retention"`
 }
 
-type Context struct {
-	Enabled                    bool           `json:"enabled"`
-	RecentCompleteTurns        int            `json:"recent_complete_turns"`
-	SafetyMarginTokens         int            `json:"safety_margin_tokens"`
-	ConservativeEstimatorRatio float64        `json:"conservative_estimator_ratio"`
-	HighWaterRatio             float64        `json:"high_water_ratio"`
-	MaxToolExcerptBytes        int            `json:"max_tool_excerpt_bytes"`
-	Summary                    ContextSummary `json:"summary"`
-}
-
-type ContextSummary struct {
-	Task            string `json:"task"`
-	MaxSourceTokens int    `json:"max_source_tokens"`
-	MaxOutputTokens int    `json:"max_output_tokens"`
-	PromptVersion   string `json:"prompt_version"`
-}
-
 type Sync struct {
 	Enabled            bool               `json:"enabled"`
 	Remote             string             `json:"remote"`
@@ -537,23 +520,6 @@ func DefaultSync() *Sync {
 		GitBinary:          "/usr/bin/git",
 		SSHBinary:          "/usr/bin/ssh",
 		Include:            []string{"skills/**", "config-templates/**"},
-	}
-}
-
-func DefaultContext() *Context {
-	return &Context{
-		Enabled:                    true,
-		RecentCompleteTurns:        10,
-		SafetyMarginTokens:         1024,
-		ConservativeEstimatorRatio: 0.80,
-		HighWaterRatio:             0.90,
-		MaxToolExcerptBytes:        2048,
-		Summary: ContextSummary{
-			Task:            "compression",
-			MaxSourceTokens: 32768,
-			MaxOutputTokens: 2048,
-			PromptVersion:   "v1",
-		},
 	}
 }
 

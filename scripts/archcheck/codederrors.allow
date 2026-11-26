@@ -10,7 +10,6 @@ internal/modules/broadcast  # until this module's errors move to platform/fault 
 internal/modules/child  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec/interpreter  # until this module's errors move to platform/fault with the module
-internal/modules/compaction  # until this module's errors move to platform/fault with the module
 internal/modules/fetch  # until this module's errors move to platform/fault with the module
 internal/modules/gitsync  # until this module's errors move to platform/fault with the module
 internal/modules/mcp  # until this module's errors move to platform/fault with the module

@@ -2,6 +2,8 @@ package compaction
 
 import (
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func turnEvent(sequence uint64, turn, text string) Event {
@@ -113,7 +115,7 @@ func TestGroupEventsRejects(t *testing.T) {
 			}
 			if _, err := GroupEvents(events, counter, tc.current); err == nil {
 				t.Errorf("expected error")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})
