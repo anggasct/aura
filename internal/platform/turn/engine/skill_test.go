@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -122,7 +121,7 @@ func TestPinnedTurnRecordsTheActivationBeforeExecution(t *testing.T) {
 func TestPinnedTurnFailsClosedWhenTheSkillIsUnavailable(t *testing.T) {
 	for name, renderer := range map[string]SkillRenderer{
 		"not configured": nil,
-		"render fails":   &stubSkillRenderer{err: skills.Errorf(skills.ErrorCodeSkillUnavailable, "digest changed")},
+		"render fails":   &stubSkillRenderer{err: fault.New(turn.ErrorCodeSkillUnavailable, "digest changed")},
 	} {
 		t.Run(name, func(t *testing.T) {
 			executor := &pinRecordingExecutor{}
@@ -219,7 +218,7 @@ func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 }
 
 func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
-	renderer := &stubSkillRenderer{err: skills.Errorf(skills.ErrorCodeSkillUnavailable, "quarantined")}
+	renderer := &stubSkillRenderer{err: fault.New(turn.ErrorCodeSkillUnavailable, "quarantined")}
 	engine, db, events := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, &pinRecordingExecutor{})
 	mustCreateSession(t, db, "session-a")
 	inv := &journalInvocation{}
@@ -382,7 +381,7 @@ func TestDurableReplayReusesTheJournaledActivation(t *testing.T) {
 		t.Fatalf("first attempt: %v", err)
 	}
 	renderer.mu.Lock()
-	renderer.body, renderer.err = "Changed body.", skills.Errorf(skills.ErrorCodeSkillUnavailable, "quarantined")
+	renderer.body, renderer.err = "Changed body.", fault.New(turn.ErrorCodeSkillUnavailable, "quarantined")
 	renderer.mu.Unlock()
 	if err := attempt(); err != nil {
 		t.Fatalf("replayed attempt: %v", err)

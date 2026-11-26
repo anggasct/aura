@@ -54,12 +54,7 @@ type ADKExecutor struct {
 	ledger            *usage.Ledger
 	modelDefinitionID string
 	ownerContext      string
-	skills            SkillContextProvider
 	providers         []turn.ContextProvider
-}
-
-type SkillContextProvider interface {
-	SkillContext(ctx context.Context, req *turn.TurnRequest) (string, error)
 }
 
 type AgentResolver interface {
@@ -166,16 +161,6 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 func WithOwnerContext(block string) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		e.ownerContext = strings.TrimSpace(block)
-		return nil
-	}
-}
-
-func WithSkillContext(provider SkillContextProvider) ExecutorOption {
-	return func(e *ADKExecutor) error {
-		if provider == nil {
-			return invalidArgument("skill context provider must not be nil")
-		}
-		e.skills = provider
 		return nil
 	}
 }
@@ -312,12 +297,6 @@ type turnContext struct {
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
 	var blocks []turn.ContextBlock
-	if skills := x.skillContextFor(ctx, req); skills != "" {
-		blocks = append(blocks, turn.ContextBlock{
-			Order:   turn.ContextOrderSkills,
-			Content: skills,
-		})
-	}
 	for _, provider := range x.providers {
 		provided, err := provider.TurnContext(ctx, req)
 		if err != nil {
@@ -333,30 +312,6 @@ func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRe
 		return cmp.Compare(a.Order, b.Order)
 	})
 	return blocks, nil
-}
-
-func (x *ADKExecutor) skillContextFor(ctx context.Context, req *turn.TurnRequest) string {
-	if x.skills == nil || req.PrincipalClass != principal.ClassOwner {
-		return ""
-	}
-	render := func(ctx context.Context) ([]byte, error) {
-		block, err := x.skills.SkillContext(ctx, req)
-		if err != nil {
-			x.logger.WarnContext(ctx, "skill context unavailable", "component", "skills", "error", err, "turn_id", req.TurnID)
-			return []byte{}, nil
-		}
-		return []byte(strings.TrimSpace(block)), nil
-	}
-	if scope, ok := durable.TurnScopeFrom(ctx); ok {
-		raw, err := scope.Invocation().RunAction(ctx, "skill-context", render)
-		if err != nil {
-			x.logger.WarnContext(ctx, "skill context journal failed", "component", "skills", "error", err, "turn_id", req.TurnID)
-			return ""
-		}
-		return string(raw)
-	}
-	raw, _ := render(ctx)
-	return string(raw)
 }
 
 const userAuthor = "user"

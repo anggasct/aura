@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"slices"
@@ -13,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -203,14 +205,41 @@ func (b *build) buildSkills(ctx context.Context) error {
 	if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {
 		return nil
 	}
-	runtime, err := buildSkillRuntime(ctx, b.cfg.Skills, b.db, b.logger)
+	mod, err := skills.New(ctx, &skills.ModuleDeps{
+		Config:      b.cfg.Skills,
+		DB:          b.db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(b.db)},
+		Logger:      b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithSkillContext(runtime.context))
-	b.modules.skillRenderer = runtime.context
-	b.modules.skills = runtime.bridge
+	if err := b.registerModule("skills", mod); err != nil {
+		return err
+	}
+	b.modules.skillRenderer = mod.Renderer()
+	b.modules.skills = mod.ChatCommands()
 	return nil
+}
+
+type skillActivationLog struct {
+	events turnstore.EventKindReader
+}
+
+func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]turn.SkillActivation, error) {
+	events, err := l.events.LatestByKind(ctx, sessionID, turn.EventKindSkillActivated, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]turn.SkillActivation, 0, len(events))
+	for i := range events {
+		var activation turn.SkillActivation
+		if err := json.Unmarshal(events[i].Payload, &activation); err != nil || activation.SkillID == "" {
+			continue
+		}
+		out = append(out, activation)
+	}
+	return out, nil
 }
 
 func (b *build) buildKnowledge(ctx context.Context) error {

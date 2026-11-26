@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/modules/skills"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
@@ -23,6 +24,19 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
+	root.AddCommand(skills.Commands(skillsOpener(gf))...)
+}
+
+func skillsOpener(gf *globalFlags) skills.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, engine *skills.Engine, defaultRoot string) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartSkills}}, func(ctx context.Context, app *App) error {
+			return fn(ctx, app.skillsEngine, app.skillsRoot)
+		})
+	}
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {
