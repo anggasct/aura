@@ -4,6 +4,7 @@ import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/skills"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -41,7 +42,7 @@ type Config struct {
 	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
 	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
 	Memory       legacyconfig.Memory         `json:"memory"`
-	Skills       *legacyconfig.Skills        `json:"skills,omitempty"`
+	Skills       *skills.Config              `json:"skills,omitempty"`
 	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
 	Owner        *principal.Owner            `json:"owner,omitempty"`
@@ -59,6 +60,7 @@ func Default() Config {
 	defaultAgents := auraagent.Default()
 	defaultAccess := principal.Default()
 	defaultVision := vision.Default()
+	defaultSkills := skills.Default()
 	defaultContext := compaction.Default()
 	return Config{
 		Version:      1,
@@ -81,7 +83,7 @@ func Default() Config {
 		Scheduler:    legacyconfig.DefaultScheduler(),
 		Memory:       legacyconfig.DefaultMemory(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),
-		Skills:       legacyconfig.DefaultSkills(),
+		Skills:       &defaultSkills,
 		Sync:         legacyconfig.DefaultSync(),
 		Vision:       &defaultVision,
 		Context:      &defaultContext,

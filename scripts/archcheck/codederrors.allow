@@ -19,6 +19,5 @@ internal/modules/plugin/connector  # until this module's errors move to platform
 internal/modules/plugin/wire  # plugin protocol errors; plugins import only the wire contract
 internal/modules/profile  # until this module's errors move to platform/fault with the module
 internal/modules/schedule  # until this module's errors move to platform/fault with the module
-internal/modules/skills  # until this module's errors move to platform/fault with the module
 internal/modules/workflow  # until this module's errors move to platform/fault with the module
 plugins/gmail/connector  # plugin protocol errors; plugins import only the wire contract

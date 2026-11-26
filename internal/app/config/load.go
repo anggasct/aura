@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/skills"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -125,7 +126,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		configkit.Under("models", cfg.Models.Validate()),
 		configkit.Under("model_routes", model.ValidateRoutes(cfg.ModelRoutes)),
 		legacyconfig.ValidateTools(cfg.Tools),
-		legacyconfig.ValidateSkills(cfg.Skills),
+		validateSkills(cfg.Skills),
 		validateContext(cfg.Context),
 		legacyconfig.ValidateProfile(cfg.Profile),
 		legacyconfig.ValidateChildren(cfg.Children),
@@ -429,4 +430,11 @@ func validateContext(section *compaction.Config) error {
 		return nil
 	}
 	return configkit.Under("context", section.Validate())
+}
+
+func validateSkills(section *skills.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("skills", section.Validate())
 }
