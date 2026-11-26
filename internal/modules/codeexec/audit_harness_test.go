@@ -19,12 +19,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const (
@@ -152,7 +152,7 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 			OutputBytes: observation.StdoutBytes + observation.StderrBytes, ArtifactBytes: observation.ArtifactBytes,
 		})
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	now := time.Now().UTC()
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: auditSessionID, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)

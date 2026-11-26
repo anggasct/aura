@@ -26,7 +26,6 @@ var moduleMapSections = []moduleMapSection{
 	{header: "internal/platform/", root: "internal/platform"},
 	{header: "internal/modules/", root: "internal/modules"},
 	{header: "internal/channels/", root: "internal/channels"},
-	{header: "internal/store/", root: "internal/store"},
 	{header: "plugins/", root: "plugins"},
 }
 

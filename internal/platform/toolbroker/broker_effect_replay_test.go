@@ -16,12 +16,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const (
@@ -73,7 +75,7 @@ type replayHarness struct {
 
 func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema())
 	now := time.Now().UTC()
 	for _, id := range []string{"session-1", "session-2"} {
 		if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {

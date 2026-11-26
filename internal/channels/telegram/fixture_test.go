@@ -18,14 +18,17 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 const (
@@ -501,7 +504,7 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	t.Setenv(testTokenEnv, testToken)
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), storage.Schema(), Schema())
 	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)

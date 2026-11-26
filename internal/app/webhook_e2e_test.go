@@ -15,9 +15,9 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const webhookE2ESecret = "e2e-secret-0123456789abcdef"
@@ -87,7 +87,7 @@ func webhookSignedGet(t *testing.T, path, nonce string) *http.Request {
 
 func TestBuildWebhookListener(t *testing.T) {
 	t.Setenv("AURA_WEBHOOK_E2E_SECRET", webhookE2ESecret)
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 	runtime := durabletest.NewFake()
 	t.Cleanup(runtime.Close)

@@ -25,11 +25,11 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const (
@@ -485,7 +485,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
+			db := sqlitetest.OpenMigrated(t, Schemas()...)
 			ensurer, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
 			if err != nil {
 				t.Fatalf("NewSessionEnsurer: %v", err)
@@ -515,7 +515,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 }
 
 func TestRecoverEmailEffects_FailsClosedWhenTheJournalIsUnreadable(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

@@ -13,10 +13,14 @@ import (
 	"testing"
 	"time"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const reconcilePassWait = 10 * time.Second
@@ -183,7 +187,7 @@ func TestWebhookDispatcher_ReplayOfAnAdmittedTurnSubmitsNothing(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
+			db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 			first := &fakeTurnRuntime{events: turnEmitting(tc.kinds...)}
 			dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: first})
 			ref, err := dispatcher.Dispatch(t.Context(), testAcceptedEvent())
@@ -228,7 +232,7 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 	completed := storedTurnEvent{id: "d", kind: turn.EventKindTurnCompleted}
 
 	t.Run("one pass settles the unexpired unfinished executions", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		executions, err := platformwebhook.NewSQLiteStore(db)
 		if err != nil {
 			t.Fatalf("NewSQLiteStore: %v", err)
@@ -274,7 +278,7 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 	})
 
 	t.Run("a pass walks every batch behind the never admitted executions", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_a0"})
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_a1"})
 		settling := []string{"whex_b0", "whex_b1", "whex_b2"}
@@ -305,7 +309,7 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 	})
 
 	t.Run("a failing execution is counted and the pass goes on", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		broken := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_c0", events: []storedTurnEvent{accepted, completed}})
 		corruptStoredEvents(t, db, broken.SessionID)
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_c1", events: []storedTurnEvent{accepted, completed}})
@@ -362,7 +366,7 @@ func requireOneReplayWarning(t *testing.T, logs *syncBuffer) {
 
 func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *testing.T) {
 	t.Run("a replay whose session read fails", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_unreadable", events: []storedTurnEvent{{id: "a", kind: turn.EventKindTurnAccepted}}})
 		corruptStoredEvents(t, db, execution.SessionID)
 		logs := &syncBuffer{}
@@ -382,7 +386,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 	})
 
 	t.Run("a replay of a never admitted execution whose submission is refused", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_refused"})
 		logs := &syncBuffer{}
 		backend := &fakeTurnRuntime{overload: true}
@@ -398,7 +402,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 	})
 
 	t.Run("a live stream that breaks leaves the execution to the store", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
 			return []turnOutcome{
 				{event: turn.Event{ID: "evt_accepted_" + turnID, Kind: turn.EventKindTurnAccepted}},
@@ -419,7 +423,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 	})
 
 	t.Run("a terminal event without an id leaves the execution to the store", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 		execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_unstored", events: []storedTurnEvent{{id: "a", kind: turn.EventKindTurnAccepted}}})
 		dispatcher, _ := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}})
 		yielded := false

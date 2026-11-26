@@ -12,13 +12,13 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return storetest.OpenMigrated(t)
+	return sqlitetest.OpenMigrated(t, Schema())
 }
 
 func newSession(id string) turn.Session {

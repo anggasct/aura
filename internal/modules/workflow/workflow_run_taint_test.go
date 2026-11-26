@@ -2,30 +2,31 @@ package workflow
 
 import (
 	"database/sql"
-	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func TestMigrationAddsRunTaintAndLineageWithoutDisturbingLegacyRows(t *testing.T) {
+func TestWorkflowRunTaintAndLineageBaselineConstraints(t *testing.T) {
 	ctx := t.Context()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "legacy.db"), sqlite.Options{})
+	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("Baseline: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:45]); err != nil {
-		t.Fatalf("migrate to v%d: %v", 45, err)
+	db := sqlitetest.OpenMigrations(t, migrations)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
+	if err != nil || applied != 2 || latest != 2 {
+		t.Fatalf("schema = applied %d latest %d %v, want 2", applied, latest, err)
 	}
 	seedMigrationSession(t, db, "sess-1", "owner-1")
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES ('flow', 1, 'g', 'defined', '{}', 'digest', '2026-11-13T10:00:00Z')`); err != nil {
 		t.Fatalf("seed definition: %v", err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id)
-VALUES ('run-legacy', 'flow', 1, 'dur-legacy', 'g', '{}', 'queued', '2026-11-13T10:00:00Z', '2026-11-13T10:00:00Z', 'discord:1', 'public', 'lobby', 'sess-1')`); err != nil {
+VALUES ('run-base', 'flow', 1, 'dur-base', 'g', '{}', 'queued', '2026-11-13T10:00:00Z', '2026-11-13T10:00:00Z', 'discord:1', 'public', 'lobby', 'sess-1')`); err != nil {
 		t.Fatalf("seed run: %v", err)
 	}
 	insertProposal := func(id string, tainted any) error {
@@ -37,27 +38,20 @@ VALUES (?, 'sess-1', 'main', 'owner-1', '{}', 'digest', 'proposed', '2026-11-13T
 		_, err = db.ExecContext(ctx, `UPDATE workflow_proposal SET tainted = ? WHERE id = ?`, tainted, id)
 		return err
 	}
-	if err := insertProposal("prop-legacy", nil); err != nil {
+	if err := insertProposal("prop-base", nil); err != nil {
 		t.Fatalf("seed proposal: %v", err)
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
-	if err != nil || applied != 48 || latest != 48 {
-		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
 	}
 	var runTainted int
 	var parent sql.NullString
-	if err := db.QueryRowContext(ctx, `SELECT tainted, parent_run_id FROM workflow_run WHERE id = 'run-legacy'`).Scan(&runTainted, &parent); err != nil {
-		t.Fatalf("read legacy run: %v", err)
+	if err := db.QueryRowContext(ctx, `SELECT tainted, parent_run_id FROM workflow_run WHERE id = 'run-base'`).Scan(&runTainted, &parent); err != nil {
+		t.Fatalf("read base run: %v", err)
 	}
 	if runTainted != 0 || parent.Valid {
-		t.Fatalf("legacy run tainted = %d parent valid = %v, want 0 and NULL", runTainted, parent.Valid)
+		t.Fatalf("base run tainted = %d parent valid = %v, want 0 and NULL", runTainted, parent.Valid)
 	}
 	var proposalTainted int
-	if err := db.QueryRowContext(ctx, `SELECT tainted FROM workflow_proposal WHERE id = 'prop-legacy'`).Scan(&proposalTainted); err != nil || proposalTainted != 0 {
-		t.Fatalf("legacy proposal tainted = %d, %v, want 0", proposalTainted, err)
+	if err := db.QueryRowContext(ctx, `SELECT tainted FROM workflow_proposal WHERE id = 'prop-base'`).Scan(&proposalTainted); err != nil || proposalTainted != 0 {
+		t.Fatalf("base proposal tainted = %d, %v, want 0", proposalTainted, err)
 	}
 	if err := insertProposal("prop-tainted", 1); err != nil {
 		t.Fatalf("a tainted proposal was refused: %v", err)
@@ -70,7 +64,7 @@ VALUES (?, 'sess-1', 'main', 'owner-1', '{}', 'digest', 'proposed', '2026-11-13T
 VALUES (?, 'flow', 1, ?, 'g', '{}', 'queued', '2026-11-13T10:00:00Z', '2026-11-13T10:00:00Z', ?, ?)`, id, "dur-"+id, tainted, parentID)
 		return err
 	}
-	if err := insertRun("run-child", 1, "run-legacy"); err != nil {
+	if err := insertRun("run-child", 1, "run-base"); err != nil {
 		t.Fatalf("a tainted child run was refused: %v", err)
 	}
 	if err := insertRun("run-bad-taint", 2, nil); err == nil {

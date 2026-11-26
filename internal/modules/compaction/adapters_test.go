@@ -15,9 +15,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func contextRow(kind, payload string) *turn.Event {
@@ -117,7 +117,7 @@ func seedContextSession(t *testing.T, db *sql.DB) {
 }
 
 func TestContextSummaryStoreRoundTrip(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema())
 	seedContextSession(t, db)
 	adapter, err := NewEventSummaryStore(turnstore.NewSessionService(db), turnstore.NewEventStore(db))
 	if err != nil {
@@ -155,7 +155,7 @@ func TestContextSummaryStoreRoundTrip(t *testing.T) {
 }
 
 func TestEventSummaryStoreRefusesNilPorts(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema())
 	sessions := turnstore.NewSessionService(db)
 	events := turnstore.NewEventStore(db)
 	if _, err := NewEventSummaryStore(nil, events); err == nil {

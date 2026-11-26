@@ -9,15 +9,14 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 var pluginTestTime = time.Date(2026, 11, 6, 9, 0, 0, 0, time.UTC)
 
 func newTestSQLiteStore(t *testing.T) (*SQLiteStore, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
@@ -49,11 +48,15 @@ func TestNewSQLiteStoreRejectsNilDB(t *testing.T) {
 	}
 }
 
-func TestPluginMigrationV37Schema(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
-	if err != nil || applied != latest || applied < 48 {
-		t.Fatalf("schema = applied %d latest %d %v, want latest >= 48", applied, latest, err)
+func TestPluginBaselineSchema(t *testing.T) {
+	migrations, err := sqlite.Baseline(Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	db := sqlitetest.OpenMigrations(t, migrations)
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, migrations)
+	if err != nil || applied != latest || applied != 1 {
+		t.Fatalf("schema = applied %d latest %d %v, want 1", applied, latest, err)
 	}
 	for _, table := range []string{"plugin", "plugin_version", "plugin_grant"} {
 		var name string

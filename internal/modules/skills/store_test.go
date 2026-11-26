@@ -8,7 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func testSkillRecord(id string) *Record {
@@ -26,7 +26,7 @@ func testSkillRecord(id string) *Record {
 
 func mustNewSQLiteStore(t *testing.T) *SQLiteStore {
 	t.Helper()
-	store, err := NewSQLiteStore(storetest.OpenMigrated(t))
+	store, err := NewSQLiteStore(sqlitetest.OpenMigrated(t, Schema()))
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
@@ -53,7 +53,7 @@ func TestNewSQLiteStoreRejectsNilDB(t *testing.T) {
 
 func TestSQLiteStoreJoinsCallersTransaction(t *testing.T) {
 	ctx := t.Context()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	store, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)

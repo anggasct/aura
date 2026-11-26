@@ -12,8 +12,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type outcomeLog struct {
@@ -42,7 +42,7 @@ func (l *outcomeLog) count(outcome string) int {
 func newObservedExecutor(t *testing.T) (*Executor, *sql.DB, *outcomeLog) {
 	t.Helper()
 	observed := &outcomeLog{}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	journal, err := NewJournal(db, Options{Logger: slog.New(slog.DiscardHandler), Observer: observed, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)

@@ -11,12 +11,13 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestNewBrokerExecutorRejectsNilBroker(t *testing.T) {
@@ -114,7 +115,7 @@ func TestBrokerExecutorPropagatesChannelAndFiltersCapabilities(t *testing.T) {
 
 func TestTurnToolCallsLetTheJournalAllocateTheSequence(t *testing.T) {
 	ctx := t.Context()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	const session = "session-allocate"
 	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: session, OwnerID: principal.OwnerID}); err != nil {
 		t.Fatalf("create session: %v", err)

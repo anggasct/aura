@@ -9,11 +9,21 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
+
+func broadcastBaselineMigrations(t *testing.T) []sqlite.Migration {
+	t.Helper()
+	migrations, err := sqlite.Baseline(turnstore.Schema(), effect.Schema(), Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	return migrations
+}
 
 func testBroadcastItem(id, producer, key string) *ItemRecord {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
@@ -34,7 +44,7 @@ func testBroadcastItem(id, producer, key string) *ItemRecord {
 
 func mustNewSQLiteStore(t *testing.T) (*sql.DB, *SQLiteStore) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(): %v", err)
@@ -344,7 +354,7 @@ func TestBroadcastStore_CursorSurvivesRestart(t *testing.T) {
 			t.Fatalf("OpenDB: %v", err)
 		}
 		t.Cleanup(func() { _ = db.Close() })
-		if err := sqlite.Migrate(t.Context(), db, history.Migrations()); err != nil {
+		if err := sqlite.Migrate(t.Context(), db, broadcastBaselineMigrations(t)); err != nil {
 			t.Fatalf("Migrate: %v", err)
 		}
 		s, err := NewSQLiteStore(db)
@@ -578,8 +588,8 @@ func TestBroadcastStore_ListHeldHonorsLimit(t *testing.T) {
 }
 
 func TestBroadcastStore_SchemaVersion(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), Schema())
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, broadcastBaselineMigrations(t))
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}

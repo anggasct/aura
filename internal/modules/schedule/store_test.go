@@ -9,9 +9,18 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
+
+func scheduleBaselineMigrations(t *testing.T) []sqlite.Migration {
+	t.Helper()
+	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	return migrations
+}
 
 func occurrenceIDs(items []Occurrence) []string {
 	ids := make([]string, 0, len(items))
@@ -33,7 +42,7 @@ func testScheduledJob(id string) *Job {
 
 func mustNewSQLiteStore(t *testing.T) *SQLiteStore {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(): %v", err)
@@ -284,8 +293,8 @@ func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
 }
 
 func TestScheduleStore_SchemaAppliesCleanly(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, scheduleBaselineMigrations(t))
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}
@@ -317,7 +326,7 @@ func TestScheduleStore_RecordFireMissingJob(t *testing.T) {
 }
 
 func TestScheduleStoreJoinsCallersTransaction(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(): %v", err)

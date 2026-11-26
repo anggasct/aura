@@ -5,18 +5,19 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestSessionApprovalEraserRefusesANilReader(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	if _, err := NewSessionApprovalEraser(db, nil, false); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewSessionApprovalEraser(db, nil, false) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }
 
 func TestDeleteApprovalsForSessionsRemovesOnlyTargetSessions(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	ctx := t.Context()
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	for _, sess := range []string{"wf-s1", "wf-s2"} {

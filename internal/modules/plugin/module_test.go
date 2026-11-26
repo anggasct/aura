@@ -17,12 +17,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestModuleNewRejectsInvalidDeps(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	var nilCtx context.Context
 	if _, err := New(nilCtx, &ModuleDeps{DB: db, DataRoot: t.TempDir()}); !fault.HasCode(err, ErrInvalidArgument) {
 		t.Fatalf("New(nil ctx) = %v, want %s", err, ErrInvalidArgument)
@@ -45,7 +45,7 @@ func TestModuleNewRejectsInvalidDeps(t *testing.T) {
 }
 
 func TestModuleEmptyHealthCheckAndClose(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	mod, err := New(t.Context(), &ModuleDeps{
 		DB:       db,
 		DataRoot: t.TempDir(),
@@ -125,7 +125,7 @@ func TestModuleKeepsAuthAndConnectorHTTPClientsSeparate(t *testing.T) {
 	t.Cleanup(loopbackServer.Close)
 	loopbackHost := strings.TrimPrefix(loopbackServer.URL, "https://")
 
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	dataRoot := t.TempDir()
 	service, err := OpenService(db, dataRoot, nil, loopbackServer.Client())
 	if err != nil {

@@ -20,12 +20,12 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type workflowCard struct {
@@ -180,7 +180,7 @@ func newSurfaceRig(t *testing.T, opts *surfaceRigOptions) *surfaceRig {
 	if opts.configure != nil {
 		opts.configure(&cfg)
 	}
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

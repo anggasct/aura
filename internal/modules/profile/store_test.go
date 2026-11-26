@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func testStoredFact(id string) *Fact {
@@ -25,7 +25,7 @@ func testStoredFact(id string) *Fact {
 
 func newTestSQLiteStore(t *testing.T) (*SQLiteStore, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)

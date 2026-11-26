@@ -29,12 +29,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type gateFixture struct {
@@ -71,7 +71,7 @@ func newGateFixture(t *testing.T, report capability.Report, approve bool) *gateF
 		t.Fatalf("write fixture: %v", err)
 	}
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -350,7 +350,7 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workspace, "big.txt"), []byte(big), 0o600); err != nil {
 		t.Fatalf("write fixture: %v", err)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	sess := turn.Session{ID: "session-1", OwnerID: "owner-1"}
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
@@ -419,7 +419,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 		t.Fatalf("write secret fixture: %v", err)
 	}
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -546,7 +546,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 
 func TestWiringRegistersEveryBuiltinAdapter(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -574,7 +574,7 @@ func TestWiringRegistersEveryBuiltinAdapter(t *testing.T) {
 func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	workspace := t.TempDir()
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -655,7 +655,7 @@ func TestEveryConfiguredWebSearchProviderBuildsAnAdapter(t *testing.T) {
 			if provider == search.ProviderSearXNG {
 				cfg.Tools.WebSearch.Endpoint = "https://search.example.com/search"
 			}
-			db := storetest.OpenMigrated(t)
+			db := sqlitetest.OpenMigrated(t, Schemas()...)
 			executor, err := newTestToolExecutor(&toolExecutorInput{
 				result:       &appconfig.LoadResult{Config: &cfg, CapabilityReport: capabilitytest.All(t)},
 				db:           db,
@@ -693,7 +693,7 @@ func TestSearXNGToolsConfigReachesALoopbackServerThroughTheExecutorAdapters(t *t
 		CredentialRef: secrettest.Ref("env://AURA_TEST_SEARXNG_TOKEN"),
 		MaxResults:    5,
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result:       &appconfig.LoadResult{Config: &cfg, CapabilityReport: capabilitytest.All(t)},
 		db:           db,
@@ -739,7 +739,7 @@ func TestExecutorRejectsASearchEndpointItCannotParse(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Tools.Workspace = t.TempDir()
 	cfg.Tools.WebSearch = search.Config{Provider: search.ProviderSearXNG, Endpoint: "http://localhost:8888/search", MaxResults: 5}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	if _, err := newTestToolExecutor(&toolExecutorInput{
 		result:       &appconfig.LoadResult{Config: &cfg, CapabilityReport: capabilitytest.All(t)},
 		db:           db,

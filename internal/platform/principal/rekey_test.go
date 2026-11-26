@@ -8,7 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 type stubRekeyer struct {
@@ -20,7 +20,11 @@ func (s stubRekeyer) RekeyOwner(ctx context.Context, state *RekeyState, move Own
 }
 
 func TestRekeyRunsEveryParticipantInOneTransaction(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	sessionSchema := sqlite.StaticSchema{
+		Name: "test_session",
+		SQL:  `CREATE TABLE session (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, metadata_json TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL, updated_at TEXT NOT NULL);`,
+	}
+	db := sqlitetest.OpenMigrated(t, sessionSchema, Schema())
 	ctx := t.Context()
 	const at = "2026-11-02T09:00:00Z"
 	for _, stmt := range []string{
@@ -68,7 +72,7 @@ func TestRekeyRunsEveryParticipantInOneTransaction(t *testing.T) {
 }
 
 func TestRekeyRefusesAnUndeclaredLine(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	_, err := Rekey(t.Context(), db, []OwnerMove{{From: "kuma", To: OwnerID}}, false, []Rekeyer{
 		stubRekeyer{fn: func(_ context.Context, state *RekeyState, _ OwnerMove) error {
 			return state.Record("unknown_line", 1)
@@ -80,7 +84,7 @@ func TestRekeyRefusesAnUndeclaredLine(t *testing.T) {
 }
 
 func TestRekeyValidationErrorsAreNotWrapped(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	_, err := Rekey(t.Context(), db, []OwnerMove{{From: "", To: OwnerID}}, false, nil)
 	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("Rekey invalid move = %v, want %s", err, ErrorCodeInvalidArgument)

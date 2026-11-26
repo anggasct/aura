@@ -16,16 +16,16 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newMemoryTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return storetest.OpenMigrated(t)
+	return sqlitetest.OpenMigrated(t, Schemas()...)
 }
 
 func TestMemoryDocumentStoreRoundTrip(t *testing.T) {

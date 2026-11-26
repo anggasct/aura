@@ -14,8 +14,16 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/history"
 )
+
+func storageBaselineMigrations(t *testing.T) []sqlite.Migration {
+	t.Helper()
+	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	return migrations
+}
 
 func mustPutArtifact(t *testing.T, db *sql.DB, root, id, sessionID string, content []byte) ArtifactRef {
 	t.Helper()
@@ -60,7 +68,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 		t.Fatalf("open restored db: %v", err)
 	}
 	defer func() { _ = restored.Close() }()
-	if err := sqlite.Migrate(ctx, restored, history.Migrations()); err != nil {
+	if err := sqlite.Migrate(ctx, restored, storageBaselineMigrations(t)); err != nil {
 		t.Fatalf("Migrate restored db: %v", err)
 	}
 	sessions := turnstore.NewSessionService(restored)
@@ -135,7 +143,7 @@ func TestRestoreForceReplacesLiveDB(t *testing.T) {
 		t.Fatalf("open restored db: %v", err)
 	}
 	defer func() { _ = restored.Close() }()
-	if err := sqlite.Migrate(ctx, restored, history.Migrations()); err != nil {
+	if err := sqlite.Migrate(ctx, restored, storageBaselineMigrations(t)); err != nil {
 		t.Fatalf("Migrate restored db: %v", err)
 	}
 	if _, err := turnstore.NewSessionService(restored).Get(ctx, "session-1"); err != nil {

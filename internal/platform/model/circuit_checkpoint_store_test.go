@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	s := NewSQLiteCircuitCheckpointStore(db)
 	ctx := t.Context()
 

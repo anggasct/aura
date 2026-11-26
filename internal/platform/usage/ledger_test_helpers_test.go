@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func newTestLedger(t *testing.T, dailyCap, monthlyCap int64) *Ledger {
@@ -17,7 +17,7 @@ func newTestLedger(t *testing.T, dailyCap, monthlyCap int64) *Ledger {
 
 func newTestLedgerWithDB(t *testing.T, dailyCap, monthlyCap int64) (*Ledger, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	reg := NewPriceRegistry()
 	primary := testPrice("primary")
 	if err := reg.Put(primary); err != nil {

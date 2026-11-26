@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func testAPIKey(id string) *APIKey {
@@ -22,7 +22,7 @@ func testAPIKey(id string) *APIKey {
 
 func TestAPIKeyRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
+	keys := NewAPIKeyStore(sqlitetest.OpenMigrated(t, Schema()))
 	want := testAPIKey("aaaaaaaaaaaa")
 	if err := keys.Create(ctx, want); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -37,7 +37,7 @@ func TestAPIKeyRoundTrip(t *testing.T) {
 }
 
 func TestAPIKeyGetByIDUnknown(t *testing.T) {
-	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
+	keys := NewAPIKeyStore(sqlitetest.OpenMigrated(t, Schema()))
 	_, err := keys.GetByID(t.Context(), "zzzzzzzzzzzz")
 	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeAPIKeyNotFound {
 		t.Fatalf("GetByID error = %v, want %s", err, ErrorCodeAPIKeyNotFound)
@@ -46,7 +46,7 @@ func TestAPIKeyGetByIDUnknown(t *testing.T) {
 
 func TestAPIKeyListOrdersByCreation(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
+	keys := NewAPIKeyStore(sqlitetest.OpenMigrated(t, Schema()))
 	if listed, err := keys.List(ctx); err != nil || len(listed) != 0 {
 		t.Fatalf("List on empty store = %v, %v", listed, err)
 	}
@@ -68,7 +68,7 @@ func TestAPIKeyListOrdersByCreation(t *testing.T) {
 
 func TestAPIKeyRevokeIsIdempotent(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
+	keys := NewAPIKeyStore(sqlitetest.OpenMigrated(t, Schema()))
 	key := testAPIKey("aaaaaaaaaaaa")
 	if err := keys.Create(ctx, key); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -90,7 +90,7 @@ func TestAPIKeyRevokeIsIdempotent(t *testing.T) {
 }
 
 func TestAPIKeyRevokeUnknown(t *testing.T) {
-	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
+	keys := NewAPIKeyStore(sqlitetest.OpenMigrated(t, Schema()))
 	_, err := keys.Revoke(t.Context(), "zzzzzzzzzzzz", time.Now())
 	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeAPIKeyNotFound {
 		t.Fatalf("Revoke error = %v, want %s", err, ErrorCodeAPIKeyNotFound)
@@ -99,7 +99,7 @@ func TestAPIKeyRevokeUnknown(t *testing.T) {
 
 func TestAPIKeyCreateRejects(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
+	keys := NewAPIKeyStore(sqlitetest.OpenMigrated(t, Schema()))
 	if err := keys.Create(ctx, testAPIKey("aaaaaaaaaaaa")); err != nil {
 		t.Fatalf("seed Create: %v", err)
 	}

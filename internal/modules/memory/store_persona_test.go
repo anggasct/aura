@@ -2,14 +2,14 @@ package memory
 
 import (
 	"database/sql"
-	"path/filepath"
 	"slices"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/history"
 )
 
 func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID string) {
@@ -18,19 +18,6 @@ func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID st
 		sessionID, ownerID, agentID, `{}`, "2026-09-12T12:00:00Z", "2026-09-12T12:00:00Z"); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-}
-
-func openDatabaseAtVersion(t *testing.T, path string, count int) *sql.DB {
-	t.Helper()
-	db, err := sqlite.Open(t.Context(), path, sqlite.Options{})
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(t.Context(), db, history.Migrations()[:count]); err != nil {
-		t.Fatalf("migrate %d: %v", count, err)
-	}
-	return db
 }
 
 func TestMemoryStore_DocumentTakesItsSessionPersona(t *testing.T) {
@@ -88,32 +75,23 @@ func TestMemoryStore_SearchFiltersByReadablePersonas(t *testing.T) {
 	}
 }
 
-func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
+func TestMemoryPersonaBaselineSchemaDefaultsAndIndex(t *testing.T) {
 	ctx := t.Context()
-	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), 20)
-	seedPersonaSession(t, db, "engineer-session", "owner-1", "engineer")
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	seedPersonaSession(t, db, "main-session", "owner-1", "main")
-	for _, row := range []struct{ id, session string }{{"mem-engineer", "engineer-session"}, {"mem-main", "main-session"}} {
-		if _, err := db.ExecContext(ctx, `INSERT INTO memory_document (id, owner_id, session_id, kind, source_from_sequence, source_to_sequence, content, trust_label, created_at) VALUES (?, 'owner-1', ?, 'event_text', 1, 1, 'pre-upgrade text', 'owner_input', '2026-09-12T12:00:00Z')`,
-			row.id, row.session); err != nil {
-			t.Fatalf("seed legacy document: %v", err)
-		}
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO memory_document (id, owner_id, session_id, kind, source_from_sequence, source_to_sequence, content, trust_label, created_at) VALUES ('mem-default', 'owner-1', 'main-session', 'event_text', 1, 1, 'default agent text', 'owner_input', '2026-09-12T12:00:00Z')`); err != nil {
+		t.Fatalf("seed document: %v", err)
 	}
 	s, err := NewSQLiteStore(db, turnstore.NewSessionService(db))
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
-	for id, want := range map[string]string{"mem-engineer": "engineer", "mem-main": "main"} {
-		document, found, err := s.GetDocument(ctx, id)
-		if err != nil || !found {
-			t.Fatalf("GetDocument(%s) = %v, %v", id, found, err)
-		}
-		if document.AgentID != want {
-			t.Errorf("%s agent_id = %q, want %q", id, document.AgentID, want)
-		}
+	document, found, err := s.GetDocument(ctx, "mem-default")
+	if err != nil || !found {
+		t.Fatalf("GetDocument = %v, %v", found, err)
+	}
+	if document.AgentID != "main" {
+		t.Errorf("default agent_id = %q, want main", document.AgentID)
 	}
 	var index string
 	if err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'memory_document_owner_agent_idx'`).Scan(&index); err != nil {
@@ -121,22 +99,13 @@ func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 	}
 }
 
-const memoryNonOwnerTrustMigrationVersion = 38
-
-func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
+func TestMemoryTrustLabelBaselineConstraintAndSearch(t *testing.T) {
 	ctx := t.Context()
-	before := slices.IndexFunc(history.Migrations(), func(m sqlite.Migration) bool { return m.Version == memoryNonOwnerTrustMigrationVersion })
-	if before < 0 {
-		t.Fatal("non-owner trust migration not registered")
-	}
-	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), before)
-	rows := []struct{ id, owner, trust, want string }{
-		{"mem-owner", principal.OwnerID, "owner_input", "owner_input"},
-		{"mem-public", "http:abcdefabcdef", "owner_input", "untrusted_external"},
-		{"mem-trusted", "telegram:42", "owner_input", "untrusted_external"},
-		{"mem-legacy", "ubuntu", "owner_input", "untrusted_external"},
-		{"mem-derived", "http:abcdefabcdef", "derived_untrusted", "derived_untrusted"},
-		{"mem-external", principal.OwnerID, "untrusted_external", "untrusted_external"},
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	rows := []struct{ id, owner, trust string }{
+		{"mem-owner", principal.OwnerID, "owner_input"},
+		{"mem-public", "http:abcdefabcdef", "untrusted_external"},
+		{"mem-derived", "http:abcdefabcdef", "derived_untrusted"},
 	}
 	for _, row := range rows {
 		session := "sess-" + row.id
@@ -146,8 +115,8 @@ func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
 			t.Fatalf("seed %s: %v", row.id, err)
 		}
 	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	if _, err := db.ExecContext(ctx, `INSERT INTO memory_document (id, owner_id, session_id, kind, source_from_sequence, source_to_sequence, content, trust_label, created_at) VALUES ('mem-bad-trust', 'owner-1', 'sess-mem-owner', 'event_text', 2, 2, 'bad', 'invalid_trust', '2026-09-12T12:00:00Z')`); !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
+		t.Fatalf("invalid trust_label err = %v, want check violation", err)
 	}
 	s, err := NewSQLiteStore(db, turnstore.NewSessionService(db))
 	if err != nil {
@@ -159,13 +128,13 @@ func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
 			if err != nil || !found {
 				t.Fatalf("GetDocument = %v, %v", found, err)
 			}
-			if document.TrustLabel != row.want {
-				t.Errorf("trust_label = %q, want %q", document.TrustLabel, row.want)
+			if document.TrustLabel != row.trust {
+				t.Errorf("trust_label = %q, want %q", document.TrustLabel, row.trust)
 			}
 		})
 	}
 	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "http:abcdefabcdef", Terms: "nightly", Limit: 10})
 	if err != nil || len(hits) != 2 {
-		t.Fatalf("search after migration = %d hits, %v; want 2", len(hits), err)
+		t.Fatalf("search = %d hits, %v; want 2", len(hits), err)
 	}
 }

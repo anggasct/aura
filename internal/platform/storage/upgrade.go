@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"time"
@@ -16,6 +17,18 @@ type UpgradeResult struct {
 	Latest  int
 	Backup  string
 	Report  RestoreReport
+}
+
+func UpgradePath(ctx context.Context, dbPath string, opts sqlite.Options, migrations []sqlite.Migration, backupRoot, artifactRoot string, now time.Time) (result UpgradeResult, retErr error) {
+	if err := sqlite.CheckCompatibility(ctx, dbPath); err != nil {
+		return UpgradeResult{}, err
+	}
+	db, err := sqlite.Open(ctx, dbPath, opts)
+	if err != nil {
+		return UpgradeResult{}, err
+	}
+	defer func() { retErr = errors.Join(retErr, db.Close()) }()
+	return UpgradeWithBackup(ctx, db, migrations, backupRoot, artifactRoot, now)
 }
 
 func UpgradeWithBackup(ctx context.Context, db *sql.DB, migrations []sqlite.Migration, backupRoot, artifactRoot string, now time.Time) (UpgradeResult, error) {

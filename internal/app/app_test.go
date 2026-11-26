@@ -24,7 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 const compositionModelsYAML = `models:
@@ -366,7 +366,7 @@ func TestCompositionCommandHasNoCapabilityGate(t *testing.T) {
 
 func TestCompositionCommandModelOptionsMatchEvaluation(t *testing.T) {
 	cfg := appconfig.Default()
-	options := evaluationModelOptions(&cfg, storetest.OpenMigrated(t))
+	options := evaluationModelOptions(&cfg, sqlitetest.OpenMigrated(t, Schemas()...))
 	if options.Prices != nil {
 		t.Error("the evaluation registry carries a price registry")
 	}
@@ -384,7 +384,7 @@ func TestCompositionCommandModelOptionsMatchEvaluation(t *testing.T) {
 func TestCompositionDurableRuntimeIsBuiltOnce(t *testing.T) {
 	t.Run("sqlite", func(t *testing.T) {
 		b := newDurableRuntimeBuild()
-		b.db = storetest.OpenMigrated(t)
+		b.db = sqlitetest.OpenMigrated(t, Schemas()...)
 		first, err := b.durableRuntime()
 		if err != nil {
 			t.Fatalf("durableRuntime: %v", err)

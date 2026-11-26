@@ -11,13 +11,16 @@ import (
 	"testing"
 	"time"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type fakeTurnRuntime struct {
@@ -120,7 +123,7 @@ type dispatcherTestRig struct {
 
 func dispatcherTestSetup(t *testing.T, backend *fakeTurnRuntime) (*Dispatcher, platformwebhook.ExecutionStore) {
 	t.Helper()
-	return newTestDispatcher(t, &dispatcherTestRig{db: storetest.OpenMigrated(t), backend: backend})
+	return newTestDispatcher(t, &dispatcherTestRig{db: sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema()), backend: backend})
 }
 
 func newTestDispatcher(t *testing.T, rig *dispatcherTestRig) (*Dispatcher, platformwebhook.ExecutionStore) {
@@ -343,7 +346,7 @@ func TestWebhookDispatcher_ConcurrentDuplicatesSubmitOnce(t *testing.T) {
 
 func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 	dispatcher, executions := newTestDispatcher(t, &dispatcherTestRig{db: db, backend: backend})
 	ctx := t.Context()
 

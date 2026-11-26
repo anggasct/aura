@@ -17,10 +17,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type managerFixture struct {
@@ -41,7 +41,7 @@ type managerFixture struct {
 
 func newManagerFixture(t *testing.T, build func(api *fakeAPI) func(index int) func(map[string]any) (any, error), mutate func(cfg *Config)) *managerFixture {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema())
 	now := time.Now().UTC()
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create session: %v", err)

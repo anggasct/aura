@@ -11,7 +11,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -140,7 +142,7 @@ func newChildHost(t *testing.T, sessions *scriptedSessions) *childHost {
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
-	host := &childHost{t: t, db: storetest.OpenMigrated(t), runs: runs, ledger: ledger, signaler: signaler, handler: handler}
+	host := &childHost{t: t, db: sqlitetest.OpenMigrated(t, turnstore.Schema(), sqlite.Schema(), effect.Schema(), Schema()), runs: runs, ledger: ledger, signaler: signaler, handler: handler}
 	host.startHost()
 	t.Cleanup(host.stopHost)
 	return host

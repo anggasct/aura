@@ -14,8 +14,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const testTimeout = 20 * time.Second
@@ -23,7 +24,7 @@ const testTimeout = 20 * time.Second
 func newDatabaseFile(t *testing.T) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, path)
+	sqlitetest.Seed(t, path, turnstore.Schema(), Schema())
 	return path
 }
 

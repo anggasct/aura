@@ -10,8 +10,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func testModuleConfig(root string) *Config {
@@ -28,7 +28,7 @@ func testModuleConfig(root string) *Config {
 }
 
 func TestNewModuleRejectsNilDependencies(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	cfg := testModuleConfig(t.TempDir())
 	log := &memoryActivationLog{}
 
@@ -49,7 +49,7 @@ func TestNewModuleRejectsNilDependencies(t *testing.T) {
 }
 
 func TestModuleWiresContextProviderRendererAndChatCommands(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	root := filepath.Join(t.TempDir(), "skills-root")
 	skillDir := filepath.Join(root, "review-pr")
 	if err := os.MkdirAll(skillDir, 0o700); err != nil {

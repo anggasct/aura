@@ -11,14 +11,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func openSkillsTestStore(t *testing.T) *skills.SQLiteStore {
 	t.Helper()
 	dbPath := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 	handle, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -59,7 +59,7 @@ func TestSkillStoreRegistryRoundTrip(t *testing.T) {
 
 func TestBuildSkillsEngine(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "chat.db")
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 	chatDB, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -97,7 +97,7 @@ func TestBuildSkillsEngine(t *testing.T) {
 
 func TestSkillStoreBusyStaysStorageBusy(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "busy.db")
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 	holder, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{BusyTimeout: time.Millisecond})
 	if err != nil {
 		t.Fatalf("open holder: %v", err)

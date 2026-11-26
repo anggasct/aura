@@ -15,9 +15,12 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func buildTestRegistry() (*auraagent.Registry, error) {
@@ -71,7 +74,7 @@ func (f *fakeToolRunner) Invoke(ctx context.Context, toolID string, args json.Ra
 
 func newTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return storetest.OpenMigrated(t)
+	return sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema(), Schema())
 }
 
 func (s *Store) newRun(ctx context.Context, spec *Spec, input *RunInput, origin *RunOrigin) (*RunSummary, error) {

@@ -9,10 +9,14 @@ import (
 	"testing"
 	"time"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/usage"
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
@@ -22,7 +26,7 @@ func newSessionTestDB(t *testing.T) (*sql.DB, turnstore.SessionService, turnstor
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

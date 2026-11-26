@@ -11,7 +11,8 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestCommandsEmptyReplyTextReturnsUsageError(t *testing.T) {
@@ -41,7 +42,7 @@ func TestCommandsNilOpenerFailsWithInvalidArgument(t *testing.T) {
 }
 
 func TestCommandsListReplyAndRelease(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s := mustNewSQLiteStore(t, db)
 	sessionID := "main/discord:office/dm:9"
 	seedPersonaSession(t, db, sessionID, "discord:9", "main")

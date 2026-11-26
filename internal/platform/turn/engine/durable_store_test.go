@@ -13,13 +13,15 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type hookedSessionStore struct {
@@ -128,7 +130,7 @@ type runningHost struct {
 func openTestDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

@@ -5,13 +5,19 @@ import (
 	"testing"
 	"time"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 func TestTelegramCursorStore_AdvancesMonotonically(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), storage.Schema(), Schema())
 	cursors, err := NewSQLiteCursorStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteCursorStore: %v", err)
@@ -46,7 +52,7 @@ func TestTelegramCursorStore_RejectsInvalidInput(t *testing.T) {
 	if _, err := NewSQLiteCursorStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewSQLiteCursorStore(nil) = %v, want invalid_argument", err)
 	}
-	cursors, err := NewSQLiteCursorStore(storetest.OpenMigrated(t))
+	cursors, err := NewSQLiteCursorStore(sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), storage.Schema(), Schema()))
 	if err != nil {
 		t.Fatalf("NewSQLiteCursorStore: %v", err)
 	}
@@ -61,7 +67,7 @@ func TestTelegramCursorStore_RejectsInvalidInput(t *testing.T) {
 }
 
 func TestTelegramCursorStore_JoinsContextTransaction(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), storage.Schema(), Schema())
 	cursors, err := NewSQLiteCursorStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteCursorStore: %v", err)

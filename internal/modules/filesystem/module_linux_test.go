@@ -10,10 +10,11 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestModuleRegistersAndExecutesWorkspaceTools(t *testing.T) {
@@ -30,7 +31,7 @@ func TestModuleRegistersAndExecutesWorkspaceTools(t *testing.T) {
 		t.Fatalf("Tools() count = %d, want 3", len(mod.Tools()))
 	}
 
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	turns := turnstore.NewTurnStore(db)
 	if err := turns.CreateSession(t.Context(), &turn.Session{ID: "sess-1", OwnerID: "owner"}); err != nil {
 		t.Fatalf("CreateSession: %v", err)

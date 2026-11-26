@@ -6,9 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestNewSQLiteStoreRejectsNilDB(t *testing.T) {
@@ -20,7 +22,7 @@ func TestNewSQLiteStoreRejectsNilDB(t *testing.T) {
 
 func TestPersonaEvalResultsAppendAndLatestWins(t *testing.T) {
 	t.Parallel()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), Schema())
 	evals, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
@@ -56,7 +58,7 @@ func TestPersonaEvalResultsAppendAndLatestWins(t *testing.T) {
 
 func TestPersonaEvalStoreJoinsCallersTransaction(t *testing.T) {
 	t.Parallel()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), Schema())
 	evals, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)

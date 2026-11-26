@@ -9,10 +9,12 @@ import (
 	"time"
 
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type orphanRunFixture struct {
@@ -100,7 +102,7 @@ func TestDeleteOrphanedTurnRuns(t *testing.T) {
 		returnedSession = "lobby/discord:owner/dm:600"
 		goneSession     = "lobby/discord:owner/dm:599"
 	)
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	runs := newOrphanRuntime(t, db)
 	turns := turnstore.NewTurnStore(db)
 	seedOrphanSession(t, db, liveSession, "discord:601", "lobby")
@@ -163,7 +165,7 @@ func TestDeleteOrphanedTurnRuns(t *testing.T) {
 }
 
 func TestOrphanedTurnRunPayloadsDecodeAsTheSQLRuleDid(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	runs := newOrphanRuntime(t, db)
 	turns := turnstore.NewTurnStore(db)
 	seedOrphanSession(t, db, "sess-a", "discord:1", "lobby")

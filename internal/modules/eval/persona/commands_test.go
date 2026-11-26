@@ -11,9 +11,11 @@ import (
 	"github.com/spf13/cobra"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestCommandsRejectNilOpener(t *testing.T) {
@@ -40,7 +42,7 @@ func TestCommandsRejectNilOpener(t *testing.T) {
 
 func TestScheduleRunnerLogsDistinctCronWarnings(t *testing.T) {
 	t.Parallel()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), Schema())
 	evalStore, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +109,7 @@ func TestModuleImplementsHealthProviderAndRejectsNilDeps(t *testing.T) {
 	if _, err := New(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("New(nil) = %v, want %q", err, ErrorCodeInvalidArgument)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), Schema())
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "hi", Audience: auraagent.AudiencePublic,
 		Tools: []string{"web_search"}, PublicTools: []string{"web_search"},

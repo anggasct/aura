@@ -9,15 +9,19 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func validChannelDeps(t *testing.T) *Deps {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 	executions, err := platformwebhook.NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
@@ -78,7 +82,7 @@ func TestExecutionStatusStore(t *testing.T) {
 	if _, err := NewExecutionStatusStore(nil); !fault.HasCode(err, platformwebhook.ErrorCodeInvalidArgument) {
 		t.Fatalf("NewExecutionStatusStore(nil) = %v, want %s", err, platformwebhook.ErrorCodeInvalidArgument)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), platformwebhook.Schema())
 	executions, err := platformwebhook.NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)

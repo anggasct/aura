@@ -19,9 +19,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type fakeCronEngine struct {
@@ -60,7 +60,7 @@ func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2
 
 func cronTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return storetest.OpenMigrated(t)
+	return sqlitetest.OpenMigrated(t, Schemas()...)
 }
 
 func cronCompletedBatch(turnID, text string) []turn.Event {

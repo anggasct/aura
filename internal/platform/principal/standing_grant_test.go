@@ -4,11 +4,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestStandingGrantLifecycle(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	ctx := t.Context()
 	grants := NewStandingGrantStore(db)
 	now := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
@@ -57,7 +57,7 @@ func TestStandingGrantLifecycle(t *testing.T) {
 }
 
 func TestStandingGrantRejectsIncompleteGrants(t *testing.T) {
-	grants := NewStandingGrantStore(storetest.OpenMigrated(t))
+	grants := NewStandingGrantStore(sqlitetest.OpenMigrated(t, Schema()))
 	now := time.Now().UTC()
 	for name, grant := range map[string]StandingGrant{
 		"no principal": {AgentID: "kantor", ToolName: "exec", GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)},
@@ -71,17 +71,11 @@ func TestStandingGrantRejectsIncompleteGrants(t *testing.T) {
 }
 
 func TestAccessSchemaTablesExist(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	for _, table := range []string{"principal_grant", "pairing_request", "standing_grant", "session_handoff"} {
+	db := sqlitetest.OpenMigrated(t, Schema())
+	for _, table := range []string{"principal_grant", "pairing_request", "standing_grant", "api_key"} {
 		var name string
 		if err := db.QueryRowContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
 			t.Errorf("table %s missing: %v", table, err)
-		}
-	}
-	for _, column := range []string{"principal_id", "principal_class"} {
-		var count int
-		if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM pragma_table_info('usage_reservation') WHERE name = ?`, column).Scan(&count); err != nil || count != 1 {
-			t.Errorf("usage_reservation.%s = %d, %v", column, count, err)
 		}
 	}
 }

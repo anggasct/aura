@@ -16,11 +16,11 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/vision"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func lifecycleLimits() *vision.Limits {
@@ -78,7 +78,7 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -144,7 +144,7 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -176,7 +176,7 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
