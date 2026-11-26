@@ -13,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -117,7 +118,7 @@ func TestClientMissingToolCapability(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected connect to fail due to missing tools capability")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrCapabilityUnavailable {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrCapabilityUnavailable {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrCapabilityUnavailable, code, err)
 	}
 }
@@ -139,7 +140,7 @@ func TestClientNotConnectedErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if code, _ := CodeOf(err); code != ErrServerUnavailable {
+		if code, _ := fault.CodeOf[ErrorCode](err); code != ErrServerUnavailable {
 			t.Fatalf("expected %s, got %s", ErrServerUnavailable, code)
 		}
 	})
@@ -149,7 +150,7 @@ func TestClientNotConnectedErrors(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error")
 		}
-		if code, _ := CodeOf(err); code != ErrServerUnavailable {
+		if code, _ := fault.CodeOf[ErrorCode](err); code != ErrServerUnavailable {
 			t.Fatalf("expected %s, got %s", ErrServerUnavailable, code)
 		}
 	})
@@ -256,7 +257,7 @@ func TestClientUnsupportedProtocolVersion(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Connect to fail for handshake failure")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrServerUnavailable, code, err)
 	}
 }
@@ -322,7 +323,7 @@ func TestClientDiscoveryValidation(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected duplicate tool names to fail")
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrSchemaInvalid {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrSchemaInvalid {
 			t.Fatalf("expected %s, got %s", ErrSchemaInvalid, code)
 		}
 	})
@@ -371,7 +372,7 @@ func TestClientDiscoveryValidation(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected oversized schema to fail")
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrMessageTooLarge {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrMessageTooLarge {
 			t.Fatalf("expected %s, got %s", ErrMessageTooLarge, code)
 		}
 	})
@@ -437,7 +438,7 @@ func TestClientStreamableHTTPRequiresAuth(t *testing.T) {
 	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("expected unresolvable credential to fail")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Fatalf("expected %s, got %s (%v)", ErrAuthRequired, code, err)
 	}
 }
@@ -457,7 +458,7 @@ func TestClientStreamableHTTPWithoutClientFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("expected missing http client to fail closed")
-	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrEgressDenied {
 		t.Fatalf("expected %s, got %s (%v)", ErrEgressDenied, code, err)
 	}
 }
@@ -477,7 +478,7 @@ func TestClientStreamableHTTPWithoutPolicyFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(ctx) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("expected missing endpoint policy to fail closed")
-	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrEgressDenied {
 		t.Fatalf("expected %s, got %s (%v)", ErrEgressDenied, code, err)
 	}
 }
@@ -527,7 +528,7 @@ func TestClientDiscoveryNameValidation(t *testing.T) {
 			}
 			if _, err := client.DiscoverTools(ctx); err == nil {
 				t.Fatalf("expected %s to fail", tc.name)
-			} else if code, ok := CodeOf(err); !ok || code != ErrSchemaInvalid {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrSchemaInvalid {
 				t.Fatalf("expected %s, got %s (%v)", ErrSchemaInvalid, code, err)
 			}
 		})

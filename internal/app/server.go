@@ -17,6 +17,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/handoff"
+	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -68,7 +69,7 @@ type serverBuild struct {
 	ownerRoute         *approval.OwnerRoute
 	workflowRoute      *approval.OwnerRoute
 	accessRecorder     *telemetry.AccessRecorder
-	mcp                *mcpRuntime
+	mcp                *mcp.Module
 	personaRecorder    *telemetry.PersonaRecorder
 	durableConfig      *runtimeengine.DurableConfig
 	host               *runtimeengine.Host
@@ -247,26 +248,39 @@ func (b *build) startConnectorPlugins(ctx context.Context, plugins *pluginRuntim
 
 func (b *build) startMCPServers(ctx context.Context, plugins *pluginRuntime) error {
 	cfg, logger := b.cfg, b.logger
-	if !mcpServersConfigured(cfg) && len(plugins.mcpPlugins()) == 0 {
+	mcpPlugins := plugins.mcpPlugins()
+	if len(configuredMCPServers(cfg)) == 0 && len(mcpPlugins) == 0 {
 		return nil
 	}
-	mcpServers, err := startConfiguredMCP(ctx, cfg, b.builtin.Broker(), logger, b.meters(), b.result.CapabilityReport, b.registry.Definitions(), plugins.mcpPlugins())
+	trustPath, err := mcpTrustRegistryPath(cfg)
 	if err != nil {
 		return err
 	}
-	b.server.mcp = mcpServers
-	if err := b.group.Defer("mcp", func(ctx context.Context) error {
-		if err := mcpServers.Close(ctx); err != nil {
+	mod, err := mcp.New(ctx, &mcp.ModuleDeps{
+		Config:       cfg.MCP,
+		Plugins:      mcpPlugins,
+		Broker:       b.builtin.Broker(),
+		TrustPath:    trustPath,
+		Meters:       b.meters(),
+		Capabilities: b.result.CapabilityReport,
+		Personas:     b.registry.Definitions(),
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       logger,
+	})
+	if err != nil {
+		return err
+	}
+	b.server.mcp = mod
+	if err := b.registerModule("mcp", mod); err != nil {
+		_ = mod.Close(context.WithoutCancel(ctx))
+		return err
+	}
+	return b.group.Defer("mcp", func(ctx context.Context) error {
+		if err := mod.Close(ctx); err != nil {
 			logger.WarnContext(ctx, "mcp shutdown", "component", "mcp", "error", err)
 		}
 		return nil
-	}); err != nil {
-		return err
-	}
-	if mcpServers.hasCheck {
-		b.server.checks = append(b.server.checks, mcpServers.check)
-	}
-	return nil
+	})
 }
 
 func (b *build) buildServerDurable() error {

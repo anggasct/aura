@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestComputeTrustDigest(t *testing.T) {
@@ -98,7 +99,7 @@ func TestComputeTrustDigest(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for nil config")
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 			t.Fatalf("expected %s, got %s", ErrConfigInvalid, code)
 		}
 	})
@@ -384,7 +385,7 @@ func TestComputeConfigDigest(t *testing.T) {
 	}
 	t.Run("nil config fails", func(t *testing.T) {
 		_, err := ComputeConfigDigest(nil)
-		if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 			t.Fatalf("code = %v, %v", code, ok)
 		}
 	})

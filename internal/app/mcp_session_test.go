@@ -8,12 +8,13 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
 func TestMCPSessionStarterMapping(t *testing.T) {
 	var got *sandbox.SessionRequest
-	starter := newMCPSessionStarter(func(_ context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
+	starter := mcp.NewSandboxSessionStarter(func(_ context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
 		got = req
 		return nil, errors.New("stop here")
 	})
@@ -49,7 +50,7 @@ func TestMCPSessionStarterMapping(t *testing.T) {
 	}
 	if _, err := starter.StartSession(t.Context(), nil); err == nil {
 		t.Error("nil request accepted")
-	} else if code, ok := mcp.CodeOf(err); !ok || code != mcp.ErrConfigInvalid {
+	} else if code, ok := fault.CodeOf[mcp.ErrorCode](err); !ok || code != mcp.ErrConfigInvalid {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
@@ -65,11 +66,16 @@ func TestTranslateSessionError(t *testing.T) {
 		{sandbox.Errorf(sandbox.ErrorCodeSandboxUnavailable, "no linux"), mcp.ErrServerUnavailable},
 		{errors.New("plain failure"), mcp.ErrServerUnavailable},
 	} {
-		err := translateSessionError(tc.err)
+		starter := mcp.NewSandboxSessionStarter(func(_ context.Context, _ *sandbox.SessionRequest) (*sandbox.Session, error) {
+			return nil, tc.err
+		})
+		_, err := starter.StartSession(t.Context(), &mcp.ContainedSessionRequest{
+			ServerName: "docs", Executable: "/bin/server", WorkingDir: "/work", Timeout: time.Minute,
+		})
 		if err == nil {
 			t.Fatalf("error swallowed: %v", tc.err)
 		}
-		if code, ok := mcp.CodeOf(err); !ok || code != tc.code {
+		if code, ok := fault.CodeOf[mcp.ErrorCode](err); !ok || code != tc.code {
 			t.Errorf("code = %v, %v, want %v", code, ok, tc.code)
 		}
 	}
@@ -113,7 +119,7 @@ func TestConnectorSessionStarterAppliesTheConnectorProfileAndLimits(t *testing.T
 
 func TestBaseSessionStarterKeepsTheBaseProfile(t *testing.T) {
 	var got *sandbox.SessionRequest
-	starter := newMCPSessionStarter(func(_ context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
+	starter := mcp.NewSandboxSessionStarter(func(_ context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
 		got = req
 		return nil, errors.New("stop here")
 	})

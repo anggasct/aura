@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -304,7 +305,7 @@ func TestNewManagerRejectsUnsafePlugins(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			var prompts int
 			_, err := NewManager(&ManagerOptions{Config: &config.MCP{Servers: tc.servers}, Broker: countingBroker(t, &prompts), Plugins: tc.plugins})
-			if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 				t.Fatalf("NewManager error = %v, want %s", err, ErrConfigInvalid)
 			}
 		})
@@ -374,7 +375,7 @@ func TestNewManagerRejectsInvalidPluginDisplayNames(t *testing.T) {
 			server.Tools[0].Display = display
 			var prompts int
 			_, err := NewManager(&ManagerOptions{Config: &config.MCP{}, Broker: countingBroker(t, &prompts), Plugins: []PluginServer{server}})
-			if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 				t.Fatalf("NewManager error = %v, want %s", err, ErrConfigInvalid)
 			}
 		})

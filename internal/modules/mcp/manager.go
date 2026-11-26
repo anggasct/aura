@@ -16,6 +16,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -227,7 +228,7 @@ func (m *Manager) recordOutcome(ctx context.Context, serverName string, err erro
 	if err == nil {
 		return
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		code = ErrServerUnavailable
 	}

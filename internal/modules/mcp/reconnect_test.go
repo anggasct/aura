@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -97,7 +98,7 @@ func TestReconnectHealsWithoutDuplicating(t *testing.T) {
 	dropped.drop.Store(true)
 	if err := callWork(ctx, t, client); err == nil {
 		t.Fatal("call during outage accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	if got := dropped.invoked.Load(); got != 1 {

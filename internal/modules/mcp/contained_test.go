@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type scriptedSession struct {
@@ -239,7 +240,7 @@ func TestContainedUnavailableFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("unavailable containment accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	if len(starter.requests) != 1 {
@@ -256,7 +257,7 @@ func TestContainedWithoutStarterFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("starterless stdio accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 }

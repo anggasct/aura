@@ -14,6 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const plantedProviderText = "PLANTED-PROVIDER-TEXT-91c2"
@@ -199,7 +200,7 @@ func TestClientRefusesAnAuthorizerNextToConfiguredAuth(t *testing.T) {
 	}
 	defer func() { _ = client.Close(t.Context()) }()
 	err = client.Connect(t.Context(), nil)
-	if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 		t.Fatalf("Connect error = %v", err)
 	}
 }
@@ -303,7 +304,7 @@ func TestAuthorizerFailureOnACallKeepsTheSession(t *testing.T) {
 	}
 	authorizer.setError(errors.New("plugin_auth_unavailable: the token endpoint is unavailable"))
 	_, err = client.CallTool(ctx, "echo", args)
-	if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Fatalf("CallTool error = %v, want %s", err, ErrAuthRequired)
 	}
 	if !client.Connected() {

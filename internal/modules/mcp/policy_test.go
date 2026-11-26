@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"io"
 	"net/http"
 	"strings"
@@ -69,7 +70,7 @@ func TestCappedTransportRejectsDeclaredLength(t *testing.T) {
 	}
 	if err == nil {
 		t.Fatal("declared over-limit body accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrMessageTooLarge {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrMessageTooLarge {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	if !closed {
@@ -168,7 +169,7 @@ func TestRedirectPolicy(t *testing.T) {
 	}
 	if err := checkRedirectPolicy(other, []*http.Request{origin}, true, base); err == nil {
 		t.Error("cross-origin redirect accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrEgressDenied {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 	if err := checkRedirectPolicy(same, []*http.Request{origin}, true, base); err != nil {
@@ -180,7 +181,7 @@ func TestRedirectPolicy(t *testing.T) {
 	}
 	if err := checkRedirectPolicy(same, hops, true, base); err == nil {
 		t.Error("over-long chain accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrEgressDenied {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }

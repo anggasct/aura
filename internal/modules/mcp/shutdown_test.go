@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -36,7 +37,7 @@ func TestConnectAfterCloseFails(t *testing.T) {
 	}
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("connect after close accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 }

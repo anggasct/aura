@@ -4,15 +4,23 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"path/filepath"
 
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
+)
+
+const (
+	mcpTrustDirName  = "mcp"
+	mcpTrustFileName = "trust.json"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
@@ -21,6 +29,40 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
+	root.AddCommand(mcp.Commands(mcpOpener(gf))...)
+}
+
+func mcpTrustRegistryPath(cfg *appconfig.Config) (string, error) {
+	dataRoot, err := resolveDataRoot(cfg)
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dataRoot, mcpTrustDirName, mcpTrustFileName), nil
+}
+
+func configuredMCPServers(cfg *appconfig.Config) []legacyconfig.MCPServer {
+	if cfg == nil || cfg.MCP == nil {
+		return nil
+	}
+	return cfg.MCP.Servers
+}
+
+func mcpOpener(gf *globalFlags) mcp.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, servers []legacyconfig.MCPServer, registry *mcp.FileTrustRegistry) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		trustPath, err := mcpTrustRegistryPath(result.Config)
+		if err != nil {
+			return err
+		}
+		registry, err := mcp.NewFileTrustRegistry(trustPath)
+		if err != nil {
+			return err
+		}
+		return fn(cmd.Context(), configuredMCPServers(result.Config), registry)
+	}
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {

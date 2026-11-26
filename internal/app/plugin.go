@@ -54,7 +54,7 @@ func newPluginAuth(cfg *appconfig.Config, redactor auth.Redactor) (*auth.Registr
 	if err != nil {
 		return nil, err
 	}
-	return auth.NewRegistry(&auth.Options{Dir: dir, Secrets: mcpSecretResolver{}, HTTPClient: pluginHTTPClient(mcpHTTPClient(nil)), Redactor: redactor})
+	return auth.NewRegistry(&auth.Options{Dir: dir, Secrets: mcp.NewSecretResolver(), HTTPClient: pluginHTTPClient(mcp.NewHTTPClient(nil)), Redactor: redactor})
 }
 
 type loopbackAwareTransport struct {
@@ -255,7 +255,7 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 	return servers
 }
 
-func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServers *mcpRuntime) (health.RegisteredCheck, bool, error) {
+func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServers *mcp.Module) (health.RegisteredCheck, bool, error) {
 	if r == nil || (cfg.Plugins == nil && r.installed == 0) {
 		return health.RegisteredCheck{}, false, nil
 	}
@@ -282,10 +282,10 @@ func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServer
 	}, true, nil
 }
 
-func (r *pluginRuntime) runtimeStatuses(ctx context.Context, mcpServers *mcpRuntime) []plugin.RuntimeStatus {
+func (r *pluginRuntime) runtimeStatuses(ctx context.Context, mcpServers *mcp.Module) []plugin.RuntimeStatus {
 	var out []plugin.RuntimeStatus
 	if mcpServers != nil {
-		for _, status := range mcpServers.manager.PluginStatuses() {
+		for _, status := range mcpServers.PluginStatuses() {
 			out = append(out, plugin.RuntimeStatus{
 				ID: status.ID, Running: status.Code == "" && status.Connected, Drift: status.Drift,
 				Auth: r.authStatus(ctx, status.ID),

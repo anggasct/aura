@@ -1,0 +1,170 @@
+package mcp
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+
+	"github.com/spf13/cobra"
+
+	"github.com/anggasct/aura/internal/config"
+)
+
+const restartNotice = "takes effect at the next server start"
+
+type Opener func(cmd *cobra.Command, fn func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error) error
+
+type ListRow struct {
+	Name         string   `json:"name"`
+	Transport    string   `json:"transport"`
+	State        string   `json:"state"`
+	DigestPrefix string   `json:"digest_prefix"`
+	Tools        []string `json:"tools"`
+}
+
+type ListOutput struct {
+	Servers []ListRow `json:"servers"`
+}
+
+func Commands(open Opener) []*cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "mcp",
+		Short: "Review configured MCP servers and their trust state",
+	}
+	trust := &cobra.Command{
+		Use:   "trust",
+		Short: "Approve or revoke trust for a configured MCP server",
+	}
+	trust.AddCommand(newTrustApproveCmd(open), newTrustRevokeCmd(open))
+	cmd.AddCommand(newListCmd(open), trust)
+	return []*cobra.Command{cmd}
+}
+
+func runWithOpener(cmd *cobra.Command, open Opener, fn func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error) error {
+	if open == nil {
+		return Errorf(ErrConfigInvalid, "mcp command opener must not be nil")
+	}
+	return open(cmd, fn)
+}
+
+func findServer(servers []config.MCPServer, name string) (*config.MCPServer, bool) {
+	for i := range servers {
+		if servers[i].Name == name {
+			return &servers[i], true
+		}
+	}
+	return nil, false
+}
+
+func toolsColumn(tools []string) string {
+	if len(tools) == 0 {
+		return "-"
+	}
+	return strings.Join(tools, ",")
+}
+
+func newListCmd(open Opener) *cobra.Command {
+	var asJSON bool
+	cmd := &cobra.Command{
+		Use:   "list",
+		Short: "List configured MCP servers with their trust state",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			return runWithOpener(cmd, open, func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error {
+				reviews, err := ReviewServers(ctx, registry, servers)
+				if err != nil {
+					return err
+				}
+				rows := make([]ListRow, 0, len(reviews))
+				for i := range reviews {
+					rows = append(rows, ListRow{
+						Name:         reviews[i].Name,
+						Transport:    reviews[i].Transport,
+						State:        string(reviews[i].State),
+						DigestPrefix: reviews[i].DigestPrefix(),
+						Tools:        append([]string{}, reviews[i].Tools...),
+					})
+				}
+				out := cmd.OutOrStdout()
+				if asJSON {
+					encoder := json.NewEncoder(out)
+					encoder.SetIndent("", "  ")
+					return encoder.Encode(ListOutput{Servers: rows})
+				}
+				if len(rows) == 0 {
+					_, err := fmt.Fprintln(out, "no mcp servers configured")
+					return err
+				}
+				if _, err := fmt.Fprintln(out, "SERVER\tTRANSPORT\tSTATE\tDIGEST\tTOOLS"); err != nil {
+					return err
+				}
+				for i := range rows {
+					if _, err := fmt.Fprintf(out, "%s\t%s\t%s\t%s\t%s\n", rows[i].Name, rows[i].Transport, rows[i].State, rows[i].DigestPrefix, toolsColumn(rows[i].Tools)); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		},
+	}
+	cmd.Flags().BoolVar(&asJSON, "json", false, "emit machine-readable output")
+	return cmd
+}
+
+func newTrustApproveCmd(open Opener) *cobra.Command {
+	return &cobra.Command{
+		Use:   "approve <server>",
+		Short: "Approve the current configuration of an MCP server",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWithOpener(cmd, open, func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error {
+				server, ok := findServer(servers, args[0])
+				if !ok {
+					return Errorf(ErrConfigInvalid, "server %q is not configured", args[0])
+				}
+				approval, err := ApproveServer(ctx, registry, server)
+				if err != nil {
+					return err
+				}
+				out := cmd.OutOrStdout()
+				digest := approval.Review.DigestPrefix()
+				switch approval.Change {
+				case ApprovalChangeAlreadyCurrent:
+					_, err = fmt.Fprintf(out, "%s is already approved (digest %s); no change\n", server.Name, digest)
+				case ApprovalChangeToolSurface:
+					_, err = fmt.Fprintf(out, "approved the changed tool surface of %s (%d tools: %s, digest %s); %s\n", server.Name, len(approval.Tools), strings.Join(approval.Tools, ", "), digest, restartNotice)
+				default:
+					_, err = fmt.Fprintf(out, "approved %s (%s, digest %s); %s\n", server.Name, server.Transport, digest, restartNotice)
+				}
+				return err
+			})
+		},
+	}
+}
+
+func newTrustRevokeCmd(open Opener) *cobra.Command {
+	return &cobra.Command{
+		Use:   "revoke <server>",
+		Short: "Remove the trust record of an MCP server",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runWithOpener(cmd, open, func(ctx context.Context, servers []config.MCPServer, registry *FileTrustRegistry) error {
+				removed, err := RevokeServer(ctx, registry, args[0])
+				if err != nil {
+					return err
+				}
+				_, configured := findServer(servers, args[0])
+				if !removed && !configured {
+					return Errorf(ErrConfigInvalid, "server %q is neither configured nor trusted", args[0])
+				}
+				if !removed {
+					_, err = fmt.Fprintf(cmd.OutOrStdout(), "%s had no trust record; no change\n", args[0])
+					return err
+				}
+				_, err = fmt.Fprintf(cmd.OutOrStdout(), "revoked trust for %s; %s\n", args[0], restartNotice)
+				return err
+			})
+		},
+	}
+}

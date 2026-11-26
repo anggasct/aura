@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
@@ -86,7 +87,7 @@ func TestLegacySSEOAuthFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("oauth over legacy SSE accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrCapabilityUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrCapabilityUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 }
@@ -149,7 +150,7 @@ func TestLegacyHandshakeCancelCarriesStableCode(t *testing.T) {
 	if err == nil {
 		t.Fatal("cancelled legacy handshake accepted")
 	}
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
 		t.Fatalf("cancelled handshake error carries no code: %v", err)
 	}

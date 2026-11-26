@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/plugin/connector"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
@@ -112,7 +113,7 @@ const (
 type sandboxSessionStart func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error)
 
 func newConnectorSessionStarter(start sandboxSessionStart) mcp.SessionStarter {
-	return newMCPSessionStarter(func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
+	return mcp.NewSandboxSessionStarter(func(ctx context.Context, req *sandbox.SessionRequest) (*sandbox.Session, error) {
 		req.Profile = sandbox.ProfileConnector
 		req.Limits.MemoryBytes = connectorMemoryBytes
 		req.Limits.MaxProcesses = connectorMaxProcesses
@@ -151,7 +152,7 @@ type connectorSession struct {
 func (s connectorSession) Request(ctx context.Context, payload []byte) ([]byte, error) {
 	out, err := s.inner.Request(ctx, payload)
 	if err != nil {
-		if code, coded := mcp.CodeOf(err); coded && code == mcp.ErrMessageTooLarge {
+		if fault.HasCode(err, mcp.ErrMessageTooLarge) {
 			return nil, connector.Errorf(connector.ErrRPCLimit, "the connector message exceeds the size bound")
 		}
 		return nil, err

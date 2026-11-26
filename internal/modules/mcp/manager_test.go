@@ -126,7 +126,7 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Start to fail due to trust required")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrTrustRequired, code, err)
 	}
 
@@ -251,7 +251,7 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ErrTrustRequired on first start without approval")
 	}
-	if code, _ := CodeOf(err); code != ErrTrustRequired {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrTrustRequired {
 		t.Fatalf("expected ErrTrustRequired, got %s", code)
 	}
 	if starter.starts() != 0 {
@@ -331,7 +331,7 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	defer func() { _ = mgr.Close(t.Context()) }()
 
 	err = mgr.Start(ctx)
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("expected %s, got %v", ErrTrustRequired, err)
 	}
 
@@ -386,7 +386,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	approveConfigDigest(t.Context(), t, trustRegistry, &serverCfg)
 
 	err = mgr.Start(ctx)
-	if code, _ := CodeOf(err); code != ErrServerUnavailable {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrServerUnavailable {
 		t.Fatalf("expected past the trust gate (server unavailable for dead helper), got %v", err)
 	}
 	startsBeforeChange := starter.starts()
@@ -408,7 +408,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	defer func() { _ = mgr2.Close(t.Context()) }()
 
 	err = mgr2.Start(ctx)
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("expected %s after command change, got %v", ErrTrustRequired, err)
 	}
 	if starter.starts() != startsBeforeChange {
@@ -416,7 +416,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	}
 	approveConfigDigest(t.Context(), t, trustRegistry, &mutated)
 	err = mgr2.Start(ctx)
-	if code, _ := CodeOf(err); code != ErrServerUnavailable {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrServerUnavailable {
 		t.Fatalf("expected past the trust gate after re-approval, got %v", err)
 	}
 }
@@ -453,7 +453,7 @@ func TestManagerCapabilityCheckFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Start to fail when required capability is rejected")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrCapabilityUnavailable {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrCapabilityUnavailable {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrCapabilityUnavailable, code, err)
 	}
 }
@@ -549,7 +549,7 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Start to fail when the session breaks during connect")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("expected %s, got %s (%v)", ErrServerUnavailable, code, err)
 	}
 	starter.mu.Lock()
@@ -687,7 +687,7 @@ func TestManagerPinsToolSurfaceOnFirstStartAndRequiresReapprovalOnDrift(t *testi
 	}
 	defer func() { _ = second.Close(t.Context()) }()
 	err = second.Start(ctx)
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("drifted tool surface started: %v", err)
 	}
 	if brokerHasTool(broker, FormatToolName("drift", "a")) || brokerHasTool(broker, FormatToolName("drift", "b")) {

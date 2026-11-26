@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -161,7 +162,7 @@ func TestOAuthRequiresStoredToken(t *testing.T) {
 	provider := oauthTestProvider(t, fake, NewMemoryTokenStore())
 	if _, err := provider.Handler(t.Context()); err == nil {
 		t.Fatal("missing token accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
@@ -282,7 +283,7 @@ func TestOAuthNoTokenFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("tokenless connect accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	if hits := fake.tokenHits.Load(); hits != 0 {
@@ -350,7 +351,7 @@ func TestStaticAuthHeaderModes(t *testing.T) {
 	}
 	if err == nil {
 		t.Error("missing credential accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
@@ -385,7 +386,7 @@ func TestAuthErrorsCarryNoSecrets(t *testing.T) {
 			t.Errorf("secret %q in error %q", canary, tokenErr.Error())
 		}
 	}
-	if code, ok := CodeOf(tokenErr); !ok || code != ErrAuthRequired {
+	if code, ok := fault.CodeOf[ErrorCode](tokenErr); !ok || code != ErrAuthRequired {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }

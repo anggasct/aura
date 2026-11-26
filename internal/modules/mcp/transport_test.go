@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -98,7 +99,7 @@ func TestEndpointPolicyDenyBlocksConnect(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("denied endpoint accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrEgressDenied {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrEgressDenied {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 }

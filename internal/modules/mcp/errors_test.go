@@ -4,28 +4,20 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestErrors(t *testing.T) {
 	t.Run("nil error CodeOf", func(t *testing.T) {
-		code, ok := CodeOf(nil)
+		code, ok := fault.CodeOf[ErrorCode](nil)
 		if ok || code != "" {
 			t.Fatalf("expected empty, got ok=%v, code=%v", ok, code)
 		}
 	})
 
-	t.Run("nil Error struct", func(t *testing.T) {
-		var e *Error
-		if e.Error() != "<nil>" {
-			t.Fatalf("expected <nil>, got %s", e.Error())
-		}
-		if e.Unwrap() != nil {
-			t.Fatal("expected nil unwrap")
-		}
-	})
-
 	t.Run("unrelated error CodeOf", func(t *testing.T) {
-		code, ok := CodeOf(errors.New("standard error"))
+		code, ok := fault.CodeOf[ErrorCode](errors.New("standard error"))
 		if ok || code != "" {
 			t.Fatalf("expected false, got ok=%v, code=%v", ok, code)
 		}
@@ -33,7 +25,7 @@ func TestErrors(t *testing.T) {
 
 	t.Run("Errorf and CodeOf", func(t *testing.T) {
 		err := Errorf(ErrConfigInvalid, "bad config: %s", "missing name")
-		code, ok := CodeOf(err)
+		code, ok := fault.CodeOf[ErrorCode](err)
 		if !ok || code != ErrConfigInvalid {
 			t.Fatalf("expected %s, got ok=%v, code=%v", ErrConfigInvalid, ok, code)
 		}
@@ -45,7 +37,7 @@ func TestErrors(t *testing.T) {
 	t.Run("Wrap and Unwrap", func(t *testing.T) {
 		cause := errors.New("underlying network down")
 		err := Wrap(ErrServerUnavailable, cause, "connection refused")
-		code, ok := CodeOf(err)
+		code, ok := fault.CodeOf[ErrorCode](err)
 		if !ok || code != ErrServerUnavailable {
 			t.Fatalf("expected %s, got %s", ErrServerUnavailable, code)
 		}
@@ -61,7 +53,7 @@ func TestErrors(t *testing.T) {
 	t.Run("wrapped in standard fmt.Errorf", func(t *testing.T) {
 		orig := Errorf(ErrTrustRequired, "trust required")
 		wrapped := fmt.Errorf("context: %w", orig)
-		code, ok := CodeOf(wrapped)
+		code, ok := fault.CodeOf[ErrorCode](wrapped)
 		if !ok || code != ErrTrustRequired {
 			t.Fatalf("expected %s, got ok=%v, code=%s", ErrTrustRequired, ok, code)
 		}

@@ -59,9 +59,9 @@ func processesRunning(t *testing.T, executable string) []int {
 	return found
 }
 
-func findingsByCode(t *testing.T, started *mcpRuntime) map[string]string {
+func findingsByCode(t *testing.T, started *mcp.Module) map[string]string {
 	t.Helper()
-	return findingCodes(started.check.Checker.Check(t.Context()))
+	return findingCodes(mcpHealthCheck(t, started).Checker.Check(t.Context()))
 }
 
 func TestIntegrationMCPStdioServerInsideTheSandboxSession(t *testing.T) {
@@ -77,7 +77,7 @@ func TestIntegrationMCPStdioServerInsideTheSandboxSession(t *testing.T) {
 
 	harness := newMCPHarness(t, []config.MCPServer{server})
 	harness.approveServer(t, "docs")
-	started := harness.start(t, newMCPSessionStarter(sandbox.Start))
+	started := harness.start(t, mcp.NewSandboxSessionStarter(sandbox.Start))
 
 	names := harness.toolNames()
 	for _, want := range []string{"mcp_docs_ping", "mcp_docs_hang"} {

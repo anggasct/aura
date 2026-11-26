@@ -140,6 +140,15 @@ func personaToolNames(cfg *appconfig.Config) []string {
 	return names
 }
 
+func configuredMCPServerNames(cfg *appconfig.Config) []string {
+	servers := configuredMCPServers(cfg)
+	names := make([]string, 0, len(servers))
+	for i := range servers {
+		names = append(names, servers[i].Name)
+	}
+	return names
+}
+
 func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 	routeSet := make(map[string]bool, len(cfg.Models.Definitions)+len(cfg.ModelRoutes))
 	for route := range cfg.Models.Definitions {
