@@ -3,6 +3,8 @@ package webhook
 import (
 	"sync"
 	"time"
+
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type RateLimiter struct {
@@ -16,10 +18,10 @@ type RateLimiter struct {
 
 func NewRateLimiter(limit int, now func() time.Time) (*RateLimiter, error) {
 	if limit < 1 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "rate limit must be at least 1")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "rate limit must be at least 1")
 	}
 	if now == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "clock must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "clock must not be nil")
 	}
 	return &RateLimiter{
 		limit:   limit,

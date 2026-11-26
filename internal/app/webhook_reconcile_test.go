@@ -1,28 +1,23 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
-	"sync"
 	"testing"
-	"testing/synctest"
 	"time"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
-const (
-	testReconcileEventPage = 3
-	reconcilePassWait      = 10 * time.Second
-)
+const reconcilePassWait = 10 * time.Second
 
 type storedTurnEvent struct {
 	id      string
@@ -38,18 +33,22 @@ type webhookTurnSeed struct {
 	expiresAt   time.Time
 }
 
-func seedWebhookTurn(t *testing.T, db *sql.DB, seed *webhookTurnSeed) *store.WebhookExecution {
+func seedWebhookTurn(t *testing.T, db *sql.DB, seed *webhookTurnSeed) *platformwebhook.Execution {
 	t.Helper()
 	now := time.Now().UTC()
-	execution := &store.WebhookExecution{
+	execution := &platformwebhook.Execution{
 		ID: seed.id, KeyID: "primary", EventID: "evt-" + seed.id, Nonce: "nonce-" + seed.id, BodyDigest: "digest-" + seed.id,
-		TurnID: "turn-" + seed.id, SessionID: "sess-" + seed.id, State: store.WebhookExecutionStateAccepted,
+		TurnID: "turn-" + seed.id, SessionID: "sess-" + seed.id, State: platformwebhook.StateAccepted,
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
 	if !seed.expiresAt.IsZero() {
 		execution.ExpiresAt = seed.expiresAt
 	}
-	if err := store.NewWebhookExecutionStore(db).InsertExecution(t.Context(), execution); err != nil {
+	executions, err := platformwebhook.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := executions.InsertExecution(t.Context(), execution); err != nil {
 		t.Fatalf("InsertExecution %s: %v", seed.id, err)
 	}
 	if !seed.withSession && len(seed.events) == 0 {
@@ -64,8 +63,8 @@ func seedWebhookTurn(t *testing.T, db *sql.DB, seed *webhookTurnSeed) *store.Web
 	for i, event := range seed.events {
 		stored := &turn.Event{
 			ID: seed.id + "-" + event.id, SessionID: execution.SessionID, Sequence: uint64(i + 1),
-			TurnID: firstNonEmpty(event.turnID, execution.TurnID), InvocationID: "inv-" + seed.id, Author: "webhook:primary",
-			Kind: event.kind, SchemaVersion: 1, Payload: json.RawMessage(firstNonEmpty(event.payload, `{}`)), CreatedAt: now,
+			TurnID: cmp.Or(event.turnID, execution.TurnID), InvocationID: "inv-" + seed.id, Author: "webhook:primary",
+			Kind: event.kind, SchemaVersion: 1, Payload: json.RawMessage(cmp.Or(event.payload, `{}`)), CreatedAt: now,
 		}
 		if err := events.Append(t.Context(), stored); err != nil {
 			t.Fatalf("append %s: %v", stored.ID, err)
@@ -81,15 +80,19 @@ func corruptStoredEvents(t *testing.T, db *sql.DB, sessionID string) {
 	}
 }
 
-func replayOf(execution *store.WebhookExecution) *gatewaywebhook.AcceptedEvent {
+func replayOf(execution *platformwebhook.Execution) *platformwebhook.AcceptedEvent {
 	event := webhookTestEvent()
 	event.KeyID, event.Nonce, event.BodyDigest, event.Envelope.EventID = execution.KeyID, execution.Nonce, execution.BodyDigest, execution.EventID
 	return event
 }
 
-func readExecution(t *testing.T, db *sql.DB, id string) store.WebhookExecution {
+func readExecution(t *testing.T, db *sql.DB, id string) platformwebhook.Execution {
 	t.Helper()
-	execution, err := store.NewWebhookExecutionStore(db).Execution(t.Context(), id)
+	executions, err := platformwebhook.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	execution, err := executions.Execution(t.Context(), id)
 	if err != nil {
 		t.Fatalf("Execution %s: %v", id, err)
 	}
@@ -124,76 +127,6 @@ func capturedLogger(logs *syncBuffer) *slog.Logger {
 	return slog.New(slog.NewJSONHandler(logs, nil))
 }
 
-func TestWebhookReconcileSettlesFromStoredEvents(t *testing.T) {
-	accepted := storedTurnEvent{id: "a", kind: turn.EventKindTurnAccepted}
-	started := storedTurnEvent{id: "s", kind: turn.EventKindModelStarted}
-	message := storedTurnEvent{id: "m", kind: turn.EventKindMessageCompleted}
-	completed := storedTurnEvent{id: "d", kind: turn.EventKindTurnCompleted}
-	cases := []struct {
-		name        string
-		events      []storedTurnEvent
-		withSession bool
-		want        store.WebhookExecution
-		result      reconcileResult
-	}{
-		{name: "only the accepted event", events: []storedTurnEvent{accepted},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateAccepted}, result: reconcileResult{admitted: true}},
-		{name: "one more event", events: []storedTurnEvent{accepted, started},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateRunning}, result: reconcileResult{admitted: true}},
-		{name: "a completed message before the completed turn", events: []storedTurnEvent{accepted, message, completed},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateCompleted, ResultEventID: "m"}, result: reconcileResult{admitted: true, settled: true}},
-		{name: "a completed turn without a message", events: []storedTurnEvent{accepted, completed},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateCompleted, ResultEventID: "d"}, result: reconcileResult{admitted: true, settled: true}},
-		{name: "a failed turn with a code", events: []storedTurnEvent{accepted, {id: "f", kind: turn.EventKindTurnFailed, payload: `{"code":"model_capability_unsupported"}`}},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateFailed, ResultEventID: "f", ErrorCode: "model_capability_unsupported"}, result: reconcileResult{admitted: true, settled: true}},
-		{name: "a failed turn without a code", events: []storedTurnEvent{accepted, {id: "f", kind: turn.EventKindTurnFailed}},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateFailed, ResultEventID: "f", ErrorCode: string(turn.ErrorCodeRuntimeInternal)}, result: reconcileResult{admitted: true, settled: true}},
-		{name: "a cancelled turn", events: []storedTurnEvent{accepted, {id: "c", kind: turn.EventKindTurnCancelled}},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateCancelled, ErrorCode: string(turn.ErrorCodeTurnCancelled)}, result: reconcileResult{admitted: true, settled: true}},
-		{name: "no event in an existing session", withSession: true,
-			want: store.WebhookExecution{State: store.WebhookExecutionStateAccepted}},
-		{name: "no event and no session",
-			want: store.WebhookExecution{State: store.WebhookExecutionStateAccepted}},
-		{name: "a turn longer than one page ends", events: []storedTurnEvent{accepted, started, {id: "s2", kind: turn.EventKindModelStarted}, {id: "s3", kind: turn.EventKindModelStarted}, completed},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateCompleted, ResultEventID: "d"}, result: reconcileResult{admitted: true, settled: true}},
-		{name: "only an event of another turn", events: []storedTurnEvent{{id: "w", kind: turn.EventKindMessageCompleted, turnID: "turn-workflow"}},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateAccepted}},
-		{name: "an event of the turn after its terminal one", events: []storedTurnEvent{accepted, completed, {id: "x", kind: turn.EventKindModelStarted}},
-			want: store.WebhookExecution{State: store.WebhookExecutionStateCompleted, ResultEventID: "d"}, result: reconcileResult{admitted: true, settled: true}},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
-			execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_case", events: tc.events, withSession: tc.withSession})
-			reconciler := &webhookReconciler{
-				sessions: turnstore.NewSessionService(db), executions: store.NewWebhookExecutionStore(db), clock: time.Now, page: testReconcileEventPage,
-			}
-			result, err := reconciler.reconcile(t.Context(), execution)
-			if err != nil {
-				t.Fatalf("reconcile: %v", err)
-			}
-			if result != tc.result {
-				t.Fatalf("reconcile = %+v, want %+v", result, tc.result)
-			}
-			got := readExecution(t, db, execution.ID)
-			want := tc.want
-			if want.ResultEventID != "" {
-				want.ResultEventID = execution.ID + "-" + want.ResultEventID
-			}
-			if got.State != want.State || got.ResultEventID != want.ResultEventID || got.ErrorCode != want.ErrorCode {
-				t.Fatalf("execution = %s %q %q, want %s %q %q", got.State, got.ResultEventID, got.ErrorCode, want.State, want.ResultEventID, want.ErrorCode)
-			}
-			again, err := reconciler.reconcile(t.Context(), &got)
-			if err != nil || again.settled {
-				t.Fatalf("second reconcile = %+v, %v; want no new settlement", again, err)
-			}
-			if after := readExecution(t, db, execution.ID); after != got {
-				t.Fatalf("second reconcile changed the row: %+v, want %+v", after, got)
-			}
-		})
-	}
-}
-
 func turnEmitting(kinds ...string) func(turnID string) []turnOutcome {
 	return func(turnID string) []turnOutcome {
 		outcomes := make([]turnOutcome, 0, len(kinds))
@@ -204,7 +137,7 @@ func turnEmitting(kinds ...string) func(turnID string) []turnOutcome {
 	}
 }
 
-func appendTurnCompleted(t *testing.T, db *sql.DB, execution *store.WebhookExecution) {
+func appendTurnCompleted(t *testing.T, db *sql.DB, execution *platformwebhook.Execution) {
 	t.Helper()
 	next := uint64(countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ?`, execution.SessionID)) + 1
 	if err := turnstore.NewEventStore(db).Append(t.Context(), &turn.Event{
@@ -225,9 +158,9 @@ func TestWebhookDispatcher_ReplayOfAnAdmittedTurnSubmitsNothing(t *testing.T) {
 		want      string
 	}{
 		{name: "an execution left accepted", kinds: []string{turn.EventKindTurnAccepted},
-			left: store.WebhookExecutionStateAccepted, want: store.WebhookExecutionStateAccepted},
+			left: platformwebhook.StateAccepted, want: platformwebhook.StateAccepted},
 		{name: "an execution left running whose turn ended", kinds: []string{turn.EventKindTurnAccepted, turn.EventKindModelStarted},
-			left: store.WebhookExecutionStateRunning, completes: true, want: store.WebhookExecutionStateCompleted},
+			left: platformwebhook.StateRunning, completes: true, want: platformwebhook.StateCompleted},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -277,23 +210,30 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 
 	t.Run("one pass settles the unexpired unfinished executions", func(t *testing.T) {
 		db := storetest.OpenMigrated(t)
-		executions := store.NewWebhookExecutionStore(db)
+		executions, err := platformwebhook.NewSQLiteStore(db)
+		if err != nil {
+			t.Fatalf("NewSQLiteStore: %v", err)
+		}
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_1ended", events: []storedTurnEvent{accepted, message, completed}})
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_2open", events: []storedTurnEvent{accepted, {id: "s", kind: turn.EventKindModelStarted}}})
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_3never"})
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_4expired", events: []storedTurnEvent{accepted, completed}, expiresAt: time.Now().Add(-time.Minute)})
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_5settled", events: []storedTurnEvent{accepted, completed}})
-		if _, err := executions.MarkTerminal(t.Context(), "whex_5settled", store.WebhookExecutionStateCompleted, "whex_5settled-d", "", time.Now()); err != nil {
+		if _, err := executions.MarkTerminal(t.Context(), "whex_5settled", platformwebhook.StateCompleted, "whex_5settled-d", "", time.Now()); err != nil {
 			t.Fatalf("settle whex_5settled: %v", err)
 		}
 		settledBefore := readExecution(t, db, "whex_5settled")
 		logs := &syncBuffer{}
 		backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
-		runPassWithin(t, dispatcher.reconcilePass())
+		pass, err := dispatcher.reconcilePass()
+		if err != nil {
+			t.Fatalf("reconcilePass: %v", err)
+		}
+		runPassWithin(t, pass)
 		for id, want := range map[string]string{
-			"whex_1ended": store.WebhookExecutionStateCompleted, "whex_2open": store.WebhookExecutionStateRunning,
-			"whex_3never": store.WebhookExecutionStateAccepted, "whex_4expired": store.WebhookExecutionStateAccepted,
+			"whex_1ended": platformwebhook.StateCompleted, "whex_2open": platformwebhook.StateRunning,
+			"whex_3never": platformwebhook.StateAccepted, "whex_4expired": platformwebhook.StateAccepted,
 		} {
 			if got := readExecution(t, db, id).State; got != want {
 				t.Errorf("%s = %s, want %s", id, got, want)
@@ -324,11 +264,19 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 		}
 		logs := &syncBuffer{}
 		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}, logger: capturedLogger(logs)})
-		pass := dispatcher.reconcilePass()
-		pass.batch = 2
+		pass, err := platformwebhook.NewReconcilePass(&platformwebhook.ReconcilePassOptions{
+			Executions: dispatcher.executions,
+			Reconciler: dispatcher.reconciler,
+			Clock:      dispatcher.clock,
+			Batch:      2,
+			Logger:     dispatcher.logger,
+		})
+		if err != nil {
+			t.Fatalf("NewReconcilePass: %v", err)
+		}
 		runPassWithin(t, pass)
 		for _, id := range settling {
-			if got := readExecution(t, db, id).State; got != store.WebhookExecutionStateCompleted {
+			if got := readExecution(t, db, id).State; got != platformwebhook.StateCompleted {
 				t.Errorf("%s = %s, want completed", id, got)
 			}
 		}
@@ -345,9 +293,13 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 		seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_c2", events: []storedTurnEvent{accepted, completed}})
 		logs := &syncBuffer{}
 		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}, logger: capturedLogger(logs)})
-		runPassWithin(t, dispatcher.reconcilePass())
+		pass, err := dispatcher.reconcilePass()
+		if err != nil {
+			t.Fatalf("reconcilePass: %v", err)
+		}
+		runPassWithin(t, pass)
 		for id, want := range map[string]string{
-			"whex_c0": store.WebhookExecutionStateAccepted, "whex_c1": store.WebhookExecutionStateCompleted, "whex_c2": store.WebhookExecutionStateCompleted,
+			"whex_c0": platformwebhook.StateAccepted, "whex_c1": platformwebhook.StateCompleted, "whex_c2": platformwebhook.StateCompleted,
 		} {
 			if got := readExecution(t, db, id).State; got != want {
 				t.Errorf("%s = %s, want %s", id, got, want)
@@ -361,13 +313,13 @@ func TestWebhookReconcilePassSettlesUnfinishedExecutions(t *testing.T) {
 	})
 }
 
-func runPassWithin(t *testing.T, pass *webhookReconcilePass) {
+func runPassWithin(t *testing.T, pass *platformwebhook.ReconcilePass) {
 	t.Helper()
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		pass.pass(ctx)
+		pass.Pass(ctx)
 		close(done)
 	}()
 	timeout := time.NewTimer(reconcilePassWait)
@@ -379,135 +331,6 @@ func runPassWithin(t *testing.T, pass *webhookReconcilePass) {
 		<-done
 		t.Fatal("the pass did not end")
 	}
-}
-
-type scriptedUnfinished struct {
-	mu       sync.Mutex
-	failures []error
-	lists    int
-}
-
-func (s *scriptedUnfinished) ListUnfinished(context.Context, *store.UnfinishedExecutionQuery) ([]store.WebhookExecution, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.lists++
-	if s.lists <= len(s.failures) && s.failures[s.lists-1] != nil {
-		return nil, s.failures[s.lists-1]
-	}
-	return []store.WebhookExecution{{ID: "whex_listed"}}, nil
-}
-
-func (s *scriptedUnfinished) count() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.lists
-}
-
-type reconcileScript struct {
-	failures []error
-	settles  bool
-}
-
-func newScriptedReconcilePass(script reconcileScript) (*webhookReconcilePass, *scriptedUnfinished, *syncBuffer) {
-	lister := &scriptedUnfinished{failures: script.failures}
-	logs := &syncBuffer{}
-	return &webhookReconcilePass{
-		executions: lister,
-		reconcile: func(context.Context, *store.WebhookExecution) (reconcileResult, error) {
-			return reconcileResult{admitted: true, settled: script.settles}, nil
-		},
-		clock:    time.Now,
-		batch:    webhookReconcileBatch,
-		interval: webhookReconcileInterval,
-		logger:   capturedLogger(logs),
-	}, lister, logs
-}
-
-func runReconcilePasses(t *testing.T, pass *webhookReconcilePass, intervals int) {
-	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
-	done := make(chan struct{})
-	go func() {
-		pass.run(ctx)
-		close(done)
-	}()
-	time.Sleep(time.Duration(intervals)*pass.interval + pass.interval/2)
-	synctest.Wait()
-	cancel()
-	<-done
-}
-
-func countRecords(records []reconcileRecord, level, msg string) int {
-	count := 0
-	for _, record := range records {
-		if record.Level == level && record.Msg == msg {
-			count++
-		}
-	}
-	return count
-}
-
-func TestWebhookReconcilePassRepeats(t *testing.T) {
-	t.Run("one pass at the start and one per interval, silent when nothing settled", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			pass, lister, logs := newScriptedReconcilePass(reconcileScript{})
-			runReconcilePasses(t, pass, 3)
-			if got := lister.count(); got != 4 {
-				t.Fatalf("passes after three intervals = %d, want 4", got)
-			}
-			if got := logs.String(); got != "" {
-				t.Fatalf("logs = %q, want none when nothing settled", got)
-			}
-		})
-	})
-
-	t.Run("a failing list is one warning per pass and the next pass runs", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			locked := errors.New("database is locked")
-			pass, lister, logs := newScriptedReconcilePass(reconcileScript{failures: []error{locked, locked}, settles: true})
-			runReconcilePasses(t, pass, 2)
-			if got := lister.count(); got != 3 {
-				t.Fatalf("passes after two intervals = %d, want 3", got)
-			}
-			records := reconcileRecords(t, logs)
-			if got := countRecords(records, "WARN", "webhook reconcile failed"); got != 2 {
-				t.Fatalf("records = %+v, want one warning for each failing pass", records)
-			}
-			if got := countRecords(records, "INFO", "webhook executions reconciled"); got != 1 || len(records) != 3 {
-				t.Fatalf("records = %+v, want one info line for the pass that settled", records)
-			}
-		})
-	})
-
-	t.Run("nothing runs or is logged under an ended context", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			pass, lister, logs := newScriptedReconcilePass(reconcileScript{failures: []error{errors.New("database is locked")}})
-			ctx, cancel := context.WithCancel(t.Context())
-			cancel()
-			pass.run(ctx)
-			if got := lister.count(); got != 0 {
-				t.Fatalf("passes under an ended context = %d, want 0", got)
-			}
-			if got := logs.String(); got != "" {
-				t.Fatalf("logs under an ended context = %q, want none", got)
-			}
-		})
-	})
-
-	t.Run("a pass whose context ends while it runs logs nothing", func(t *testing.T) {
-		synctest.Test(t, func(t *testing.T) {
-			pass, _, logs := newScriptedReconcilePass(reconcileScript{})
-			ctx, cancel := context.WithCancel(t.Context())
-			pass.reconcile = func(ctx context.Context, _ *store.WebhookExecution) (reconcileResult, error) {
-				cancel()
-				return reconcileResult{}, ctx.Err()
-			}
-			pass.pass(ctx)
-			if got := logs.String(); got != "" {
-				t.Fatalf("logs of a pass whose context ended = %q, want none", got)
-			}
-		})
-	})
 }
 
 func requireOneReplayWarning(t *testing.T, logs *syncBuffer) {
@@ -527,13 +350,13 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		backend := &fakeTurnRuntime{events: acceptedTurnEvents}
 		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
 		ref, err := dispatcher.Dispatch(t.Context(), replayOf(execution))
-		if err != nil || ref != (gatewaywebhook.ExecutionRef{ExecutionID: execution.ID, TurnID: execution.TurnID}) {
+		if err != nil || ref != (platformwebhook.ExecutionRef{ExecutionID: execution.ID, TurnID: execution.TurnID}) {
 			t.Fatalf("replay = %+v, %v; want the original reference", ref, err)
 		}
 		if got := backend.submitted(); got != 0 {
 			t.Fatalf("turns submitted = %d, want 0", got)
 		}
-		if got := readExecution(t, db, execution.ID).State; got != store.WebhookExecutionStateAccepted {
+		if got := readExecution(t, db, execution.ID).State; got != platformwebhook.StateAccepted {
 			t.Fatalf("execution = %s, want it kept accepted", got)
 		}
 		requireOneReplayWarning(t, logs)
@@ -546,10 +369,10 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		backend := &fakeTurnRuntime{overload: true}
 		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend, logger: capturedLogger(logs)})
 		ref, err := dispatcher.Dispatch(t.Context(), replayOf(execution))
-		if err != nil || ref != (gatewaywebhook.ExecutionRef{ExecutionID: execution.ID, TurnID: execution.TurnID}) {
+		if err != nil || ref != (platformwebhook.ExecutionRef{ExecutionID: execution.ID, TurnID: execution.TurnID}) {
 			t.Fatalf("replay = %+v, %v; want the original reference", ref, err)
 		}
-		if got := readExecution(t, db, execution.ID).State; got != store.WebhookExecutionStateAccepted {
+		if got := readExecution(t, db, execution.ID).State; got != platformwebhook.StateAccepted {
 			t.Fatalf("execution = %s, want it kept accepted", got)
 		}
 		requireOneReplayWarning(t, logs)
@@ -571,7 +394,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		if err := dispatcher.Wait(t.Context()); err != nil {
 			t.Fatalf("Wait: %v", err)
 		}
-		if got := readExecution(t, db, ref.ExecutionID); got.State != store.WebhookExecutionStateAccepted || got.ErrorCode != "" {
+		if got := readExecution(t, db, ref.ExecutionID); got.State != platformwebhook.StateAccepted || got.ErrorCode != "" {
 			t.Fatalf("execution after a broken stream = %s %q, want it left accepted", got.State, got.ErrorCode)
 		}
 	})
@@ -591,7 +414,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		if err := dispatcher.Wait(t.Context()); err != nil {
 			t.Fatalf("Wait: %v", err)
 		}
-		if got := readExecution(t, db, execution.ID); got.State != store.WebhookExecutionStateAccepted || got.ErrorCode != "" {
+		if got := readExecution(t, db, execution.ID); got.State != platformwebhook.StateAccepted || got.ErrorCode != "" {
 			t.Fatalf("execution after an unstored terminal event = %s %q, want it left accepted", got.State, got.ErrorCode)
 		}
 	})

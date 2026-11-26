@@ -16,6 +16,7 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type Config struct {
@@ -36,7 +37,7 @@ type Config struct {
 	Usage        usage.Config                `json:"usage"`
 	Health       health.Config               `json:"health"`
 	Terminal     legacyconfig.Terminal       `json:"terminal"`
-	Webhook      legacyconfig.Webhook        `json:"webhook"`
+	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
 	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
 	Memory       legacyconfig.Memory         `json:"memory"`
@@ -74,7 +75,7 @@ func Default() Config {
 		Usage:        usage.Default(),
 		Health:       health.Default(),
 		Terminal:     legacyconfig.DefaultTerminal(),
-		Webhook:      legacyconfig.DefaultWebhook(),
+		Webhook:      platformwebhook.Default(),
 		Channels:     legacyconfig.DefaultChannels(),
 		Broadcast:    legacyconfig.DefaultBroadcast(),
 		Scheduler:    legacyconfig.DefaultScheduler(),
