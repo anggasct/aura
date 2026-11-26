@@ -2,6 +2,7 @@ package config
 
 import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
@@ -49,5 +50,5 @@ func deriveWebSearchCredential(tools *legacyconfig.Tools) {
 	if tools == nil || !tools.WebSearch.CredentialRef.IsZero() {
 		return
 	}
-	tools.WebSearch.CredentialRef = legacyconfig.DefaultWebSearchCredentialRef(tools.WebSearch.Provider)
+	tools.WebSearch.CredentialRef = search.DefaultCredentialRef(tools.WebSearch.Provider)
 }

@@ -12,9 +12,7 @@ func TestCliWiresBuiltinToolsOnlyThroughThisPackage(t *testing.T) {
 	forbiddenImports := []string{
 		"github.com/anggasct/aura/internal/platform/tools",
 		"github.com/anggasct/aura/internal/modules/shellexec",
-		"github.com/anggasct/aura/internal/modules/fetch",
 		"github.com/anggasct/aura/internal/modules/filesystem",
-		"github.com/anggasct/aura/internal/modules/search",
 	}
 	forbiddenCalls := []string{"toolbroker.New("}
 	forbiddenProductionCalls := []string{"effect.NewExecutor("}

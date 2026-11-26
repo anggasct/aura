@@ -512,19 +512,13 @@ func ValidateTools(toolsConfig *Tools) error {
 	if toolsConfig.Exec.MaxStdoutBytes <= 0 || toolsConfig.Exec.MaxStderrBytes <= 0 {
 		return configkit.Invalid("tools.exec", "output limits must be positive")
 	}
-	if toolsConfig.Fetch.Timeout <= 0 {
-		return configkit.Invalid("tools.fetch.timeout", "must be positive")
-	}
-	if toolsConfig.Fetch.MaxRedirects < 0 || toolsConfig.Fetch.MaxRedirects > 10 {
-		return configkit.Invalid("tools.fetch.max_redirects", "must be between 0 and 10")
-	}
-	if toolsConfig.Fetch.MaxEncodedBytes <= 0 || toolsConfig.Fetch.MaxDecodedBytes <= 0 {
-		return configkit.Invalid("tools.fetch", "body limits must be positive")
+	if err := configkit.Under("tools.fetch", toolsConfig.Fetch.Validate()); err != nil {
+		return err
 	}
 	if err := configkit.Under("tools.github", toolsConfig.GitHub.Validate()); err != nil {
 		return err
 	}
-	return validateWebSearch(&toolsConfig.WebSearch)
+	return configkit.Under("tools.web_search", toolsConfig.WebSearch.Validate())
 }
 
 func ValidateChildren(childrenConfig *Children) error {
