@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestJournal(t *testing.T) (*Journal, *sql.DB) {
@@ -22,7 +22,7 @@ func newTestJournal(t *testing.T) (*Journal, *sql.DB) {
 
 func newTestJournalWithEvents(t *testing.T, events EventPublisher) (*Journal, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	j, err := NewJournal(db, Options{
 		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
 		Logger: slog.New(slog.DiscardHandler),

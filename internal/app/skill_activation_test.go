@@ -20,12 +20,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 
 	"google.golang.org/adk/v2/agent"
 	adkmodel "google.golang.org/adk/v2/model"
@@ -104,7 +104,7 @@ type skillHarness struct {
 
 func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config) *skillHarness {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	root := t.TempDir()
 	for name, body := range bodies {
 		dir := filepath.Join(root, name)
@@ -287,7 +287,7 @@ func TestSkillSessionBudgetEvictsTheOldestActivation(t *testing.T) {
 }
 
 func TestBuildSkillRuntimeRejectsASessionBoundBelowOneActivation(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	cfg := defaultSkillConfig()
 	cfg.Enabled, cfg.Roots, cfg.MaxSessionContextTokens = true, []string{t.TempDir()}, 99
 	if _, err := skills.New(t.Context(), &skills.ModuleDeps{

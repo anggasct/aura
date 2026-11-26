@@ -12,8 +12,8 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func writeUsageConfig(t *testing.T, dataRoot string) string {
@@ -30,7 +30,7 @@ func writeUsageConfig(t *testing.T, dataRoot string) string {
 func seedUsage(t *testing.T, dataRoot string) {
 	t.Helper()
 	ctx := context.Background()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(ctx, filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -165,7 +165,7 @@ func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
 
 func TestUsageEntriesEmpty(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeUsageConfig(t, dataRoot)
 
 	out, err := execute(t, "usage", "entries", "--config", cfg)
@@ -179,7 +179,7 @@ func TestUsageEntriesEmpty(t *testing.T) {
 
 func TestUsagePrices(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeUsageConfig(t, dataRoot)
 	prices := filepath.Join(t.TempDir(), "prices.yaml")
 	content := "version: 1\nprices:\n  - model_definition_id: primary\n    currency: USD\n" +
@@ -202,7 +202,7 @@ func TestUsagePrices(t *testing.T) {
 
 func TestUsagePricesMissingExplicitFile(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeUsageConfig(t, dataRoot)
 	_, err := execute(t, "usage", "prices", "--config", cfg, "--prices", filepath.Join(t.TempDir(), "nope.yaml"))
 	if err == nil {

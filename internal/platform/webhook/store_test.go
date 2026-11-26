@@ -2,15 +2,14 @@ package webhook
 
 import (
 	"database/sql"
-	"path/filepath"
 	"slices"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func webhookFixture(now time.Time) *Execution {
@@ -42,7 +41,7 @@ func TestWebhookExecutionStore_InsertAndRead(t *testing.T) {
 	if _, err := NewSQLiteStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewSQLiteStore(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -87,7 +86,7 @@ func TestWebhookExecutionStore_InsertAndRead(t *testing.T) {
 }
 
 func TestWebhookExecutionStore_Conflicts(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -124,7 +123,7 @@ func TestWebhookExecutionStore_Conflicts(t *testing.T) {
 }
 
 func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -183,7 +182,7 @@ func TestWebhookExecutionStore_ForwardOnlyTransitions(t *testing.T) {
 }
 
 func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	now := time.Date(2026, 9, 7, 12, 0, 0, 0, time.UTC)
@@ -235,80 +234,18 @@ func TestWebhookExecutionStore_ListsUnfinished(t *testing.T) {
 	}
 }
 
-type seededExecution struct {
-	id, state string
-}
-
-func seedExecutionAtVersion42(t *testing.T, db *sql.DB, execution seededExecution) {
-	t.Helper()
-	if _, err := db.ExecContext(t.Context(),
-		`INSERT INTO webhook_execution (id, key_id, event_id, nonce, body_digest, turn_id, state, created_at, updated_at, expires_at)
-		 VALUES (?, 'primary', ?, ?, 'digest', ?, ?, '2026-09-07T12:00:00Z', '2026-09-07T12:00:00Z', '2030-01-01T00:00:00Z')`,
-		execution.id, "evt-"+execution.id, "nonce-"+execution.id, "turn-"+execution.id, execution.state); err != nil {
-		t.Fatalf("seed execution %s: %v", execution.id, err)
-	}
-}
-
-type seededTurnEvent struct {
-	sessionID, turnID, kind string
-}
-
-func seedTurnEventAtVersion42(t *testing.T, db *sql.DB, event seededTurnEvent) {
-	t.Helper()
-	if _, err := db.ExecContext(t.Context(),
-		`INSERT OR IGNORE INTO session (id, owner_id, metadata_json, created_at, updated_at) VALUES (?, ?, '{}', '2026-09-07T12:00:00Z', '2026-09-07T12:00:00Z')`,
-		event.sessionID, "webhook:primary"); err != nil {
-		t.Fatalf("seed session %s: %v", event.sessionID, err)
-	}
-	if _, err := db.ExecContext(t.Context(),
-		`INSERT INTO runtime_event (id, session_id, sequence, turn_id, invocation_id, branch, author, kind, schema_version, payload_json, created_at)
-		 VALUES (?, ?, (SELECT COALESCE(MAX(sequence), 0) + 1 FROM runtime_event WHERE session_id = ?), ?, 'inv', '', 'webhook:primary', ?, 1, '{}', '2026-09-07T12:00:00Z')`,
-		event.sessionID+"-"+event.kind, event.sessionID, event.sessionID, event.turnID, event.kind); err != nil {
-		t.Fatalf("seed event %s: %v", event.kind, err)
-	}
-}
-
-func TestWebhookExecutionSessionMigration(t *testing.T) {
+func TestWebhookExecutionBaselineSchemaAndUnfinishedIndex(t *testing.T) {
 	ctx := t.Context()
-	path := filepath.Join(t.TempDir(), "aura.db")
-	db, err := sqlite.Open(ctx, path, sqlite.Options{})
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	var upTo42 []sqlite.Migration
-	for _, m := range history.Migrations() {
-		if m.Version <= 42 {
-			upTo42 = append(upTo42, m)
-		}
-	}
-	if err := sqlite.Migrate(ctx, db, upTo42); err != nil {
-		t.Fatalf("Migrate(<=42): %v", err)
-	}
-
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_completed", state: StateCompleted})
-	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-other", turnID: "turn-other", kind: "turn.accepted"})
-	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-completed", turnID: "turn-whex_completed", kind: "turn.accepted"})
-	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-completed", turnID: "turn-whex_completed", kind: "turn.completed"})
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_running", state: StateRunning})
-	seedTurnEventAtVersion42(t, db, seededTurnEvent{sessionID: "sess-running", turnID: "turn-whex_running", kind: "turn.accepted"})
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_never_admitted", state: StateAccepted})
-	seedExecutionAtVersion42(t, db, seededExecution{id: "whex_events_gone", state: StateCompleted})
-
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	if _, err := db.ExecContext(ctx,
+		`INSERT INTO webhook_execution (id, key_id, event_id, nonce, body_digest, turn_id, state, created_at, updated_at, expires_at)
+		 VALUES ('whex_default_session', 'primary', 'evt-default', 'nonce-default', 'digest', 'turn-default', 'accepted', '2026-09-07T12:00:00Z', '2026-09-07T12:00:00Z', '2030-01-01T00:00:00Z')`); err != nil {
+		t.Fatalf("insert default session execution: %v", err)
 	}
 	s := mustNewSQLiteStore(t, db)
-	for id, want := range map[string]string{"whex_completed": "sess-completed", "whex_running": "sess-running", "whex_events_gone": ""} {
-		got, err := s.Execution(ctx, id)
-		if err != nil || got.SessionID != want {
-			t.Errorf("%s = session %q, %v; want %q", id, got.SessionID, err, want)
-		}
-	}
-	if _, err := s.Execution(ctx, "whex_never_admitted"); err == nil {
-		t.Error("an unfinished execution without an admitted turn survived the migration")
-	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeExecutionNotFound {
-		t.Errorf("never admitted execution = %v (ok=%v), want %s", code, ok, ErrorCodeExecutionNotFound)
+	got, err := s.Execution(ctx, "whex_default_session")
+	if err != nil || got.SessionID != "" {
+		t.Fatalf("default session_id = %q, %v; want empty string", got.SessionID, err)
 	}
 	var index string
 	if err := db.QueryRowContext(ctx,

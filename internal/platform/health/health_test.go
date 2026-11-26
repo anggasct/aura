@@ -12,19 +12,23 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func fixedNow() time.Time { return time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC) }
 
 func TestMigrationCheckerAgainstRealStore(t *testing.T) {
 	ctx := context.Background()
-	db := storetest.OpenMigrated(t)
+	migrations, err := sqlite.Baseline(turnstore.Schema(), storage.Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	db := sqlitetest.OpenMigrations(t, migrations)
 
 	checker := health.MigrationChecker{Versions: func(ctx context.Context) (int, int, error) {
-		return sqlite.SchemaVersions(ctx, db, history.Migrations())
+		return sqlite.SchemaVersions(ctx, db, migrations)
 	}}
 	findings := checker.Check(ctx)
 	if len(findings) != 1 || findings[0].Status != health.StatusUp {

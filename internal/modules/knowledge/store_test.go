@@ -8,7 +8,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
-	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -16,14 +15,14 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 var kbTestTime = time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)
 
 func newKBTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return storetest.OpenMigrated(t)
+	return sqlitetest.OpenMigrated(t, Schema())
 }
 
 func mustNewSQLiteStore(t *testing.T, db *sql.DB) *SQLiteStore {
@@ -454,7 +453,7 @@ func TestKnowledgeCheckDetectsScopeMismatch(t *testing.T) {
 
 func TestKnowledgeSourceNeverUsesInsertOrReplace(t *testing.T) {
 	forbidden := regexp.MustCompile(`(?i)(insert\s+or\s+replace|replace\s+into)\s+(into\s+)?kb_`)
-	for _, path := range []string{"store.go", "store_embedding.go", filepath.Join("..", "..", "store", "history", "history.go"), "service.go"} {
+	for _, path := range []string{"store.go", "store_embedding.go", "schema.go", "service.go"} {
 		content, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatalf("read %s: %v", path, err)

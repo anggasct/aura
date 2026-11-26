@@ -69,17 +69,10 @@ func OpenAndMigrate(ctx context.Context, cfg *Config, migrations []sqlite.Migrat
 	if err != nil {
 		return nil, err
 	}
-	db, err := sqlite.Open(ctx, dbPath, sqlite.Options{BusyTimeout: time.Duration(cfg.BusyTimeout), MaxOpenConnections: cfg.MaxOpenConnections})
-	if err != nil {
-		return nil, err
-	}
-	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
-		return nil, errors.Join(err, db.Close())
-	}
-	return db, nil
+	return sqlite.OpenAndMigrate(ctx, dbPath, sqlite.Options{BusyTimeout: time.Duration(cfg.BusyTimeout), MaxOpenConnections: cfg.MaxOpenConnections}, migrations)
 }
 
-func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migrations []sqlite.Migration, now time.Time) (retErr error) {
+func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migrations []sqlite.Migration, now time.Time) error {
 	if cfg == nil {
 		return errNilArgument("storage config")
 	}
@@ -90,7 +83,7 @@ func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migration
 	if err != nil {
 		return err
 	}
-	if _, err := os.Stat(dbPath); errors.Is(err, os.ErrNotExist) {
+	if _, err := os.Lstat(dbPath); errors.Is(err, os.ErrNotExist) {
 		db, err := OpenAndMigrate(ctx, cfg, migrations)
 		if err != nil {
 			return err
@@ -100,13 +93,8 @@ func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migration
 	} else if err != nil {
 		return fmt.Errorf("stat live database: %w", err)
 	}
-	db, err := sqlite.Open(ctx, dbPath, sqlite.Options{BusyTimeout: time.Duration(cfg.BusyTimeout)})
-	if err != nil {
-		return err
-	}
-	defer func() { retErr = errors.Join(retErr, db.Close()) }()
 	start := time.Now()
-	result, err := UpgradeWithBackup(ctx, db, migrations, backupDir, artifactRoot, now)
+	result, err := UpgradePath(ctx, dbPath, sqlite.Options{BusyTimeout: time.Duration(cfg.BusyTimeout)}, migrations, backupDir, artifactRoot, now)
 	if err != nil {
 		if result.Backup != "" {
 			return fmt.Errorf("storage upgrade from schema %d to %d failed; restore the pre-upgrade backup %s with aura storage restore: %w", result.Applied, result.Latest, result.Backup, err)
@@ -201,6 +189,9 @@ func newStorageVerifyCmd(open CommandOpener) *cobra.Command {
 				report, err := VerifyRestore(ctx, input, artifactRoot)
 				if err != nil {
 					if _, ok := fault.CodeOf[ErrorCode](err); ok {
+						return err
+					}
+					if fault.HasCode(err, sqlite.ErrorCodeSchemaIncompatible) {
 						return err
 					}
 					return fault.Wrap(ErrorCodeBackupInvalid, "storage verification failed", err)

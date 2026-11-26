@@ -8,8 +8,11 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type stubSender struct{}
@@ -19,7 +22,7 @@ func (stubSender) Send(context.Context, *SendRequest) (SendOutcome, error) {
 }
 
 func TestBroadcastModuleNewValidatesDepsAndConfig(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), Schema())
 	rt := durabletest.NewFake()
 	validCfg := Default()
 
@@ -54,7 +57,7 @@ func TestBroadcastModuleNewValidatesDepsAndConfig(t *testing.T) {
 }
 
 func TestBroadcastModuleClonesSendersAndExcludesNilSender(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), Schema())
 	rt := durabletest.NewFake()
 	cfg := Default()
 	cfg.Destinations = map[string]string{
@@ -87,7 +90,7 @@ func TestBroadcastModuleClonesSendersAndExcludesNilSender(t *testing.T) {
 }
 
 func TestBroadcastModuleSubmitAndResume(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), Schema())
 	rt := durabletest.NewFake()
 	rt.RegisterHandler(HandlerName, func(context.Context, durable.Invocation) error { return nil })
 

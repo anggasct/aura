@@ -19,11 +19,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type fakeTurnRuntime struct {
@@ -112,7 +112,7 @@ func acceptedTurnEvents(turnID string) []turnOutcome {
 
 func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime, handlers ...gatewaywebhook.EventHandler) (*gatewaywebhook.Dispatcher, platformwebhook.ExecutionStore) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	executions, err := platformwebhook.NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
@@ -174,7 +174,7 @@ func waitForExecutionState(t *testing.T, executions platformwebhook.ExecutionSto
 
 func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	return db, mustWorkflowStore(t, db)
 }
 

@@ -27,7 +27,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/history"
 )
 
 const (
@@ -313,7 +312,11 @@ func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.
 		return zero, err
 	}
 	defer func() { _ = db.Close() }()
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
+	migrations, err := sqlite.Baseline(turnstore.Schema(), effect.Schema())
+	if err != nil {
+		return zero, err
+	}
+	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
 		return zero, err
 	}
 	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: SessionID, OwnerID: principalID, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {

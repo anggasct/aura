@@ -2059,6 +2059,9 @@ func schemaVersionsReadOnly(ctx context.Context, dbPath string) (applied, latest
 	if _, err := os.Stat(dbPath); err != nil {
 		return 0, 0, err
 	}
+	if err := sqlite.CheckCompatibility(ctx, dbPath); err != nil {
+		return 0, 0, err
+	}
 	db, err := sqlite.OpenReadOnly(ctx, dbPath)
 	if err != nil {
 		return 0, 0, err

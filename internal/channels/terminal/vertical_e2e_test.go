@@ -20,10 +20,14 @@ import (
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -32,7 +36,7 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/usage"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -123,7 +127,7 @@ type approvalE2EStack struct {
 
 func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answer string) *approvalE2EStack {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
 	sessions := turnstore.NewSessionService(db)
 	events := turnstore.NewEventStore(db)
 	liveEvents := turn.NewEventBus(nil)
@@ -328,7 +332,7 @@ func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) i
 }
 
 func TestTerminalOverloadSurfacesError(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
 	sessions := turnstore.NewSessionService(db)
 	events := turnstore.NewEventStore(db)
 	now := time.Now().UTC()
@@ -419,7 +423,7 @@ func TestTerminalRestartResume(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
 
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
 	db1, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -515,7 +519,7 @@ func TestTerminalRestartResume(t *testing.T) {
 func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
 	db, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

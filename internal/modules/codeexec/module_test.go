@@ -6,18 +6,19 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestNewCodeRunnerRequiresItsOptions(t *testing.T) {
 	defaults := Default()
-	artifacts := storage.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), storage.DefaultArtifactQuotaBytes)
+	artifacts := storage.NewArtifactStore(sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema()), t.TempDir(), storage.DefaultArtifactQuotaBytes)
 	invalid := Default()
 	invalid.MaxProcesses = 0
 	cases := []struct {
@@ -44,7 +45,7 @@ func TestNewCodeRunnerRequiresItsOptions(t *testing.T) {
 }
 
 func TestCodeArtifactsMapStoreFailuresToCodes(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -100,7 +101,7 @@ func TestModuleImplementsDiscoveryInterfaces(t *testing.T) {
 	mod, err := New(t.Context(), &ModuleDeps{
 		Config:       &defaults,
 		DataRoot:     dataRoot,
-		Artifacts:    storage.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), storage.DefaultArtifactQuotaBytes),
+		Artifacts:    storage.NewArtifactStore(sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema()), t.TempDir(), storage.DefaultArtifactQuotaBytes),
 		CheckTimeout: 5 * time.Second,
 		Logger:       slog.New(slog.DiscardHandler),
 	})

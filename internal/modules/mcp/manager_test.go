@@ -18,17 +18,17 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func newEffectBroker(t *testing.T) *toolbroker.Broker {
 	t.Helper()
 	ctx := t.Context()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema())
 	session := turn.Session{ID: "session-1", OwnerID: "principal-1"}
 	if err := turnstore.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create(): %v", err)

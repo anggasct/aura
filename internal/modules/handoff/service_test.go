@@ -7,7 +7,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type stubNotifier struct {
@@ -35,7 +36,7 @@ func TestHandoffModuleAndServiceValidation(t *testing.T) {
 		t.Fatalf("NewGate(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	now := time.Date(2026, 11, 5, 9, 0, 0, 0, time.UTC)
 	seedPersonaSession(t, db, "main/discord:office/dm:9", "discord:9", "main")
 	elsewhere := &stubNotifier{err: ErrNoTarget}

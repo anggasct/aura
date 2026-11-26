@@ -8,8 +8,8 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestOwnerActionRecorderNilGuardAndUTC(t *testing.T) {
@@ -18,7 +18,7 @@ func TestOwnerActionRecorderNilGuardAndUTC(t *testing.T) {
 		t.Fatalf("nil RecordOwnerRekey = %v, want %s", err, turnstore.ErrorCodeInvalidArgument)
 	}
 
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema())
 	rec := turnstore.NewOwnerActionRecorder(db)
 	zone := time.FixedZone("UTC+7", 7*3600)
 	at := time.Date(2026, 11, 26, 14, 30, 0, 0, zone)

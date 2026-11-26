@@ -10,14 +10,14 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestChannelMediaStorePersistsContentUnderTheSession(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), storage.Schema())
 	sessionID := "main/telegram:pocket/chat:5"
 	now := time.Now().UTC()
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{
@@ -59,7 +59,7 @@ func TestArtifactStoreRejectsNilArguments(t *testing.T) {
 	if _, err := NewArtifactStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Errorf("NewArtifactStore(nil) = %v, want invalid_argument", err)
 	}
-	store, err := NewArtifactStore(storage.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), 1<<20))
+	store, err := NewArtifactStore(storage.NewArtifactStore(sqlitetest.OpenMigrated(t, turnstore.Schema(), storage.Schema()), t.TempDir(), 1<<20))
 	if err != nil {
 		t.Fatalf("NewArtifactStore: %v", err)
 	}

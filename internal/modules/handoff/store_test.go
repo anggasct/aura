@@ -2,29 +2,14 @@ package handoff
 
 import (
 	"database/sql"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
-
-func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
-	t.Helper()
-	ctx := t.Context()
-	db, err := sqlite.Open(ctx, path, sqlite.Options{})
-	if err != nil {
-		t.Fatalf("sqlite.Open: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:upTo]); err != nil {
-		t.Fatalf("migrate to v%d: %v", upTo, err)
-	}
-	return db
-}
 
 func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID string) {
 	t.Helper()
@@ -47,7 +32,7 @@ func TestHandoffOpenCheckReleaseAndTimeout(t *testing.T) {
 	if _, err := NewSQLiteStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewSQLiteStore(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	ctx := t.Context()
 	seedPersonaSession(t, db, "lobby/discord:owner/dm:601", "discord:601", "lobby")
 	handoffs := mustNewSQLiteStore(t, db)
@@ -91,7 +76,7 @@ func TestHandoffOpenCheckReleaseAndTimeout(t *testing.T) {
 }
 
 func TestHandoffRoundTripsATelegramReplyTarget(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	ctx := t.Context()
 	sessionID := "lobby/telegram:pocket/chat:555001"
 	seedPersonaSession(t, db, sessionID, "telegram:555001", "lobby")
@@ -125,7 +110,7 @@ func TestHandoffRoundTripsATelegramReplyTarget(t *testing.T) {
 }
 
 func TestHandoffRoundTripsAnHTTPTarget(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	ctx := t.Context()
 	sessionID := "lobby/http/abcdefghijkl/token"
 	seedPersonaSession(t, db, sessionID, "http:abcdefghijkl", "lobby")
@@ -142,7 +127,7 @@ func TestHandoffRoundTripsAnHTTPTarget(t *testing.T) {
 }
 
 func TestHandoffOpenRejectsInvalidInput(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	sessionID := "lobby/discord:owner/dm:601"
 	seedPersonaSession(t, db, sessionID, "discord:601", "lobby")
 	handoffs := mustNewSQLiteStore(t, db)
@@ -175,7 +160,7 @@ func TestHandoffOpenRejectsInvalidInput(t *testing.T) {
 }
 
 func TestHandoffChannelColumnRejectsUnknownChannels(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	sessionID := "lobby/discord:owner/dm:601"
 	seedPersonaSession(t, db, sessionID, "discord:601", "lobby")
 	_, err := db.ExecContext(t.Context(), `INSERT INTO session_handoff (session_id, reason, opened_at, channel) VALUES (?, 'x', '2026-11-05T09:00:00Z', 'slack')`, sessionID)
@@ -184,131 +169,64 @@ func TestHandoffChannelColumnRejectsUnknownChannels(t *testing.T) {
 	}
 }
 
-func TestHandoffChannelMigrationKeepsExistingDiscordRows(t *testing.T) {
-	migrations := history.Migrations()
+func TestHandoffBaselineSchemaChannelsDefaultsAndCascade(t *testing.T) {
 	ctx := t.Context()
-	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
-	sessionID := "lobby/discord:owner/dm:601"
-	seedPersonaSession(t, db, sessionID, "discord:601", "lobby")
-	if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, principal_id, agent_id, account, reply_channel_id) VALUES (?, 'refund', '2026-11-04T09:00:00Z', 'discord:601', 'lobby', 'owner', '4400')`, sessionID); err != nil {
-		t.Fatalf("seed v%d handoff: %v", migrations[len(migrations)-2].Version, err)
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	got, found, err := mustNewSQLiteStore(t, db).Get(ctx, sessionID)
-	if err != nil || !found {
-		t.Fatalf("Get = %+v, %v, %v", got, found, err)
-	}
-	if got.Channel != ChannelDiscord || got.ReplyThreadID != "" || got.ReplyChannelID != "4400" || got.Account != "owner" {
-		t.Fatalf("migrated handoff = %+v, want a discord row with no thread", got)
-	}
-}
-
-func TestHandoffHTTPChannelMigrationKeepsRowsAndAcceptsHTTP(t *testing.T) {
-	migrations := history.Migrations()
-	ctx := t.Context()
-	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
-	seeded := []struct {
-		session, channel, account, replyChannel, replyThread string
-		released                                             any
-	}{
-		{"lobby/discord:owner/dm:601", "discord", "owner", "4400", "", nil},
-		{"lobby/telegram:pocket/chat:555001", "telegram", "pocket", "-1001234567890", "77", "2026-11-05T10:00:00Z"},
-	}
-	for _, row := range seeded {
-		seedPersonaSession(t, db, row.session, "owner-1", "lobby")
-		if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, released_at, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id) VALUES (?, 'refund', '2026-11-05T09:00:00Z', ?, 'owner-1', 'lobby', ?, ?, ?, ?)`,
-			row.session, row.released, row.account, row.channel, row.replyChannel, row.replyThread); err != nil {
-			t.Fatalf("seed %s handoff: %v", row.channel, err)
-		}
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	defaultSession := "lobby/discord:owner/dm:601"
+	seedPersonaSession(t, db, defaultSession, "discord:601", "lobby")
+	if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, principal_id, agent_id, account, reply_channel_id) VALUES (?, 'refund', '2026-11-04T09:00:00Z', 'discord:601', 'lobby', 'owner', '4400')`, defaultSession); err != nil {
+		t.Fatalf("seed default channel handoff: %v", err)
 	}
 	handoffs := mustNewSQLiteStore(t, db)
-	for _, row := range seeded {
-		got, found, err := handoffs.Get(ctx, row.session)
-		if err != nil || !found {
-			t.Fatalf("Get(%s) = %+v, %v, %v", row.channel, got, found, err)
-		}
-		if got.Channel != row.channel || got.Account != row.account || got.ReplyChannelID != row.replyChannel || got.ReplyThreadID != row.replyThread || got.Reason != "refund" || got.PrincipalID != "owner-1" || got.AgentID != "lobby" || (got.ReleasedAt.IsZero() != (row.released == nil)) {
-			t.Fatalf("migrated %s handoff = %+v", row.channel, got)
-		}
+	gotDefault, found, err := handoffs.Get(ctx, defaultSession)
+	if err != nil || !found {
+		t.Fatalf("Get default = %+v, %v, %v", gotDefault, found, err)
 	}
+	if gotDefault.Channel != ChannelDiscord || gotDefault.ReplyThreadID != "" || gotDefault.ReplyChannelID != "4400" || gotDefault.Account != "owner" {
+		t.Fatalf("default handoff = %+v, want discord row with empty thread", gotDefault)
+	}
+
 	var indexes int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'session_handoff_open_idx' AND tbl_name = 'session_handoff'`).Scan(&indexes); err != nil || indexes != 1 {
 		t.Fatalf("open index count = %d, %v; want 1", indexes, err)
 	}
-	httpSession := "lobby/http/abcdefghijkl/token"
-	seedPersonaSession(t, db, httpSession, "http:abcdefghijkl", "lobby")
-	if err := handoffs.Open(ctx, &Handoff{SessionID: httpSession, Reason: "refund", Channel: ChannelHTTP, Account: "abcdefghijkl", OpenedAt: time.Now()}); err != nil {
-		t.Fatalf("Open http handoff after migration: %v", err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE session_handoff SET channel = 'slack' WHERE session_id = ?`, httpSession); !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
-		t.Fatalf("update to an unknown channel err = %v, want a check violation", err)
-	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM session WHERE id = ?`, httpSession); err != nil {
-		t.Fatalf("delete session: %v", err)
-	}
-	if _, found, err := handoffs.Get(ctx, httpSession); err != nil || found {
-		t.Fatalf("handoff survived its session: found=%v err=%v", found, err)
-	}
-}
 
-func TestHandoffEmailChannelMigrationKeepsRowsAndAcceptsEmail(t *testing.T) {
-	migrations := history.Migrations()
-	ctx := t.Context()
-	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), len(migrations)-1)
-	seeded := []struct {
+	channels := []struct {
 		session, channel, account, replyChannel, replyThread string
-		released                                             any
 	}{
-		{"lobby/discord:owner/dm:601", "discord", "owner", "4400", "", nil},
-		{"lobby/telegram:pocket/chat:555001", "telegram", "pocket", "-1001234567890", "77", "2026-11-05T10:00:00Z"},
-		{"lobby/http/abcdefghijkl/token", "http", "abcdefghijkl", "", "", nil},
+		{"lobby/telegram:pocket/chat:555001", ChannelTelegram, "pocket", "-1001234567890", "77"},
+		{"lobby/http/abcdefghijkl/token", ChannelHTTP, "abcdefghijkl", "", ""},
+		{"lobby/email:desk/thread:abcdefghijklmnopqrstuvwxyz", ChannelEmail, "desk", "alice@example.com", ""},
 	}
-	for _, row := range seeded {
-		seedPersonaSession(t, db, row.session, "owner-1", "lobby")
-		if _, err := db.ExecContext(ctx, `INSERT INTO session_handoff (session_id, reason, opened_at, released_at, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id) VALUES (?, 'refund', '2026-11-05T09:00:00Z', ?, 'owner-1', 'lobby', ?, ?, ?, ?)`,
-			row.session, row.released, row.account, row.channel, row.replyChannel, row.replyThread); err != nil {
-			t.Fatalf("seed %s handoff: %v", row.channel, err)
-		}
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	handoffs := mustNewSQLiteStore(t, db)
-	for _, row := range seeded {
+	for _, row := range channels {
 		t.Run(row.channel, func(t *testing.T) {
-			got, found, err := handoffs.Get(ctx, row.session)
-			if err != nil || !found {
+			seedPersonaSession(t, db, row.session, "owner-1", "lobby")
+			if err := handoffs.Open(t.Context(), &Handoff{
+				SessionID:      row.session,
+				Reason:         "refund",
+				PrincipalID:    "owner-1",
+				AgentID:        "lobby",
+				Account:        row.account,
+				Channel:        row.channel,
+				ReplyChannelID: row.replyChannel,
+				ReplyThreadID:  row.replyThread,
+				OpenedAt:       time.Now(),
+			}); err != nil {
+				t.Fatalf("Open %s handoff: %v", row.channel, err)
+			}
+			got, found, err := handoffs.Get(t.Context(), row.session)
+			if err != nil || !found || got.Channel != row.channel || got.ReplyChannelID != row.replyChannel || got.ReplyThreadID != row.replyThread {
 				t.Fatalf("Get = %+v, %v, %v", got, found, err)
 			}
-			if got.Channel != row.channel || got.Account != row.account || got.ReplyChannelID != row.replyChannel || got.ReplyThreadID != row.replyThread || got.Reason != "refund" || got.PrincipalID != "owner-1" || got.AgentID != "lobby" || (got.ReleasedAt.IsZero() != (row.released == nil)) {
-				t.Fatalf("migrated handoff = %+v", got)
+			if _, err := db.ExecContext(t.Context(), `UPDATE session_handoff SET channel = 'slack' WHERE session_id = ?`, row.session); !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
+				t.Fatalf("update to unknown channel err = %v, want check violation", err)
+			}
+			if _, err := db.ExecContext(t.Context(), `DELETE FROM session WHERE id = ?`, row.session); err != nil {
+				t.Fatalf("delete session: %v", err)
+			}
+			if _, found, err := handoffs.Get(t.Context(), row.session); err != nil || found {
+				t.Fatalf("handoff survived its session: found=%v err=%v", found, err)
 			}
 		})
-	}
-	var indexes int
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = 'session_handoff_open_idx' AND tbl_name = 'session_handoff'`).Scan(&indexes); err != nil || indexes != 1 {
-		t.Fatalf("open index count = %d, %v; want 1", indexes, err)
-	}
-	emailSession := "lobby/email:desk/thread:abcdefghijklmnopqrstuvwxyz"
-	seedPersonaSession(t, db, emailSession, "email:alice@example.com", "lobby")
-	if err := handoffs.Open(ctx, &Handoff{SessionID: emailSession, Reason: "refund", PrincipalID: "email:alice@example.com", AgentID: "lobby", Account: "desk", Channel: ChannelEmail, ReplyChannelID: "alice@example.com", OpenedAt: time.Now()}); err != nil {
-		t.Fatalf("Open email handoff after migration: %v", err)
-	}
-	if got, found, err := handoffs.Get(ctx, emailSession); err != nil || !found || got.Channel != ChannelEmail || got.ReplyChannelID != "alice@example.com" {
-		t.Fatalf("Get email handoff = %+v, %v, %v", got, found, err)
-	}
-	if _, err := db.ExecContext(ctx, `UPDATE session_handoff SET channel = 'slack' WHERE session_id = ?`, emailSession); !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
-		t.Fatalf("update to an unknown channel err = %v, want a check violation", err)
-	}
-	if _, err := db.ExecContext(ctx, `DELETE FROM session WHERE id = ?`, emailSession); err != nil {
-		t.Fatalf("delete session: %v", err)
-	}
-	if _, found, err := handoffs.Get(ctx, emailSession); err != nil || found {
-		t.Fatalf("handoff survived its session: found=%v err=%v", found, err)
 	}
 }

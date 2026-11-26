@@ -17,9 +17,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type parityPorts struct{}
@@ -125,7 +125,7 @@ func (s *stubActivity) SessionActivity(string) (activeTurnID string, queued int)
 
 func newCommandStore(t *testing.T) (turnstore.SessionService, turnstore.EventStore, turnstore.ConversationSessionStore, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	return turnstore.NewSessionService(db), turnstore.NewEventStore(db), turnstore.NewConversationSessionStore(db), db
 }
 

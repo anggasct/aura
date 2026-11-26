@@ -5,11 +5,14 @@ import (
 	"database/sql"
 	"testing"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func durableRowsOf(t *testing.T, db *sql.DB, turnID string) (runs, actions int) {
@@ -62,7 +65,7 @@ func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
 }
 
 func TestOrphanedTurnRunEraserRefusesNilPorts(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	turns := turnstore.NewTurnStore(db)
 	runs := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, newHoldingExecutor()).runtime
 	if _, err := NewOrphanedTurnRunEraser(db, nil, turns); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {

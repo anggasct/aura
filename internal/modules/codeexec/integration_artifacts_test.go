@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const liveSession = "session-live"
@@ -30,7 +31,7 @@ type storedHost struct {
 
 func (h *liveHost) storedRunner(t *testing.T, quota int64, change func(*Limits)) *storedHost {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	now := time.Now().UTC()
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: liveSession, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)

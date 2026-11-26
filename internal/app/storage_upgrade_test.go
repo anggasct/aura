@@ -10,7 +10,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
 )
 
 func openLiveDB(t *testing.T, dataRoot string) *sql.DB {
@@ -39,7 +38,7 @@ func TestStorageUpgradeInitializesAFreshInstall(t *testing.T) {
 	}
 	db := openLiveDB(t, dataRoot)
 	defer func() { _ = db.Close() }()
-	if applied, latest, err := sqlite.SchemaVersions(context.Background(), db, history.Migrations()); err != nil || applied != latest {
+	if applied, latest, err := sqlite.SchemaVersions(context.Background(), db, Migrations()); err != nil || applied != latest {
 		t.Fatalf("schema = %d/%d, %v", applied, latest, err)
 	}
 	if _, err := os.Stat(filepath.Join(dataRoot, "backups")); !os.IsNotExist(err) {

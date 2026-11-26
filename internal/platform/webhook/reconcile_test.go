@@ -13,9 +13,9 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const testReconcileEventPage = 3
@@ -177,7 +177,7 @@ func TestWebhookReconcileSettlesFromStoredEvents(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
+			db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 			execution := seedReconcileTurn(t, db, &reconcileTurnSeed{id: "whex_case", events: tc.events, withSession: tc.withSession})
 			reconciler, err := NewReconciler(&ReconcilerDeps{
 				Events:     turnstore.NewTurnStore(db),

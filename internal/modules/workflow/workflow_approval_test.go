@@ -2,11 +2,11 @@ package workflow
 
 import (
 	"database/sql"
-	"path/filepath"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func seedMigrationSession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
@@ -17,19 +17,16 @@ func seedMigrationSession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
 	}
 }
 
-func TestMigrationAddsWorkflowApprovalWithItsConstraints(t *testing.T) {
+func TestWorkflowApprovalBaselineConstraints(t *testing.T) {
 	ctx := t.Context()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "approval.db"), sqlite.Options{})
+	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("Baseline: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
-	if err != nil || applied != 48 || latest != 48 {
-		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
+	db := sqlitetest.OpenMigrations(t, migrations)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
+	if err != nil || applied != 2 || latest != 2 {
+		t.Fatalf("schema = applied %d latest %d %v, want 2", applied, latest, err)
 	}
 	seedMigrationSession(t, db, "sess-1", "owner-1")
 	for version := 1; version <= 12; version++ {

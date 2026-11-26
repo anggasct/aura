@@ -17,9 +17,9 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func writeBroadcastCLIConfig(t *testing.T, dataDir string) string {
@@ -35,7 +35,7 @@ func writeBroadcastCLIConfig(t *testing.T, dataDir string) string {
 func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 	t.Helper()
 	if _, err := os.Stat(dbPath); errors.Is(err, fs.ErrNotExist) {
-		storetest.Seed(t, dbPath)
+		sqlitetest.Seed(t, dbPath, Schemas()...)
 	}
 	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
@@ -173,7 +173,7 @@ func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
+			db := sqlitetest.OpenMigrated(t, Schemas()...)
 			sessions := turnstore.NewSessionService(db)
 			now := time.Now().UTC()
 			if err := sessions.Create(t.Context(), &turn.Session{ID: "broadcast:default", OwnerID: "broadcast", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {

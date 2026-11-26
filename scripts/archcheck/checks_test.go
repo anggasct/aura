@@ -45,10 +45,7 @@ func TestLayerViolations(t *testing.T) {
 		{"cli to app", "internal/cli", "internal/app", false},
 		{"cli to platform logging", "internal/cli", "internal/platform/logging", false},
 		{"cli to platform turn", "internal/cli", "internal/platform/turn", true},
-		{"cli to legacy store", "internal/cli", "internal/store", true},
 		{"cli to module", "internal/cli", "internal/modules/memory", true},
-		{"legacy source is exempt", "internal/store/history", "internal/modules/memory", false},
-		{"legacy target is exempt", "internal/platform/turn", "internal/store/history", false},
 		{"app is exempt", "internal/app", "internal/modules/memory", false},
 		{"cmd is exempt", "cmd/aura", "internal/modules/memory", false},
 	}
@@ -93,7 +90,7 @@ func TestCheckLayersReportsCliImportingPlatformPackages(t *testing.T) {
 func TestCheckLayout(t *testing.T) {
 	t.Parallel()
 	entries := map[string][]dirEntry{
-		"internal":          {{name: "platform", isDir: true}, {name: "modules", isDir: true}, {name: "store", isDir: true}, {name: "tools", isDir: true}, {name: "doc.go"}},
+		"internal":          {{name: "platform", isDir: true}, {name: "modules", isDir: true}, {name: "tools", isDir: true}, {name: "doc.go"}},
 		"internal/modules":  {{name: "memory", isDir: true}, {name: "registry.go"}},
 		"internal/platform": {{name: "turn", isDir: true}, {name: "README"}},
 	}
@@ -270,7 +267,7 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 func TestFakesReportsProductionImportsOfTestKits(t *testing.T) {
 	t.Parallel()
 	repo := &repository{stdNames: map[string]string{"testing": "testing"}, importedStd: map[string]bool{}}
-	kitImport := modulePath + "/internal/store/storetest"
+	kitImport := modulePath + "/internal/platform/sqlite/sqlitetest"
 	cases := []struct {
 		name   string
 		listed listedPackage
@@ -279,7 +276,7 @@ func TestFakesReportsProductionImportsOfTestKits(t *testing.T) {
 		{
 			name:   "production import",
 			listed: listedPackage{ImportPath: modulePath + "/internal/modules/memory", Name: "memory", Imports: []string{kitImport}},
-			want:   []string{"fakes: internal/modules/memory imports the test kit internal/store/storetest from a production file"},
+			want:   []string{"fakes: internal/modules/memory imports the test kit internal/platform/sqlite/sqlitetest from a production file"},
 		},
 		{
 			name:   "test imports",
@@ -293,7 +290,7 @@ func TestFakesReportsProductionImportsOfTestKits(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			kit := sourcePackage{path: "internal/store/storetest", name: "storetest"}
+			kit := sourcePackage{path: "internal/platform/sqlite/sqlitetest", name: "sqlitetest"}
 			pkg := repo.newPackage(&tc.listed)
 			subject := sourcePackage{path: pkg.path, name: pkg.name, imports: pkg.productionImports}
 			got := findFakes([]sourcePackage{kit, subject})
@@ -334,7 +331,7 @@ func TestSettersReportsSingleArgumentDependencySetters(t *testing.T) {
 		{name: "variadic", dir: dir, source: "type T struct{}\nfunc (t *T) SetIssuers(issuers ...string) {}\n"},
 		{name: "function without receiver", dir: dir, source: "func SetDefault(l *slog.Logger) {}\n"},
 		{name: "name without a capital letter", dir: dir, source: "type T struct{}\nfunc (t *T) Setup(dep Dep) {}\nfunc (t *T) Set(dep Dep) {}\nfunc (t *T) Settle(dep Dep) {}\n"},
-		{name: "test kit", dir: "internal/store/storetest", source: "type T struct{}\nfunc (t *T) SetX(dep Dep) {}\n"},
+		{name: "test kit", dir: "internal/platform/sqlite/sqlitetest", source: "type T struct{}\nfunc (t *T) SetX(dep Dep) {}\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -365,7 +362,7 @@ func TestCodedErrorsReportsCopiedErrorTypesOutsideFault(t *testing.T) {
 		{name: "fault package", dir: faultPackage, source: "type Error struct{}\nfunc CodeOf(err error) string { return \"\" }\n"},
 		{name: "method", dir: dir, source: "type Probe struct{}\nfunc (p *Probe) CodeOf() string { return \"\" }\n"},
 		{name: "error code type", dir: dir, source: "type ErrorCode string\nfunc Error() {}\nvar CodeOf = 1\n"},
-		{name: "test kit", dir: "internal/store/storetest", source: "type Error struct{}\n"},
+		{name: "test kit", dir: "internal/platform/sqlite/sqlitetest", source: "type Error struct{}\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -454,11 +451,10 @@ func TestModuleMap(t *testing.T) {
 	samplePackages := []repoPackage{
 		{path: "scripts/archcheck", name: "main"},
 		{path: "plugins/gmail/connector", name: "connector"},
-		{path: "internal/store/storetest", name: "storetest"},
-		{path: "internal/store/history", name: "history"},
 		{path: "internal/channels/discord", name: "discord"},
 		{path: "internal/modules/memory", name: "memory"},
 		{path: "internal/platform/turn/engine", name: "runtimeengine"},
+		{path: "internal/platform/sqlite/sqlitetest", name: "sqlitetest"},
 		{path: "internal/platform/sqlite", name: "sqlite"},
 		{path: "internal/cli", name: "cli"},
 		{path: "internal/app/config", name: "config"},
@@ -480,6 +476,7 @@ func TestModuleMap(t *testing.T) {
 		"",
 		"internal/platform/",
 		"  internal/platform/sqlite",
+		"  internal/platform/sqlite/sqlitetest",
 		"  internal/platform/turn/engine (package runtimeengine)",
 		"",
 		"internal/modules/",
@@ -487,10 +484,6 @@ func TestModuleMap(t *testing.T) {
 		"",
 		"internal/channels/",
 		"  internal/channels/discord",
-		"",
-		"internal/store/",
-		"  internal/store/history",
-		"  internal/store/storetest",
 		"",
 		"plugins/",
 		"  plugins/gmail/connector",

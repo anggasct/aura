@@ -33,6 +33,7 @@ internal/platform/
   internal/platform/secret/secrettest
   internal/platform/server
   internal/platform/sqlite
+  internal/platform/sqlite/sqlitetest
   internal/platform/storage
   internal/platform/telemetry
   internal/platform/toolbroker
@@ -94,10 +95,6 @@ internal/channels/
   internal/channels/telegram
   internal/channels/terminal
   internal/channels/webhook
-
-internal/store/
-  internal/store/history
-  internal/store/storetest
 
 plugins/
   plugins/gmail/connector

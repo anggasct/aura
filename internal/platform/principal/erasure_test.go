@@ -9,7 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 type stubEraser struct {
@@ -30,7 +30,7 @@ func countTableRows(t *testing.T, db *sql.DB, table string) int {
 }
 
 func TestEraseRunsEveryParticipantInOneTransaction(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	ctx := t.Context()
 	const now = "2026-11-02T09:00:00Z"
 	for _, stmt := range []string{
@@ -72,7 +72,7 @@ func TestEraseRunsEveryParticipantInOneTransaction(t *testing.T) {
 }
 
 func TestEraseDryRunWritesNothing(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	ctx := t.Context()
 	const now = "2026-11-02T09:00:00Z"
 	if _, err := db.ExecContext(ctx, `INSERT INTO principal_grant (principal_id, account, class, granted_at, granted_by) VALUES ('discord:601', 'owner', 'trusted', ?, 'local-owner')`, now); err != nil {
@@ -99,7 +99,7 @@ func TestEraseDryRunWritesNothing(t *testing.T) {
 }
 
 func TestEraseReportPrintsTheDeclaredLineOrder(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	erasers := []Eraser{
 		stubEraser{fn: func(_ context.Context, state *ErasureState) error {
 			if err := state.Record(ErasureLineLiveWorkflowRuns, 12); err != nil {
@@ -139,7 +139,7 @@ func TestEraseReportPrintsTheDeclaredLineOrder(t *testing.T) {
 
 func TestErasureRefusesAnUndeclaredLine(t *testing.T) {
 	t.Run("ErasureState.Record", func(t *testing.T) {
-		db := storetest.OpenMigrated(t)
+		db := sqlitetest.OpenMigrated(t, Schema())
 		_, err := Erase(t.Context(), db, ErasureScope{PrincipalID: "discord:601"}, []Eraser{
 			stubEraser{fn: func(_ context.Context, state *ErasureState) error {
 				return state.Record("unknown_line", 1)

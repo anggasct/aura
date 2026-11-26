@@ -9,8 +9,10 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type stubTurnRunner struct{}
@@ -46,7 +48,7 @@ func (s *moduleRecordingStarter) snapshot() []durable.StartRequest {
 }
 
 func TestScheduleModuleNewValidatesDeps(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), Schema())
 	rt := durabletest.NewFake()
 	cases := []struct {
 		name string
@@ -68,7 +70,7 @@ func TestScheduleModuleNewValidatesDeps(t *testing.T) {
 }
 
 func TestScheduleModuleResumeUsesReuseEnded(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), Schema())
 	starter := &moduleRecordingStarter{}
 	mod, err := New(&ModuleDeps{
 		Config:  Default(),
@@ -109,7 +111,7 @@ func TestScheduleModuleResumeUsesReuseEnded(t *testing.T) {
 }
 
 func TestScheduleModuleRunPassUsesReuseNeverAndStopsOnCancel(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), Schema())
 	starter := &moduleRecordingStarter{}
 	mod, err := New(&ModuleDeps{
 		Config:       Default(),

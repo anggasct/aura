@@ -11,11 +11,16 @@ import (
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 func wantDigest(text string) string {
@@ -30,7 +35,7 @@ func TestNew_RejectsMissingDependencies(t *testing.T) {
 func TestEmailNewRefusesMissingRequiredDeps(t *testing.T) {
 	cfg := &Config{}
 	account := &Account{Name: testAccount}
-	effects := newEffects(t, storetest.OpenMigrated(t))
+	effects := newEffects(t, sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), storage.Schema(), Schema()))
 	validDeps := func() *Deps {
 		return &Deps{
 			Config:    cfg,

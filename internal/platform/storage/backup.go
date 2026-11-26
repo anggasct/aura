@@ -145,9 +145,13 @@ func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (Restore
 		return RestoreReport{}, err
 	}
 
-	db, err := sqlite.OpenReadOnly(ctx, filepath.Join(backupDir, backupDatabaseFilename))
+	dbPath := filepath.Join(backupDir, backupDatabaseFilename)
+	if err := sqlite.CheckCompatibility(ctx, dbPath); err != nil {
+		return RestoreReport{}, backupFail("check restored database compatibility", err, dbPath)
+	}
+	db, err := sqlite.OpenReadOnly(ctx, dbPath)
 	if err != nil {
-		return RestoreReport{}, backupFail("open restored database", err, filepath.Join(backupDir, backupDatabaseFilename))
+		return RestoreReport{}, backupFail("open restored database", err, dbPath)
 	}
 	defer func() { _ = db.Close() }()
 

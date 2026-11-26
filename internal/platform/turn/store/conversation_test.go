@@ -1,12 +1,11 @@
 package turnstore
 
 import (
-	"path/filepath"
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestConversationSessionPointerLifecycle(t *testing.T) {
@@ -77,23 +76,17 @@ func TestConversationSessionPointerCascadesAndRejectsUnknownSessions(t *testing.
 	}
 }
 
-func TestConversationSessionMigrationAppliesOnV21(t *testing.T) {
+func TestConversationSessionBaselineSchemaAndForeignKeys(t *testing.T) {
 	ctx := t.Context()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "aura.db"), sqlite.Options{})
+	migrations, err := sqlite.Baseline(Schema())
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("Baseline: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:21]); err != nil {
-		t.Fatalf("migrate to v%d: %v", 21, err)
-	}
+	db := sqlitetest.OpenMigrations(t, migrations)
 	seedPersonaSession(t, db, "main/discord:owner/dm:111", "local-owner", "main")
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate: %v", err)
-	}
-	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
-	if err != nil || applied != 48 || latest != 48 {
-		t.Fatalf("schema = applied %d latest %d %v, want 48", applied, latest, err)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
+	if err != nil || applied != 1 || latest != 1 {
+		t.Fatalf("schema = applied %d latest %d %v, want 1", applied, latest, err)
 	}
 	if _, found, err := NewConversationSessionStore(db).Resolve(ctx, "main/discord:owner/dm:111"); err != nil || found {
 		t.Fatalf("existing conversation resolved to a pointer: %v %v", found, err)

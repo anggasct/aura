@@ -6,15 +6,16 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestSessionEnsurerLifecycle(t *testing.T) {
 	if _, err := NewSessionEnsurer(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewSessionEnsurer(nil) = %v, want invalid_argument", err)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	ensurer, err := NewSessionEnsurer(turnstore.NewSessionService(db))
 	if err != nil {
 		t.Fatalf("NewSessionEnsurer: %v", err)
@@ -57,7 +58,7 @@ func TestConversationResolver(t *testing.T) {
 	if _, err := NewConversationResolver(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewConversationResolver(nil) = %v, want invalid_argument", err)
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	sessions := turnstore.NewSessionService(db)
 	pointers := turnstore.NewConversationSessionStore(db)
 	ensurer, err := NewSessionEnsurer(sessions)

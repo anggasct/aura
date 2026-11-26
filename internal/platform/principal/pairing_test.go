@@ -8,9 +8,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestPairingStore(t *testing.T, db *sql.DB) principal.PairingStore {
@@ -30,7 +30,7 @@ func pairingIssue(code, principalID, account string, now time.Time) *principal.P
 }
 
 func TestPairingIssueEnforcesCooldownAndAccountCap(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	ctx := t.Context()
 	pairings := newTestPairingStore(t, db)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
@@ -74,7 +74,7 @@ func TestPairingIssueEnforcesCooldownAndAccountCap(t *testing.T) {
 }
 
 func TestPairingApproveGrantsOnceAndReactivatesRevokedGrants(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	ctx := t.Context()
 	pairings := newTestPairingStore(t, db)
 	grants := principal.NewPrincipalGrantStore(db)
@@ -121,7 +121,7 @@ func TestPairingApproveGrantsOnceAndReactivatesRevokedGrants(t *testing.T) {
 }
 
 func TestPairingExpiredCodeIsNotApproved(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	pairings := newTestPairingStore(t, db)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	if _, err := pairings.Issue(t.Context(), pairingIssue("code-x", "discord:1", "office", now)); err != nil {
@@ -136,7 +136,7 @@ func TestPairingExpiredCodeIsNotApproved(t *testing.T) {
 }
 
 func TestPairingFailedApprovalsReadOwnerActions(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	ctx := t.Context()
 	if _, err := principal.NewPairingStore(db, nil); !fault.HasCode(err, principal.ErrorCodeInvalidArgument) {
 		t.Fatalf("NewPairingStore(db, nil) error = %v, want %s", err, principal.ErrorCodeInvalidArgument)
@@ -177,7 +177,7 @@ func TestPairingFailedApprovalsReadOwnerActions(t *testing.T) {
 }
 
 func TestPairingApproveNeverConsumesAnotherChannelsCode(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), principal.Schema())
 	ctx := t.Context()
 	pairings := newTestPairingStore(t, db)
 	grants := principal.NewPrincipalGrantStore(db)

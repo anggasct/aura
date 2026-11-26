@@ -16,4 +16,5 @@ const (
 	ErrorCodeFailed                    ErrorCode = "storage_failed"
 	ErrorCodeMigrationChecksumMismatch ErrorCode = "migration_checksum_mismatch"
 	ErrorCodeMigrationSequenceInvalid  ErrorCode = "migration_sequence_invalid"
+	ErrorCodeSchemaIncompatible        ErrorCode = "schema_incompatible"
 )

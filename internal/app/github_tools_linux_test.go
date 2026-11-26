@@ -34,12 +34,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
@@ -57,7 +57,7 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -130,7 +130,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*runtimea
 	cfg.Tools.Workspace = filepath.Join(dir, "workspace")
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = r.credentials
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -399,7 +399,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	if err != nil {
 		t.Fatalf("storagePaths: %v", err)
 	}
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 	db, err := openStorage(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("openStorage: %v", err)

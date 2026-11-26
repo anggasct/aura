@@ -14,12 +14,18 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 type e2eRunner struct {
@@ -85,7 +91,7 @@ func (s e2eSessions) ListEvents(ctx context.Context, sessionID string, after uin
 }
 
 func TestTerminalVerticalSlice(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), model.Schema(), storage.Schema())
 
 	sessions := turnstore.NewSessionService(db)
 	events := turnstore.NewEventStore(db)
@@ -135,7 +141,7 @@ func TestTerminalVerticalSlice(t *testing.T) {
 }
 
 func TestTerminalReplayCompletedEventWins(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), model.Schema(), storage.Schema())
 	sessions := turnstore.NewSessionService(db)
 	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{

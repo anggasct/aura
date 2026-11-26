@@ -13,9 +13,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestPrepare_RecordsIntentAndRequestedEvent(t *testing.T) {
@@ -490,7 +490,7 @@ func TestPrepare_EventPayloadIsSafe(t *testing.T) {
 
 func TestStorePackageContract(t *testing.T) {
 	t.Parallel()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	_, err := NewJournal(db, Options{})
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
@@ -506,7 +506,7 @@ func (f failingEventTurnStore) AppendEvent(context.Context, *turn.Event) error {
 
 func TestJournalPrepareLeavesNoIntentWhenItsEventCannotBeWritten(t *testing.T) {
 	t.Parallel()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	if err := seedSession(t, db); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}

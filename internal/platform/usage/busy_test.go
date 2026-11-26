@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
@@ -16,7 +16,7 @@ func TestReserveRetriesWhileWriteLockHeld(t *testing.T) {
 	t.Cleanup(cancel)
 	dsn := t.TempDir() + "/usage.db"
 
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, Schema())
 	seed, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -113,7 +113,7 @@ func TestBeginTxBoundedUnderSustainedBusy(t *testing.T) {
 	ctx := context.Background()
 	dsn := t.TempDir() + "/usage.db"
 
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, Schema())
 	seed, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

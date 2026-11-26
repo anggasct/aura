@@ -10,9 +10,9 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
@@ -60,7 +60,7 @@ func TestHandoffReplyEventIDIsPrefixedByTheSharedConstant(t *testing.T) {
 }
 
 func TestHandoffReplyStoreListsOnlyOwnerRepliesOfTheSession(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	ctx := t.Context()
 	mustCreateSession(t, db, "lobby/http/one")
 	mustCreateSession(t, db, "lobby/http/two")
@@ -117,7 +117,7 @@ func TestHandoffReplyStoreRejectsInvalidBounds(t *testing.T) {
 	if _, err := NewReplyStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("NewReplyStore(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
-	replies := mustNewReplyStore(t, storetest.OpenMigrated(t))
+	replies := mustNewReplyStore(t, sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema()))
 	if _, err := replies.List(t.Context(), "lobby/http/one", 0, 0); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Fatalf("zero limit err = %v, want %s", err, ErrorCodeInvalidArgument)
 	}

@@ -4,14 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func testChildRun(id string) *Run {
@@ -42,7 +41,7 @@ func seedChildSessions(t *testing.T, db *sql.DB, parent, childID string) {
 
 func newTestStore(t *testing.T) (*SQLiteStore, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
@@ -208,7 +207,7 @@ func TestChildStore_Conflicts(t *testing.T) {
 }
 
 func TestChildMigrationHasTable(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	for _, table := range []string{"child_run"} {
 		var name string
 		if err := db.QueryRowContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {
@@ -217,60 +216,58 @@ func TestChildMigrationHasTable(t *testing.T) {
 	}
 }
 
-func TestChildDepthRemovalUpgrade(t *testing.T) {
+func TestChildBaselineSchemaOmitsDepthAndHasResultDefaults(t *testing.T) {
 	ctx := t.Context()
-	dsn := filepath.Join(t.TempDir(), "legacy.db")
-	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
+	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
+		t.Fatalf("Baseline: %v", err)
 	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:16]); err != nil {
-		t.Fatalf("migrate to v%d: %v", 16, err)
+	db := sqlitetest.OpenMigrations(t, migrations)
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
+	if err != nil || applied != 2 || latest != 2 {
+		t.Fatalf("schema = applied %d latest %d, %v; want 2", applied, latest, err)
 	}
 	var depthCol string
-	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err != nil {
-		t.Fatalf("legacy depth column missing: %v", err)
+	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {
+		t.Fatal("depth column must not exist on child_run")
 	}
 	now := time.Now().UTC().Truncate(time.Second)
 	seedLegacySession(t, db, "sess-parent", "owner-1")
-	seedLegacySession(t, db, "sess-child-legacy", "owner-1")
+	seedLegacySession(t, db, "sess-child-base", "owner-1")
 	format := func(v time.Time) string { return v.UTC().Format(time.RFC3339Nano) }
 	if _, err := db.ExecContext(ctx,
-		`INSERT INTO child_run (id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id, child_session_id, depth, durable_key, context_digest, grants_json, budget_json, state, deadline, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"ch-legacy", "key-legacy", "sess-parent", "turn-1", "inv-legacy", "sess-child-legacy", 1, "child/ch-legacy", "digest-legacy", `[]`, `{}`, "queued", format(now.Add(time.Hour)), format(now), format(now),
+		`INSERT INTO child_run (id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id, child_session_id, durable_key, context_digest, grants_json, budget_json, state, deadline, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		"ch-base", "key-base", "sess-parent", "turn-1", "inv-base", "sess-child-base", "child/ch-base", "digest-base", `[]`, `{}`, "queued", format(now.Add(time.Hour)), format(now), format(now),
 	); err != nil {
-		t.Fatalf("insert legacy row: %v", err)
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate upgrade: %v", err)
-	}
-	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
-	if err != nil {
-		t.Fatalf("SchemaVersions: %v", err)
-	}
-	if latest != 48 || applied != 48 {
-		t.Fatalf("schema = applied %d latest %d, want 48", applied, latest)
-	}
-	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {
-		t.Fatal("depth column must be removed by v17")
+		t.Fatalf("insert baseline row: %v", err)
 	}
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
-	got, found, err := s.GetRun(ctx, "ch-legacy")
+	got, found, err := s.GetRun(ctx, "ch-base")
 	if err != nil || !found {
-		t.Fatalf("GetRun legacy: %+v, %v, %v", got, found, err)
+		t.Fatalf("GetRun baseline: %+v, %v, %v", got, found, err)
 	}
-	if got.DurableKey != "child/ch-legacy" {
-		t.Fatalf("legacy row = %+v", got)
+	if got.DurableKey != "child/ch-base" || got.ResultStatus != "" || got.TokensUsed != 0 || got.CostMicros != 0 {
+		t.Fatalf("baseline row defaults = %+v", got)
+	}
+	completed := now.Add(time.Minute)
+	if err := s.SetResult(ctx, "ch-base", &StoredResult{Status: "completed", Output: "ok", CompletedAt: completed, Provenance: "child=ch-base session=sess-child-base digest=digest-base durable=child/ch-base", ChildID: "ch-base", SessionID: "sess-child-base", ContextDigest: "digest-base", DurableKey: "child/ch-base", SourceRange: "inv-base", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted"}, completed); err != nil {
+		t.Fatalf("SetResult: %v", err)
+	}
+	after, found, err := s.GetRun(ctx, "ch-base")
+	if err != nil || !found {
+		t.Fatalf("GetRun after SetResult: %+v, %v, %v", after, found, err)
+	}
+	if after.ResultTrust != "derived_untrusted" || after.ResultModel != "child-default" {
+		t.Fatalf("typed result must persist: %+v", after)
 	}
 	seedLegacySession(t, db, "sess-child-new", "owner-1")
 	fresh := testChildRun("ch-new")
 	fresh.ChildSessionID = "sess-child-new"
 	if err := s.InsertRun(ctx, fresh); err != nil {
-		t.Fatalf("InsertRun after upgrade: %v", err)
+		t.Fatalf("InsertRun: %v", err)
 	}
 }
 
@@ -315,53 +312,5 @@ func TestChildStore_SetResultRoundTrip(t *testing.T) {
 	}
 	if err := s.SetResult(ctx, "ch-1", nil, completed); err == nil {
 		t.Fatal("nil result must fail")
-	}
-}
-
-func TestChildResultUpgradePreservesRows(t *testing.T) {
-	ctx := t.Context()
-	dsn := filepath.Join(t.TempDir(), "result-legacy.db")
-	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:17]); err != nil {
-		t.Fatalf("migrate to v%d: %v", 17, err)
-	}
-	now := time.Now().UTC().Truncate(time.Second)
-	seedLegacySession(t, db, "sess-parent", "owner-1")
-	seedLegacySession(t, db, "sess-child-legacy", "owner-1")
-	format := func(v time.Time) string { return v.UTC().Format(time.RFC3339Nano) }
-	if _, err := db.ExecContext(ctx,
-		`INSERT INTO child_run (id, idempotency_key, parent_session_id, parent_turn_id, parent_invocation_id, child_session_id, durable_key, context_digest, grants_json, budget_json, state, deadline, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"ch-legacy", "key-legacy", "sess-parent", "turn-1", "inv-legacy", "sess-child-legacy", "child/ch-legacy", "digest-legacy", `[]`, `{}`, "queued", format(now.Add(time.Hour)), format(now), format(now),
-	); err != nil {
-		t.Fatalf("insert legacy row: %v", err)
-	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
-		t.Fatalf("Migrate upgrade: %v", err)
-	}
-	s, err := NewSQLiteStore(db)
-	if err != nil {
-		t.Fatalf("NewSQLiteStore: %v", err)
-	}
-	got, found, err := s.GetRun(ctx, "ch-legacy")
-	if err != nil || !found {
-		t.Fatalf("GetRun legacy: %+v, %v, %v", got, found, err)
-	}
-	if got.ResultStatus != "" || got.TokensUsed != 0 {
-		t.Fatalf("legacy result defaults = %+v", got)
-	}
-	completed := now.Add(time.Minute)
-	if err := s.SetResult(ctx, "ch-legacy", &StoredResult{Status: "completed", Output: "ok", CompletedAt: completed, Provenance: "child=ch-legacy session=sess-child-legacy digest=digest-legacy durable=child/ch-legacy", ChildID: "ch-legacy", SessionID: "sess-child-legacy", ContextDigest: "digest-legacy", DurableKey: "child/ch-legacy", SourceRange: "inv-legacy", Model: "child-default", PromptVersion: "v1", Trust: "derived_untrusted"}, completed); err != nil {
-		t.Fatalf("SetResult after upgrade: %v", err)
-	}
-	after, found, err := s.GetRun(ctx, "ch-legacy")
-	if err != nil || !found {
-		t.Fatalf("GetRun after upgrade: %+v, %v, %v", after, found, err)
-	}
-	if after.ResultTrust != "derived_untrusted" || after.ResultModel != "child-default" {
-		t.Fatalf("typed upgrade must persist: %+v", after)
 	}
 }

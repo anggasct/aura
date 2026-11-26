@@ -14,7 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store/history"
 )
 
 type Trajectory struct {
@@ -29,7 +28,12 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 		return nil, nil, fmt.Errorf("eval: open store: %w", err)
 	}
 	cleanup := func() { _ = db.Close() }
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
+	migrations, err := sqlite.Baseline(turnstore.Schema())
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("eval: baseline: %w", err)
+	}
+	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: migrate: %w", err)
 	}

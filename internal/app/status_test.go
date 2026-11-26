@@ -21,7 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestFormatSandboxStatusAvailable(t *testing.T) {
@@ -128,12 +128,12 @@ func seedConfiguredStorage(t *testing.T, configPath string) {
 	if err != nil {
 		t.Fatalf("storagePaths: %v", err)
 	}
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 }
 
 func seedHealthyStorage(t *testing.T, dataRoot string) {
 	t.Helper()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

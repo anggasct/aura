@@ -14,9 +14,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type countingEffectProvider struct {
@@ -76,7 +76,7 @@ type replayFixture struct {
 
 func newReplayFixture(t *testing.T, gap time.Duration) *replayFixture {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	if err := sessions.Create(t.Context(), &turn.Session{

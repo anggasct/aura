@@ -8,12 +8,12 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func mustResumeStore(t *testing.T, instance string) (store *SQLiteResumeStore, corrupt func() error) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	s, err := NewSQLiteResumeStore(db, instance)
 	if err != nil {
 		t.Fatalf("NewSQLiteResumeStore(): %v", err)
@@ -80,7 +80,7 @@ func TestChannelResumeStore_SaveLoadDelete(t *testing.T) {
 }
 
 func TestChannelResumeStore_SchemaPresent(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	var name string
 	err := db.QueryRowContext(t.Context(),
 		`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'channel_resume'`).Scan(&name)
@@ -90,7 +90,7 @@ func TestChannelResumeStore_SchemaPresent(t *testing.T) {
 }
 
 func TestChannelResumeStore_RejectsInvalid(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	if _, err := NewSQLiteResumeStore(nil, "owner"); !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Errorf("NewSQLiteResumeStore(nil) = %v, want invalid_argument", err)
 	}
@@ -152,7 +152,7 @@ func TestChannelResumeStore_RejectsCorruptTimestamp(t *testing.T) {
 }
 
 func TestChannelResumeStore_ParticipatesInTransaction(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schema())
 	s, err := NewSQLiteResumeStore(db, "owner")
 	if err != nil {
 		t.Fatalf("NewSQLiteResumeStore(): %v", err)

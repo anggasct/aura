@@ -34,6 +34,7 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -41,7 +42,6 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const (
@@ -531,7 +531,7 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 	if err := os.Mkdir(plan.Ledger, 0o700); err != nil {
 		t.Fatalf("create the ledger directory: %v", err)
 	}
-	storetest.Seed(t, plan.Database)
+	sqlitetest.Seed(t, plan.Database, Schemas()...)
 	db, err := sqlite.Open(t.Context(), plan.Database, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open the database: %v", err)

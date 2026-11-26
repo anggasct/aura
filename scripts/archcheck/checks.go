@@ -10,7 +10,6 @@ type groupKind int
 
 const (
 	kindExempt groupKind = iota
-	kindLegacy
 	kindApp
 	kindCLI
 	kindPlatform
@@ -25,9 +24,7 @@ type group struct {
 	name string
 }
 
-var legacyRoots = []string{"internal/store"}
-
-var allowedInternalDirs = []string{"app", "channels", "cli", "modules", "platform", "store"}
+var allowedInternalDirs = []string{"app", "channels", "cli", "modules", "platform"}
 
 const pluginWire = "internal/modules/plugin/wire"
 
@@ -43,8 +40,6 @@ func segmentAfter(path, root string) string {
 
 func classify(path string) group {
 	switch {
-	case slices.ContainsFunc(legacyRoots, func(root string) bool { return within(path, root) }):
-		return group{kind: kindLegacy, name: path}
 	case within(path, "internal/app"):
 		return group{kind: kindApp}
 	case within(path, "internal/cli"):
@@ -69,7 +64,7 @@ func layerViolation(from, to string) bool {
 	if source.kind == kindCLI {
 		return !within(to, "internal/app") && !within(to, "internal/platform/logging")
 	}
-	if source.kind == kindExempt || source.kind == kindLegacy || source.kind == kindApp || target.kind == kindLegacy {
+	if source.kind == kindExempt || source.kind == kindApp {
 		return false
 	}
 	if source.kind == kindPlugin {

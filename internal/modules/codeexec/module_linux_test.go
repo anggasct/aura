@@ -18,11 +18,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const codeArguments = `{"runtime":"python","source":"print(1)"}`
@@ -39,7 +39,7 @@ func newModuleBrokerFixture(t *testing.T, approve bool, mutateConfig func(*Confi
 	dataRoot := t.TempDir()
 	t.Cleanup(func() { removeTree(dataRoot) })
 	dbPath := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, turnstore.Schema(), effect.Schema(), storage.Schema())
 	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

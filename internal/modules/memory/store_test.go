@@ -8,14 +8,13 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store/history"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func newTestSQLiteStore(t *testing.T) (*sql.DB, *SQLiteStore) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	s, err := NewSQLiteStore(db, turnstore.NewSessionService(db))
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(): %v", err)
@@ -264,13 +263,17 @@ func TestMemoryStore_RejectsInvalidRows(t *testing.T) {
 }
 
 func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, history.Migrations())
+	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	db := sqlitetest.OpenMigrations(t, migrations)
+	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, migrations)
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}
-	if latest != 48 || applied != 48 {
-		t.Errorf("schema = applied %d latest %d, want 48", applied, latest)
+	if latest != 2 || applied != 2 {
+		t.Errorf("schema = applied %d latest %d, want 2", applied, latest)
 	}
 	var ftsSQL string
 	if err := db.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name = 'memory_document_fts'`).Scan(&ftsSQL); err != nil {

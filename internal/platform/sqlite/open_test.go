@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-var sessionTableHistory = []Migration{{Version: 1, SQL: `CREATE TABLE session (id TEXT PRIMARY KEY);`}}
+var sessionTableHistory = []Migration{{Version: 1, Owner: "turn", SQL: `CREATE TABLE session (id TEXT PRIMARY KEY);`}}
 
 func openFresh(t *testing.T, opts Options) *sql.DB {
 	t.Helper()

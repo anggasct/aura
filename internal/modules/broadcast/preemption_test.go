@@ -14,7 +14,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	platformeffect "github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -289,7 +291,7 @@ func newBroadcastHost(t *testing.T, setup *hostSetup) *broadcastHost {
 	wire := newTripwire(setup.block, setup.nth)
 	host := &broadcastHost{
 		t:        t,
-		db:       storetest.OpenMigrated(t),
+		db:       sqlitetest.OpenMigrated(t, turnstore.Schema(), sqlite.Schema(), platformeffect.Schema(), Schema()),
 		clock:    clock,
 		wire:     wire,
 		store:    &recordingRunStore{fakeRunStore: newFakeRunStore(), wire: wire},

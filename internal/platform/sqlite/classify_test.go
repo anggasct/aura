@@ -264,8 +264,8 @@ func TestClassifyKeepsTheDriverErrorAndIsIdempotent(t *testing.T) {
 func TestMigrateClassifiesAFailingMigration(t *testing.T) {
 	db := openFresh(t, Options{})
 	err := Migrate(t.Context(), db, []Migration{
-		{Version: 1, SQL: `CREATE TABLE t1 (id INTEGER PRIMARY KEY);`},
-		{Version: 2, SQL: `INVALID SQL STATEMENT;`},
+		{Version: 1, Owner: "test", SQL: `CREATE TABLE t1 (id INTEGER PRIMARY KEY);`},
+		{Version: 2, Owner: "test", SQL: `INVALID SQL STATEMENT;`},
 	})
 	if err == nil {
 		t.Fatal("expected migration error, got nil")

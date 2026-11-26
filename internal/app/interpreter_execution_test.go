@@ -9,8 +9,8 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestEnableExecutionBuildsTheRunnerAndVerifier(t *testing.T) {
@@ -85,5 +85,5 @@ func TestHealthReasonForAFailedProbeMatchesTheVerifierReason(t *testing.T) {
 
 func testArtifacts(t *testing.T) storage.ArtifactStore {
 	t.Helper()
-	return storage.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), storage.DefaultArtifactQuotaBytes)
+	return storage.NewArtifactStore(sqlitetest.OpenMigrated(t, Schemas()...), t.TempDir(), storage.DefaultArtifactQuotaBytes)
 }
