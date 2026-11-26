@@ -3,6 +3,7 @@ package config
 import (
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/telegram"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/codeexec"
@@ -32,10 +33,10 @@ import (
 )
 
 type Channels struct {
-	Discord  legacyconfig.Discord  `json:"discord"`
-	Telegram legacyconfig.Telegram `json:"telegram"`
-	Email    legacyconfig.Email    `json:"email"`
-	HTTP     legacyconfig.HTTP     `json:"http"`
+	Discord  legacyconfig.Discord `json:"discord"`
+	Telegram telegram.Config      `json:"telegram"`
+	Email    legacyconfig.Email   `json:"email"`
+	HTTP     legacyconfig.HTTP    `json:"http"`
 }
 
 type Config struct {
@@ -104,19 +105,7 @@ func Default() Config {
 				MaxAttachmentBytes:       20971520,
 				ThreadAutoArchiveMinutes: 1440,
 			},
-			Telegram: legacyconfig.Telegram{
-				Polling: legacyconfig.TelegramPolling{
-					Timeout:    configkit.Duration(30 * time.Second),
-					MaxBackoff: configkit.Duration(time.Minute),
-				},
-				MinEditInterval:    configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes: legacyconfig.TelegramMaxAttachmentBytes,
-				Webhook: legacyconfig.TelegramWebhook{
-					ListenAddress:  legacyconfig.TelegramWebhookListenAddress,
-					MaxBodyBytes:   legacyconfig.TelegramWebhookMaxBodyBytes,
-					MaxConnections: legacyconfig.TelegramWebhookMaxConnections,
-				},
-			},
+			Telegram: telegram.Default(),
 			Email: legacyconfig.Email{
 				MaxAttachmentBytes: legacyconfig.EmailMaxAttachmentBytes,
 			},

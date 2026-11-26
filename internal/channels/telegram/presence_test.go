@@ -217,10 +217,14 @@ func TestPresenceFailureLineIsShownOnce(t *testing.T) {
 
 func TestPresenceRedactsSecretsFromStatusMessages(t *testing.T) {
 	h := newHarness(t)
-	adapter := presenceAdapter(t, h, time.Nanosecond, time.Hour, 0)
 	vault := secret.New()
 	vault.Set("api", "sk-live-hunter2")
-	adapter.SetSecretVault(vault)
+	adapter := h.adapterWithDeps(t, nil, nil, func(deps *Deps) {
+		deps.SecretVault = vault
+	})
+	adapter.statusAfter = time.Nanosecond
+	adapter.typingRefresh = time.Hour
+	adapter.cfg.MinEditInterval = 0
 	req := presenceRequest(t, h, "turn-secret")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted: %v", err)

@@ -8,8 +8,8 @@ import (
 	"time"
 	"unicode/utf16"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -109,7 +109,7 @@ func TestDeliverAmbiguousSendBecomesUnknownAndIsNotRetried(t *testing.T) {
 	h.api.failNext(apiFailure(http.StatusBadGateway, 0))
 	req := deliveryRequest(t, h, "turn-2", "hello")
 	_, err := adapter.Deliver(t.Context(), req)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryAmbiguous {
+	if !fault.HasCode(err, ErrorCodeDeliveryAmbiguous) {
 		t.Fatalf("Deliver error = %v, want %s", err, ErrorCodeDeliveryAmbiguous)
 	}
 	if _, err := adapter.Deliver(t.Context(), req); err == nil {
@@ -157,7 +157,7 @@ func TestDeliverDefinitiveRejectionsFailWithoutRetry(t *testing.T) {
 				h.api.failNext(apiFailure(tc.status, 0))
 			}
 			_, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-4", "hello"))
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryFailed {
+			if !fault.HasCode(err, ErrorCodeDeliveryFailed) {
 				t.Fatalf("Deliver error = %v, want %s", err, ErrorCodeDeliveryFailed)
 			}
 			var safe string
@@ -348,7 +348,7 @@ func TestDeliverDisablesLinkPreviewsByDefault(t *testing.T) {
 
 func TestDeliverKeepsLinkPreviewsOnOptedInAccount(t *testing.T) {
 	h := newHarness(t)
-	adapter := h.adapterWith(t, nil, func(_ *config.Telegram, account *config.TelegramAccount) {
+	adapter := h.adapterWith(t, nil, func(_ *Config, account *Account) {
 		account.LinkPreviews = true
 	})
 	const link = "see https://evil.example/?d=x"

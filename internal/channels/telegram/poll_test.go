@@ -250,7 +250,7 @@ func TestRetryDelayHonorsRetryAfterWithinTheCap(t *testing.T) {
 	adapter.retryBase = 100 * time.Millisecond
 	adapter.cfg.Polling.MaxBackoff = 2_000_000_000
 	limited := func(after time.Duration) error {
-		return &Error{Code: ErrorCodeBotAPIRejected, Detail: "bot api getUpdates failed", Cause: &APIError{Method: "getUpdates", Status: http.StatusTooManyRequests, RetryAfter: after}}
+		return fault.Wrap(ErrorCodeBotAPIRejected, "bot api getUpdates failed", &APIError{Method: "getUpdates", Status: http.StatusTooManyRequests, RetryAfter: after})
 	}
 	if got := adapter.retryDelay(0, limited(time.Second)); got != time.Second {
 		t.Errorf("retry_after 1s → %v", got)

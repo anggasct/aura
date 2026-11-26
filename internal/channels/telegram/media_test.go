@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -159,9 +160,11 @@ func newMediaRig(t *testing.T, opts accessOpts) *mediaRig {
 	t.Helper()
 	scratch := t.TempDir()
 	t.Setenv("TMPDIR", scratch)
-	rig := newGroupRig(t, opts)
 	artifacts := &fakeArtifacts{}
-	rig.adapter.SetMediaStore(artifacts)
+	if opts.media == nil && !opts.withoutMedia {
+		opts.media = artifacts
+	}
+	rig := newGroupRig(t, opts)
 	return &mediaRig{accessRig: rig, artifacts: artifacts, scratch: scratch}
 }
 
@@ -459,9 +462,8 @@ func TestVisionServiceTakesImagesAndStoreTakesTheRest(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig := newMediaRig(t, accessOpts{})
 			images := &visionStore{}
-			rig.adapter.SetVisionService(testVisionService(t, images))
+			rig := newMediaRig(t, accessOpts{vision: testVisionService(t, images)})
 			file := tc.file
 			rig.h.api.addFile(&file)
 			rig.run(t, privateMedia(10, ownerUserID, tc.caption, tc.attach))
@@ -500,9 +502,8 @@ func TestVisionServiceTakesImagesAndStoreTakesTheRest(t *testing.T) {
 }
 
 func TestHostileImageIsDroppedWithoutAnArtifact(t *testing.T) {
-	rig := newMediaRig(t, accessOpts{})
 	images := &visionStore{}
-	rig.adapter.SetVisionService(testVisionService(t, images))
+	rig := newMediaRig(t, accessOpts{vision: testVisionService(t, images)})
 	rig.h.api.addFile(&fakeFile{id: "bad", path: "photos/file_6.jpg", contentType: "image/jpeg", body: []byte("not an image at all")})
 	rig.run(t, privateMedia(10, ownerUserID, "look", asPhoto(mediaFile{FileID: "bad", FileSize: 19, Width: 8, Height: 8})))
 	rig.assertQuiet(t, "attachment_failed")
@@ -626,14 +627,11 @@ func TestAttachmentFailuresDropTheMessageAndLeaveNothingBehind(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig := newMediaRig(t, accessOpts{})
+			rig := newMediaRig(t, accessOpts{withoutMedia: tc.withoutStore})
 			rig.adapter.cfg.MaxAttachmentBytes = smallMediaCap
 			rig.h.api.addFile(tc.file)
 			if tc.storeFails {
 				rig.artifacts.err = errors.New("quota exceeded")
-			}
-			if tc.withoutStore {
-				rig.adapter.SetMediaStore(nil)
 			}
 			rig.run(t, privateMedia(10, ownerUserID, "here", asDocument(tc.message)))
 
@@ -678,7 +676,7 @@ func TestRejectedSendersAndClosedGatesTriggerNoMediaCall(t *testing.T) {
 		},
 		{
 			name:      "budget refusal",
-			opts:      accessOpts{allowed: []string{allowed}, settings: AccessSettings{Budgets: &fakeBudgets{refusal: auraagent.MessageRateLimited}}},
+			opts:      accessOpts{allowed: []string{allowed}, settings: access.Settings{Budgets: &fakeBudgets{refusal: auraagent.MessageRateLimited}}},
 			update:    privateMedia(10, mediaUserID, "hi", document),
 			wantDrops: []string{"rate_limited"},
 		},
@@ -739,7 +737,7 @@ func TestOpenHandoffHoldsMediaBeforeAnyDownload(t *testing.T) {
 	handoffs := &fakeHandoffs{state: "open"}
 	rig := newMediaRig(t, accessOpts{
 		allowed:  []string{strconv.Itoa(mediaUserID)},
-		settings: AccessSettings{Handoffs: handoffs},
+		settings: access.Settings{Handoffs: handoffs},
 	})
 	rig.h.api.addFile(&fakeFile{id: "f", path: "documents/file_1.pdf", declared: 3, contentType: "application/pdf", body: []byte("pdf")})
 	rig.runGroup(t, privateMedia(10, mediaUserID, "hello", asDocument(mediaFile{FileID: "f", FileSize: 3, MimeType: "application/pdf"})))
@@ -800,9 +798,11 @@ func mentioningOther(item update, token string) update {
 }
 
 func TestReplayedAcceptedUpdateCreatesNoSecondArtifact(t *testing.T) {
-	rig := newMediaRig(t, accessOpts{})
-	ledger := &ledgerFromSink{sink: rig.sink}
-	rig.adapter.SetUpdateLedger(ledger)
+	var ledger *ledgerFromSink
+	rig := newMediaRig(t, accessOpts{ledger: func(sink *memorySink) UpdateLedger {
+		ledger = &ledgerFromSink{sink: sink}
+		return ledger
+	}})
 	rig.h.api.addFile(&fakeFile{id: "f", path: "documents/file_1.pdf", declared: 3, contentType: "application/pdf", body: []byte("pdf")})
 	item := privateMedia(10, ownerUserID, "once", asDocument(mediaFile{FileID: "f", FileSize: 3, MimeType: "application/pdf"}))
 	rig.run(t, item, item)
@@ -825,9 +825,11 @@ func TestReplayedAcceptedUpdateCreatesNoSecondArtifact(t *testing.T) {
 }
 
 func TestUnreadableLedgerHoldsTheUpdateForRetry(t *testing.T) {
-	rig := newMediaRig(t, accessOpts{})
-	ledger := &ledgerFromSink{sink: rig.sink, err: errors.New("database is locked")}
-	rig.adapter.SetUpdateLedger(ledger)
+	var ledger *ledgerFromSink
+	rig := newMediaRig(t, accessOpts{ledger: func(sink *memorySink) UpdateLedger {
+		ledger = &ledgerFromSink{sink: sink, err: errors.New("database is locked")}
+		return ledger
+	}})
 	rig.h.api.addFile(&fakeFile{id: "f", path: "documents/file_1.pdf", declared: 3, contentType: "application/pdf", body: []byte("pdf")})
 	item := privateMedia(10, ownerUserID, "later", asDocument(mediaFile{FileID: "f", FileSize: 3, MimeType: "application/pdf"}))
 	rig.h.api.queue(item)

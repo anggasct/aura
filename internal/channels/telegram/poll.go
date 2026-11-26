@@ -63,7 +63,7 @@ func (a *Adapter) pollOnce(ctx context.Context) error {
 	}
 	next, _, err := a.cursors.Load(ctx, a.source())
 	if err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "telegram cursor is not readable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "telegram cursor is not readable", err)
 	}
 	timeout := time.Duration(a.cfg.Polling.Timeout)
 	call, cancel := context.WithTimeout(ctx, timeout+pollGrace)
@@ -103,7 +103,7 @@ func (a *Adapter) advanceCursor(ctx context.Context, next int64) {
 
 func (a *Adapter) advanceCursorErr(ctx context.Context, next int64) error {
 	if err := a.cursors.Advance(ctx, a.source(), next, time.Now().UTC()); err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "telegram cursor is not writable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "telegram cursor is not writable", err)
 	}
 	return nil
 }
@@ -132,7 +132,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 	}
 	active, err := a.activeSession(ctx, envelope.ConversationID)
 	if err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "conversation session is not resolvable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "conversation session is not resolvable", err)
 	}
 	envelope.ConversationID = active
 	if held, reason := a.handoffHeld(ctx, msg.destination(), envelope.Parts[0].Text, envelope); held {
@@ -152,7 +152,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 		dest: msg.destination(),
 	})
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
-		return &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
+		return fault.Wrap(ErrorCodeIntakeFailed, "session is not ensurable", err)
 	}
 	if msg.hasMedia() {
 		proceed, err := a.stageMedia(ctx, msg, envelope)
@@ -162,7 +162,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 	}
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
 		if retryableIntake(err) {
-			return &Error{Code: ErrorCodeIntakeFailed, Detail: "runtime did not accept the update", Cause: err}
+			return fault.Wrap(ErrorCodeIntakeFailed, "runtime did not accept the update", err)
 		}
 		a.logger.WarnContext(ctx, "telegram update rejected by the runtime", "component", "telegram", "account", a.account.Name, "error", err)
 		return nil
@@ -337,7 +337,7 @@ func retryableIntake(err error) bool {
 	}
 }
 
-var errTokenUnavailable = Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+var errTokenUnavailable = fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 
 func classifyFault(err error) string {
 	if errors.Is(err, errTokenUnavailable) {
@@ -355,7 +355,7 @@ func classifyFault(err error) string {
 		}
 		return faultUnreachable
 	}
-	if code, ok := CodeOf(err); ok && code == ErrorCodeIntakeFailed {
+	if fault.HasCode(err, ErrorCodeIntakeFailed) {
 		return faultIntake
 	}
 	return faultUnreachable

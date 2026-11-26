@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
@@ -127,7 +128,7 @@ func TestTransportFailuresNeverExposeTheTokenOrTheFilePath(t *testing.T) {
 			t.Errorf("error carries %q: %v", secret, err)
 		}
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
-		t.Errorf("error code = %q, want %q", code, ErrorCodeConnectionFailed)
+	if !fault.HasCode(err, ErrorCodeConnectionFailed) {
+		t.Errorf("error = %v, want %q", err, ErrorCodeConnectionFailed)
 	}
 }

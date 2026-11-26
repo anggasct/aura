@@ -22,13 +22,6 @@ func CommandBinding() command.Binding {
 	}
 }
 
-func (a *Adapter) SetCommands(commands *command.Dispatcher) {
-	if a == nil {
-		return
-	}
-	a.commands = commands
-}
-
 func (a *Adapter) commandInvocation(text string) (command.Invocation, bool) {
 	if self, known := a.selfIdentity(); known {
 		text = stripCommandSuffix(text, self.Username)
@@ -67,7 +60,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 	conversation := envelope.ConversationID
 	active, err := a.activeSession(ctx, conversation)
 	if err != nil {
-		return false, &Error{Code: ErrorCodeIntakeFailed, Detail: "conversation session is not resolvable", Cause: err}
+		return false, fault.Wrap(ErrorCodeIntakeFailed, "conversation session is not resolvable", err)
 	}
 	caller := &command.Caller{
 		Channel:         principal.ChannelTelegram,
@@ -78,7 +71,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 		AgentID:         envelope.AgentID,
 	}
 	if err := a.sessions.EnsureSession(ctx, active, envelope.PrincipalID, envelope.AgentID); err != nil {
-		return false, &Error{Code: ErrorCodeIntakeFailed, Detail: "session is not ensurable", Cause: err}
+		return false, fault.Wrap(ErrorCodeIntakeFailed, "session is not ensurable", err)
 	}
 	outcome, err := chatcommand.Execute(ctx, &chatcommand.Run{
 		Effects:        a.effects,
@@ -94,7 +87,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 			a.logger.WarnContext(ctx, "chat command rejected", "component", "command", "account", a.account.Name, "code", string(code))
 			return true, nil
 		}
-		return false, &Error{Code: ErrorCodeIntakeFailed, Detail: "command could not run", Cause: err}
+		return false, fault.Wrap(ErrorCodeIntakeFailed, "command could not run", err)
 	}
 	if outcome.Receipt == nil {
 		return true, nil
@@ -112,7 +105,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 func (a *Adapter) replyCommand(ctx context.Context, msg *message, intentID, sessionID string, lines []string) error {
 	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID, ThreadID: msg.topicID()})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	_, err = a.Deliver(ctx, &runtimechannelhost.DeliveryRequest{
 		Channel:        a.source(),

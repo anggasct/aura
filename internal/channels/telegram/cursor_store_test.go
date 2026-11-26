@@ -1,15 +1,21 @@
-package store
+package telegram
 
 import (
+	"context"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestTelegramCursorStore_AdvancesMonotonically(t *testing.T) {
-	db := newTestDB(t)
-	cursors := NewTelegramCursorStore(db)
+	db := storetest.OpenMigrated(t)
+	cursors, err := NewSQLiteCursorStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
 	ctx := t.Context()
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
 
@@ -37,7 +43,13 @@ func TestTelegramCursorStore_AdvancesMonotonically(t *testing.T) {
 }
 
 func TestTelegramCursorStore_RejectsInvalidInput(t *testing.T) {
-	cursors := NewTelegramCursorStore(newTestDB(t))
+	if _, err := NewSQLiteCursorStore(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("NewSQLiteCursorStore(nil) = %v, want invalid_argument", err)
+	}
+	cursors, err := NewSQLiteCursorStore(storetest.OpenMigrated(t))
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
 	for name, call := range map[string]func() error{
 		"empty source":   func() error { return cursors.Advance(t.Context(), "", 1, time.Now()) },
 		"negative value": func() error { return cursors.Advance(t.Context(), "telegram:pocket", -1, time.Now()) },
@@ -45,5 +57,29 @@ func TestTelegramCursorStore_RejectsInvalidInput(t *testing.T) {
 		if code, ok := fault.CodeOf[ErrorCode](call()); !ok || code != ErrorCodeInvalidArgument {
 			t.Errorf("%s: code = %q, want %q", name, code, ErrorCodeInvalidArgument)
 		}
+	}
+}
+
+func TestTelegramCursorStore_JoinsContextTransaction(t *testing.T) {
+	db := storetest.OpenMigrated(t)
+	cursors, err := NewSQLiteCursorStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	if err := sqlite.RunInTx(t.Context(), db, func(txCtx context.Context) error {
+		if err := cursors.Advance(txCtx, "telegram:pocket", 42, now); err != nil {
+			return err
+		}
+		next, found, err := cursors.Load(txCtx, "telegram:pocket")
+		if err != nil || !found || next != 42 {
+			t.Fatalf("Load inside tx = %d %v %v, want 42", next, found, err)
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("RunInTx: %v", err)
+	}
+	if next, found, err := cursors.Load(t.Context(), "telegram:pocket"); err != nil || !found || next != 42 {
+		t.Fatalf("Load after commit = %d %v %v, want 42", next, found, err)
 	}
 }

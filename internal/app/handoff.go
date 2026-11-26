@@ -144,7 +144,7 @@ func discordAccount(cfg *appconfig.Config, name string) (*config.DiscordAccount,
 	return nil, false
 }
 
-func telegramAccount(cfg *appconfig.Config, name string) (*config.TelegramAccount, bool) {
+func telegramAccount(cfg *appconfig.Config, name string) (*telegram.Account, bool) {
 	for i := range cfg.Channels.Telegram.Accounts {
 		if cfg.Channels.Telegram.Accounts[i].Name == name {
 			return &cfg.Channels.Telegram.Accounts[i], true

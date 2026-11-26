@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
@@ -190,7 +191,7 @@ func captureTelegramDeliveries(t *testing.T, failWith error) *[]deliveredTelegra
 	t.Helper()
 	var delivered []deliveredTelegramText
 	previous := deliverTelegramText
-	deliverTelegramText = func(_ context.Context, account *config.TelegramAccount, chatID, threadID, text string) error {
+	deliverTelegramText = func(_ context.Context, account *telegram.Account, chatID, threadID, text string) error {
 		if failWith != nil {
 			return failWith
 		}
@@ -301,7 +302,7 @@ func TestReplyToATelegramHandoffFailsWithoutJournaling(t *testing.T) {
 		cfg := writeTelegramAccessConfig(t)
 		open(t, cfg, "pocket", "not-a-chat")
 		_, err := runReplyCommand(t, cfg, session, "hi")
-		if code, ok := telegram.CodeOf(err); !ok || code != telegram.ErrorCodeInvalidArgument {
+		if !fault.HasCode(err, telegram.ErrorCodeInvalidArgument) {
 			t.Fatalf("err = %v, want %s", err, telegram.ErrorCodeInvalidArgument)
 		}
 		if accessEventCount(t, cfg, accessActionHandoffReply) != 0 {

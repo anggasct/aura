@@ -15,7 +15,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -209,21 +208,6 @@ func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 		Handoffs:         shared.Handoffs,
 		Evals:            shared.Evals,
 		Denied:           shared.Denied,
-		ApprovalRouted:   shared.ApprovalRouted,
-	}
-}
-
-func telegramAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) telegram.AccessSettings {
-	shared := channelAccessSettings(cfg, db, recorder, runs)
-	return telegram.AccessSettings{
-		ApprovalTimeout:  shared.ApprovalTimeout,
-		StandingGrantTTL: shared.StandingGrantTTL,
-		Grants:           shared.Grants,
-		Pairing:          shared.Pairing,
-		Budgets:          shared.Budgets,
-		Erasure:          shared.Erasure,
-		Handoffs:         shared.Handoffs,
-		Evals:            shared.Evals,
 		ApprovalRouted:   shared.ApprovalRouted,
 	}
 }

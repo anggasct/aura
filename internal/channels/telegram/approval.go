@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -62,13 +63,13 @@ func (a *Adapter) observeRouted(ctx context.Context, result string) {
 
 func validateApprovalPrompt(ctx context.Context, prompt *approval.Prompt) error {
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if prompt == nil {
-		return Errorf(ErrorCodeInvalidArgument, "approval prompt must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "approval prompt must not be nil")
 	}
 	if strings.TrimSpace(prompt.ToolName) == "" || strings.TrimSpace(prompt.SessionID) == "" || strings.TrimSpace(prompt.PrincipalID) == "" {
-		return Errorf(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
+		return fault.New(ErrorCodeInvalidArgument, "approval prompt is missing tool, session, or principal")
 	}
 	return nil
 }
@@ -92,7 +93,7 @@ func (a *Adapter) DecideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		return false, err
 	}
 	if requester == nil || requester.Principal == "" || requester.Principal != prompt.PrincipalID {
-		return false, Errorf(ErrorCodeInvalidArgument, "approval requester is missing or does not match the prompt")
+		return false, fault.New(ErrorCodeInvalidArgument, "approval requester is missing or does not match the prompt")
 	}
 	return a.decideForOwner(ctx, prompt, &approvalTarget{binding: approval.Binding{Principal: requester.Principal, Class: requester.Class, Persona: requester.Persona}})
 }
@@ -132,12 +133,12 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 	ownerChat, ok := a.ownerChatID()
 	if !ok {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "owner has no telegram identity")
+		return false, approvalUnavailable("owner has no telegram identity")
 	}
 	token, ok := a.botToken()
 	if !ok {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "approval token is unavailable")
+		return false, approvalUnavailable("approval token is unavailable")
 	}
 	now := time.Now()
 	expiresAt := now.Add(approval.OwnerTimeout(definition.ApprovalTimeout, a.access.ApprovalTimeout))
@@ -160,7 +161,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 	card, err := a.openCard(ctx, token, &binding, ownerDest, text, expiresAt)
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
-		return false, Errorf(ErrorCodeApprovalUnavailable, "owner approval card delivery failed")
+		return false, approvalUnavailable("owner approval card delivery failed")
 	}
 	a.postNotice(ctx, requester.dest, definition.Message(auraagent.MessageWaitingForOwner))
 	outcome, timedOut, err := a.awaitApproval(ctx, token, &card)
@@ -172,7 +173,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		if err != nil {
 			return false, err
 		}
-		return false, Errorf(ErrorCodeApprovalTimeout, "owner did not answer the approval in time")
+		return false, approvalTimeout("owner did not answer the approval in time")
 	case err != nil:
 		return false, err
 	case outcome.Standing:
@@ -223,7 +224,7 @@ func (a *Adapter) openCard(ctx context.Context, token string, binding *approval.
 	}
 	if sent.MessageID == 0 {
 		a.approvals.Drop(tokenID, pending)
-		return openedCard{}, Errorf(ErrorCodeDeliveryAmbiguous, "approval card post has no message id")
+		return openedCard{}, deliveryAmbiguous("approval card post has no message id")
 	}
 	return openedCard{tokenID: tokenID, pending: pending, dest: dest, messageID: sent.MessageID}, nil
 }

@@ -21,31 +21,31 @@ func (c *botClient) getFile(ctx context.Context, token, fileID string) (fileInfo
 
 func (c *botClient) download(ctx context.Context, token, filePath string, limit int64) (*os.File, error) {
 	if !safeFilePath(filePath) {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "file path is not acceptable")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "file path is not acceptable")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/file/bot"+token+"/"+filePath, http.NoBody)
 	if err != nil {
-		return nil, Errorf(ErrorCodeConnectionFailed, "file download request is not constructible")
+		return nil, fault.New(ErrorCodeConnectionFailed, "file download request is not constructible")
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return nil, &Error{Code: ErrorCodeConnectionFailed, Detail: "file download request failed", Cause: scrub(redact(err, token), filePath)}
+		return nil, fault.Wrap(ErrorCodeConnectionFailed, "file download request failed", scrub(redact(err, token), filePath))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	switch {
 	case resp.StatusCode != http.StatusOK:
-		return nil, Errorf(ErrorCodeAttachmentRejected, "file download did not succeed")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "file download did not succeed")
 	case !servedTypeAcceptable(resp.Header.Get("Content-Type")):
-		return nil, Errorf(ErrorCodeAttachmentRejected, "file media type is not eligible")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "file media type is not eligible")
 	case resp.ContentLength > limit:
-		return nil, Errorf(ErrorCodeAttachmentRejected, "file exceeds the size bound")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "file exceeds the size bound")
 	}
 	file, err := media.Spool(resp.Body, limit)
 	if err != nil {
 		if fault.HasCode(err, media.ErrorCodeSizeExceeded) {
-			return nil, Errorf(ErrorCodeAttachmentRejected, "file exceeds the size bound")
+			return nil, fault.New(ErrorCodeAttachmentRejected, "file exceeds the size bound")
 		}
-		return nil, Errorf(ErrorCodeAttachmentRejected, "file download did not complete")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "file download did not complete")
 	}
 	return file, nil
 }

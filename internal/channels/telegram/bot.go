@@ -12,6 +12,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -71,31 +73,31 @@ func newBotClient() *botClient {
 func (c *botClient) call(ctx context.Context, token, method string, payload, result any) error {
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "bot api %s payload is not serializable", method)
+		return fault.New(ErrorCodeProtocolInvalid, fmt.Sprintf("bot api %s payload is not serializable", method))
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.base+"/bot"+token+"/"+method, bytes.NewReader(body))
 	if err != nil {
-		return Errorf(ErrorCodeConnectionFailed, "bot api %s request is not constructible", method)
+		return fault.New(ErrorCodeConnectionFailed, fmt.Sprintf("bot api %s request is not constructible", method))
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "bot api " + method + " request failed", Cause: redact(err, token)}
+		return fault.Wrap(ErrorCodeConnectionFailed, "bot api "+method+" request failed", redact(err, token))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
-		return &Error{Code: ErrorCodeConnectionFailed, Detail: "bot api " + method + " response is not readable", Cause: redact(err, token)}
+		return fault.Wrap(ErrorCodeConnectionFailed, "bot api "+method+" response is not readable", redact(err, token))
 	}
 	if len(raw) > maxResponseBytes {
-		return Errorf(ErrorCodeProtocolInvalid, "bot api %s response exceeds the size bound", method)
+		return fault.New(ErrorCodeProtocolInvalid, fmt.Sprintf("bot api %s response exceeds the size bound", method))
 	}
 	var envelope apiResponse
 	if err := json.Unmarshal(raw, &envelope); err != nil {
 		if resp.StatusCode != http.StatusOK {
-			return &Error{Code: ErrorCodeBotAPIRejected, Detail: "bot api " + method + " failed", Cause: &APIError{Method: method, Status: resp.StatusCode}}
+			return fault.Wrap(ErrorCodeBotAPIRejected, "bot api "+method+" failed", &APIError{Method: method, Status: resp.StatusCode})
 		}
-		return Errorf(ErrorCodeProtocolInvalid, "bot api %s response is not decodable", method)
+		return fault.New(ErrorCodeProtocolInvalid, fmt.Sprintf("bot api %s response is not decodable", method))
 	}
 	if !envelope.OK || resp.StatusCode != http.StatusOK {
 		apiErr := &APIError{Method: method, Status: envelope.ErrorCode}
@@ -105,13 +107,13 @@ func (c *botClient) call(ctx context.Context, token, method string, payload, res
 		if envelope.Parameters != nil && envelope.Parameters.RetryAfter > 0 {
 			apiErr.RetryAfter = time.Duration(envelope.Parameters.RetryAfter) * time.Second
 		}
-		return &Error{Code: ErrorCodeBotAPIRejected, Detail: "bot api " + method + " failed", Cause: apiErr}
+		return fault.Wrap(ErrorCodeBotAPIRejected, "bot api "+method+" failed", apiErr)
 	}
 	if result == nil {
 		return nil
 	}
 	if err := json.Unmarshal(envelope.Result, result); err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "bot api %s result is not decodable", method)
+		return fault.New(ErrorCodeProtocolInvalid, fmt.Sprintf("bot api %s result is not decodable", method))
 	}
 	return nil
 }
@@ -336,7 +338,7 @@ func (c *botClient) editMessageText(ctx context.Context, token string, req *edit
 	var edited sentMessage
 	if len(result) > 0 && result[0] == '{' {
 		if err := json.Unmarshal(result, &edited); err != nil {
-			return sentMessage{}, Errorf(ErrorCodeProtocolInvalid, "bot api editMessageText result is not decodable")
+			return sentMessage{}, fault.New(ErrorCodeProtocolInvalid, "bot api editMessageText result is not decodable")
 		}
 	}
 	return edited, nil
@@ -369,7 +371,7 @@ func (c *botClient) getMe(ctx context.Context, token string) (botIdentity, error
 		return botIdentity{}, err
 	}
 	if self.ID <= 0 || self.Username == "" {
-		return botIdentity{}, Errorf(ErrorCodeProtocolInvalid, "bot api getMe result carries no bot identity")
+		return botIdentity{}, fault.New(ErrorCodeProtocolInvalid, "bot api getMe result carries no bot identity")
 	}
 	return self, nil
 }

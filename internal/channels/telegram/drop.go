@@ -37,13 +37,6 @@ const (
 	dropScopeChat    = "chat"
 )
 
-func (a *Adapter) SetDropObserver(observe func(ctx context.Context, reason string)) {
-	if a == nil {
-		return
-	}
-	a.dropped = observe
-}
-
 func messageScope(msg *message) string {
 	if msg.Chat.Type == chatTypePrivate {
 		return dropScopePrivate

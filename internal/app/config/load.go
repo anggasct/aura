@@ -152,7 +152,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		validatePlugins(cfg.Plugins),
 		configkit.Under("webhook", cfg.Webhook.Validate()),
 		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
-		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
+		configkit.Under("channels.telegram", cfg.Channels.Telegram.Validate()),
 		legacyconfig.ValidateEmail(&cfg.Channels.Email),
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
 		configkit.Under("broadcast", cfg.Broadcast.Validate()),
