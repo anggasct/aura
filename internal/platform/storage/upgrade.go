@@ -1,4 +1,4 @@
-package store
+package storage
 
 import (
 	"context"
@@ -9,7 +9,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/history"
 )
 
 type UpgradeResult struct {
@@ -19,8 +18,8 @@ type UpgradeResult struct {
 	Report  RestoreReport
 }
 
-func UpgradeWithBackup(ctx context.Context, db *sql.DB, backupRoot, artifactRoot string, now time.Time) (UpgradeResult, error) {
-	applied, latest, err := sqlite.SchemaVersions(ctx, db, history.Migrations())
+func UpgradeWithBackup(ctx context.Context, db *sql.DB, migrations []sqlite.Migration, backupRoot, artifactRoot string, now time.Time) (UpgradeResult, error) {
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
 	if err != nil {
 		return UpgradeResult{}, err
 	}
@@ -44,7 +43,7 @@ func UpgradeWithBackup(ctx context.Context, db *sql.DB, backupRoot, artifactRoot
 	if len(report.ChecksumMismatches) > 0 || len(report.MissingBlobFiles) > 0 {
 		return result, Errorf(ErrorCodeBackupInvalid, "pre-upgrade backup %s failed verification: %d checksum mismatches, %d missing blobs", result.Backup, len(report.ChecksumMismatches), len(report.MissingBlobFiles))
 	}
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
+	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
 		return result, err
 	}
 	return result, nil

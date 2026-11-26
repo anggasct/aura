@@ -7,11 +7,11 @@ import (
 	"io"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 type channelMediaStore struct {
-	store store.ArtifactStore
+	store storage.ArtifactStore
 }
 
 func (s *channelMediaStore) Put(ctx context.Context, content io.Reader, meta *media.Meta) (media.Receipt, error) {
@@ -22,7 +22,7 @@ func (s *channelMediaStore) Put(ctx context.Context, content io.Reader, meta *me
 	if _, err := rand.Read(raw[:]); err != nil {
 		return media.Receipt{}, err
 	}
-	ref, err := s.store.Put(ctx, content, &store.ArtifactMetadata{
+	ref, err := s.store.Put(ctx, content, &storage.ArtifactMetadata{
 		ID:        "art-" + hex.EncodeToString(raw[:]),
 		SessionID: meta.SessionID,
 		Filename:  meta.Filename,

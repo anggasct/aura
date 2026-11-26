@@ -1,4 +1,4 @@
-package store
+package storage
 
 import (
 	"context"
@@ -49,43 +49,39 @@ func Collect(ctx context.Context, db *sql.DB, root string, before time.Time) (Co
 	if len(candidates) == 0 {
 		return report, nil
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		return CollectionReport{}, classify(err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	if err := sqlite.RunInTx(ctx, db, func(ctx context.Context) error {
+		stmt, err := sqlite.Conn(ctx, db).PrepareContext(ctx, `DELETE FROM blob WHERE digest = ? AND NOT EXISTS
+			(SELECT 1 FROM artifact_ref r WHERE r.blob_digest = ?)`)
+		if err != nil {
+			return classify(err)
+		}
+		defer func() { _ = stmt.Close() }()
 
-	stmt, err := tx.PrepareContext(ctx, `DELETE FROM blob WHERE digest = ? AND NOT EXISTS
-		(SELECT 1 FROM artifact_ref r WHERE r.blob_digest = ?)`)
-	if err != nil {
-		return CollectionReport{}, classify(err)
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for _, c := range candidates {
-		res, err := stmt.ExecContext(ctx, c.digest, c.digest)
-		if err != nil {
-			return CollectionReport{}, classify(err)
+		for _, c := range candidates {
+			res, err := stmt.ExecContext(ctx, c.digest, c.digest)
+			if err != nil {
+				return classify(err)
+			}
+			matched, err := res.RowsAffected()
+			if err != nil {
+				return classify(fmt.Errorf("rows affected for blob %s: %w", c.digest, err))
+			}
+			if matched == 0 {
+				continue
+			}
+			absPath, err := resolveRootedPath(root, c.relativePath)
+			if err != nil {
+				return err
+			}
+			if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
+				return fmt.Errorf("remove unreferenced blob %s: %w", c.digest, err)
+			}
+			report.DeletedBlobs++
+			report.FreedBytes += c.size
 		}
-		matched, err := res.RowsAffected()
-		if err != nil {
-			return CollectionReport{}, classify(fmt.Errorf("rows affected for blob %s: %w", c.digest, err))
-		}
-		if matched == 0 {
-			continue
-		}
-		absPath, err := resolveRootedPath(root, c.relativePath)
-		if err != nil {
-			return CollectionReport{}, err
-		}
-		if err := os.Remove(absPath); err != nil && !os.IsNotExist(err) {
-			return CollectionReport{}, fmt.Errorf("remove unreferenced blob %s: %w", c.digest, err)
-		}
-		report.DeletedBlobs++
-		report.FreedBytes += c.size
-	}
-	if err := tx.Commit(); err != nil {
-		return CollectionReport{}, classify(err)
+		return nil
+	}); err != nil {
+		return CollectionReport{}, err
 	}
 	return report, nil
 }
@@ -97,7 +93,7 @@ type collectionCandidate struct {
 }
 
 func collectionCandidates(ctx context.Context, db *sql.DB, before time.Time) ([]collectionCandidate, error) {
-	rows, err := db.QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob b
+	rows, err := sqlite.Conn(ctx, db).QueryContext(ctx, `SELECT digest, size_bytes, relative_path FROM blob b
 		WHERE NOT EXISTS (SELECT 1 FROM artifact_ref r WHERE r.blob_digest = b.digest)
 		AND b.created_at < ?`, sqlite.FormatTime(before))
 	if err != nil {

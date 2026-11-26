@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestChannelMediaStorePersistsContentUnderTheSession(t *testing.T) {
@@ -18,7 +18,7 @@ func TestChannelMediaStorePersistsContentUnderTheSession(t *testing.T) {
 	if err := (&discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}).EnsureSession(t.Context(), sessionID, "telegram:5", "main"); err != nil {
 		t.Fatalf("EnsureSession: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, t.TempDir(), 1<<20)
+	artifacts := storage.NewArtifactStore(db, t.TempDir(), 1<<20)
 	channelStore := &channelMediaStore{store: artifacts}
 
 	receipt, err := channelStore.Put(t.Context(), strings.NewReader("pdf-bytes"), &media.Meta{SessionID: sessionID, Filename: "a.pdf", MediaType: "application/pdf", Extra: []byte(`{"message_id":"5:9"}`)})

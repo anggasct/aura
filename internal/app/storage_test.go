@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -118,7 +118,7 @@ func TestStorageVerifyReportsBackupInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("verify of a broken backup must fail")
 	}
-	if code, ok := storeCodeOf(err); !ok || code != store.ErrorCodeBackupInvalid {
+	if code, ok := storageCodeOf(err); !ok || code != storage.ErrorCodeBackupInvalid {
 		t.Errorf("verify error = %v, want code backup_invalid (got %q, %v)", err, code, ok)
 	}
 }
@@ -144,6 +144,6 @@ func executeNoErr(t *testing.T, args ...string) error {
 	return root.Execute()
 }
 
-func storeCodeOf(err error) (store.ErrorCode, bool) {
-	return fault.CodeOf[store.ErrorCode](err)
+func storageCodeOf(err error) (storage.ErrorCode, bool) {
+	return fault.CodeOf[storage.ErrorCode](err)
 }

@@ -16,9 +16,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -445,7 +445,7 @@ func TestImportQuotaExhaustionLeavesNoPartialArtifactInTheStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	artifacts := store.NewArtifactStore(db, root, 8)
+	artifacts := storage.NewArtifactStore(db, root, 8)
 	f := newImportFixture(t)
 	f.importer.sink = storeSink{store: artifacts}
 	f.write(t, "fits.txt", []byte("12345"))

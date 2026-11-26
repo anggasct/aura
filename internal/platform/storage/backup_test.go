@@ -1,11 +1,10 @@
-package store
+package storage
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestBackupAndVerifyRestore(t *testing.T) {
@@ -315,7 +315,7 @@ func TestBackupManifestMatchesGoldenBytes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Marshal: %v", err)
 	}
-	golden, err := os.ReadFile(filepath.Join("..", "..", "testdata", "store", "backup_manifest.json"))
+	golden, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "storage", "backup_manifest.json"))
 	if err != nil {
 		t.Fatalf("read golden manifest: %v", err)
 	}

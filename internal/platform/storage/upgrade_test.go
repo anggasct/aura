@@ -1,4 +1,4 @@
-package store
+package storage
 
 import (
 	"context"
@@ -33,9 +33,9 @@ func TestUpgradeBacksUpThePreviousSchemaBeforeMigrating(t *testing.T) {
 	ctx := context.Background()
 	root := t.TempDir()
 	db := openDatabaseAtVersion(t, filepath.Join(root, "aura.db"), len(migrations)-1)
-	seedMemorySession(t, db, "sess-before-upgrade", "owner-1")
+	mustCreateSession(t, db, "sess-before-upgrade")
 	now := time.Date(2026, 11, 2, 14, 30, 0, 0, time.UTC)
-	result, err := UpgradeWithBackup(ctx, db, filepath.Join(root, "backups"), root, now)
+	result, err := UpgradeWithBackup(ctx, db, migrations, filepath.Join(root, "backups"), root, now)
 	if err != nil {
 		t.Fatalf("UpgradeWithBackup: %v", err)
 	}
@@ -51,10 +51,10 @@ func TestUpgradeBacksUpThePreviousSchemaBeforeMigrating(t *testing.T) {
 		t.Fatalf("open backup: %v", err)
 	}
 	defer func() { _ = backup.Close() }()
-	if applied, _, err := sqlite.SchemaVersions(ctx, backup, history.Migrations()); err != nil || applied != previous {
+	if applied, _, err := sqlite.SchemaVersions(ctx, backup, migrations); err != nil || applied != previous {
 		t.Fatalf("backup schema = %d, %v; want the pre-upgrade version %d", applied, err, previous)
 	}
-	if applied, _, err := sqlite.SchemaVersions(ctx, db, history.Migrations()); err != nil || applied != latest {
+	if applied, _, err := sqlite.SchemaVersions(ctx, db, migrations); err != nil || applied != latest {
 		t.Fatalf("live schema = %d, %v; want %d", applied, err, latest)
 	}
 }
@@ -63,7 +63,7 @@ func TestUpgradeOfACurrentSchemaWritesNoBackup(t *testing.T) {
 	migrations := history.Migrations()
 	root := t.TempDir()
 	db := openDatabaseAtVersion(t, filepath.Join(root, "aura.db"), len(migrations))
-	result, err := UpgradeWithBackup(context.Background(), db, filepath.Join(root, "backups"), root, time.Now())
+	result, err := UpgradeWithBackup(context.Background(), db, migrations, filepath.Join(root, "backups"), root, time.Now())
 	if err != nil || result.Backup != "" {
 		t.Fatalf("result = %+v, %v", result, err)
 	}
@@ -80,7 +80,7 @@ func TestUpgradeRefusesASchemaNewerThanTheBinary(t *testing.T) {
 	if _, err := db.ExecContext(ctx, `INSERT INTO schema_migration (version, checksum, applied_at) VALUES (?, 'future', '2026-11-02T00:00:00Z')`, migrations[len(migrations)-1].Version+1); err != nil {
 		t.Fatalf("seed future version: %v", err)
 	}
-	_, err := UpgradeWithBackup(ctx, db, filepath.Join(root, "backups"), root, time.Now())
+	_, err := UpgradeWithBackup(ctx, db, migrations, filepath.Join(root, "backups"), root, time.Now())
 	if !fault.HasCode(err, sqlite.ErrorCodeMigrationSequenceInvalid) {
 		t.Fatalf("err = %v, want %s", err, sqlite.ErrorCodeMigrationSequenceInvalid)
 	}

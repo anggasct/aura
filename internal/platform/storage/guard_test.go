@@ -1,8 +1,9 @@
-package store
+package storage
 
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -14,8 +15,49 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
+
+func newTestDB(t *testing.T) *sql.DB {
+	t.Helper()
+	return storetest.OpenMigrated(t)
+}
+
+func newSession(id string) turn.Session {
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	return turn.Session{
+		ID:        id,
+		OwnerID:   "owner-1",
+		CreatedAt: now,
+		UpdatedAt: now,
+		Metadata:  json.RawMessage(`{"k":"v"}`),
+	}
+}
+
+func newEvent(sessionID string, sequence uint64) turn.Event {
+	return turn.Event{
+		ID:            fmt.Sprintf("%s-event-%d", sessionID, sequence),
+		SessionID:     sessionID,
+		Sequence:      sequence,
+		TurnID:        "turn-1",
+		InvocationID:  "invocation-1",
+		Author:        "user",
+		Kind:          "message",
+		SchemaVersion: 1,
+		Payload:       json.RawMessage(`{"text":"hi"}`),
+		CreatedAt:     time.Now().UTC(),
+	}
+}
+
+func mustCreateSession(t *testing.T, db *sql.DB, id string) {
+	t.Helper()
+	sess := newSession(id)
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+		t.Fatalf("create session %s: %v", id, err)
+	}
+}
 
 func wantCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
@@ -24,7 +66,7 @@ func wantCode(t *testing.T, err error, want ErrorCode) {
 	}
 	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok {
-		t.Fatalf("error %v carries no store code, want %s", err, want)
+		t.Fatalf("error %v carries no storage code, want %s", err, want)
 	}
 	if got != want {
 		t.Errorf("error code = %s, want %s", got, want)

@@ -11,8 +11,8 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -73,7 +73,7 @@ func newInterpreterRuntime(cfg *appconfig.Config, manifest *interpreter.Manifest
 	return &interpreterRuntime{store: runtimeStore, set: set, verifier: verifier}, nil
 }
 
-func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *appconfig.Config, artifacts store.ArtifactStore, observer toolsbuiltin.CodeObserver, logger *slog.Logger) error {
+func (r *interpreterRuntime) enableExecution(ctx context.Context, cfg *appconfig.Config, artifacts storage.ArtifactStore, observer toolsbuiltin.CodeObserver, logger *slog.Logger) error {
 	dataRoot, err := resolveDataRoot(cfg)
 	if err != nil {
 		return err

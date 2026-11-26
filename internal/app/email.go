@@ -15,6 +15,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -85,7 +86,7 @@ func newEmailAdapter(cfg *appconfig.Config, account *config.EmailAccount, db *sq
 	if err != nil {
 		return nil, err
 	}
-	adapter.SetMediaStore(&channelMediaStore{store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))})
+	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))})
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)
 	}

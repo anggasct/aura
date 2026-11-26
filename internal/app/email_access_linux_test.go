@@ -30,6 +30,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -256,7 +257,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	adapter.SetPersonaRouter(router)
 	settings := discordAccessSettings(cfg, db, nil, nil)
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-	adapter.SetMediaStore(&channelMediaStore{store: store.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota))})
+	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota))})
 	mailboxes := wireEmailOwnerAccess([]runtimechannelhost.ChannelPort{adapter}, route, approvers)
 	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
 	builtin.SetHandoffOpener(newHandoffService(db, []handoffNotifier{adapter}))
