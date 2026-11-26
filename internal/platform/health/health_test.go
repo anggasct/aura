@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/store/history"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -120,7 +120,7 @@ func TestSandboxChecker(t *testing.T) {
 
 func TestBackupCheckerAgainstRealManifest(t *testing.T) {
 	dir := t.TempDir()
-	manifest := store.BackupManifest{CreatedAt: fixedNow().Add(-2 * time.Hour)}
+	manifest := storage.BackupManifest{CreatedAt: fixedNow().Add(-2 * time.Hour)}
 	data, err := json.Marshal(manifest)
 	if err != nil {
 		t.Fatalf("marshal manifest: %v", err)
@@ -131,7 +131,7 @@ func TestBackupCheckerAgainstRealManifest(t *testing.T) {
 
 	checker := BackupChecker{
 		LastBackup: func(context.Context) (time.Time, error) {
-			m, err := store.ReadBackupManifest(dir)
+			m, err := storage.ReadBackupManifest(dir)
 			if err != nil {
 				return time.Time{}, err
 			}

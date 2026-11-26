@@ -16,7 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/store/history"
 )
 
@@ -106,11 +106,11 @@ func newStorageBackupCmd(gf *globalFlags) *cobra.Command {
 					destDir = backupDir
 				}
 				start := time.Now()
-				manifest, err := store.Backup(ctx, opened, destDir)
+				manifest, err := storage.Backup(ctx, opened, destDir)
 				if err != nil {
 					return err
 				}
-				report, err := store.VerifyRestore(ctx, destDir, artifactRoot)
+				report, err := storage.VerifyRestore(ctx, destDir, artifactRoot)
 				if err != nil {
 					return err
 				}
@@ -165,7 +165,7 @@ func runStorageUpgrade(ctx context.Context, logger *slog.Logger, cfg *appconfig.
 	}
 	defer func() { _ = db.Close() }()
 	start := time.Now()
-	result, err := store.UpgradeWithBackup(ctx, db, backupDir, artifactRoot, now)
+	result, err := storage.UpgradeWithBackup(ctx, db, history.Migrations(), backupDir, artifactRoot, now)
 	if err != nil {
 		if result.Backup != "" {
 			return fmt.Errorf("storage upgrade from schema %d to %d failed; restore the pre-upgrade backup %s with aura storage restore: %w", result.Applied, result.Latest, result.Backup, err)
@@ -203,12 +203,12 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				start := time.Now()
-				report, err := store.VerifyRestore(ctx, input, artifactRoot)
+				report, err := storage.VerifyRestore(ctx, input, artifactRoot)
 				if err != nil {
-					if _, ok := fault.CodeOf[store.ErrorCode](err); ok {
+					if _, ok := fault.CodeOf[storage.ErrorCode](err); ok {
 						return err
 					}
-					return store.Errorf(store.ErrorCodeBackupInvalid, "storage verification failed: %v", err)
+					return storage.Errorf(storage.ErrorCodeBackupInvalid, "storage verification failed: %v", err)
 				}
 				logger.InfoContext(ctx, "storage verification complete",
 					"component", "storage",
@@ -223,7 +223,7 @@ func newStorageVerifyCmd(gf *globalFlags) *cobra.Command {
 					"missing_blobs", len(report.MissingBlobFiles),
 				)
 				if len(report.ChecksumMismatches) > 0 || len(report.MissingBlobFiles) > 0 {
-					return store.Errorf(store.ErrorCodeBackupInvalid, "storage verification failed: %d checksum mismatches, %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles))
+					return storage.Errorf(storage.ErrorCodeBackupInvalid, "storage verification failed: %d checksum mismatches, %d missing blobs", len(report.ChecksumMismatches), len(report.MissingBlobFiles))
 				}
 				return nil
 			})
@@ -252,7 +252,7 @@ func newStorageRestoreCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				start := time.Now()
-				report, err := store.Restore(ctx, input, artifactRoot, dbPath, store.RestoreOptions{Force: force})
+				report, err := storage.Restore(ctx, input, artifactRoot, dbPath, storage.RestoreOptions{Force: force})
 				if err != nil {
 					return err
 				}
@@ -284,7 +284,7 @@ func newStorageReconcileCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				start := time.Now()
-				report, err := store.Reconcile(ctx, opened, artifactRoot)
+				report, err := storage.Reconcile(ctx, opened, artifactRoot)
 				if err != nil {
 					return err
 				}
@@ -318,7 +318,7 @@ func newStorageGcCmd(gf *globalFlags) *cobra.Command {
 					return err
 				}
 				start := time.Now()
-				report, err := store.Collect(ctx, opened, artifactRoot, cutoff)
+				report, err := storage.Collect(ctx, opened, artifactRoot, cutoff)
 				if err != nil {
 					return err
 				}

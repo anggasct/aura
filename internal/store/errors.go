@@ -12,44 +12,37 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeInvalidArgument           ErrorCode = "invalid_argument"
-	ErrorCodeSessionNotFound           ErrorCode = "session_not_found"
-	ErrorCodeEventNotFound             ErrorCode = "event_not_found"
-	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
-	ErrorCodeArtifactBlobMissing       ErrorCode = "artifact_blob_missing"
-	ErrorCodeBackupDestinationConflict ErrorCode = "backup_destination_conflict"
-	ErrorCodeBackupInvalid             ErrorCode = "backup_invalid"
-	ErrorCodeRestoreLocked             ErrorCode = "restore_locked"
-	ErrorCodeStorageUnavailable        ErrorCode = "storage_unavailable"
-	ErrorCodeWebhookExecutionConflict  ErrorCode = "webhook_execution_conflict"
-	ErrorCodeWebhookExecutionNotFound  ErrorCode = "webhook_execution_not_found"
-	ErrorCodeWebhookExecutionInvalid   ErrorCode = "webhook_execution_invalid"
-	ErrorCodeChannelResumeInvalid      ErrorCode = "channel_resume_invalid"
-	ErrorCodeBroadcastConflict         ErrorCode = "broadcast_conflict"
-	ErrorCodeBroadcastNotFound         ErrorCode = "broadcast_not_found"
-	ErrorCodeBroadcastInvalid          ErrorCode = "broadcast_invalid"
-	ErrorCodeScheduleConflict          ErrorCode = "schedule_conflict"
-	ErrorCodeScheduleNotFound          ErrorCode = "schedule_not_found"
-	ErrorCodeScheduleInvalid           ErrorCode = "schedule_invalid"
-	ErrorCodeMemoryConflict            ErrorCode = "memory_conflict"
-	ErrorCodeMemoryNotFound            ErrorCode = "memory_not_found"
-	ErrorCodeMemoryInvalid             ErrorCode = "memory_invalid"
-	ErrorCodeSkillNotFound             ErrorCode = "skill_not_found"
-	ErrorCodeSkillInvalid              ErrorCode = "skill_invalid"
-	ErrorCodeSkillDigestChanged        ErrorCode = "skill_digest_changed"
-	ErrorCodeProfileConflict           ErrorCode = "profile_conflict"
-	ErrorCodeProfileNotFound           ErrorCode = "profile_not_found"
-	ErrorCodeProfileInvalid            ErrorCode = "profile_invalid"
-	ErrorCodeChildConflict             ErrorCode = "child_conflict"
-	ErrorCodeChildNotFound             ErrorCode = "child_not_found"
-	ErrorCodeChildInvalid              ErrorCode = "child_invalid"
-	ErrorCodePluginConflict            ErrorCode = "plugin_conflict"
-	ErrorCodePluginNotFound            ErrorCode = "plugin_not_found"
-	ErrorCodePluginInvalid             ErrorCode = "plugin_invalid"
-	ErrorCodeKBCapExceeded             ErrorCode = "kb_cap_exceeded"
-	ErrorCodeKBSourceNotFound          ErrorCode = "kb_source_not_found"
-	ErrorCodeKBEmbeddingStale          ErrorCode = "kb_embedding_stale"
-	ErrorCodeErasureBlocked            ErrorCode = "erasure_blocked_by_live_runs"
+	ErrorCodeInvalidArgument          ErrorCode = "invalid_argument"
+	ErrorCodeStorageUnavailable       ErrorCode = "storage_unavailable"
+	ErrorCodeWebhookExecutionConflict ErrorCode = "webhook_execution_conflict"
+	ErrorCodeWebhookExecutionNotFound ErrorCode = "webhook_execution_not_found"
+	ErrorCodeWebhookExecutionInvalid  ErrorCode = "webhook_execution_invalid"
+	ErrorCodeChannelResumeInvalid     ErrorCode = "channel_resume_invalid"
+	ErrorCodeBroadcastConflict        ErrorCode = "broadcast_conflict"
+	ErrorCodeBroadcastNotFound        ErrorCode = "broadcast_not_found"
+	ErrorCodeBroadcastInvalid         ErrorCode = "broadcast_invalid"
+	ErrorCodeScheduleConflict         ErrorCode = "schedule_conflict"
+	ErrorCodeScheduleNotFound         ErrorCode = "schedule_not_found"
+	ErrorCodeScheduleInvalid          ErrorCode = "schedule_invalid"
+	ErrorCodeMemoryConflict           ErrorCode = "memory_conflict"
+	ErrorCodeMemoryNotFound           ErrorCode = "memory_not_found"
+	ErrorCodeMemoryInvalid            ErrorCode = "memory_invalid"
+	ErrorCodeSkillNotFound            ErrorCode = "skill_not_found"
+	ErrorCodeSkillInvalid             ErrorCode = "skill_invalid"
+	ErrorCodeSkillDigestChanged       ErrorCode = "skill_digest_changed"
+	ErrorCodeProfileConflict          ErrorCode = "profile_conflict"
+	ErrorCodeProfileNotFound          ErrorCode = "profile_not_found"
+	ErrorCodeProfileInvalid           ErrorCode = "profile_invalid"
+	ErrorCodeChildConflict            ErrorCode = "child_conflict"
+	ErrorCodeChildNotFound            ErrorCode = "child_not_found"
+	ErrorCodeChildInvalid             ErrorCode = "child_invalid"
+	ErrorCodePluginConflict           ErrorCode = "plugin_conflict"
+	ErrorCodePluginNotFound           ErrorCode = "plugin_not_found"
+	ErrorCodePluginInvalid            ErrorCode = "plugin_invalid"
+	ErrorCodeKBCapExceeded            ErrorCode = "kb_cap_exceeded"
+	ErrorCodeKBSourceNotFound         ErrorCode = "kb_source_not_found"
+	ErrorCodeKBEmbeddingStale         ErrorCode = "kb_embedding_stale"
+	ErrorCodeErasureBlocked           ErrorCode = "erasure_blocked_by_live_runs"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {
@@ -92,20 +85,4 @@ type rowChecker interface {
 func rowExists(ctx context.Context, q rowChecker, query string, args ...any) bool {
 	var one int
 	return q.QueryRowContext(ctx, query, args...).Scan(&one) == nil
-}
-
-func classifyFKReference(ctx context.Context, q rowChecker, refs ...fkReference) error {
-	for _, ref := range refs {
-		if !rowExists(ctx, q, ref.existsSQL, ref.key) {
-			return fault.New(ref.code, fmt.Sprintf("%s %s does not exist", ref.what, ref.key))
-		}
-	}
-	return nil
-}
-
-type fkReference struct {
-	what      string
-	key       any
-	existsSQL string
-	code      ErrorCode
 }

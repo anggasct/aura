@@ -248,7 +248,7 @@ linters:
       - linters:
           - gosec
         text: G304
-        path: internal/(store|config|app/config|platform/usage|platform/sqlite)/
+        path: internal/(store|config|app/config|platform/usage|platform/sqlite|platform/storage)/
 
       # The cgroup v2 directory comes from the kernel's /proc/self/cgroup for
       # this very process, never from external input.

@@ -1,18 +1,17 @@
 package store
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"math"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -70,20 +69,31 @@ func pragmaValue(t *testing.T, db *sql.DB, name string) string {
 	return v
 }
 
-func TestArtifactPutMaxInt64Quota(t *testing.T) {
+func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
+	t.Helper()
 	ctx := context.Background()
-	db := newTestDB(t)
-	mustCreateSession(t, db, "session-1")
-	artifacts := NewArtifactStore(db, t.TempDir(), math.MaxInt64)
-
-	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("content")), &ArtifactMetadata{
-		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
-	})
+	db, err := sqlite.Open(ctx, path, sqlite.Options{})
 	if err != nil {
-		t.Fatalf("Put with MaxInt64 quota: %v", err)
+		t.Fatalf("OpenDB: %v", err)
 	}
-	if ref.SizeBytes != int64(len("content")) {
-		t.Errorf("SizeBytes = %d, want %d", ref.SizeBytes, len("content"))
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(ctx, db, history.Migrations()[:upTo]); err != nil {
+		t.Fatalf("migrate to v%d: %v", upTo, err)
+	}
+	return db
+}
+
+func wantCode(t *testing.T, err error, want ErrorCode) {
+	t.Helper()
+	if err == nil {
+		t.Fatalf("expected error with code %s, got nil", want)
+	}
+	got, ok := fault.CodeOf[ErrorCode](err)
+	if !ok {
+		t.Fatalf("error %v carries no store code, want %s", err, want)
+	}
+	if got != want {
+		t.Errorf("error code = %s, want %s", got, want)
 	}
 }
 
@@ -95,21 +105,6 @@ func newSession(id string) turn.Session {
 		CreatedAt: now,
 		UpdatedAt: now,
 		Metadata:  json.RawMessage(`{"k":"v"}`),
-	}
-}
-
-func newEvent(sessionID string, sequence uint64) turn.Event {
-	return turn.Event{
-		ID:            fmt.Sprintf("%s-event-%d", sessionID, sequence),
-		SessionID:     sessionID,
-		Sequence:      sequence,
-		TurnID:        "turn-1",
-		InvocationID:  "invocation-1",
-		Author:        "user",
-		Kind:          "message",
-		SchemaVersion: 1,
-		Payload:       json.RawMessage(`{"text":"hi"}`),
-		CreatedAt:     time.Now().UTC(),
 	}
 }
 

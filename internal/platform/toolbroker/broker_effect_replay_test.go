@@ -18,9 +18,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -111,7 +111,7 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 		options.Policy = policy
 	}
 	if config.artifacts {
-		options.Artifacts = store.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 8<<20)
+		options.Artifacts = storage.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 8<<20)
 	}
 	broker, err := New(options)
 	if err != nil {

@@ -13,20 +13,20 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type bridgeStore struct {
-	inner        store.ArtifactStore
+	inner        storage.ArtifactStore
 	lastSourceID string
 	puts         int
 }
 
 func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
-	ref, err := b.inner.Put(ctx, r, &store.ArtifactMetadata{
+	ref, err := b.inner.Put(ctx, r, &storage.ArtifactMetadata{
 		ID:        meta.ID,
 		SessionID: meta.SessionID,
 		EventID:   meta.EventID,
@@ -35,7 +35,7 @@ func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetada
 		Metadata:  meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[storage.ErrorCode](err); ok && code == storage.ErrorCodeArtifactQuotaExceeded {
 			return ArtifactRef{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted", err)
 		}
 		return ArtifactRef{}, err
@@ -67,7 +67,7 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, root, store.DefaultArtifactQuotaBytes)
+	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
 	bridged := &bridgeStore{inner: artifacts}
 	svc, err := NewService(ptrLimits(), WithStore(bridged))
 	if err != nil {
@@ -97,14 +97,14 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 			t.Fatalf("Unlink derived: %v", err)
 		}
 	}
-	report, err := store.Collect(ctx, db, root, time.Now().UTC().Add(time.Hour))
+	report, err := storage.Collect(ctx, db, root, time.Now().UTC().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	if report.DeletedBlobs != 1 {
 		t.Errorf("deleted blobs = %d, want 1 (png source and derived dedupe)", report.DeletedBlobs)
 	}
-	rep, err := store.Reconcile(ctx, db, root)
+	rep, err := storage.Reconcile(ctx, db, root)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, root, 16)
+	artifacts := storage.NewArtifactStore(db, root, 16)
 	bridged := &bridgeStore{inner: artifacts}
 	svc, err := NewService(ptrLimits(), WithStore(bridged))
 	if err != nil {
@@ -164,7 +164,7 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, root, store.DefaultArtifactQuotaBytes)
+	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
 	bridged := &bridgeStore{inner: artifacts}
 	svc, err := NewService(ptrLimits(), WithStore(bridged))
 	if err != nil {
@@ -195,7 +195,7 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 		}
 	}
 	dest := filepath.Join(dir, "backup")
-	manifest, err := store.Backup(ctx, db, dest)
+	manifest, err := storage.Backup(ctx, db, dest)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}

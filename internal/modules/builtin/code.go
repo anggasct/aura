@@ -13,9 +13,9 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type (
@@ -55,7 +55,7 @@ func (e *Executor) SetCodeRunner(runner CodeRunner) {
 	e.code.runner.Store(&runner)
 }
 
-func (e *Executor) Artifacts() store.ArtifactStore {
+func (e *Executor) Artifacts() storage.ArtifactStore {
 	return e.artifacts
 }
 
@@ -66,7 +66,7 @@ func codeKey() string {
 type CodeOptions struct {
 	Store     *interpreter.Store
 	Verified  *interpreter.VerifiedSet
-	Artifacts store.ArtifactStore
+	Artifacts storage.ArtifactStore
 	Observer  CodeObserver
 	RunRoot   string
 	Limits    *config.Interpreter
@@ -83,15 +83,15 @@ func NewCodeRunner(options *CodeOptions) (*codeexec.Runner, error) {
 }
 
 type codeArtifacts struct {
-	store store.ArtifactStore
+	store storage.ArtifactStore
 }
 
 func (a codeArtifacts) Put(ctx context.Context, content io.Reader, meta *codeexec.ArtifactMeta) (codeexec.ArtifactReceipt, error) {
-	ref, err := a.store.Put(ctx, content, &store.ArtifactMetadata{
+	ref, err := a.store.Put(ctx, content, &storage.ArtifactMetadata{
 		ID: meta.ID, SessionID: meta.SessionID, Filename: meta.Filename, MediaType: meta.MediaType, Metadata: meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[storage.ErrorCode](err); ok && code == storage.ErrorCodeArtifactQuotaExceeded {
 			return codeexec.ArtifactReceipt{}, codeexec.Errorf(codeexec.ErrorCodeArtifactQuota, "the artifact store quota is exhausted")
 		}
 		return codeexec.ArtifactReceipt{}, errors.New("the artifact store refused the artifact")

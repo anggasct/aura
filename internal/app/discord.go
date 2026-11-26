@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -255,7 +256,7 @@ func newDiscordAdapter(cfg *appconfig.Config, account *config.DiscordAccount, db
 		store:    store.NewChannelResumeStore(db),
 		instance: account.Name,
 	}, executor, &channelMediaStore{
-		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
+		store: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
 	}, &discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}, logger)
 	if err != nil {
 		return nil, err

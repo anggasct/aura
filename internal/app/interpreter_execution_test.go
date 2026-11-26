@@ -12,7 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/storage"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -84,7 +83,7 @@ func TestHealthReasonForAFailedProbeMatchesTheVerifierReason(t *testing.T) {
 	}
 }
 
-func testArtifacts(t *testing.T) store.ArtifactStore {
+func testArtifacts(t *testing.T) storage.ArtifactStore {
 	t.Helper()
-	return store.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), store.DefaultArtifactQuotaBytes)
+	return storage.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), storage.DefaultArtifactQuotaBytes)
 }

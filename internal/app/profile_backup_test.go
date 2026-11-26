@@ -17,10 +17,10 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
@@ -118,16 +118,16 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 		t.Fatalf("storagePaths: %v", err)
 	}
 	backupDir := filepath.Join(t.TempDir(), "backup")
-	if _, err := store.Backup(t.Context(), db, backupDir); err != nil {
+	if _, err := storage.Backup(t.Context(), db, backupDir); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	if _, err := store.VerifyRestore(t.Context(), backupDir, artifactRoot); err != nil {
+	if _, err := storage.VerifyRestore(t.Context(), backupDir, artifactRoot); err != nil {
 		t.Fatalf("VerifyRestore: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
-	if _, err := store.Restore(t.Context(), backupDir, artifactRoot, dbPath, store.RestoreOptions{Force: true}); err != nil {
+	if _, err := storage.Restore(t.Context(), backupDir, artifactRoot, dbPath, storage.RestoreOptions{Force: true}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
