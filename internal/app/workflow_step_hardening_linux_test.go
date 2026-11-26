@@ -15,6 +15,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -59,7 +60,7 @@ func (c *countingWorkflowController) Cancel(context.Context, *toolsbuiltin.Workf
 
 type countingHandoffOpener struct{ calls atomic.Int64 }
 
-func (o *countingHandoffOpener) OpenHandoff(context.Context, *toolsbuiltin.HandoffRequest) error {
+func (o *countingHandoffOpener) OpenHandoff(context.Context, *handoff.Request) error {
 	o.calls.Add(1)
 	return nil
 }
@@ -72,7 +73,9 @@ func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 	}
 	controller, opener := &countingWorkflowController{}, &countingHandoffOpener{}
 	toolRunner.in.Executor.SetWorkflowController(controller)
-	toolRunner.in.Executor.SetHandoffOpener(opener)
+	if err := toolRunner.in.Executor.Broker().RegisterProvider(handoff.NewToolProvider(opener)); err != nil {
+		t.Fatalf("RegisterProvider(handoff): %v", err)
+	}
 
 	for name, args := range map[string]json.RawMessage{
 		"workflow_status":  json.RawMessage(`{"run_id":"r"}`),

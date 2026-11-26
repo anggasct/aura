@@ -1,4 +1,4 @@
-package store
+package handoff
 
 import (
 	"context"
@@ -12,16 +12,16 @@ import (
 )
 
 const (
-	HandoffNone    = "none"
-	HandoffOpen    = "open"
-	HandoffExpired = "expired"
+	StateNone    = "none"
+	StateOpen    = "open"
+	StateExpired = "expired"
 )
 
 const (
-	HandoffChannelDiscord  = "discord"
-	HandoffChannelTelegram = "telegram"
-	HandoffChannelHTTP     = "http"
-	HandoffChannelEmail    = "email"
+	ChannelDiscord  = "discord"
+	ChannelTelegram = "telegram"
+	ChannelHTTP     = "http"
+	ChannelEmail    = "email"
 )
 
 type Handoff struct {
@@ -37,7 +37,7 @@ type Handoff struct {
 	ReleasedAt     time.Time
 }
 
-type HandoffStore interface {
+type Store interface {
 	Open(ctx context.Context, handoff *Handoff) error
 	Check(ctx context.Context, sessionID string, timeout time.Duration, now time.Time) (string, Handoff, error)
 	Release(ctx context.Context, sessionID string, now time.Time) (Handoff, bool, error)
@@ -45,29 +45,36 @@ type HandoffStore interface {
 	ListOpen(ctx context.Context) ([]Handoff, error)
 }
 
-type sqliteHandoffStore struct {
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
+type SQLiteStore struct {
 	db *sql.DB
 }
 
-func NewHandoffStore(db *sql.DB) HandoffStore {
-	return &sqliteHandoffStore{db: db}
+func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
+	if db == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "handoff database must not be nil")
+	}
+	return &SQLiteStore{db: db}, nil
 }
 
 const handoffColumns = `session_id, reason, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id, opened_at, COALESCE(released_at, '')`
 
-func (s *sqliteHandoffStore) Open(ctx context.Context, handoff *Handoff) error {
+func (s *SQLiteStore) Open(ctx context.Context, handoff *Handoff) error {
 	if handoff == nil {
-		return errNilArgument("handoff")
+		return fault.New(ErrorCodeInvalidArgument, "handoff must not be nil")
 	}
 	if handoff.SessionID == "" || handoff.Reason == "" {
 		return fault.New(ErrorCodeInvalidArgument, "open handoff: session and reason are required")
 	}
 	switch handoff.Channel {
-	case HandoffChannelDiscord, HandoffChannelTelegram, HandoffChannelHTTP, HandoffChannelEmail:
+	case ChannelDiscord, ChannelTelegram, ChannelHTTP, ChannelEmail:
 	default:
 		return fault.New(ErrorCodeInvalidArgument, "open handoff: channel must be discord, telegram, http or email")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 		INSERT INTO session_handoff (session_id, reason, principal_id, agent_id, account, channel, reply_channel_id, reply_thread_id, opened_at, released_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
 		ON CONFLICT(session_id) DO UPDATE SET
@@ -77,45 +84,46 @@ func (s *sqliteHandoffStore) Open(ctx context.Context, handoff *Handoff) error {
 		handoff.SessionID, handoff.Reason, handoff.PrincipalID, handoff.AgentID, handoff.Account, handoff.Channel,
 		handoff.ReplyChannelID, handoff.ReplyThreadID, sqlite.FormatTime(handoff.OpenedAt))
 	if err != nil {
-		if isConstraintCheck(err) {
-			return codedError(ErrorCodeInvalidArgument, "open handoff: a column value violates its constraint", err)
+		classified := sqlite.Classify(err)
+		if fault.HasCode(classified, sqlite.ErrorCodeConstraintCheck) {
+			return fault.Wrap(ErrorCodeInvalidArgument, "open handoff: a column value violates its constraint", err)
 		}
-		return classify(fmt.Errorf("open handoff: %w", err))
+		return fmt.Errorf("open handoff: %w", classified)
 	}
 	return nil
 }
 
-func (s *sqliteHandoffStore) Get(ctx context.Context, sessionID string) (Handoff, bool, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+handoffColumns+` FROM session_handoff WHERE session_id = ?`, sessionID)
+func (s *SQLiteStore) Get(ctx context.Context, sessionID string) (Handoff, bool, error) {
+	row := sqlite.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT `+handoffColumns+` FROM session_handoff WHERE session_id = ?`, sessionID)
 	handoff, err := scanHandoff(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Handoff{}, false, nil
 	}
 	if err != nil {
-		return Handoff{}, false, classify(err)
+		return Handoff{}, false, sqlite.Classify(err)
 	}
 	return handoff, true, nil
 }
 
-func (s *sqliteHandoffStore) Check(ctx context.Context, sessionID string, timeout time.Duration, now time.Time) (string, Handoff, error) {
+func (s *SQLiteStore) Check(ctx context.Context, sessionID string, timeout time.Duration, now time.Time) (string, Handoff, error) {
 	handoff, found, err := s.Get(ctx, sessionID)
 	if err != nil || !found || !handoff.ReleasedAt.IsZero() {
-		return HandoffNone, handoff, err
+		return StateNone, handoff, err
 	}
 	if now.Before(handoff.OpenedAt.Add(timeout)) {
-		return HandoffOpen, handoff, nil
+		return StateOpen, handoff, nil
 	}
 	released, ok, err := s.Release(ctx, sessionID, now)
 	if err != nil || !ok {
-		return HandoffNone, handoff, err
+		return StateNone, handoff, err
 	}
-	return HandoffExpired, released, nil
+	return StateExpired, released, nil
 }
 
-func (s *sqliteHandoffStore) Release(ctx context.Context, sessionID string, now time.Time) (Handoff, bool, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE session_handoff SET released_at = ? WHERE session_id = ? AND released_at IS NULL`, sqlite.FormatTime(now), sessionID)
+func (s *SQLiteStore) Release(ctx context.Context, sessionID string, now time.Time) (Handoff, bool, error) {
+	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `UPDATE session_handoff SET released_at = ? WHERE session_id = ? AND released_at IS NULL`, sqlite.FormatTime(now), sessionID)
 	if err != nil {
-		return Handoff{}, false, classify(fmt.Errorf("release handoff: %w", err))
+		return Handoff{}, false, fmt.Errorf("release handoff: %w", sqlite.Classify(err))
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed == 0 {
 		return Handoff{}, false, err
@@ -123,10 +131,10 @@ func (s *sqliteHandoffStore) Release(ctx context.Context, sessionID string, now 
 	return s.Get(ctx, sessionID)
 }
 
-func (s *sqliteHandoffStore) ListOpen(ctx context.Context) ([]Handoff, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+handoffColumns+` FROM session_handoff WHERE released_at IS NULL ORDER BY opened_at, session_id`)
+func (s *SQLiteStore) ListOpen(ctx context.Context) ([]Handoff, error) {
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, `SELECT `+handoffColumns+` FROM session_handoff WHERE released_at IS NULL ORDER BY opened_at, session_id`)
 	if err != nil {
-		return nil, classify(fmt.Errorf("list handoffs: %w", err))
+		return nil, fmt.Errorf("list handoffs: %w", sqlite.Classify(err))
 	}
 	defer func() { _ = rows.Close() }()
 	var handoffs []Handoff
@@ -138,7 +146,7 @@ func (s *sqliteHandoffStore) ListOpen(ctx context.Context) ([]Handoff, error) {
 		handoffs = append(handoffs, handoff)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classify(fmt.Errorf("list handoffs: %w", err))
+		return nil, fmt.Errorf("list handoffs: %w", sqlite.Classify(err))
 	}
 	return handoffs, nil
 }
