@@ -2,16 +2,11 @@ package app
 
 import (
 	"context"
-	"os"
-	"strings"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/embedding"
-	"github.com/anggasct/aura/internal/platform/health"
-	"github.com/anggasct/aura/internal/platform/secret"
-	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type knowledgeEmbedder struct {
@@ -27,18 +22,6 @@ func configuredEmbedding(cfg *appconfig.Config) *knowledge.EmbeddingConfig {
 		return nil
 	}
 	return cfg.Knowledge.Embedding
-}
-
-func resolveEmbeddingCredential(ref secret.Ref) (string, bool) {
-	if ref.IsZero() {
-		return "", true
-	}
-	value, err := ref.Reference().Resolve()
-	value = strings.TrimSpace(value)
-	if err != nil || value == "" {
-		return "", false
-	}
-	return value, true
 }
 
 type knowledgeEmbeddingWiring struct {
@@ -65,7 +48,7 @@ func newKnowledgeEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (kno
 		Model: embeddingConfig.Model, Dimensions: embeddingConfig.Dimensions, BatchSize: embeddingConfig.BatchSize,
 		MaxMemory: int64(embeddingConfig.MaxMemory), PublicQueries: embeddingConfig.PublicQueries,
 	}}
-	credential, resolved := resolveEmbeddingCredential(embeddingConfig.CredentialRef)
+	credential, resolved := knowledge.ResolveEmbeddingCredential(embeddingConfig.CredentialRef)
 	if !resolved {
 		return wiring, nil
 	}
@@ -75,52 +58,4 @@ func newKnowledgeEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (kno
 	}
 	wiring.embedder = &knowledgeEmbedder{client: client}
 	return wiring, nil
-}
-
-func knowledgeEmbeddingReader(cfg *appconfig.Config, dbPath string) func(ctx context.Context) (health.KnowledgeEmbeddingState, error) {
-	return func(ctx context.Context) (health.KnowledgeEmbeddingState, error) {
-		var state health.KnowledgeEmbeddingState
-		fingerprint := ""
-		dimensions := 0
-		if embeddingConfig := configuredEmbedding(cfg); embeddingConfig != nil {
-			clientCfg := embeddingConfig.ClientConfig()
-			computed, err := embedding.Fingerprint(&clientCfg)
-			if err != nil {
-				return health.KnowledgeEmbeddingState{}, err
-			}
-			fingerprint = computed
-			_, state.Available = resolveEmbeddingCredential(embeddingConfig.CredentialRef)
-			state.Configured = true
-			state.MaxMemory = int64(embeddingConfig.MaxMemory)
-			dimensions = embeddingConfig.Dimensions
-		}
-		if _, err := os.Stat(dbPath); err != nil {
-			return health.KnowledgeEmbeddingState{}, err
-		}
-		db, err := sqlite.OpenReadOnly(ctx, dbPath)
-		if err != nil {
-			return health.KnowledgeEmbeddingState{}, err
-		}
-		defer func() { _ = db.Close() }()
-		present, err := knowledge.EmbeddingPresent(ctx, db)
-		if err != nil || !present {
-			return state, err
-		}
-		kbStore, err := knowledge.NewSQLiteStore(db)
-		if err != nil {
-			return health.KnowledgeEmbeddingState{}, err
-		}
-		coverage, err := kbStore.EmbeddingCoverage(ctx, fingerprint)
-		if err != nil {
-			return health.KnowledgeEmbeddingState{}, err
-		}
-		for i := range coverage {
-			state.Collections = append(state.Collections, health.KnowledgeEmbeddingCollection{
-				Collection: coverage[i].Collection, Chunks: coverage[i].Chunks, Covered: coverage[i].Covered,
-				Stale: state.Configured && coverage[i].Fingerprint != fingerprint,
-				Bytes: knowledge.VectorBytes(coverage[i].Chunks, dimensions),
-			})
-		}
-		return state, nil
-	}
 }

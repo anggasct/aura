@@ -106,6 +106,13 @@ func (b *build) buildSkills(ctx context.Context) error {
 }
 
 func (b *build) buildKnowledge(ctx context.Context) error {
+	checks, err := knowledgeStatusChecks(b.cfg)
+	if err != nil {
+		return err
+	}
+	for i := range checks {
+		b.addHealthCheck(&checks[i])
+	}
 	runtime, enabled, err := buildKnowledgeRuntime(ctx, b.cfg, b.registry, b.logger)
 	if err != nil {
 		return err

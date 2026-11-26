@@ -16,6 +16,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -219,4 +220,42 @@ func buildKnowledgeRuntime(ctx context.Context, cfg *appconfig.Config, registry 
 		return nil, false, err
 	}
 	return &knowledgeRuntime{retriever: retriever, provider: provider, pool: pool, vectors: vectors}, true, nil
+}
+
+func personaKnowledgeScopes(agents *auraagent.Config) []knowledge.PersonaScope {
+	var scopes []knowledge.PersonaScope
+	if agents == nil {
+		return nil
+	}
+	for i := range agents.Definitions {
+		definition := &agents.Definitions[i]
+		for _, list := range []struct {
+			class       string
+			collections []string
+		}{
+			{"owner", definition.Knowledge},
+			{"trusted", definition.PrincipalKnowledge},
+			{"public", definition.PublicKnowledge},
+		} {
+			if len(list.collections) > 0 {
+				scopes = append(scopes, knowledge.PersonaScope{
+					Persona:     definition.ID,
+					Class:       list.class,
+					Collections: list.collections,
+				})
+			}
+		}
+	}
+	return scopes
+}
+
+func knowledgeStatusChecks(cfg *appconfig.Config) ([]health.RegisteredCheck, error) {
+	if cfg == nil {
+		return nil, nil
+	}
+	dbPath, _, _, err := storagePaths(cfg)
+	if err != nil {
+		return nil, err
+	}
+	return knowledge.HealthChecks(cfg.Knowledge, personaKnowledgeScopes(cfg.Agents), dbPath, time.Duration(cfg.Health.CheckTimeout)), nil
 }

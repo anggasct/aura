@@ -94,7 +94,12 @@ func runStatus(cmd *cobra.Command, cfg *appconfig.Config, report capability.Repo
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}
-	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe, interpreterChecks...)
+	knowledgeChecks, err := knowledgeStatusChecks(cfg)
+	if err != nil {
+		return &exitCodeError{code: exitCommand, err: err}
+	}
+	extra := append(interpreterChecks, knowledgeChecks...)
+	registry, err := buildHealthRegistry(cfg, mapCapabilityStatuses(report), statusSandboxSupport(daemon, negotiate), processProbe, extra...)
 	if err != nil {
 		return &exitCodeError{code: exitCommand, err: err}
 	}
@@ -196,22 +201,6 @@ func buildHealthRegistry(cfg *appconfig.Config, capabilities []health.Capability
 			Remediation: health.RemediationConfigureModels,
 		},
 	)
-	if len(configuredKnowledgeScopes(cfg)) > 0 {
-		checks = append(checks, health.RegisteredCheck{
-			ID:          health.ComponentKnowledge,
-			Checker:     health.KnowledgeChecker{Scopes: knowledgeScopeReader(cfg, dbPath), Limit: health.KnowledgeScopeChunkLimit},
-			Timeout:     checkTimeout,
-			Remediation: health.RemediationReviewKnowledge,
-		})
-	}
-	if len(configuredKnowledgeScopes(cfg)) > 0 || configuredEmbedding(cfg) != nil {
-		checks = append(checks, health.RegisteredCheck{
-			ID:          health.ComponentKnowledgeEmbedding,
-			Checker:     health.KnowledgeEmbeddingChecker{State: knowledgeEmbeddingReader(cfg, dbPath)},
-			Timeout:     checkTimeout,
-			Remediation: health.RemediationEmbedKnowledge,
-		})
-	}
 	return health.NewRegistry(append(checks, extra...)...)
 }
 
