@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 	"time"
 
@@ -51,10 +52,10 @@ type Provider struct {
 
 func NewProvider(service *Service, config ProviderConfig) (*Provider, error) {
 	if service == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "memory service must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "memory service must not be nil")
 	}
 	if config.Scopes == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "memory recall scopes must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "memory recall scopes must not be nil")
 	}
 	tp := config.TracerProvider
 	if tp == nil {
@@ -74,9 +75,32 @@ func NewProvider(service *Service, config ProviderConfig) (*Provider, error) {
 	}, nil
 }
 
+func (p *Provider) TurnContext(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req != nil && req.UntrustedContext != nil {
+		return nil, nil
+	}
+	evidence, err := p.RecallTurn(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if evidence == nil {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{
+		Order:     turn.ContextOrderRecall,
+		Placement: turn.ContextPlacementUserPart,
+		Content:   turn.RenderUntrustedRecall(evidence),
+		Caveat:    turn.RecallEvidenceCaveat,
+	}}, nil
+}
+
+func (p *Provider) Required(req *turn.TurnRequest) bool {
+	return req != nil && req.RequireRecall
+}
+
 func (p *Provider) RecallTurn(ctx context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	start := p.now().UTC()
 	evidence, observation, err := p.recall(ctx, req)
@@ -93,11 +117,11 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 	observation := &Observation{}
 	if req == nil {
 		observation.Outcome = string(ErrorCodeInvalidArgument)
-		return nil, observation, Errorf(ErrorCodeInvalidArgument, "turn request must not be nil")
+		return nil, observation, fault.New(ErrorCodeInvalidArgument, "turn request must not be nil")
 	}
 	if strings.TrimSpace(req.PrincipalID) == "" || strings.TrimSpace(req.SessionID) == "" {
 		observation.Outcome = string(ErrorCodeInvalidArgument)
-		return nil, observation, Errorf(ErrorCodeInvalidArgument, "recall owner and session must not be empty")
+		return nil, observation, fault.New(ErrorCodeInvalidArgument, "recall owner and session must not be empty")
 	}
 	query := runtimeingress.QueryText(req.Parts)
 	if query == "" {
@@ -107,7 +131,7 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 	readable, known := p.scopes.RecallScope(req.AgentID)
 	if !known {
 		observation.Outcome = string(ErrorCodeQueryInvalid)
-		return nil, observation, Errorf(ErrorCodeQueryInvalid, "recall persona is not registered")
+		return nil, observation, fault.New(ErrorCodeQueryInvalid, "recall persona is not registered")
 	}
 	result, err := p.service.RecallWithSummary(ctx, &RecallRequest{
 		OwnerID:   req.PrincipalID,
@@ -118,7 +142,7 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 	}, p.model, p.summarizer)
 	if err != nil {
 		observation.Outcome = string(ErrorCodeUnavailable)
-		if code, ok := CodeOf(err); ok {
+		if code, ok := fault.CodeOf[ErrorCode](err); ok {
 			observation.Outcome = string(code)
 		}
 		return nil, observation, err

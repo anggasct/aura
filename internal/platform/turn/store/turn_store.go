@@ -137,6 +137,53 @@ func (s *TurnStore) SessionIDs(ctx context.Context, ownerID string, runSessions 
 	return ids, nil
 }
 
+func (s *TurnStore) FilterSessions(ctx context.Context, ownerID string, ids []string) ([]string, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return nil, fmt.Errorf("encode session ids: %w", err)
+	}
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
+		`SELECT id FROM session WHERE owner_id = ? AND id IN (SELECT value FROM json_each(?))`,
+		ownerID, string(encoded),
+	)
+	if err != nil {
+		return nil, classify(fmt.Errorf("filter sessions: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var found []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, classify(fmt.Errorf("scan filtered session: %w", err))
+		}
+		found = append(found, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classify(fmt.Errorf("filter sessions: %w", err))
+	}
+	return found, nil
+}
+
+func (s *TurnStore) DeleteSessionsByID(ctx context.Context, ownerID string, ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(ids)
+	if err != nil {
+		return fmt.Errorf("encode session ids: %w", err)
+	}
+	if _, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
+		`DELETE FROM session WHERE owner_id = ? AND id IN (SELECT value FROM json_each(?))`,
+		ownerID, string(encoded),
+	); err != nil {
+		return classify(fmt.Errorf("delete sessions: %w", err))
+	}
+	return nil
+}
+
 type acceptedTurnPair struct {
 	SessionID string `json:"session_id"`
 	TurnID    string `json:"turn_id"`

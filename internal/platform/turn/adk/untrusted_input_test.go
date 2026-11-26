@@ -17,7 +17,7 @@ func TestBuiltinToolRequestCarriesTheTaintOfUntrustedInput(t *testing.T) {
 		origin  turn.Origin
 		class   principal.Class
 		context *turn.UntrustedRecall
-		recall  RecallProvider
+		recall  turn.ContextProvider
 		want    bool
 	}{
 		"webhook":                  {origin: turn.OriginWebhook, class: principal.ClassTrusted, want: true},
@@ -43,7 +43,7 @@ func TestBuiltinToolRequestCarriesTheTaintOfUntrustedInput(t *testing.T) {
 			definition := auraagent.Definition{ID: "team", PrincipalTools: []string{"sample_tool"}}
 			options := []ExecutorOption{WithBuiltinToolExecutor(builtin), WithAgentResolver(&stubResolver{definition: definition}, nil)}
 			if tc.recall != nil {
-				options = append(options, WithRecallProvider(tc.recall))
+				options = append(options, WithContextProvider(tc.recall))
 			}
 			executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil, options...)
 			if err != nil {

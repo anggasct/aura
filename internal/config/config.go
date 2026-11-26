@@ -17,20 +17,6 @@ type Channels struct {
 	HTTP     HTTP     `json:"http"`
 }
 
-type Memory struct {
-	Enabled              bool               `json:"enabled"`
-	MaxDocuments         int                `json:"max_documents"`
-	RecallTokenBudget    int                `json:"recall_token_budget"`
-	Locale               string             `json:"locale"`
-	EnglishStemming      bool               `json:"english_stemming"`
-	SummaryPromptVersion string             `json:"summary_prompt_version"`
-	SummaryTTL           configkit.Duration `json:"summary_ttl"`
-	RangeThreshold       int                `json:"range_threshold"`
-	RangeLiveWindow      int                `json:"range_live_window"`
-	PurgeInterval        configkit.Duration `json:"purge_interval"`
-	PurgeLimit           int                `json:"purge_limit"`
-}
-
 type Sync struct {
 	Enabled            bool               `json:"enabled"`
 	Remote             string             `json:"remote"`
@@ -248,18 +234,6 @@ type ToolWebSearch struct {
 	MaxResults    int        `json:"max_results"`
 }
 
-type Workflows struct {
-	DefinitionsDir     string             `json:"definitions_dir"`
-	MaxConcurrentSteps int                `json:"max_concurrent_steps"`
-	DefaultStepTimeout configkit.Duration `json:"default_step_timeout"`
-	Generated          GeneratedWorkflows `json:"generated"`
-}
-
-type GeneratedWorkflows struct {
-	MaxSteps  int   `json:"max_steps"`
-	MaxTokens int64 `json:"max_tokens"`
-}
-
 var (
 	syncBranchPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
@@ -283,14 +257,6 @@ func DefaultTools() *Tools {
 			Provider:   WebSearchProviderDuckDuckGo,
 			MaxResults: 5,
 		},
-	}
-}
-
-func DefaultWorkflows() *Workflows {
-	return &Workflows{
-		MaxConcurrentSteps: 4,
-		DefaultStepTimeout: configkit.Duration(15 * time.Minute),
-		Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
 	}
 }
 
@@ -336,20 +302,6 @@ func DefaultChannels() Channels {
 			MaxHistoryBytes:     HTTPMaxHistoryBytes,
 			KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
 		},
-	}
-}
-
-func DefaultMemory() Memory {
-	return Memory{
-		Enabled:              true,
-		MaxDocuments:         10,
-		RecallTokenBudget:    2000,
-		SummaryPromptVersion: "memory-summary-v1",
-		SummaryTTL:           configkit.Duration(720 * time.Hour),
-		RangeThreshold:       20,
-		RangeLiveWindow:      5,
-		PurgeInterval:        configkit.Duration(1 * time.Hour),
-		PurgeLimit:           100,
 	}
 }
 

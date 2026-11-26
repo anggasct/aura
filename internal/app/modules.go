@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"slices"
@@ -13,9 +14,11 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -25,15 +28,13 @@ import (
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-type postTurnHook func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
-
 type turnHookFunc func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
 
 func (f turnHookFunc) AfterTurn(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 	return f(ctx, req, events)
 }
 
-func composeTurnHooks(hooks []turn.TurnHook) func(context.Context, *turn.TurnRequest, []turn.Event) error {
+func composeTurnHooks(hooks []turn.TurnHook) func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 	active := slices.DeleteFunc(slices.Clone(hooks), func(hook turn.TurnHook) bool { return hook == nil })
 	switch len(active) {
 	case 0:
@@ -51,7 +52,6 @@ func composeTurnHooks(hooks []turn.TurnHook) func(context.Context, *turn.TurnReq
 }
 
 type moduleParts struct {
-	memoryHook    postTurnHook
 	skillRenderer runtimeengine.SkillRenderer
 	skills        command.Skills
 }
@@ -99,6 +99,9 @@ func (b *build) registerModule(name string, mod any) error {
 			b.addHealthCheck(&check)
 		}
 	}
+	if th, ok := mod.(turn.TurnHook); ok {
+		b.turnHooks = append(b.turnHooks, th)
+	}
 	switch m := mod.(type) {
 	case server.Lifecycle:
 		if err := b.group.Add(m); err != nil {
@@ -127,18 +130,47 @@ func (b *build) buildMemory(ctx context.Context) error {
 		}
 		observer = memoryRecorderObserver(recorder)
 	}
-	runtime, err := buildMemoryRuntime(ctx, cfg, b.db, b.registry, b.models, logger, observer)
+	mod, err := memory.New(ctx, &memory.Deps{
+		Config:      cfg.Memory,
+		DB:          b.db,
+		Sessions:    turnstore.NewSessionService(b.db),
+		Scopes:      b.registry,
+		Secrets:     secret.New(),
+		Models:      b.models,
+		ModelConfig: &cfg.Models,
+		ModelRoutes: cfg.ModelRoutes,
+		Observer:    observer,
+		Logger:      logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithRecallProvider(runtime.provider))
-	b.modules.memoryHook = buildMemoryHook(runtime.service, runtime.model, runtime.summarizer, logger)
+	if err := b.registerModule("memory", mod); err != nil {
+		return err
+	}
 	if !b.onServer() {
 		return nil
 	}
-	return b.group.Add(server.Background("memory_purge", func(ctx context.Context) {
-		runtime.service.RunPurgeLoop(ctx, time.Duration(cfg.Memory.PurgeInterval), cfg.Memory.PurgeLimit)
-	}))
+	if loop := mod.PurgeLoop(); loop != nil {
+		return b.group.Add(server.Background("memory_purge", loop))
+	}
+	return nil
+}
+
+func memoryRecorderObserver(recorder *telemetry.MemoryRecorder) memory.Observer {
+	if recorder == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *memory.Observation) {
+		recorder.Record(ctx, &telemetry.MemoryObservation{
+			Outcome:     observation.Outcome,
+			Summarized:  observation.Summarized,
+			Documents:   observation.Documents,
+			Screened:    observation.Screened,
+			ModelSystem: observation.ModelProtocol,
+			Duration:    observation.Duration,
+		})
+	}
 }
 
 func (b *build) buildProfile(ctx context.Context) error {
@@ -173,14 +205,41 @@ func (b *build) buildSkills(ctx context.Context) error {
 	if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {
 		return nil
 	}
-	runtime, err := buildSkillRuntime(ctx, b.cfg.Skills, b.db, b.logger)
+	mod, err := skills.New(ctx, &skills.ModuleDeps{
+		Config:      b.cfg.Skills,
+		DB:          b.db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(b.db)},
+		Logger:      b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithSkillContext(runtime.context))
-	b.modules.skillRenderer = runtime.context
-	b.modules.skills = runtime.bridge
+	if err := b.registerModule("skills", mod); err != nil {
+		return err
+	}
+	b.modules.skillRenderer = mod.Renderer()
+	b.modules.skills = mod.ChatCommands()
 	return nil
+}
+
+type skillActivationLog struct {
+	events turnstore.EventKindReader
+}
+
+func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]turn.SkillActivation, error) {
+	events, err := l.events.LatestByKind(ctx, sessionID, turn.EventKindSkillActivated, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]turn.SkillActivation, 0, len(events))
+	for i := range events {
+		var activation turn.SkillActivation
+		if err := json.Unmarshal(events[i].Payload, &activation); err != nil || activation.SkillID == "" {
+			continue
+		}
+		out = append(out, activation)
+	}
+	return out, nil
 }
 
 func (b *build) buildKnowledge(ctx context.Context) error {
@@ -266,63 +325,46 @@ func (b *build) buildInterpreter(ctx context.Context) error {
 
 func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	cfg, db := b.cfg, b.db
-	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
-	if err != nil {
-		return err
-	}
 	deps, err := workflowValidationDeps(cfg)
 	if err != nil {
 		return err
-	}
-	options := &workflow.Options{
-		MaxConcurrentSteps: workflowMaxConcurrentSteps(cfg),
-		Logger:             b.logger,
-	}
-	if cfg.Workflows != nil {
-		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
-	}
-	runs, err := workflow.NewStore(db, b.turns)
-	if err != nil {
-		return err
-	}
-	if host && b.builtin != nil {
-		input := &workflowToolRunnerInput{
-			Executor: b.builtin, Sessions: b.sessions, Registry: b.registry, Runs: runs, Logger: b.logger,
-		}
-		if b.server != nil {
-			input.Route = b.server.workflowRoute
-		}
-		tools, err := newWorkflowToolRunner(input)
-		if err != nil {
-			return err
-		}
-		options.Tools = tools
 	}
 	runtime, err := b.durableRuntime()
 	if err != nil {
 		return err
 	}
-	built := workflow.NewInterpreter(runs, runtime, options)
-	routines, err := runs.Routines(ctx)
+	modDeps := &workflow.ModuleDeps{
+		DB:             db,
+		Sessions:       b.turns,
+		Durable:        runtime,
+		Config:         cfg.Workflows,
+		ValidationDeps: deps,
+		Logger:         b.logger,
+	}
+	if host && b.builtin != nil {
+		modDeps.Broker = b.builtin.Broker()
+		modDeps.RunSessions = b.sessions
+		modDeps.Registry = b.registry
+		modDeps.Appender = &workflowSessionTextAppender{db: db}
+		modDeps.Deliver = &workflowCompletionDeliverer{cfg: cfg, deliver: deliverText}
+		modDeps.CheckTimeout = time.Duration(cfg.Health.CheckTimeout)
+		if b.server != nil {
+			modDeps.Route = newWorkflowOwnerRoute(b.server.workflowRoute)
+			modDeps.Targets = workflowReplyTargeters(b.server.channels)
+			modDeps.Offerers = workflowProposalOfferers(b.server.channels)
+		}
+	}
+	mod, err := workflow.New(ctx, modDeps)
 	if err != nil {
 		return err
 	}
-	if err := built.Install(ctx, specs, deps); err != nil {
-		return err
+	b.workflowMod = mod
+	b.quarantined = mod.Quarantined()
+	b.interpreter = mod.Interpreter()
+	if host && b.onServer() {
+		if err := b.registerModule("workflow", mod); err != nil {
+			return err
+		}
 	}
-	quarantined, err := built.LoadRoutines(ctx, routines, deps)
-	if err != nil {
-		return err
-	}
-	for i := range quarantined {
-		b.logger.WarnContext(ctx, "workflow routine does not compile and is quarantined", "component", "workflow",
-			"definition_id", quarantined[i].ID, "version", quarantined[i].Version, "error", quarantined[i].Err)
-	}
-	b.quarantined = quarantined
-	if b.onServer() {
-		check := workflowDefinitionsCheck(b.cfg, b.registry, quarantined)
-		b.addHealthCheck(&check)
-	}
-	b.interpreter = built
 	return nil
 }

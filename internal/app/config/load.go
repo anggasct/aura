@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -146,7 +147,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),
 		legacyconfig.ValidateTerminal(cfg.Terminal),
-		legacyconfig.ValidateWorkflows(cfg.Workflows),
+		validateWorkflows(cfg.Workflows),
 		validateMCP(cfg.MCP),
 		validatePlugins(cfg.Plugins),
 		configkit.Under("webhook", cfg.Webhook.Validate()),
@@ -156,7 +157,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
 		configkit.Under("broadcast", cfg.Broadcast.Validate()),
 		configkit.Under("scheduler", cfg.Scheduler.Validate()),
-		legacyconfig.ValidateMemory(&cfg.Memory),
+		configkit.Under("memory", cfg.Memory.Validate()),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),
 		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),
@@ -449,4 +450,11 @@ func validateProfile(section *profile.Config) error {
 		return nil
 	}
 	return configkit.Under("profile", section.Validate())
+}
+
+func validateWorkflows(section *workflow.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("workflows", section.Validate())
 }

@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 )
 
@@ -14,19 +15,19 @@ type BatchResult struct {
 func (s *Service) ProjectBatch(ctx context.Context, ownerID string, events []*Event) (BatchResult, error) {
 	var result BatchResult
 	if ctx == nil {
-		return result, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return result, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err
 	}
 	if strings.TrimSpace(ownerID) == "" {
-		return result, Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+		return result, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if s == nil {
-		return result, Errorf(ErrorCodeInvalidArgument, "memory service must not be nil")
+		return result, fault.New(ErrorCodeInvalidArgument, "memory service must not be nil")
 	}
 	if s.documents == nil {
-		return result, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
+		return result, fault.New(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
@@ -37,7 +38,7 @@ func (s *Service) ProjectBatch(ctx context.Context, ownerID string, events []*Ev
 		}
 		_, indexed, err := s.ProjectEvent(ctx, ownerID, event)
 		if err != nil {
-			if code, ok := CodeOf(err); ok && code == ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); ok && code == ErrorCodeInvalidArgument {
 				result.Skipped++
 				continue
 			}
@@ -45,7 +46,7 @@ func (s *Service) ProjectBatch(ctx context.Context, ownerID string, events []*Ev
 				return result, ctx.Err()
 			}
 			s.projectionFailures.Add(1)
-			return result, Errorf(ErrorCodeProjectionStale, "projection store unavailable")
+			return result, fault.New(ErrorCodeProjectionStale, "projection store unavailable")
 		}
 		if indexed {
 			result.Indexed++

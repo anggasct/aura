@@ -6,10 +6,12 @@ import (
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -31,7 +33,7 @@ type Config struct {
 	Capabilities capability.Config           `json:"capabilities"`
 	Tools        *legacyconfig.Tools         `json:"tools,omitempty"`
 	Agents       *auraagent.Config           `json:"agents,omitempty"`
-	Workflows    *legacyconfig.Workflows     `json:"workflows,omitempty"`
+	Workflows    *workflow.Config            `json:"workflows,omitempty"`
 	MCP          *mcp.Config                 `json:"mcp,omitempty"`
 	Plugins      *plugin.Config              `json:"plugins,omitempty"`
 	Server       server.Config               `json:"server"`
@@ -46,7 +48,7 @@ type Config struct {
 	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    broadcast.Config            `json:"broadcast"`
 	Scheduler    schedule.Config             `json:"scheduler"`
-	Memory       legacyconfig.Memory         `json:"memory"`
+	Memory       memory.Config               `json:"memory"`
 	Skills       *skills.Config              `json:"skills,omitempty"`
 	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *profile.Config             `json:"profile,omitempty"`
@@ -68,12 +70,13 @@ func Default() Config {
 	defaultSkills := skills.Default()
 	defaultContext := compaction.Default()
 	defaultProfile := profile.Default()
+	defaultWorkflows := workflow.Default()
 	return Config{
 		Version:      1,
 		Runtime:      runtimeengine.Default(),
 		Capabilities: capability.Default(),
 		Agents:       &defaultAgents,
-		Workflows:    legacyconfig.DefaultWorkflows(),
+		Workflows:    &defaultWorkflows,
 		Tools:        legacyconfig.DefaultTools(),
 		Server:       server.Default(),
 		Logging:      logging.Default(),
@@ -87,7 +90,7 @@ func Default() Config {
 		Channels:     legacyconfig.DefaultChannels(),
 		Broadcast:    broadcast.Default(),
 		Scheduler:    schedule.Default(),
-		Memory:       legacyconfig.DefaultMemory(),
+		Memory:       memory.Default(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),
 		Skills:       &defaultSkills,
 		Sync:         legacyconfig.DefaultSync(),

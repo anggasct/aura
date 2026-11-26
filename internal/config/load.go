@@ -97,19 +97,6 @@ func validateSyncRemote(raw string) error {
 	return nil
 }
 
-func ValidateWorkflows(workflows *Workflows) error {
-	if workflows == nil {
-		return nil
-	}
-	if workflows.MaxConcurrentSteps < 1 {
-		return configkit.Invalid("workflows.max_concurrent_steps", "must be at least 1")
-	}
-	if workflows.Generated.MaxSteps < 1 || workflows.Generated.MaxTokens < 1 {
-		return configkit.Invalid("workflows.generated", "max_steps and max_tokens must be positive")
-	}
-	return nil
-}
-
 func ValidateTerminal(t Terminal) error {
 	if t.RenderHz <= 0 {
 		return configkit.Invalid("terminal.render_hz", "must be positive")
@@ -383,32 +370,6 @@ func snowflakeListProblems(field string, ids []string) []error {
 		}
 	}
 	return problems
-}
-
-func ValidateMemory(memory *Memory) error {
-	if memory == nil {
-		return configkit.Invalid("memory", "must not be nil")
-	}
-	var problems []error
-	if memory.MaxDocuments <= 0 || memory.MaxDocuments > 50 {
-		problems = append(problems, configkit.Invalid("memory.max_documents", "must be between 1 and 50"))
-	}
-	if memory.RecallTokenBudget <= 0 || memory.RecallTokenBudget > 8000 {
-		problems = append(problems, configkit.Invalid("memory.recall_token_budget", "must be between 1 and 8000"))
-	}
-	if strings.TrimSpace(memory.SummaryPromptVersion) == "" {
-		problems = append(problems, configkit.Invalid("memory.summary_prompt_version", "must not be empty"))
-	}
-	if memory.SummaryTTL <= 0 {
-		problems = append(problems, configkit.Invalid("memory.summary_ttl", "must be positive"))
-	}
-	if memory.EnglishStemming {
-		problems = append(problems, configkit.Invalid("memory.english_stemming", "is not supported by this build"))
-	}
-	if strings.TrimSpace(memory.Locale) != "" {
-		problems = append(problems, configkit.Invalid("memory.locale", "is not supported by this build"))
-	}
-	return errors.Join(problems...)
 }
 
 func ValidateTools(toolsConfig *Tools) error {

@@ -54,17 +54,3 @@ func newTestDB(t *testing.T) *sql.DB {
 	t.Cleanup(func() { _ = db.Close() })
 	return db
 }
-
-func openDatabaseAtVersion(t *testing.T, path string, upTo int) *sql.DB {
-	t.Helper()
-	ctx := context.Background()
-	db, err := sqlite.Open(ctx, path, sqlite.Options{})
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:upTo]); err != nil {
-		t.Fatalf("migrate to v%d: %v", upTo, err)
-	}
-	return db
-}

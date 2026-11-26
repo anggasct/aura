@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,7 +62,7 @@ func TestParseSpecRejectsNonObjectToolArgs(t *testing.T) {
 		content := "id: toolfile\nversion: 1\ngoal: g\nsource: defined\nsteps:\n  - id: read\n    executor:\n      kind: tool\n      tool: read_file\n      " + body + "\n    timeout: 1m\n"
 		if _, err := parseSpec([]byte(content)); err == nil {
 			t.Fatalf("parseSpec accepted %q", body)
-		} else if code, _ := CodeOf(err); code != ErrorCodeExecutorInvalid {
+		} else if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodeExecutorInvalid {
 			t.Fatalf("code = %s (%v), want %s", code, err, ErrorCodeExecutorInvalid)
 		}
 	}

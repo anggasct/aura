@@ -2,6 +2,7 @@ package turnstore
 
 import (
 	"database/sql"
+	"slices"
 	"testing"
 	"time"
 
@@ -58,5 +59,36 @@ func TestRunSessionsAreNotPrincipalActivity(t *testing.T) {
 	activity, err = turns.PrincipalActivity(t.Context())
 	if err != nil || len(activity) != 2 {
 		t.Fatalf("PrincipalActivity() with an upper-case WF- chat session = %+v, %v; want two principals", activity, err)
+	}
+}
+
+func TestFilterAndDeleteSessionsByIDScopeByOwner(t *testing.T) {
+	db := newTestDB(t)
+	turns := NewTurnStore(db)
+	seedActivitySession(t, db, "wf-a", "workflow", "main")
+	seedActivitySession(t, db, "wf-b", "workflow", "main")
+	seedActivitySession(t, db, "wf-other", "discord:1", "main")
+
+	empty, err := turns.FilterSessions(t.Context(), "workflow", nil)
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("FilterSessions(nil) = %v, %v; want empty", empty, err)
+	}
+	found, err := turns.FilterSessions(t.Context(), "workflow", []string{"wf-a", "wf-other", "wf-missing"})
+	if err != nil || !slices.Equal(found, []string{"wf-a"}) {
+		t.Fatalf("FilterSessions = %v, %v; want [wf-a]", found, err)
+	}
+	if err := turns.DeleteSessionsByID(t.Context(), "workflow", nil); err != nil {
+		t.Fatalf("DeleteSessionsByID(nil): %v", err)
+	}
+	if err := turns.DeleteSessionsByID(t.Context(), "workflow", []string{"wf-a", "wf-other"}); err != nil {
+		t.Fatalf("DeleteSessionsByID: %v", err)
+	}
+	remainingWorkflow, err := turns.FilterSessions(t.Context(), "workflow", []string{"wf-a", "wf-b"})
+	if err != nil || !slices.Equal(remainingWorkflow, []string{"wf-b"}) {
+		t.Fatalf("remaining workflow sessions = %v, %v; want [wf-b]", remainingWorkflow, err)
+	}
+	remainingOther, err := turns.FilterSessions(t.Context(), "discord:1", []string{"wf-other"})
+	if err != nil || !slices.Equal(remainingOther, []string{"wf-other"}) {
+		t.Fatalf("other owner session was deleted: %v, %v", remainingOther, err)
 	}
 }

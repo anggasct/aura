@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -24,7 +23,7 @@ func (e *Engine) renderSkillActivation(ctx context.Context, req *turn.TurnReques
 	}
 	caveat, body, err := e.deps.Skills.RenderSkill(ctx, req.SessionID, req.Skill)
 	if err != nil {
-		if fault.HasCode(err, skills.ErrorCodeSkillUnavailable) {
+		if fault.HasCode(err, turn.ErrorCodeSkillUnavailable) {
 			e.logger.WarnContext(ctx, "skill activation unavailable", "component", "skills", "skill_id", req.Skill.SkillID, "turn_id", req.TurnID, "error", err)
 			return nil, codedError(turn.ErrorCodeSkillUnavailable, "skill is not available", nil)
 		}

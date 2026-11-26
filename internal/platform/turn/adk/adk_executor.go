@@ -53,18 +53,8 @@ type ADKExecutor struct {
 	modelForRoute     func(route string) (string, error)
 	ledger            *usage.Ledger
 	modelDefinitionID string
-	recall            RecallProvider
 	ownerContext      string
-	skills            SkillContextProvider
 	providers         []turn.ContextProvider
-}
-
-type RecallProvider interface {
-	RecallTurn(ctx context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error)
-}
-
-type SkillContextProvider interface {
-	SkillContext(ctx context.Context, req *turn.TurnRequest) (string, error)
 }
 
 type AgentResolver interface {
@@ -168,29 +158,9 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 	}
 }
 
-func WithRecallProvider(provider RecallProvider) ExecutorOption {
-	return func(e *ADKExecutor) error {
-		if provider == nil {
-			return invalidArgument("recall provider must not be nil")
-		}
-		e.recall = provider
-		return nil
-	}
-}
-
 func WithOwnerContext(block string) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		e.ownerContext = strings.TrimSpace(block)
-		return nil
-	}
-}
-
-func WithSkillContext(provider SkillContextProvider) ExecutorOption {
-	return func(e *ADKExecutor) error {
-		if provider == nil {
-			return invalidArgument("skill context provider must not be nil")
-		}
-		e.skills = provider
 		return nil
 	}
 }
@@ -232,20 +202,6 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			sessionService.leaveOutTurn = req.TurnID
 		}
 		recallAttached := req.UntrustedContext != nil
-		if x.recall != nil && !recallAttached {
-			evidence, rerr := x.recall.RecallTurn(runCtx, req)
-			if rerr != nil {
-				if req.RequireRecall {
-					yield(turn.Event{}, codedError(turn.ErrorCodeStorageUnavailable, "required recall is unavailable", rerr))
-					return
-				}
-			} else if evidence != nil {
-				scoped := *req
-				scoped.UntrustedContext = evidence
-				req = &scoped
-				recallAttached = true
-			}
-		}
 		blocks, err := x.collectContextBlocks(runCtx, req)
 		if err != nil {
 			yield(turn.Event{}, err)
@@ -267,7 +223,15 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			}
 		}
 
-		content, err := contentFromParts(req)
+		var userParts []string
+		for i := range blocks {
+			if blocks[i].Placement == turn.ContextPlacementUserPart {
+				if text := strings.TrimSpace(blocks[i].Content); text != "" {
+					userParts = append(userParts, text)
+				}
+			}
+		}
+		content, err := contentFromParts(req, userParts...)
 		if err != nil {
 			yield(turn.Event{}, err)
 			return
@@ -333,12 +297,6 @@ type turnContext struct {
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
 	var blocks []turn.ContextBlock
-	if skills := x.skillContextFor(ctx, req); skills != "" {
-		blocks = append(blocks, turn.ContextBlock{
-			Order:   turn.ContextOrderSkills,
-			Content: skills,
-		})
-	}
 	for _, provider := range x.providers {
 		provided, err := provider.TurnContext(ctx, req)
 		if err != nil {
@@ -354,30 +312,6 @@ func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRe
 		return cmp.Compare(a.Order, b.Order)
 	})
 	return blocks, nil
-}
-
-func (x *ADKExecutor) skillContextFor(ctx context.Context, req *turn.TurnRequest) string {
-	if x.skills == nil || req.PrincipalClass != principal.ClassOwner {
-		return ""
-	}
-	render := func(ctx context.Context) ([]byte, error) {
-		block, err := x.skills.SkillContext(ctx, req)
-		if err != nil {
-			x.logger.WarnContext(ctx, "skill context unavailable", "component", "skills", "error", err, "turn_id", req.TurnID)
-			return []byte{}, nil
-		}
-		return []byte(strings.TrimSpace(block)), nil
-	}
-	if scope, ok := durable.TurnScopeFrom(ctx); ok {
-		raw, err := scope.Invocation().RunAction(ctx, "skill-context", render)
-		if err != nil {
-			x.logger.WarnContext(ctx, "skill context journal failed", "component", "skills", "error", err, "turn_id", req.TurnID)
-			return ""
-		}
-		return string(raw)
-	}
-	raw, _ := render(ctx)
-	return string(raw)
 }
 
 const userAuthor = "user"
@@ -507,7 +441,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	return result, nil
 }
 
-func contentFromParts(req *turn.TurnRequest) (*genai.Content, error) {
+func contentFromParts(req *turn.TurnRequest, extraParts ...string) (*genai.Content, error) {
 	var parts []*genai.Part
 	for _, p := range req.Parts {
 		if len(p.Image) > 0 {
@@ -523,8 +457,13 @@ func contentFromParts(req *turn.TurnRequest) (*genai.Content, error) {
 		}
 		parts = append(parts, &genai.Part{Text: p.Text})
 	}
-	if block := renderUntrustedRecall(req.UntrustedContext); strings.TrimSpace(block) != "" {
+	if block := turn.RenderUntrustedRecall(req.UntrustedContext); strings.TrimSpace(block) != "" {
 		parts = append(parts, &genai.Part{Text: block})
+	}
+	for _, extra := range extraParts {
+		if strings.TrimSpace(extra) != "" {
+			parts = append(parts, &genai.Part{Text: extra})
+		}
 	}
 	if len(parts) == 0 {
 		return nil, invalidArgument("turn has no input parts")
@@ -677,15 +616,17 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 		}
 	}
 	if recallAttached {
-		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
+		instruction = strings.TrimSpace(instruction) + "\n\n" + turn.RecallEvidenceCaveat
 	}
 	var beforeModel []llmagent.BeforeModelCallback
 	for i := range extra.blocks {
-		if caveat := strings.TrimSpace(extra.blocks[i].Caveat); caveat != "" {
+		if caveat := strings.TrimSpace(extra.blocks[i].Caveat); caveat != "" && (!recallAttached || caveat != turn.RecallEvidenceCaveat) {
 			instruction = strings.TrimSpace(instruction) + "\n\n" + caveat
 		}
-		if content := strings.TrimSpace(extra.blocks[i].Content); content != "" {
-			beforeModel = append(beforeModel, withUntrustedContextPart(content))
+		if extra.blocks[i].Placement == turn.ContextPlacementEphemeral {
+			if content := strings.TrimSpace(extra.blocks[i].Content); content != "" {
+				beforeModel = append(beforeModel, withUntrustedContextPart(content))
+			}
 		}
 	}
 	instruction = appendStatusProtocol(instruction)

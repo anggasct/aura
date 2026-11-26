@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -49,7 +50,7 @@ func (i *Interpreter) SaveRoutine(ctx context.Context, runID, name string) (*Spe
 	version := 1
 	if latest, err := i.store.LatestDefinition(ctx, id); err == nil {
 		version = latest.Version + 1
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeDefinitionNotFound {
+	} else if !fault.HasCode(err, ErrorCodeDefinitionNotFound) {
 		return nil, err
 	}
 	routine := &Spec{ID: id, Name: strings.TrimSpace(name), Goal: source.Goal, Version: version, Source: SourceGenerated, Steps: slices.Clone(source.Steps)}

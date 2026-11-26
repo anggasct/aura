@@ -70,7 +70,7 @@ func mapCorrelationError(err error) error {
 	if err == nil {
 		return nil
 	}
-	if code, ok := workflow.CodeOf(err); ok {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); ok {
 		if code == workflow.ErrorCodeCorrelationUnmatched {
 			return fault.Wrap(github.ErrorCodeCorrelationUnmatched, err.Error(), err)
 		}

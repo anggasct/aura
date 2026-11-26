@@ -1,4 +1,4 @@
-package store
+package memory
 
 import (
 	"database/sql"
@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/history"
 )
 
@@ -19,12 +20,24 @@ func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID st
 	}
 }
 
+func openDatabaseAtVersion(t *testing.T, path string, count int) *sql.DB {
+	t.Helper()
+	db, err := sqlite.Open(t.Context(), path, sqlite.Options{})
+	if err != nil {
+		t.Fatalf("sqlite.Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(t.Context(), db, history.Migrations()[:count]); err != nil {
+		t.Fatalf("migrate %d: %v", count, err)
+	}
+	return db
+}
+
 func TestMemoryStore_DocumentTakesItsSessionPersona(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	seedPersonaSession(t, db, "kuma/discord:home/dm:1", "owner-1", "kuma")
-	if _, err := s.UpsertDocument(ctx, testMemoryDocument("mem-kuma", "kuma/discord:home/dm:1", MemoryKindEventText)); err != nil {
+	if _, err := s.UpsertDocument(ctx, testMemoryDocument("mem-kuma", "kuma/discord:home/dm:1", KindEventText)); err != nil {
 		t.Fatalf("UpsertDocument: %v", err)
 	}
 	document, found, err := s.GetDocument(ctx, "mem-kuma")
@@ -37,8 +50,7 @@ func TestMemoryStore_DocumentTakesItsSessionPersona(t *testing.T) {
 }
 
 func TestMemoryStore_SearchFiltersByReadablePersonas(t *testing.T) {
-	db := newTestDB(t)
-	s := NewMemoryStore(db)
+	db, s := newTestSQLiteStore(t)
 	ctx := t.Context()
 	for _, seed := range []struct{ session, agent, doc string }{
 		{"kuma/s", "kuma", "mem-kuma"},
@@ -46,7 +58,7 @@ func TestMemoryStore_SearchFiltersByReadablePersonas(t *testing.T) {
 		{"solo/s", "solo", "mem-solo"},
 	} {
 		seedPersonaSession(t, db, seed.session, "owner-1", seed.agent)
-		if _, err := s.UpsertDocument(ctx, testMemoryDocument(seed.doc, seed.session, MemoryKindEventText)); err != nil {
+		if _, err := s.UpsertDocument(ctx, testMemoryDocument(seed.doc, seed.session, KindEventText)); err != nil {
 			t.Fatalf("UpsertDocument(%s): %v", seed.doc, err)
 		}
 	}
@@ -60,7 +72,7 @@ func TestMemoryStore_SearchFiltersByReadablePersonas(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "owner-1", AgentIDs: tc.agents, Terms: "nightly backup", Limit: 10})
+			hits, err := s.Search(ctx, &StoredQuery{OwnerID: "owner-1", AgentIDs: tc.agents, Terms: "nightly backup", Limit: 10})
 			if err != nil {
 				t.Fatalf("Search: %v", err)
 			}
@@ -78,14 +90,7 @@ func TestMemoryStore_SearchFiltersByReadablePersonas(t *testing.T) {
 
 func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 	ctx := t.Context()
-	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "aura.db"), sqlite.Options{})
-	if err != nil {
-		t.Fatalf("OpenDB: %v", err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err := sqlite.Migrate(ctx, db, history.Migrations()[:20]); err != nil {
-		t.Fatalf("migrate to v%d: %v", 20, err)
-	}
+	db := openDatabaseAtVersion(t, filepath.Join(t.TempDir(), "aura.db"), 20)
 	seedPersonaSession(t, db, "engineer-session", "owner-1", "engineer")
 	seedPersonaSession(t, db, "main-session", "owner-1", "main")
 	for _, row := range []struct{ id, session string }{{"mem-engineer", "engineer-session"}, {"mem-main", "main-session"}} {
@@ -97,7 +102,10 @@ func TestMemoryPersonaMigrationBackfillsFromSession(t *testing.T) {
 	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	s := NewMemoryStore(db)
+	s, err := NewSQLiteStore(db, turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
 	for id, want := range map[string]string{"mem-engineer": "engineer", "mem-main": "main"} {
 		document, found, err := s.GetDocument(ctx, id)
 		if err != nil || !found {
@@ -141,7 +149,10 @@ func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
 	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	s := NewMemoryStore(db)
+	s, err := NewSQLiteStore(db, turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
 	for _, row := range rows {
 		t.Run(row.id, func(t *testing.T) {
 			document, found, err := s.GetDocument(ctx, row.id)
@@ -153,7 +164,7 @@ func TestMemoryNonOwnerTrustMigrationRelabelsOnlyNonOwnerInput(t *testing.T) {
 			}
 		})
 	}
-	hits, err := s.Search(ctx, &MemoryQuery{OwnerID: "http:abcdefabcdef", Terms: "nightly", Limit: 10})
+	hits, err := s.Search(ctx, &StoredQuery{OwnerID: "http:abcdefabcdef", Terms: "nightly", Limit: 10})
 	if err != nil || len(hits) != 2 {
 		t.Fatalf("search after migration = %d hits, %v; want 2", len(hits), err)
 	}

@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"slices"
 	"testing"
 	"time"
@@ -38,7 +39,7 @@ func TestParseConditionGrammar(t *testing.T) {
 				if err == nil {
 					t.Fatalf("parseCondition(%q) unexpectedly succeeded", tc.source)
 				}
-				code, ok := CodeOf(err)
+				code, ok := fault.CodeOf[ErrorCode](err)
 				if !ok || code != ErrorCodeConditionInvalid {
 					t.Fatalf("code = %s, want workflow_condition_invalid", code)
 				}
@@ -276,7 +277,7 @@ func TestValidateRejectsInvalidClasses(t *testing.T) {
 			if err == nil {
 				t.Fatal("Validate unexpectedly accepted the spec")
 			}
-			if code, _ := CodeOf(err); code != tc.wantCode {
+			if code, _ := fault.CodeOf[ErrorCode](err); code != tc.wantCode {
 				t.Fatalf("code = %s (%v), want %s", code, err, tc.wantCode)
 			}
 		})
@@ -309,7 +310,7 @@ func TestValidateRequiresApprovalCoverageForEffectfulTools(t *testing.T) {
 	if err == nil {
 		t.Fatal("uncovered effectful tool was accepted")
 	}
-	if code, _ := CodeOf(err); code != ErrorCodeDangerousUncovered {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodeDangerousUncovered {
 		t.Fatalf("code = %s, want workflow_dangerous_operation_uncovered", code)
 	}
 
@@ -392,7 +393,7 @@ func TestValidateWaitCorrelationFields(t *testing.T) {
 			if err == nil {
 				t.Fatal("Validate unexpectedly accepted the spec")
 			}
-			if code, _ := CodeOf(err); code != ErrorCodeExecutorInvalid {
+			if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodeExecutorInvalid {
 				t.Fatalf("code = %s (%v), want %s", code, err, ErrorCodeExecutorInvalid)
 			}
 		})
@@ -423,7 +424,7 @@ func TestValidateToolArgumentsMustBeJSONObject(t *testing.T) {
 			if err == nil {
 				t.Fatal("Validate unexpectedly accepted non-object args")
 			}
-			if code, _ := CodeOf(err); code != ErrorCodeExecutorInvalid {
+			if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodeExecutorInvalid {
 				t.Fatalf("code = %s (%v), want %s", code, err, ErrorCodeExecutorInvalid)
 			}
 		})

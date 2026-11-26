@@ -76,7 +76,9 @@ func TestPromptAssemblyGolden(t *testing.T) {
 		WithAgentResolver(resolver, nil),
 		WithOwnerContext(RenderOwnerContext(&OwnerContext{Name: "Angga"})),
 		WithContextProvider(&stubProfileContext{block: profileBlockFixture}),
-		WithSkillContext(&stubSkillContext{block: skillBlockFixture}),
+		WithContextProvider(&stubContextProvider{
+			blocks: []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: skillBlockFixture}},
+		}),
 		WithContextProvider(&stubContextProvider{
 			blocks: []turn.ContextBlock{{
 				Order:   turn.ContextOrderKnowledge,

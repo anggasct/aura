@@ -526,24 +526,13 @@ func (b *build) newProbeListener() (*probeListener, error) {
 }
 
 func (b *build) wireWorkflowParts() error {
-	cfg, db, s := b.cfg, b.db, b.server
-	if b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
+	s := b.server
+	if b.workflowMod == nil || b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
 		return invalidOptions("the server's workflow parts need an interpreter and the surface tool executor")
 	}
-	runs, err := workflow.NewStore(db, b.turns)
-	if err != nil {
+	if err := b.group.Add(server.Background("workflow_proposal_cards", b.workflowMod.ProposalCardsRunner())); err != nil {
 		return err
 	}
-	controller, err := newWorkflowToolController(b.interpreter, runs, b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
-	if err != nil {
-		return err
-	}
-	controller.enableProposalCards(cfg, proposalOfferers(s.channels), b.logger)
-	controller.enableCallDisplay(b.builtin.Broker().ExactCallText)
-	if err := b.group.Add(server.Background("workflow_proposal_cards", controller.runProposalCards)); err != nil {
-		return err
-	}
-	b.builtin.SetWorkflowController(controller)
 	s.scheduledWorkflows.set(b.interpreter)
 	return nil
 }
@@ -565,14 +554,12 @@ func (b *build) registerSweeps() error {
 	if err := b.registerRunRetention(); err != nil {
 		return err
 	}
-	notifier, err := newWorkflowCompletionNotifier(cfg, db, b.turns, registry, logger)
-	if err != nil {
-		return err
-	}
-	if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
-		notifier.run(ctx, workflowCompletionInterval)
-	})); err != nil {
-		return err
+	if b.workflowMod != nil {
+		if run := b.workflowMod.CompletionRunner(); run != nil {
+			if err := b.group.Add(server.Background("workflow_completion", run)); err != nil {
+				return err
+			}
+		}
 	}
 	configPath := b.result.Path
 	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}

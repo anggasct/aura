@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -70,7 +71,7 @@ func (i *Interpreter) admitRun(ctx context.Context, spec *Spec, origin *RunOrigi
 
 func (i *Interpreter) refuseSpentChild(ctx context.Context, child *Spec) error {
 	approval, err := i.requireSpecApproval(ctx, child)
-	if code, ok := CodeOf(err); ok && code == ErrorCodeApprovalMissing {
+	if fault.HasCode(err, ErrorCodeApprovalMissing) {
 		return nil
 	}
 	if err != nil {
