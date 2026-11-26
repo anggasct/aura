@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -35,7 +36,7 @@ func (s *TurnStore) ListSessionEvents(ctx context.Context, sessionID string, fil
 	}
 	if filter.IDPrefix != "" {
 		query += ` AND substr(id, 1, ?) = ?`
-		args = append(args, len(filter.IDPrefix), filter.IDPrefix)
+		args = append(args, utf8.RuneCountInString(filter.IDPrefix), filter.IDPrefix)
 	}
 	query += ` ORDER BY sequence ASC`
 	if filter.Limit > 0 {
