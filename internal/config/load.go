@@ -688,44 +688,6 @@ func ValidateMemory(memory *Memory) error {
 	return errors.Join(problems...)
 }
 
-func ValidateSkills(skillsConfig *Skills) error {
-	if skillsConfig == nil {
-		return nil
-	}
-	var problems []error
-	if len(skillsConfig.Roots) == 0 {
-		problems = append(problems, configkit.Invalid("skills.roots", "must list at least one directory"))
-	}
-	for _, root := range skillsConfig.Roots {
-		switch {
-		case strings.TrimSpace(root) == "":
-			problems = append(problems, configkit.Invalid("skills.roots", "entries must not be empty"))
-		case !filepath.IsAbs(root):
-			problems = append(problems, configkit.Invalid("skills.roots", "entries must be absolute paths"))
-		case filepath.Clean(root) != root:
-			problems = append(problems, configkit.Invalid("skills.roots", "entries must be clean paths"))
-		}
-	}
-	if skillsConfig.MaxIndexedSkills <= 0 || skillsConfig.MaxIndexedSkills > 4096 {
-		problems = append(problems, configkit.Invalid("skills.max_indexed_skills", "must be between 1 and 4096"))
-	}
-	if skillsConfig.MaxInstructionTokens <= 0 || skillsConfig.MaxInstructionTokens > 128000 {
-		problems = append(problems, configkit.Invalid("skills.max_instruction_tokens", "must be between 1 and 128000"))
-	}
-	if skillsConfig.MaxSessionContextTokens <= 0 {
-		problems = append(problems, configkit.Invalid("skills.max_session_context_tokens", "must be positive"))
-	} else if skillsConfig.MaxSessionContextTokens < skillsConfig.MaxInstructionTokens {
-		problems = append(problems, configkit.Invalid("skills.max_session_context_tokens", "must be at least skills.max_instruction_tokens"))
-	}
-	if skillsConfig.MaxResourceBytes <= 0 || skillsConfig.MaxResourceBytes > 1<<30 {
-		problems = append(problems, configkit.Invalid("skills.max_resource_bytes", "must be between 1 and 1073741824"))
-	}
-	if skillsConfig.QuarantineRetention <= 0 {
-		problems = append(problems, configkit.Invalid("skills.quarantine_retention", "must be positive"))
-	}
-	return errors.Join(problems...)
-}
-
 func validHourMinute(value string) bool {
 	if len(value) != 5 || value[2] != ':' {
 		return false

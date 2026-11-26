@@ -71,17 +71,6 @@ type QuietHours struct {
 	End     string `json:"end"`
 }
 
-type Skills struct {
-	Enabled                 bool               `json:"enabled"`
-	Roots                   []string           `json:"roots"`
-	AutoSelect              bool               `json:"auto_select"`
-	MaxIndexedSkills        int                `json:"max_indexed_skills"`
-	MaxInstructionTokens    int                `json:"max_instruction_tokens"`
-	MaxSessionContextTokens int                `json:"max_session_context_tokens"`
-	MaxResourceBytes        int64              `json:"max_resource_bytes"`
-	QuarantineRetention     configkit.Duration `json:"quarantine_retention"`
-}
-
 type Sync struct {
 	Enabled            bool               `json:"enabled"`
 	Remote             string             `json:"remote"`
@@ -494,19 +483,6 @@ func DefaultMemory() Memory {
 		RangeLiveWindow:      5,
 		PurgeInterval:        configkit.Duration(1 * time.Hour),
 		PurgeLimit:           100,
-	}
-}
-
-func DefaultSkills() *Skills {
-	return &Skills{
-		Enabled:                 true,
-		Roots:                   []string{"/srv/aura/skills"},
-		AutoSelect:              true,
-		MaxIndexedSkills:        256,
-		MaxInstructionTokens:    5000,
-		MaxSessionContextTokens: 15000,
-		MaxResourceBytes:        8388608,
-		QuarantineRetention:     configkit.Duration(720 * time.Hour),
 	}
 }
 

@@ -97,7 +97,7 @@ func TestLoad_SkillsInvalid(t *testing.T) {
 			_, err := LoadWithOptions(writeSkillsConfig(t, content), execLinuxOptions(t))
 			if err == nil {
 				t.Errorf("expected error")
-			} else if !strings.Contains(err.Error(), "config_invalid") && !strings.Contains(err.Error(), "skills") {
+			} else if !strings.Contains(err.Error(), "skills") {
 				t.Errorf("err = %v", err)
 			}
 		})

@@ -399,3 +399,26 @@ func TestDurableReplayReusesTheJournaledActivation(t *testing.T) {
 		t.Errorf("renderer calls = %d, want the replay to reuse the journal", renderer.calls)
 	}
 }
+
+func TestRenderSkillActivationClassifiesSQLiteErrorsAsStorageUnavailable(t *testing.T) {
+	codes := []sqlite.ErrorCode{
+		sqlite.ErrorCodeBusy,
+		sqlite.ErrorCodeUnavailable,
+		sqlite.ErrorCodeCorrupt,
+		sqlite.ErrorCodeFailed,
+	}
+	for _, code := range codes {
+		t.Run(string(code), func(t *testing.T) {
+			renderer := &stubSkillRenderer{err: fault.New(code, "sqlite error")}
+			engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Skills: renderer}, &pinRecordingExecutor{})
+			mustCreateSession(t, db, "session-a")
+			_, err := engine.renderSkillActivation(t.Context(), pinnedRequest("session-a", "turn-1"))
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", code)
+			}
+			if !fault.HasCode(err, turn.ErrorCodeStorageUnavailable) {
+				t.Fatalf("err = %v, want %s", err, turn.ErrorCodeStorageUnavailable)
+			}
+		})
+	}
+}

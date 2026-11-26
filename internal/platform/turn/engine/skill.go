@@ -24,11 +24,11 @@ func (e *Engine) renderSkillActivation(ctx context.Context, req *turn.TurnReques
 	}
 	caveat, body, err := e.deps.Skills.RenderSkill(ctx, req.SessionID, req.Skill)
 	if err != nil {
-		if code, ok := skills.CodeOf(err); ok && code == skills.ErrorCodeSkillUnavailable {
+		if fault.HasCode(err, skills.ErrorCodeSkillUnavailable) {
 			e.logger.WarnContext(ctx, "skill activation unavailable", "component", "skills", "skill_id", req.Skill.SkillID, "turn_id", req.TurnID, "error", err)
 			return nil, codedError(turn.ErrorCodeSkillUnavailable, "skill is not available", nil)
 		}
-		if fault.HasCode(err, store.ErrorCodeStorageUnavailable) || fault.HasCode(err, sqlite.ErrorCodeBusy) {
+		if _, ok := fault.CodeOf[sqlite.ErrorCode](err); ok || fault.HasCode(err, store.ErrorCodeStorageUnavailable) {
 			return nil, codedError(turn.ErrorCodeStorageUnavailable, "read the pinned skill activation", err)
 		}
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "render the pinned skill activation", err)

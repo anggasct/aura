@@ -1,8 +1,6 @@
 package store
 
 import (
-	"context"
-	"database/sql"
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -27,9 +25,6 @@ const (
 	ErrorCodeMemoryConflict           ErrorCode = "memory_conflict"
 	ErrorCodeMemoryNotFound           ErrorCode = "memory_not_found"
 	ErrorCodeMemoryInvalid            ErrorCode = "memory_invalid"
-	ErrorCodeSkillNotFound            ErrorCode = "skill_not_found"
-	ErrorCodeSkillInvalid             ErrorCode = "skill_invalid"
-	ErrorCodeSkillDigestChanged       ErrorCode = "skill_digest_changed"
 	ErrorCodeProfileConflict          ErrorCode = "profile_conflict"
 	ErrorCodeProfileNotFound          ErrorCode = "profile_not_found"
 	ErrorCodeProfileInvalid           ErrorCode = "profile_invalid"
@@ -73,13 +68,4 @@ func isConstraintForeignKey(err error) bool {
 
 func isConstraintCheck(err error) bool {
 	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck)
-}
-
-type rowChecker interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func rowExists(ctx context.Context, q rowChecker, query string, args ...any) bool {
-	var one int
-	return q.QueryRowContext(ctx, query, args...).Scan(&one) == nil
 }
