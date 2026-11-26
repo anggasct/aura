@@ -192,9 +192,17 @@ func TestAnExplicitZeroIsKeptAndValidated(t *testing.T) {
 }
 
 func TestMCPServerZeroLimitsKeepTheirDefaults(t *testing.T) {
-	res := writeConfigYAML(t, "mcp:\n  servers:\n    - name: local-files\n      transport: stdio\n      command: /usr/local/bin/files-mcp\n      startup_timeout: 0s\n      request_timeout: 0s\n      max_message_size: \"0\"\n")
-	server := res.Config.MCP.Servers[0]
-	if time.Duration(server.StartupTimeout) != 10*time.Second || time.Duration(server.RequestTimeout) != 30*time.Second || server.MaxMessageSize != 1<<20 {
-		t.Errorf("limits = %v, %v, %d; want 10s, 30s, 1MiB", server.StartupTimeout, server.RequestTimeout, server.MaxMessageSize)
+	_, err := loadWithEnvironment(t, "version: 1\nmcp:\n  servers:\n    - name: local-files\n      transport: stdio\n      command: /usr/local/bin/files-mcp\n      startup_timeout: 0s\n      request_timeout: 0s\n      max_message_size: \"0\"\n", nil)
+	if err == nil {
+		t.Fatal("explicit zero limits accepted, want config_invalid")
+	}
+	for _, want := range []string{
+		"mcp.servers[local-files].startup_timeout: config_invalid: must be positive",
+		"mcp.servers[local-files].request_timeout: config_invalid: must be positive",
+		"mcp.servers[local-files].max_message_size: config_invalid: must be positive",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Load error = %v, want %q", err, want)
+		}
 	}
 }

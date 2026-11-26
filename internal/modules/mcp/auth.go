@@ -17,6 +17,7 @@ import (
 	"golang.org/x/oauth2"
 
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const defaultAuthHeader = "Authorization"
@@ -355,7 +356,7 @@ type sanitizedTokenSource struct {
 func (s *sanitizedTokenSource) Token() (*oauth2.Token, error) {
 	token, err := s.source.Token()
 	if err != nil {
-		if _, ok := CodeOf(err); ok {
+		if _, ok := fault.CodeOf[ErrorCode](err); ok {
 			return nil, err
 		}
 		return nil, Errorf(ErrAuthRequired, "server %q authentication failed", s.serverName)

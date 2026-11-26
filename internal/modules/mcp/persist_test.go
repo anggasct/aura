@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bytes"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"os"
 	"path/filepath"
 	"testing"
@@ -51,7 +52,7 @@ func TestFileTokenStoreCorruptFails(t *testing.T) {
 	}
 	if _, _, err := store.Load(); err == nil {
 		t.Fatal("corrupt store accepted")
-	} else if _, ok := CodeOf(err); !ok {
+	} else if _, ok := fault.CodeOf[ErrorCode](err); !ok {
 		t.Errorf("uncoded error: %v", err)
 	}
 }

@@ -352,3 +352,19 @@ func TestCompositionCloseWithoutRunClosesKnowledgePools(t *testing.T) {
 		t.Fatalf("stopped = %v, want knowledge defer to close pools even without Run", stopped)
 	}
 }
+
+func TestMCPCloseWithoutRunClosesSubprocesses(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	extra := "mcp:\n  servers:\n    - name: docs\n      transport: stdio\n      command: /usr/local/bin/docs-mcp\n"
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
+	logs := &syncBuffer{}
+	app := buildApp(t, serverCompositionOptions(result, logs))
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close without Run: %v", err)
+	}
+	stopped := lifecycleNames(t, logs.String(), "lifecycle stopped")
+	if !slices.Contains(stopped, "mcp") {
+		t.Fatalf("stopped = %v, want mcp defer to close subprocesses even without Run", stopped)
+	}
+}

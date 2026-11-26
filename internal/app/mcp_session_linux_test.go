@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
@@ -35,29 +35,29 @@ func TestContainedRealSessionExchange(t *testing.T) {
 	helper := containedFixture(t)
 	workDir := filepath.Dir(helper)
 
-	probe, err := newMCPSessionStarter(sandbox.Start).StartSession(ctx, &mcp.ContainedSessionRequest{
+	probe, err := mcp.NewSandboxSessionStarter(sandbox.Start).StartSession(ctx, &mcp.ContainedSessionRequest{
 		RequestID: "probe", ServerName: "probe", Executable: helper,
 		WorkingDir: workDir, Environment: map[string]string{},
 		Timeout: 30 * time.Second, MaxOutputBytes: 1 << 20,
 	})
 	if err != nil {
-		if code, ok := mcp.CodeOf(err); ok && code == mcp.ErrServerUnavailable {
+		if fault.HasCode(err, mcp.ErrServerUnavailable) {
 			t.Skipf("containment unavailable on this host: %v", err)
 		}
 		t.Fatalf("StartSession(): %v", err)
 	}
 	_ = probe.Close(ctx)
 
-	serverCfg := &config.MCPServer{
+	serverCfg := &mcp.ServerConfig{
 		Name:           "contained-real",
-		Transport:      config.MCPTransportStdio,
+		Transport:      mcp.TransportStdio,
 		Command:        helper,
 		Environment:    map[string]string{"SERVER_MODE": "contained"},
 		StartupTimeout: configkit.Duration(30 * time.Second),
 		RequestTimeout: configkit.Duration(30 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
-	client, err := mcp.NewClient(serverCfg, nil, mcp.WithSessionStarter(newMCPSessionStarter(sandbox.Start)))
+	client, err := mcp.NewClient(serverCfg, nil, mcp.WithSessionStarter(mcp.NewSandboxSessionStarter(sandbox.Start)))
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
 	}

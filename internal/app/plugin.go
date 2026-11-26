@@ -10,7 +10,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -54,7 +53,7 @@ func newPluginAuth(cfg *appconfig.Config, redactor auth.Redactor) (*auth.Registr
 	if err != nil {
 		return nil, err
 	}
-	return auth.NewRegistry(&auth.Options{Dir: dir, Secrets: mcpSecretResolver{}, HTTPClient: pluginHTTPClient(mcpHTTPClient(nil)), Redactor: redactor})
+	return auth.NewRegistry(&auth.Options{Dir: dir, Secrets: mcp.NewSecretResolver(), HTTPClient: pluginHTTPClient(mcp.NewHTTPClient(nil)), Redactor: redactor})
 }
 
 type loopbackAwareTransport struct {
@@ -221,8 +220,8 @@ func planPlugins(ctx context.Context, cfg *appconfig.Config, db *sql.DB, redacto
 	return &pluginRuntime{service: service, plan: plan, installed: len(summaries)}, nil
 }
 
-func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
-	return legacyconfig.MCPServer{
+func mcpServerFromBackend(s *plugin.BackendServer) mcp.ServerConfig {
+	out := mcp.ServerConfig{
 		Name:           s.Name,
 		Transport:      s.Transport,
 		Command:        s.Command,
@@ -230,10 +229,14 @@ func mcpServerFromBackend(s *plugin.BackendServer) legacyconfig.MCPServer {
 		URL:            s.URL,
 		StartupTimeout: s.StartupTimeout,
 		RequestTimeout: s.RequestTimeout,
-		ConnectTimeout: s.ConnectTimeout,
 		MaxMessageSize: s.MaxMessageSize,
 		Capabilities:   slices.Clone(s.Capabilities),
 	}
+	if s.ConnectTimeout > 0 {
+		ct := s.ConnectTimeout
+		out.ConnectTimeout = &ct
+	}
+	return out
 }
 
 func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
@@ -255,7 +258,7 @@ func (r *pluginRuntime) mcpPlugins() []mcp.PluginServer {
 	return servers
 }
 
-func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServers *mcpRuntime) (health.RegisteredCheck, bool, error) {
+func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServers *mcp.Module) (health.RegisteredCheck, bool, error) {
 	if r == nil || (cfg.Plugins == nil && r.installed == 0) {
 		return health.RegisteredCheck{}, false, nil
 	}
@@ -282,10 +285,10 @@ func (r *pluginRuntime) healthCheck(cfg *appconfig.Config, db *sql.DB, mcpServer
 	}, true, nil
 }
 
-func (r *pluginRuntime) runtimeStatuses(ctx context.Context, mcpServers *mcpRuntime) []plugin.RuntimeStatus {
+func (r *pluginRuntime) runtimeStatuses(ctx context.Context, mcpServers *mcp.Module) []plugin.RuntimeStatus {
 	var out []plugin.RuntimeStatus
 	if mcpServers != nil {
-		for _, status := range mcpServers.manager.PluginStatuses() {
+		for _, status := range mcpServers.PluginStatuses() {
 			out = append(out, plugin.RuntimeStatus{
 				ID: status.ID, Running: status.Code == "" && status.Connected, Drift: status.Drift,
 				Auth: r.authStatus(ctx, status.ID),

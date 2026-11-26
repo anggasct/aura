@@ -17,7 +17,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
@@ -191,7 +190,7 @@ func (f *e2eFixture) newService(t *testing.T) *plugin.Service {
 		t.Fatalf("pluginDirectory: %v", err)
 	}
 	registry, err := auth.NewRegistry(&auth.Options{
-		Dir: secretsDir, Secrets: mcpSecretResolver{}, HTTPClient: pluginHTTPClient(mcpHTTPClient(nil)),
+		Dir: secretsDir, Secrets: mcp.NewSecretResolver(), HTTPClient: pluginHTTPClient(mcp.NewHTTPClient(nil)),
 		Redactor: f.h.executor.Broker(), Now: f.clock.now,
 	})
 	if err != nil {
@@ -222,27 +221,29 @@ func (f *e2eFixture) login(t *testing.T) {
 	}
 }
 
-func (f *e2eFixture) start(t *testing.T) (*pluginRuntime, *mcp.Manager) {
+func (f *e2eFixture) start(t *testing.T) (*pluginRuntime, *mcp.Module) {
 	t.Helper()
 	plan, err := f.service.Plan(t.Context())
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
 	runtime := &pluginRuntime{service: f.service, plan: plan, installed: 1}
-	manager, err := mcp.NewManager(&mcp.ManagerOptions{
-		Config:         &config.MCP{},
-		Plugins:        runtime.mcpPlugins(),
-		Broker:         f.h.executor.Broker(),
-		HTTPClient:     &http.Client{},
-		EndpointPolicy: mcpEndpointPolicy{},
-		Logger:         slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+	mcpPlugins := runtime.mcpPlugins()
+	if len(mcpPlugins) == 0 {
+		return runtime, nil
+	}
+	mod, err := mcp.New(t.Context(), &mcp.ModuleDeps{
+		Config:     &mcp.Config{},
+		Plugins:    mcpPlugins,
+		Broker:     f.h.executor.Broker(),
+		HTTPClient: &http.Client{},
+		Logger:     slog.New(slog.NewTextHandler(f.logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
 	})
 	if err != nil {
-		t.Fatalf("NewManager: %v", err)
+		t.Fatalf("mcp.New: %v", err)
 	}
-	t.Cleanup(func() { _ = manager.Close(context.WithoutCancel(t.Context())) })
-	_ = manager.Start(t.Context())
-	return runtime, manager
+	t.Cleanup(func() { _ = mod.Close(context.WithoutCancel(t.Context())) })
+	return runtime, mod
 }
 
 func (f *e2eFixture) search(t *testing.T, id, message string) (json.RawMessage, error) {
@@ -360,7 +361,7 @@ func TestPermanentRefreshFailureFailsClosedAndSurvivesARestart(t *testing.T) {
 	if f.as.Refreshes() != refreshes+1 {
 		t.Fatalf("refreshes = %d, want the failed plugin to stop calling the token endpoint", f.as.Refreshes())
 	}
-	check, ok, err := runtime.healthCheck(&f.h.cfg, f.h.db, &mcpRuntime{manager: manager})
+	check, ok, err := runtime.healthCheck(&f.h.cfg, f.h.db, manager)
 	if err != nil || !ok {
 		t.Fatalf("healthCheck = %v, %v", ok, err)
 	}

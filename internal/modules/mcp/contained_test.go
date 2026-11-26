@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type scriptedSession struct {
@@ -144,10 +144,10 @@ func (s *stubSessionStarter) starts() int {
 	return len(s.requests)
 }
 
-func containedStdioConfig() *config.MCPServer {
-	return &config.MCPServer{
+func containedStdioConfig() *ServerConfig {
+	return &ServerConfig{
 		Name:           "contained",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        "/bin/contained-server",
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"SERVER_MODE": "test"},
@@ -239,7 +239,7 @@ func TestContainedUnavailableFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("unavailable containment accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	if len(starter.requests) != 1 {
@@ -256,7 +256,7 @@ func TestContainedWithoutStarterFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("starterless stdio accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 }
@@ -288,7 +288,7 @@ func TestContainedReconnectClosesPriorSession(t *testing.T) {
 	second := &scriptedSession{}
 	starter := &stubSessionStarter{session: first}
 	cfg := containedStdioConfig()
-	cfg.Restart = &config.MCPRestart{MaxAttempts: 3, Window: configkit.Duration(time.Minute)}
+	cfg.Restart = &RestartConfig{MaxAttempts: 3, Window: configkit.Duration(time.Minute)}
 	client, err := NewClient(cfg, nil, WithSessionStarter(starter))
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
