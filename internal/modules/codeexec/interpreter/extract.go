@@ -10,6 +10,8 @@ import (
 	"os"
 	"path"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -135,8 +137,7 @@ func archiveError(ctx context.Context, err error) error {
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return ctxErr
 	}
-	var coded *Error
-	if errors.As(err, &coded) {
+	if _, ok := fault.CodeOf[ErrorCode](err); ok {
 		return err
 	}
 	var pathErr *fs.PathError

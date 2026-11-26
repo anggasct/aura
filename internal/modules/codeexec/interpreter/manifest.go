@@ -14,6 +14,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -162,7 +164,7 @@ func ParseManifest(data []byte) (*Manifest, error) {
 		problems = append(problems, validateRuntime(runtime)...)
 	}
 	if err := errors.Join(problems...); err != nil {
-		return nil, &Error{Code: ErrorCodeManifestInvalid, Detail: err.Error()}
+		return nil, fault.New(ErrorCodeManifestInvalid, err.Error())
 	}
 	return &Manifest{runtimes: file.Runtimes}, nil
 }

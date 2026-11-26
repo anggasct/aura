@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func observingRig(t *testing.T) (*rig, *observations) {
@@ -40,7 +39,7 @@ func TestObservationLabelsComeFromClosedSets(t *testing.T) {
 		{"process limit", sandbox.Result{ExitCode: 1, PidsLimited: true}, ClassProcessLimit},
 		{"runtime crash", sandbox.Result{ExitCode: -1, Signal: int(syscall.SIGSEGV)}, ClassRuntimeCrashed},
 	}
-	for _, runtime := range tools.CodeRuntimes() {
+	for _, runtime := range CodeRuntimes() {
 		for _, tc := range cases {
 			t.Run(runtime+"/"+tc.name, func(t *testing.T) {
 				rig, seen := observingRig(t)
@@ -56,7 +55,7 @@ func TestObservationLabelsComeFromClosedSets(t *testing.T) {
 				if got.Class != tc.want || !slices.Contains(classes, got.Class) {
 					t.Errorf("class = %q, want %q from the closed set", got.Class, tc.want)
 				}
-				if got.Runtime != runtime || !slices.Contains(tools.CodeRuntimes(), got.Runtime) {
+				if got.Runtime != runtime || !slices.Contains(CodeRuntimes(), got.Runtime) {
 					t.Errorf("runtime = %q, want %q", got.Runtime, runtime)
 				}
 				wantPhase := PhaseRun

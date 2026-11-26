@@ -82,30 +82,29 @@ type HandlerRun struct {
 	ParentInvocation string
 }
 
-func NewHandler(runs HandlerRuns, exec Executor) (*Handler, error) {
-	if runs == nil {
+type HandlerDeps struct {
+	Runs     HandlerRuns
+	Exec     Executor
+	Ledger   BudgetLedger
+	Signaler Signaler
+}
+
+func NewHandler(deps *HandlerDeps) (*Handler, error) {
+	if deps == nil {
+		return nil, errNilArgument("deps")
+	}
+	if deps.Runs == nil {
 		return nil, errNilArgument("runs")
 	}
-	if exec == nil {
+	if deps.Exec == nil {
 		return nil, errNilArgument("executor")
 	}
-	return &Handler{runs: runs, exec: exec}, nil
-}
-
-func NewHandlerWithLedger(runs HandlerRuns, exec Executor, ledger BudgetLedger) (*Handler, error) {
-	h, err := NewHandler(runs, exec)
-	if err != nil {
-		return nil, err
-	}
-	h.ledger = ledger
-	return h, nil
-}
-
-func (h *Handler) SetSignaler(signaler Signaler) {
-	if h == nil {
-		return
-	}
-	h.signaler = signaler
+	return &Handler{
+		runs:     deps.Runs,
+		exec:     deps.Exec,
+		ledger:   deps.Ledger,
+		signaler: deps.Signaler,
+	}, nil
 }
 
 var ErrNonResumable = errors.New("child: non-resumable attempt")

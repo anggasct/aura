@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (
@@ -59,8 +58,8 @@ func (l *Limits) validate() error {
 			return Errorf(ErrorCodeInvalidArgument, "every interpreter limit must be positive")
 		}
 	}
-	if l.MaxOutputFiles > tools.MaxCodeOutputFiles {
-		return Errorf(ErrorCodeInvalidArgument, "the output file limit must be at most %d", tools.MaxCodeOutputFiles)
+	if l.MaxOutputFiles > MaxCodeOutputFiles {
+		return Errorf(ErrorCodeInvalidArgument, "the output file limit must be at most %d", MaxCodeOutputFiles)
 	}
 	if l.Timeout < time.Second || l.BuildTimeout < time.Second {
 		return Errorf(ErrorCodeInvalidArgument, "the interpreter timeouts must be at least one second")
@@ -152,8 +151,8 @@ func (r *Runner) Execute(ctx context.Context, request *Request) (Outcome, error)
 	if int64(len(request.Source)) > r.limits.MaxSourceBytes || int64(len(request.Stdin)) > r.limits.MaxStdinBytes {
 		return Outcome{}, Errorf(ErrorCodeInvalidArgument, "source or stdin exceeds the configured limit")
 	}
-	if err := tools.ValidateCodeOutputFiles(request.OutputFiles, int(r.limits.MaxOutputFiles)); err != nil {
-		return Outcome{}, wrapf(ErrorCodeInvalidArgument, err, "%v", err)
+	if err := ValidateCodeOutputFiles(request.OutputFiles, int(r.limits.MaxOutputFiles)); err != nil {
+		return Outcome{}, fault.Wrap(ErrorCodeInvalidArgument, "", err)
 	}
 	language, supported := languageFor(request.Runtime)
 	if !supported || !r.verified.Verified(request.Runtime) {

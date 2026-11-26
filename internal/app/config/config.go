@@ -6,6 +6,8 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
@@ -64,12 +66,12 @@ type Config struct {
 	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *profile.Config             `json:"profile,omitempty"`
 	Owner        *principal.Owner            `json:"owner,omitempty"`
-	Children     *legacyconfig.Children      `json:"children,omitempty"`
+	Children     *child.Config               `json:"children,omitempty"`
 	Access       *principal.Config           `json:"access,omitempty"`
 	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
-	Interpreter  legacyconfig.Interpreter    `json:"interpreter"`
+	Interpreter  codeexec.Config             `json:"interpreter"`
 	Channels     Channels                    `json:"channels"`
 	Bindings     auraagent.Bindings          `json:"bindings,omitempty"`
 }
@@ -129,13 +131,13 @@ func Default() Config {
 		Broadcast:   broadcast.Default(),
 		Scheduler:   schedule.Default(),
 		Memory:      memory.Default(),
-		Interpreter: legacyconfig.DefaultInterpreter(),
+		Interpreter: codeexec.Default(),
 		Skills:      &defaultSkills,
 		Sync:        legacyconfig.DefaultSync(),
 		Vision:      &defaultVision,
 		Context:     &defaultContext,
 		Profile:     &defaultProfile,
-		Children:    legacyconfig.DefaultChildren(),
+		Children:    child.Default(),
 		Access:      &defaultAccess,
 	}
 }

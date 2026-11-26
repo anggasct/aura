@@ -12,6 +12,7 @@ import (
 	"github.com/go-viper/mapstructure/v2"
 
 	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
@@ -133,12 +134,12 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		validateSkills(cfg.Skills),
 		validateContext(cfg.Context),
 		validateProfile(cfg.Profile),
-		legacyconfig.ValidateChildren(cfg.Children),
+		validateChildren(cfg.Children),
 		validateAccess(cfg.Access),
 		legacyconfig.ValidateSync(cfg.Sync),
 		validateVision(cfg.Vision),
 		validateKnowledge(cfg.Knowledge),
-		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
+		configkit.Under("interpreter", cfg.Interpreter.Validate()),
 		configkit.Under("runtime", cfg.Runtime.Validate()),
 		configkit.Under("server", cfg.Server.Validate()),
 		configkit.Under("logging", cfg.Logging.Validate()),
@@ -457,4 +458,11 @@ func validateWorkflows(section *workflow.Config) error {
 		return nil
 	}
 	return configkit.Under("workflows", section.Validate())
+}
+
+func validateChildren(section *child.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("children", section.Validate())
 }

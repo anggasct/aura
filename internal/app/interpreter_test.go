@@ -15,8 +15,10 @@ import (
 	"sync"
 	"testing"
 	"testing/synctest"
+	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -153,7 +155,7 @@ func makeInterpreterTreeRemovable(t *testing.T, dataRoot string) {
 
 func (r *interpreterRig) run(t *testing.T, args ...string) (string, error) {
 	t.Helper()
-	cmd := newInterpreterCmd(&globalFlags{configPath: r.configPath}, r.deps)
+	cmd := codeexec.Commands(newInterpreterOpener(&globalFlags{configPath: r.configPath}, r.deps))[0]
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&bytes.Buffer{})
@@ -194,9 +196,9 @@ func TestInterpreterInstallListRemoveLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list --json: %v", err)
 	}
-	var listed interpreterListOutput
+	var listed codeexec.ListOutput
 	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Runtimes) != 1 ||
-		listed.Runtimes[0] != (interpreterListRow{Runtime: "python", Version: "1.0.0", State: "installed", Archive: pinned.Archive, SHA256: pinned.SHA256}) {
+		listed.Runtimes[0] != (codeexec.ListRow{Runtime: "python", Version: "1.0.0", State: "installed", Archive: pinned.Archive, SHA256: pinned.SHA256}) {
 		t.Fatalf("list --json = %q, %+v, %v", out, listed, err)
 	}
 
@@ -253,7 +255,7 @@ func TestInterpreterInstallReportsCodedFailures(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := rig.run(t, "install", "python", "--archive", otherPath)
-	if code, ok := interpreter.CodeOf(err); !ok || code != interpreter.ErrorCodeDigestMismatch {
+	if code, ok := fault.CodeOf[interpreter.ErrorCode](err); !ok || code != interpreter.ErrorCodeDigestMismatch {
 		t.Fatalf("install with a different archive: CodeOf(%v) = %q, %v", err, code, ok)
 	}
 	if _, statErr := os.Stat(rig.versionDir()); !os.IsNotExist(statErr) {
@@ -262,12 +264,12 @@ func TestInterpreterInstallReportsCodedFailures(t *testing.T) {
 
 	rig.install(t)
 	_, err = rig.run(t, "install", "python", "--archive", rig.archivePath)
-	if code, ok := interpreter.CodeOf(err); !ok || code != interpreter.ErrorCodeAlreadyInstalled {
+	if code, ok := fault.CodeOf[interpreter.ErrorCode](err); !ok || code != interpreter.ErrorCodeAlreadyInstalled {
 		t.Fatalf("second install: CodeOf(%v) = %q, %v", err, code, ok)
 	}
 
 	_, err = rig.run(t, "install", "ruby", "--archive", rig.archivePath)
-	if code, ok := interpreter.CodeOf(err); !ok || code != interpreter.ErrorCodeRuntimeUnknown {
+	if code, ok := fault.CodeOf[interpreter.ErrorCode](err); !ok || code != interpreter.ErrorCodeRuntimeUnknown {
 		t.Fatalf("unknown runtime: CodeOf(%v) = %q, %v", err, code, ok)
 	}
 
@@ -352,9 +354,13 @@ func TestInterpreterStatusChecksReportEachState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checks, err := interpreterManifestChecks(loaded.Config, rig.manifest)
+	dataRoot, err := resolveDataRoot(loaded.Config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks, err := codeexec.HealthChecks(dataRoot, rig.manifest, codeexec.DefaultVerifyTimeout)
 	if err != nil || len(checks) != 1 {
-		t.Fatalf("interpreterManifestChecks = %v, %v", checks, err)
+		t.Fatalf("codeexec.HealthChecks = %v, %v", checks, err)
 	}
 	cases := []struct {
 		name       string
@@ -393,7 +399,7 @@ func TestInterpreterStatusChecksAreRegisteredOnlyForAnEnabledCapability(t *testi
 		t.Fatal(err)
 	}
 	checks, err := interpreterStatusChecks(loaded.Config, loaded.CapabilityReport)
-	if err != nil || len(checks) != 1 || checks[0].ID != health.ComponentInterpreter {
+	if err != nil || len(checks) != 1 || checks[0].ID != codeexec.ComponentInterpreter {
 		t.Fatalf("enabled: checks = %+v, %v", checks, err)
 	}
 	disabled := interpreterConfigText(rig.dataRoot)
@@ -411,6 +417,10 @@ func TestInterpreterStatusChecksAreRegisteredOnlyForAnEnabledCapability(t *testi
 	}
 }
 
+type passingProber struct{}
+
+func (passingProber) Probe(context.Context, *interpreter.Bundle) error { return nil }
+
 func TestInterpreterRuntimeReportsPendingThenTheVerifiedState(t *testing.T) {
 	rig := newAvailableInterpreterRig(t)
 	rig.install(t)
@@ -418,17 +428,25 @@ func TestInterpreterRuntimeReportsPendingThenTheVerifiedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := newInterpreterRuntime(loaded.Config, rig.manifest)
+	mod, err := codeexec.New(t.Context(), &codeexec.ModuleDeps{
+		Config:       &loaded.Config.Interpreter,
+		DataRoot:     rig.dataRoot,
+		Manifest:     rig.manifest,
+		Artifacts:    testArtifacts(t),
+		Prober:       passingProber{},
+		CheckTimeout: time.Duration(loaded.Config.Health.CheckTimeout),
+		Logger:       slog.New(slog.DiscardHandler),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings := interpreterFindings(t, runtime.check(loaded.Config))
+	findings := interpreterFindings(t, mod.HealthChecks()[0])
 	if len(findings) != 1 || findings[0].Code != "interpreter_runtime_pending" || findings[0].Status != health.StatusUnknown {
 		t.Fatalf("before verification: findings = %+v", findings)
 	}
-	runtime.run(t.Context(), slog.New(slog.DiscardHandler))
-	findings = interpreterFindings(t, runtime.check(loaded.Config))
-	if len(findings) != 1 || findings[0].Code != "ok" || !runtime.set.Verified("python") {
+	mod.VerifyRun(t.Context())
+	findings = interpreterFindings(t, mod.HealthChecks()[0])
+	if len(findings) != 1 || findings[0].Code != "ok" || !mod.Verified().Verified("python") {
 		t.Fatalf("after verification: findings = %+v", findings)
 	}
 }
@@ -440,18 +458,27 @@ func TestInterpreterVerificationRunsInTheBackgroundAndStopsWithItsContext(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	artifacts := testArtifacts(t)
 	synctest.Test(t, func(t *testing.T) {
-		runtime, err := newInterpreterRuntime(loaded.Config, rig.manifest)
+		mod, err := codeexec.New(t.Context(), &codeexec.ModuleDeps{
+			Config:       &loaded.Config.Interpreter,
+			DataRoot:     rig.dataRoot,
+			Manifest:     rig.manifest,
+			Artifacts:    artifacts,
+			Prober:       passingProber{},
+			CheckTimeout: time.Duration(loaded.Config.Health.CheckTimeout),
+			Logger:       slog.New(slog.DiscardHandler),
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
 		var tasks sync.WaitGroup
-		tasks.Go(func() { runtime.run(ctx, slog.New(slog.DiscardHandler)) })
+		tasks.Go(func() { mod.VerifyRun(ctx) })
 		tasks.Wait()
 		cancel()
-		if !runtime.set.Verified("python") {
-			t.Fatalf("statuses = %+v, want python verified", runtime.set.Statuses())
+		if !mod.Verified().Verified("python") {
+			t.Fatalf("statuses = %+v, want python verified", mod.Verified().Statuses())
 		}
 	})
 }
@@ -463,17 +490,25 @@ func TestInterpreterVerificationStopsWhenTheServerStops(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	artifacts := testArtifacts(t)
 	synctest.Test(t, func(t *testing.T) {
-		runtime, err := newInterpreterRuntime(loaded.Config, rig.manifest)
+		mod, err := codeexec.New(t.Context(), &codeexec.ModuleDeps{
+			Config:       &loaded.Config.Interpreter,
+			DataRoot:     rig.dataRoot,
+			Manifest:     rig.manifest,
+			Artifacts:    artifacts,
+			CheckTimeout: time.Duration(loaded.Config.Health.CheckTimeout),
+			Logger:       slog.New(slog.DiscardHandler),
+		})
 		if err != nil {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		var tasks sync.WaitGroup
-		tasks.Go(func() { runtime.run(ctx, slog.New(slog.DiscardHandler)) })
+		tasks.Go(func() { mod.VerifyRun(ctx) })
 		tasks.Wait()
-		if status, _ := runtime.set.Status("python"); status.State != interpreter.StatePending {
+		if status, _ := mod.Verified().Status("python"); status.State != interpreter.StatePending {
 			t.Fatalf("status after a stopped run = %+v, want pending", status)
 		}
 	})
