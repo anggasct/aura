@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -27,16 +27,17 @@ func embeddingFindings(t *testing.T, rig *kbRetrievalRig) []health.Finding {
 	return found
 }
 
-func statusEmbeddingConfig() *config.Knowledge {
-	return &config.Knowledge{Embedding: &config.KnowledgeEmbedding{
+func statusEmbeddingConfig() *knowledge.Config {
+	return &knowledge.Config{Embedding: &knowledge.EmbeddingConfig{
 		BaseURL: "https://api.example.com/v1", Model: "status-model", Dimensions: 4, DimensionsField: "dimensions",
-		RoleStyle: config.EmbeddingRoleNone, BatchSize: 96, MaxMemory: config.DefaultEmbeddingMaxMemory,
+		RoleStyle: knowledge.EmbeddingRoleNone, BatchSize: 96, MaxMemory: knowledge.DefaultEmbeddingMaxMemory,
 	}}
 }
 
 func embedChunksForStatus(t *testing.T, rig *kbRetrievalRig, collection string, count int) {
 	t.Helper()
-	fingerprint, err := embedding.Fingerprint(rig.cfg.Knowledge.Embedding)
+	clientCfg := rig.cfg.Knowledge.Embedding.ClientConfig()
+	fingerprint, err := embedding.Fingerprint(&clientCfg)
 	if err != nil {
 		t.Fatalf("Fingerprint: %v", err)
 	}

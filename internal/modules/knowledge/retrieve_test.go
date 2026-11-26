@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -202,7 +203,7 @@ func TestSearchPassesTheWholeScopeAndRejectsBadScopes(t *testing.T) {
 	for name, scope := range map[string][]string{"none": nil, "invalid": {"Bad Id"}, "empty": {""}} {
 		t.Run(name, func(t *testing.T) {
 			_, err := ownerSearch(t.Context(), retriever, scope, "refund", SearchDepth)
-			if code, ok := CodeOf(err); !ok || (code != ErrorCodeInvalidArgument && code != ErrorCodeCollectionInvalid) {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || (code != ErrorCodeInvalidArgument && code != ErrorCodeCollectionInvalid) {
 				t.Errorf("error = %v", err)
 			}
 		})
@@ -237,7 +238,7 @@ func TestSearchFailsClosedWhenTheVaultCannotBeResolved(t *testing.T) {
 		t.Fatalf("NewRetriever: %v", err)
 	}
 	hits, err := ownerSearch(t.Context(), retriever, []string{"support"}, "refund", SearchDepth)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSecretUnavailable || len(hits) != 0 {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSecretUnavailable || len(hits) != 0 {
 		t.Fatalf("hits = %v, error = %v", hits, err)
 	}
 }

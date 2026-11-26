@@ -2,7 +2,6 @@ package store
 
 import (
 	"database/sql"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 	"testing"
 	"time"
 
@@ -10,6 +9,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func appendTextEvent(t *testing.T, db *sql.DB, sessionID, id, text string, at time.Time) {

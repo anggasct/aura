@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -202,7 +201,8 @@ func (r *embedRig) fingerprint(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("appconfig.Load: %v", err)
 	}
-	fingerprint, err := embedding.Fingerprint(loaded.Config.Knowledge.Embedding)
+	clientCfg := loaded.Config.Knowledge.Embedding.ClientConfig()
+	fingerprint, err := embedding.Fingerprint(&clientCfg)
 	if err != nil {
 		t.Fatalf("Fingerprint: %v", err)
 	}
@@ -669,7 +669,7 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 }
 
 func TestEmbeddingCredentialIsAnOptionalSecretThatJoinsTheVaultWhenResolved(t *testing.T) {
-	cfg := &appconfig.Config{Knowledge: &config.Knowledge{Embedding: &config.KnowledgeEmbedding{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
+	cfg := &appconfig.Config{Knowledge: &knowledge.Config{Embedding: &knowledge.EmbeddingConfig{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
 	var found *configuredSecret
 	for _, entry := range additionalConfiguredSecrets(cfg) {
 		if entry.name == "knowledge_embedding_credential" {

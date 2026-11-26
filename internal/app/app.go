@@ -36,7 +36,6 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type Surface string
@@ -488,7 +487,7 @@ func (b *build) buildModelRegistry(ctx context.Context) error {
 		Logger:     b.logger,
 		Models:     b.cfg.Models,
 		Routes:     b.cfg.ModelRoutes,
-		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(b.db)},
+		Checkpoint: model.NewSQLiteCircuitCheckpointStore(b.db),
 		Prices:     prices,
 		Vision:     visionWiringForConfig(b.cfg, b.db, artifactRoot),
 	})
@@ -499,7 +498,7 @@ func evaluationModelOptions(cfg *appconfig.Config, db *sql.DB) *model.RegistryOp
 		Logger:     slog.New(slog.DiscardHandler),
 		Models:     cfg.Models,
 		Routes:     cfg.ModelRoutes,
-		Checkpoint: &storeCircuitCheckpointAdapter{store: store.NewCircuitCheckpointStore(db)},
+		Checkpoint: model.NewSQLiteCircuitCheckpointStore(db),
 	}
 }
 

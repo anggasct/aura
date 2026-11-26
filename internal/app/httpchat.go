@@ -14,6 +14,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
@@ -24,12 +25,12 @@ import (
 const httpChatDrainDivisor = 2
 
 type apiKeyDirectory struct {
-	keys store.APIKeyStore
+	keys principal.APIKeyStore
 }
 
 func (d *apiKeyDirectory) GetByID(ctx context.Context, id string) (httpchat.Key, bool, error) {
 	key, err := d.keys.GetByID(ctx, id)
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeAPIKeyNotFound {
+	if code, ok := fault.CodeOf[principal.ErrorCode](err); ok && code == principal.ErrorCodeAPIKeyNotFound {
 		return httpchat.Key{}, false, nil
 	}
 	if err != nil {
@@ -122,7 +123,7 @@ func buildHTTPChat(cfg *appconfig.Config, db *sql.DB, backend turn.AgentRuntime,
 		return nil, nil, err
 	}
 	handler, err := httpchat.NewHandler(&httpchat.Options{
-		Keys:                &apiKeyDirectory{keys: store.NewAPIKeyStore(db)},
+		Keys:                &apiKeyDirectory{keys: principal.NewAPIKeyStore(db)},
 		Chat:                chat,
 		Replies:             replies,
 		MaxBodyBytes:        settings.MaxBodyBytes,

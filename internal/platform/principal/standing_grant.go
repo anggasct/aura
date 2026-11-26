@@ -1,4 +1,4 @@
-package store
+package principal
 
 import (
 	"context"
@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -40,13 +41,13 @@ func NewStandingGrantStore(db *sql.DB) StandingGrantStore {
 
 func (s *sqliteStandingGrantStore) Grant(ctx context.Context, grant *StandingGrant) (StandingGrant, error) {
 	if grant == nil {
-		return StandingGrant{}, Errorf(ErrorCodeInvalidArgument, "standing grant must not be nil")
+		return StandingGrant{}, fault.New(ErrorCodeInvalidArgument, "standing grant must not be nil")
 	}
 	if strings.TrimSpace(grant.PrincipalID) == "" || strings.TrimSpace(grant.AgentID) == "" || strings.TrimSpace(grant.ToolName) == "" || strings.TrimSpace(grant.GrantedBy) == "" {
-		return StandingGrant{}, Errorf(ErrorCodeInvalidArgument, "standing grant needs principal, persona, tool and granter")
+		return StandingGrant{}, fault.New(ErrorCodeInvalidArgument, "standing grant needs principal, persona, tool and granter")
 	}
 	if !grant.ExpiresAt.After(grant.GrantedAt) {
-		return StandingGrant{}, Errorf(ErrorCodeInvalidArgument, "standing grant must expire after it is granted")
+		return StandingGrant{}, fault.New(ErrorCodeInvalidArgument, "standing grant must expire after it is granted")
 	}
 	stored := *grant
 	if stored.ID == "" {
@@ -58,7 +59,7 @@ func (s *sqliteStandingGrantStore) Grant(ctx context.Context, grant *StandingGra
 	}
 	stored.GrantedAt = stored.GrantedAt.UTC()
 	stored.ExpiresAt = stored.ExpiresAt.UTC()
-	_, err := s.db.ExecContext(ctx, `
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 INSERT INTO standing_grant (id, principal_id, agent_id, tool_name, granted_at, expires_at, granted_by)
 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		stored.ID, stored.PrincipalID, stored.AgentID, stored.ToolName,
@@ -72,7 +73,7 @@ VALUES (?, ?, ?, ?, ?, ?, ?)`,
 
 func (s *sqliteStandingGrantStore) Active(ctx context.Context, principalID, agentID, toolName string, now time.Time) (StandingGrant, bool, error) {
 	if principalID == "" || agentID == "" || toolName == "" {
-		return StandingGrant{}, false, Errorf(ErrorCodeInvalidArgument, "standing grant lookup needs principal, persona and tool")
+		return StandingGrant{}, false, fault.New(ErrorCodeInvalidArgument, "standing grant lookup needs principal, persona and tool")
 	}
 	grants, err := s.query(ctx, `
 SELECT id, principal_id, agent_id, tool_name, granted_at, expires_at, granted_by
@@ -115,9 +116,9 @@ WHERE revoked_at IS NULL`
 
 func (s *sqliteStandingGrantStore) Revoke(ctx context.Context, id string, at time.Time) (bool, error) {
 	if strings.TrimSpace(id) == "" {
-		return false, Errorf(ErrorCodeInvalidArgument, "standing grant id must not be empty")
+		return false, fault.New(ErrorCodeInvalidArgument, "standing grant id must not be empty")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE standing_grant SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at.UTC()), id)
+	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `UPDATE standing_grant SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at.UTC()), id)
 	if err != nil {
 		return false, classify(fmt.Errorf("revoke standing grant: %w", err))
 	}
@@ -129,7 +130,7 @@ func (s *sqliteStandingGrantStore) Revoke(ctx context.Context, id string, at tim
 }
 
 func (s *sqliteStandingGrantStore) query(ctx context.Context, query string, args ...any) ([]StandingGrant, error) {
-	rows, err := s.db.QueryContext(ctx, query, args...)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, classify(fmt.Errorf("read standing grants: %w", err))
 	}

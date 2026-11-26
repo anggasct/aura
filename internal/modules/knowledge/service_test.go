@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeStore struct {
@@ -208,7 +210,7 @@ func TestAddFileWritesNormalizedChunksAndRecordsTheOwnerAction(t *testing.T) {
 func TestAddRefusesASourceWithHeadingsOnly(t *testing.T) {
 	fixture := newFixture(t)
 	_, err := fixture.service.Add(t.Context(), "support", writeSource(t, "Empty.md", []byte("# Refunds\n## Returns\n")))
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeSourceUnsupported {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSourceUnsupported {
 		t.Fatalf("err = %v, want %s", err, ErrorCodeSourceUnsupported)
 	}
 	if len(fixture.store.writes) != 0 {

@@ -4,6 +4,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func credentialFixtures() map[string]string {
@@ -44,7 +46,7 @@ func TestEveryCredentialPatternHasAFixtureAndIsDetected(t *testing.T) {
 				t.Fatalf("pattern %s has no fixture", name)
 			}
 			err := screenText("Some documentation text.\n"+fixture+"\nMore text.", nil)
-			if code, coded := CodeOf(err); !coded || code != ErrorCodeSecretInvalid {
+			if code, coded := fault.CodeOf[ErrorCode](err); !coded || code != ErrorCodeSecretInvalid {
 				t.Fatalf("screenText error = %v, want %s", err, ErrorCodeSecretInvalid)
 			}
 			if strings.Contains(err.Error(), fixture) {
@@ -92,7 +94,7 @@ func TestScreenTextAcceptsOrdinaryDocumentation(t *testing.T) {
 func TestScreenTextRejectsVaultValuesWithoutPrintingThem(t *testing.T) {
 	const secretValue = "hunter2-vault-value"
 	err := screenText("The password is "+secretValue+" for the admin panel.", fakeVault{values: []string{secretValue}})
-	if code, coded := CodeOf(err); !coded || code != ErrorCodeSecretInvalid {
+	if code, coded := fault.CodeOf[ErrorCode](err); !coded || code != ErrorCodeSecretInvalid {
 		t.Fatalf("error = %v, want %s", err, ErrorCodeSecretInvalid)
 	}
 	if strings.Contains(err.Error(), secretValue) {

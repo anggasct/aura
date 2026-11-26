@@ -1,7 +1,6 @@
 package app
 
 import (
-	"context"
 	"fmt"
 	"maps"
 	"slices"
@@ -13,55 +12,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/model"
-	"github.com/anggasct/aura/internal/store"
 )
-
-type storeCircuitCheckpointAdapter struct {
-	store store.CircuitCheckpointStore
-}
-
-func (a *storeCircuitCheckpointAdapter) Save(ctx context.Context, cp *model.CircuitCheckpoint) error {
-	if a.store == nil || cp == nil {
-		return nil
-	}
-	return a.store.Save(ctx, &store.CircuitCheckpoint{
-		CircuitKey:          cp.CircuitKey,
-		ConfigDigest:        cp.ConfigDigest,
-		State:               string(cp.State),
-		ConsecutiveFailures: cp.ConsecutiveFailures,
-		OpenUntil:           cp.OpenUntil,
-		UpdatedAt:           cp.UpdatedAt,
-	})
-}
-
-func (a *storeCircuitCheckpointAdapter) Load(ctx context.Context) ([]model.CircuitCheckpoint, error) {
-	if a.store == nil {
-		return nil, nil
-	}
-	items, err := a.store.Load(ctx)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]model.CircuitCheckpoint, len(items))
-	for i, it := range items {
-		out[i] = model.CircuitCheckpoint{
-			CircuitKey:          it.CircuitKey,
-			ConfigDigest:        it.ConfigDigest,
-			State:               model.CircuitState(it.State),
-			ConsecutiveFailures: it.ConsecutiveFailures,
-			OpenUntil:           it.OpenUntil,
-			UpdatedAt:           it.UpdatedAt,
-		}
-	}
-	return out, nil
-}
-
-func (a *storeCircuitCheckpointAdapter) Delete(ctx context.Context, circuitKey string) error {
-	if a.store == nil {
-		return nil
-	}
-	return a.store.Delete(ctx, circuitKey)
-}
 
 func newModelsCmd(gf *globalFlags) *cobra.Command {
 	cmd := &cobra.Command{
@@ -139,9 +90,8 @@ func newModelsCircuitsCmd(gf *globalFlags) *cobra.Command {
 			}
 			defer func() { _ = db.Close() }()
 
-			checkpointStore := store.NewCircuitCheckpointStore(db)
-			adapter := &storeCircuitCheckpointAdapter{store: checkpointStore}
-			cm := model.NewCircuitManager(time.Now, adapter)
+			checkpointStore := model.NewSQLiteCircuitCheckpointStore(db)
+			cm := model.NewCircuitManager(time.Now, checkpointStore)
 
 			for name := range cfg.Models.Definitions {
 				def := cfg.Models.Definitions[name]
@@ -206,9 +156,8 @@ func newModelsCircuitResetCmd(gf *globalFlags) *cobra.Command {
 			}
 			defer func() { _ = db.Close() }()
 
-			checkpointStore := store.NewCircuitCheckpointStore(db)
-			adapter := &storeCircuitCheckpointAdapter{store: checkpointStore}
-			cm := model.NewCircuitManager(time.Now, adapter)
+			checkpointStore := model.NewSQLiteCircuitCheckpointStore(db)
+			cm := model.NewCircuitManager(time.Now, checkpointStore)
 
 			for name := range cfg.Models.Definitions {
 				def := cfg.Models.Definitions[name]
