@@ -11,7 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
@@ -31,15 +30,15 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{FallbackMaxDocuments: 5, FallbackTokenBudget: 2000})
+	service, err := memory.NewService(newTestMemoryStore(t, db), nil, &memory.ServiceOptions{FallbackMaxDocuments: 5, FallbackTokenBudget: 2000})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
-	hook := buildMemoryHook(service, nil, nil, nil)
+	hook := memory.NewTurnHook(service, nil, nil, nil)
 	project := func(sessionID, principalID, eventID, text string) {
 		t.Helper()
 		turnRequest := &turn.TurnRequest{TurnID: "turn-" + eventID, SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main"}
-		if err := hook(ctx, turnRequest, []turn.Event{{
+		if err := hook.AfterTurn(ctx, turnRequest, []turn.Event{{
 			ID: eventID, SessionID: sessionID, Sequence: 1, TurnID: turnRequest.TurnID, Author: "user",
 			Kind: turnstore.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
 		}}); err != nil {

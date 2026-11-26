@@ -6,11 +6,9 @@ import (
 	"net/url"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	broadcastpkg "github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -493,151 +491,6 @@ func snowflakeListProblems(field string, ids []string) []error {
 		}
 	}
 	return problems
-}
-
-func ValidateBroadcast(broadcast *Broadcast) error {
-	if broadcast == nil {
-		return configkit.Invalid("broadcast", "must not be nil")
-	}
-	var problems []error
-	if broadcast.Timezone == "" {
-		problems = append(problems, configkit.Invalid("broadcast.timezone", "must not be empty"))
-	} else if _, err := time.LoadLocation(broadcast.Timezone); err != nil {
-		problems = append(problems, configkit.Invalid("broadcast.timezone", "is not a valid IANA timezone"))
-	}
-	if broadcast.QuietHours.Start == "" || !validHourMinute(broadcast.QuietHours.Start) {
-		problems = append(problems, configkit.Invalid("broadcast.quiet_hours.start", "must be HH:MM"))
-	}
-	if broadcast.QuietHours.End == "" || !validHourMinute(broadcast.QuietHours.End) {
-		problems = append(problems, configkit.Invalid("broadcast.quiet_hours.end", "must be HH:MM"))
-	}
-	if broadcast.MaxDigestItems <= 0 {
-		problems = append(problems, configkit.Invalid("broadcast.max_digest_items", "must be positive"))
-	}
-	if broadcast.MaxDigestBytes <= 0 {
-		problems = append(problems, configkit.Invalid("broadcast.max_digest_bytes", "must be positive"))
-	}
-	if broadcast.MaxAttempts <= 0 {
-		problems = append(problems, configkit.Invalid("broadcast.max_attempts", "must be positive"))
-	}
-	if broadcast.MaxDeliveryAge <= 0 {
-		problems = append(problems, configkit.Invalid("broadcast.max_delivery_age", "must be positive"))
-	}
-	if broadcast.MinDispatchGap < 0 {
-		problems = append(problems, configkit.Invalid("broadcast.min_dispatch_gap", "must not be negative"))
-	}
-	for alias, route := range broadcast.Destinations {
-		if !validBroadcastAlias(alias) {
-			problems = append(problems, configkit.Invalid("broadcast.destinations", fmt.Sprintf("alias %q is not valid", alias)))
-		}
-		if !ValidBroadcastRoute(route) {
-			problems = append(problems, configkit.Invalid("broadcast.destinations["+alias+"]", "route is not a channel destination"))
-		}
-	}
-	for alias, route := range broadcast.Fallback {
-		if !validBroadcastAlias(alias) {
-			problems = append(problems, configkit.Invalid("broadcast.fallback", fmt.Sprintf("alias %q is not valid", alias)))
-		}
-		if route == "" {
-			continue
-		}
-		if !ValidBroadcastRoute(route) {
-			problems = append(problems, configkit.Invalid("broadcast.fallback["+alias+"]", "route is not a channel destination"))
-		}
-	}
-	return errors.Join(problems...)
-}
-
-func ValidateScheduler(scheduler *Scheduler) error {
-	if scheduler == nil {
-		return configkit.Invalid("scheduler", "must not be nil")
-	}
-	var problems []error
-	if scheduler.DefaultTimezone == "" {
-		problems = append(problems, configkit.Invalid("scheduler.default_timezone", "must not be empty"))
-	} else if _, err := time.LoadLocation(scheduler.DefaultTimezone); err != nil {
-		problems = append(problems, configkit.Invalid("scheduler.default_timezone", "is not a valid IANA timezone"))
-	}
-	if scheduler.DefaultCatchUpGrace < 0 {
-		problems = append(problems, configkit.Invalid("scheduler.default_catch_up_grace", "must not be negative"))
-	}
-	if scheduler.OccurrenceRetention <= 0 {
-		problems = append(problems, configkit.Invalid("scheduler.occurrence_retention", "must be positive"))
-	}
-	return errors.Join(problems...)
-}
-
-func ValidateMemory(memory *Memory) error {
-	if memory == nil {
-		return configkit.Invalid("memory", "must not be nil")
-	}
-	var problems []error
-	if memory.MaxDocuments <= 0 || memory.MaxDocuments > 50 {
-		problems = append(problems, configkit.Invalid("memory.max_documents", "must be between 1 and 50"))
-	}
-	if memory.RecallTokenBudget <= 0 || memory.RecallTokenBudget > 8000 {
-		problems = append(problems, configkit.Invalid("memory.recall_token_budget", "must be between 1 and 8000"))
-	}
-	if strings.TrimSpace(memory.SummaryPromptVersion) == "" {
-		problems = append(problems, configkit.Invalid("memory.summary_prompt_version", "must not be empty"))
-	}
-	if memory.SummaryTTL <= 0 {
-		problems = append(problems, configkit.Invalid("memory.summary_ttl", "must be positive"))
-	}
-	if memory.EnglishStemming {
-		problems = append(problems, configkit.Invalid("memory.english_stemming", "is not supported by this build"))
-	}
-	if strings.TrimSpace(memory.Locale) != "" {
-		problems = append(problems, configkit.Invalid("memory.locale", "is not supported by this build"))
-	}
-	return errors.Join(problems...)
-}
-
-func validHourMinute(value string) bool {
-	if len(value) != 5 || value[2] != ':' {
-		return false
-	}
-	hour, err := strconv.Atoi(value[:2])
-	if err != nil {
-		return false
-	}
-	minute, err := strconv.Atoi(value[3:])
-	if err != nil {
-		return false
-	}
-	return hour >= 0 && hour < 24 && minute >= 0 && minute < 60
-}
-
-func ValidateProfile(profileConfig *Profile) error {
-	if profileConfig == nil {
-		return nil
-	}
-	var problems []error
-	if profileConfig.MaxContextFacts <= 0 || profileConfig.MaxContextFacts > 1000 {
-		problems = append(problems, configkit.Invalid("profile.max_context_facts", "must be between 1 and 1000"))
-	}
-	if profileConfig.MaxContextTokens <= 0 || profileConfig.MaxContextTokens > 128000 {
-		problems = append(problems, configkit.Invalid("profile.max_context_tokens", "must be between 1 and 128000"))
-	}
-	if profileConfig.ExtractionQueueCapacity <= 0 || profileConfig.ExtractionQueueCapacity > 10000 {
-		problems = append(problems, configkit.Invalid("profile.extraction_queue_capacity", "must be between 1 and 10000"))
-	}
-	if profileConfig.CandidateMinConfidence < 0 || profileConfig.CandidateMinConfidence > 1 {
-		problems = append(problems, configkit.Invalid("profile.candidate_min_confidence", "must be in [0,1]"))
-	}
-	if strings.TrimSpace(profileConfig.PromptVersion) == "" {
-		problems = append(problems, configkit.Invalid("profile.prompt_version", "must not be empty"))
-	}
-	return errors.Join(problems...)
-}
-
-func validBroadcastAlias(alias string) bool {
-	return broadcastpkg.ValidAlias(alias)
-}
-
-func ValidBroadcastRoute(route string) bool {
-	_, _, err := broadcastpkg.ParseRoute(route)
-	return err == nil
 }
 
 func ValidateTools(toolsConfig *Tools) error {

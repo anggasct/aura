@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -73,18 +74,23 @@ func TestBuildSkillsEngine(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte(document), 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	engine, err := buildSkillsEngine(t.Context(), &skills.Config{
-		Enabled: true, Roots: []string{root}, AutoSelect: true,
-		MaxIndexedSkills: 16, MaxInstructionTokens: 5000,
-		MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1),
-	}, chatDB, nil)
+	activations := &skillActivationLog{events: turnstore.NewEventKindReader(chatDB)}
+	mod, err := skills.New(t.Context(), &skills.ModuleDeps{
+		Config: &skills.Config{
+			Enabled: true, Roots: []string{root}, AutoSelect: true,
+			MaxIndexedSkills: 16, MaxInstructionTokens: 5000, MaxSessionContextTokens: 15000,
+			MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1),
+		},
+		DB:          chatDB,
+		Activations: activations,
+	})
 	if err != nil {
 		t.Fatalf("build: %v", err)
 	}
-	if catalog := engine.Catalog(); len(catalog) != 0 {
+	if catalog := mod.Engine().Catalog(); len(catalog) != 0 {
 		t.Errorf("quarantined skill should not index, got %v", catalog)
 	}
-	if _, err := buildSkillsEngine(t.Context(), nil, chatDB, nil); err == nil {
+	if _, err := skills.New(t.Context(), &skills.ModuleDeps{DB: chatDB, Activations: activations}); err == nil {
 		t.Errorf("nil config should fail")
 	}
 }

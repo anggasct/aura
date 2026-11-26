@@ -11,9 +11,10 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
-	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -47,7 +48,7 @@ type stubTool struct {
 
 type lifeWiring struct {
 	renderer     runtimeengine.SkillRenderer
-	skillContext runtimeadk.SkillContextProvider
+	skillContext turn.ContextProvider
 	knowledge    turn.ContextProvider
 }
 
@@ -175,17 +176,39 @@ func (s *ledgerSkill) RenderSkill(context.Context, string, *turn.SkillPin) (cave
 	return "caveat", s.body, s.err
 }
 
-func (s *ledgerSkill) SkillContext(context.Context, *turn.TurnRequest) (string, error) {
-	if _, err := s.ledger.record(skillContextCalls, ""); err != nil {
-		return "", err
+func (s *ledgerSkill) Required(_ *turn.TurnRequest) bool { return false }
+
+func (s *ledgerSkill) TurnContext(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req == nil || req.PrincipalClass != principal.ClassOwner {
+		return nil, nil
 	}
-	return s.block, nil
+	render := func(context.Context) ([]byte, error) {
+		if _, err := s.ledger.record(skillContextCalls, ""); err != nil {
+			return nil, err
+		}
+		return []byte(strings.TrimSpace(s.block)), nil
+	}
+	var raw []byte
+	if scope, ok := durable.TurnScopeFrom(ctx); ok {
+		var err error
+		raw, err = scope.Invocation().RunAction(ctx, "skill-context", render)
+		if err != nil {
+			return nil, nil
+		}
+	} else {
+		raw, _ = render(ctx)
+	}
+	block := strings.TrimSpace(string(raw))
+	if block == "" {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: block}}, nil
 }
 
 func skillAcrossLives(_ *testing.T, ledger *turnLedger) lifeWiring {
 	stub := &ledgerSkill{ledger: ledger, body: originalSkillBody, block: turn.SkillContextStart + "]\nORIGINAL-BLOCK\n" + turn.SkillContextEnd}
 	if ledger.life > 1 {
-		stub = &ledgerSkill{ledger: ledger, body: "CHANGED-BODY", block: "CHANGED-BLOCK", err: skills.Errorf(skills.ErrorCodeSkillUnavailable, "skill is quarantined")}
+		stub = &ledgerSkill{ledger: ledger, body: "CHANGED-BODY", block: "CHANGED-BLOCK", err: fault.New(turn.ErrorCodeSkillUnavailable, "skill is quarantined")}
 	}
 	return lifeWiring{renderer: stub, skillContext: stub}
 }

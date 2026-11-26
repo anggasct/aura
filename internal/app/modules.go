@@ -2,7 +2,10 @@ package app
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"io"
+	"slices"
 	"time"
 
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
@@ -10,20 +13,45 @@ import (
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
+type turnHookFunc func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
+
+func (f turnHookFunc) AfterTurn(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
+	return f(ctx, req, events)
+}
+
+func composeTurnHooks(hooks []turn.TurnHook) func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
+	active := slices.DeleteFunc(slices.Clone(hooks), func(hook turn.TurnHook) bool { return hook == nil })
+	switch len(active) {
+	case 0:
+		return nil
+	case 1:
+		return active[0].AfterTurn
+	}
+	return func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
+		errs := make([]error, 0, len(active))
+		for _, hook := range active {
+			errs = append(errs, hook.AfterTurn(ctx, req, events))
+		}
+		return errors.Join(errs...)
+	}
+}
+
 type moduleParts struct {
-	memoryHook    postTurnHook
-	profileHook   postTurnHook
 	skillRenderer runtimeengine.SkillRenderer
 	skills        command.Skills
 }
@@ -60,6 +88,9 @@ func (b *build) registerModule(name string, mod any) error {
 	if cp, ok := mod.(turn.ContextProvider); ok {
 		b.execOpts = append(b.execOpts, runtimeadk.WithContextProvider(cp))
 	}
+	if th, ok := mod.(turn.TurnHook); ok {
+		b.turnHooks = append(b.turnHooks, th)
+	}
 	if hp, ok := mod.(health.HealthProvider); ok {
 		for _, check := range hp.HealthChecks() {
 			if check.Timeout == 0 {
@@ -67,6 +98,9 @@ func (b *build) registerModule(name string, mod any) error {
 			}
 			b.addHealthCheck(&check)
 		}
+	}
+	if th, ok := mod.(turn.TurnHook); ok {
+		b.turnHooks = append(b.turnHooks, th)
 	}
 	switch m := mod.(type) {
 	case server.Lifecycle:
@@ -96,18 +130,47 @@ func (b *build) buildMemory(ctx context.Context) error {
 		}
 		observer = memoryRecorderObserver(recorder)
 	}
-	runtime, err := buildMemoryRuntime(ctx, cfg, b.db, b.registry, b.models, logger, observer)
+	mod, err := memory.New(ctx, &memory.Deps{
+		Config:      cfg.Memory,
+		DB:          b.db,
+		Sessions:    turnstore.NewSessionService(b.db),
+		Scopes:      b.registry,
+		Secrets:     secret.New(),
+		Models:      b.models,
+		ModelConfig: &cfg.Models,
+		ModelRoutes: cfg.ModelRoutes,
+		Observer:    observer,
+		Logger:      logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithRecallProvider(runtime.provider))
-	b.modules.memoryHook = buildMemoryHook(runtime.service, runtime.model, runtime.summarizer, logger)
+	if err := b.registerModule("memory", mod); err != nil {
+		return err
+	}
 	if !b.onServer() {
 		return nil
 	}
-	return b.group.Add(server.Background("memory_purge", func(ctx context.Context) {
-		runtime.service.RunPurgeLoop(ctx, time.Duration(cfg.Memory.PurgeInterval), cfg.Memory.PurgeLimit)
-	}))
+	if loop := mod.PurgeLoop(); loop != nil {
+		return b.group.Add(server.Background("memory_purge", loop))
+	}
+	return nil
+}
+
+func memoryRecorderObserver(recorder *telemetry.MemoryRecorder) memory.Observer {
+	if recorder == nil {
+		return nil
+	}
+	return func(ctx context.Context, observation *memory.Observation) {
+		recorder.Record(ctx, &telemetry.MemoryObservation{
+			Outcome:     observation.Outcome,
+			Summarized:  observation.Summarized,
+			Documents:   observation.Documents,
+			Screened:    observation.Screened,
+			ModelSystem: observation.ModelProtocol,
+			Duration:    observation.Duration,
+		})
+	}
 }
 
 func (b *build) buildProfile(ctx context.Context) error {
@@ -115,32 +178,68 @@ func (b *build) buildProfile(ctx context.Context) error {
 	if cfg.Profile == nil || !cfg.Profile.Enabled {
 		return nil
 	}
-	runtime, err := buildProfileRuntime(ctx, cfg, b.db, b.models, b.meters(), b.logger)
+	mod, err := profile.New(ctx, &profile.Deps{
+		Config:       *cfg.Profile,
+		DB:           b.db,
+		Sessions:     turnstore.NewSessionService(b.db),
+		Events:       turnstore.NewEventStore(b.db),
+		Models:       b.models,
+		ModelConfig:  cfg.Models,
+		ModelRoutes:  cfg.ModelRoutes,
+		Scanner:      buildSecretVault(cfg),
+		Owner:        cfg.Owner,
+		Meters:       b.meters(),
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithProfileContext(runtime))
-	b.modules.profileHook = runtime.hook
-	if err := b.group.Add(server.Background("profile_extraction", runtime.run)); err != nil {
+	if err := b.registerModule("profile", mod); err != nil {
 		return err
 	}
-	check := runtime.check(cfg)
-	b.addHealthCheck(&check)
-	return nil
+	return b.group.Add(server.Background("profile_extraction", mod.Run))
 }
 
 func (b *build) buildSkills(ctx context.Context) error {
 	if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {
 		return nil
 	}
-	runtime, err := buildSkillRuntime(ctx, b.cfg.Skills, b.db, b.logger)
+	mod, err := skills.New(ctx, &skills.ModuleDeps{
+		Config:      b.cfg.Skills,
+		DB:          b.db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(b.db)},
+		Logger:      b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithSkillContext(runtime.context))
-	b.modules.skillRenderer = runtime.context
-	b.modules.skills = runtime.bridge
+	if err := b.registerModule("skills", mod); err != nil {
+		return err
+	}
+	b.modules.skillRenderer = mod.Renderer()
+	b.modules.skills = mod.ChatCommands()
 	return nil
+}
+
+type skillActivationLog struct {
+	events turnstore.EventKindReader
+}
+
+func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]turn.SkillActivation, error) {
+	events, err := l.events.LatestByKind(ctx, sessionID, turn.EventKindSkillActivated, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]turn.SkillActivation, 0, len(events))
+	for i := range events {
+		var activation turn.SkillActivation
+		if err := json.Unmarshal(events[i].Payload, &activation); err != nil || activation.SkillID == "" {
+			continue
+		}
+		out = append(out, activation)
+	}
+	return out, nil
 }
 
 func (b *build) buildKnowledge(ctx context.Context) error {

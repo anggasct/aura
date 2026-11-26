@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
@@ -307,7 +308,7 @@ func (r *Runner) record(ctx context.Context, rec *recording) (step, Occurrence, 
 }
 
 func (r *Runner) recordedElsewhere(ctx context.Context, occurrence *Occurrence, recordErr error) (step, Occurrence, error) {
-	if code, ok := CodeOf(recordErr); !ok || code != ErrorCodeOccurrenceConflict {
+	if !fault.HasCode(recordErr, ErrorCodeOccurrenceConflict) {
 		return stepEnd, Occurrence{}, recordErr
 	}
 	existing, found, err := r.jobs.OccurrenceByFire(ctx, occurrence.JobID, occurrence.ScheduledForUTC)
@@ -379,7 +380,7 @@ func (r *Runner) decideTurn(ctx context.Context, sub *submission) ([]byte, error
 		return nil, context.Cause(ctx)
 	}
 	if err != nil {
-		if code, ok := CodeOf(err); ok && code == ErrorCodeRuntimeOverloaded {
+		if fault.HasCode(err, ErrorCodeRuntimeOverloaded) {
 			return json.Marshal(turnOutcome{Kind: outcomeOverloaded, First: window.first, Deadline: window.deadline})
 		}
 		return nil, err
@@ -454,7 +455,7 @@ func (r *Runner) settle(ctx context.Context, occurrence *Occurrence, terminal *s
 }
 
 func settledElsewhere(err error) error {
-	if code, ok := CodeOf(err); ok && code == ErrorCodeOccurrenceConflict {
+	if fault.HasCode(err, ErrorCodeOccurrenceConflict) {
 		return nil
 	}
 	return err

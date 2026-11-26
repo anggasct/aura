@@ -14,6 +14,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
@@ -24,7 +25,6 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -56,10 +56,14 @@ func erasureParticipants(db *sql.DB) ([]principal.Eraser, error) {
 	if err != nil {
 		return nil, err
 	}
+	memoryEraser, err := memory.NewEraser(db)
+	if err != nil {
+		return nil, err
+	}
 	return []principal.Eraser{
 		workflowEraser,
 		effect.NewEmailEffectEraser(db),
-		store.NewMemoryEraser(db),
+		memoryEraser,
 		sessionApprovals,
 		turnstore.NewSessionEraser(db, false),
 		orphanedTurns,

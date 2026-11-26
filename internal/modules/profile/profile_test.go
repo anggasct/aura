@@ -8,6 +8,8 @@ import (
 	"time"
 
 	stdcontext "context"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeRegistry struct {
@@ -27,7 +29,7 @@ func (f *fakeRegistry) InsertCandidate(ctx stdcontext.Context, fact *Fact, evide
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, exists := f.facts[fact.ID]; exists {
-		return Fact{}, Errorf(ErrorCodeProfileConflict, "fact already exists")
+		return Fact{}, fault.New(ErrorCodeProfileConflict, "fact already exists")
 	}
 	stored := *fact
 	for _, other := range f.facts {
@@ -64,10 +66,10 @@ func (f *fakeRegistry) Reinforce(ctx stdcontext.Context, factID string, evidence
 	defer f.mu.Unlock()
 	stored, exists := f.facts[factID]
 	if !exists {
-		return Fact{}, Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return Fact{}, fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	if stored.Status != StatusCandidate && stored.Status != StatusActive {
-		return Fact{}, Errorf(ErrorCodeProfileConflict, "fact is not reinforceable")
+		return Fact{}, fault.New(ErrorCodeProfileConflict, "fact is not reinforceable")
 	}
 	f.addEvidenceLocked(factID, evidence)
 	stored.Confidence = ConfidenceV1(len(f.evidence[factID]))
@@ -94,7 +96,7 @@ func (f *fakeRegistry) SetState(ctx stdcontext.Context, factID, status, conflict
 	defer f.mu.Unlock()
 	stored, exists := f.facts[factID]
 	if !exists {
-		return Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	stored.Status = status
 	stored.ConflictsWithID = conflictsWith
@@ -112,7 +114,7 @@ func (f *fakeRegistry) ReviveCandidate(ctx stdcontext.Context, factID string, at
 	defer f.mu.Unlock()
 	stored, exists := f.facts[factID]
 	if !exists {
-		return Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	stored.Status = StatusCandidate
 	stored.UpdatedAt = at
@@ -166,7 +168,7 @@ func (f *fakeRegistry) Expire(_ stdcontext.Context, now time.Time) ([]Fact, erro
 }
 
 func testService() *Service {
-	service, err := NewService(newFakeRegistry(), Config{MinConfidence: 0.70})
+	service, err := NewService(newFakeRegistry(), ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		panic(err)
 	}
@@ -239,7 +241,7 @@ func TestConflictingValuesCoexist(t *testing.T) {
 
 func TestVerifiedActiveBlocksDerived(t *testing.T) {
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -272,7 +274,7 @@ func TestResurrectionGuard(t *testing.T) {
 	}
 	if _, err := service.ProposeFact(t.Context(), "owner-1", "habit", "standup", "async", testEvidence("d1"), now); err == nil {
 		t.Fatalf("expected resurrection refusal")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	revived, err := service.ProposeFact(t.Context(), "owner-1", "habit", "standup", "async", testEvidence("d9"), now)
@@ -299,14 +301,14 @@ func TestDeleteTombstoneIdempotent(t *testing.T) {
 	}
 	if err := service.DeleteFact(t.Context(), "owner-1", "pf-missing", now); err == nil {
 		t.Errorf("expected not-found")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileNotFound {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }
 
 func TestExpireFacts(t *testing.T) {
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -398,7 +400,7 @@ func TestConcurrentProposeConverges(t *testing.T) {
 
 func TestConcurrentConflictsSingleActive(t *testing.T) {
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}

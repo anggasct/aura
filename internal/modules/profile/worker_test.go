@@ -8,6 +8,8 @@ import (
 	"time"
 
 	stdcontext "context"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeCaller struct {
@@ -39,7 +41,7 @@ func (f *fakeCaller) Extract(_ stdcontext.Context, req *ExtractRequest) (*Extrac
 func testExtractor(t *testing.T, caller ModelCaller, capacity int) (*Extractor, *fakeRegistry) {
 	t.Helper()
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -299,7 +301,7 @@ func TestEnqueueBackpressure(t *testing.T) {
 	err := extractor.Enqueue(t.Context(), Job{OwnerID: "o", SessionID: "s", Events: []JobEvent{{ID: "e2", Sequence: 2, Text: "b"}}})
 	if err == nil {
 		t.Fatalf("expected queue-full rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileUnavailable {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if extractor.dropped.Load() != 1 {
@@ -328,7 +330,7 @@ func TestEnqueueValidation(t *testing.T) {
 }
 
 func TestNewExtractorRejects(t *testing.T) {
-	service, err := NewService(newFakeRegistry(), Config{MinConfidence: 0.70})
+	service, err := NewService(newFakeRegistry(), ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}

@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -19,12 +18,26 @@ type stubProfileContext struct {
 	calls int
 }
 
-func (s *stubProfileContext) ProfileContext(context.Context, *turn.TurnRequest) (string, error) {
+func (s *stubProfileContext) TurnContext(context.Context, *turn.TurnRequest) ([]turn.ContextBlock, error) {
 	s.calls++
-	return s.block, s.err
+	if s.err != nil {
+		return nil, s.err
+	}
+	block := strings.TrimSpace(s.block)
+	if block == "" {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{
+		Order:   turn.ContextOrderProfile,
+		Content: block,
+	}}, nil
 }
 
-func newProfileContextExecutor(t *testing.T, model *capturingModel, owner string, provider ProfileContextProvider) *ADKExecutor {
+func (*stubProfileContext) Required(*turn.TurnRequest) bool {
+	return false
+}
+
+func newProfileContextExecutor(t *testing.T, model *capturingModel, owner string, provider turn.ContextProvider) *ADKExecutor {
 	t.Helper()
 	db, sessions, _ := newSessionTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
@@ -33,7 +46,7 @@ func newProfileContextExecutor(t *testing.T, model *capturingModel, owner string
 	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
 		WithOwnerContext(owner),
-		WithProfileContext(provider),
+		WithContextProvider(provider),
 	)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -93,26 +106,6 @@ func TestProfileContextEmptyAddsNoPart(t *testing.T) {
 	}
 }
 
-func TestProfileContextOnlyAsksForOwnerTurns(t *testing.T) {
-	for name, class := range map[string]principal.Class{"trusted": principal.ClassTrusted, "public": principal.ClassPublic, "missing": ""} {
-		t.Run(name, func(t *testing.T) {
-			model := &capturingModel{answer: "done", tokens: 1}
-			provider := &stubProfileContext{block: profileBlockFixture}
-			executor := newProfileContextExecutor(t, model, "", provider)
-			req := evalTurnRequest()
-			req.PrincipalID = "discord:111"
-			req.PrincipalClass = class
-			drainTurn(t, executor, req)
-			if provider.calls != 0 {
-				t.Fatalf("provider called %d times for class %q", provider.calls, class)
-			}
-			if len(profileParts(model)) != 0 || strings.Contains(strings.Join(model.systems, "\n"), turn.ProfileEvidenceStart) {
-				t.Fatal("profile block reached a non-owner turn")
-			}
-		})
-	}
-}
-
 func TestProfileContextFailureKeepsTurnAndOwnerBlock(t *testing.T) {
 	model := &capturingModel{answer: "done", tokens: 1}
 	owner := RenderOwnerContext(&OwnerContext{Name: "Angga"})
@@ -123,11 +116,5 @@ func TestProfileContextFailureKeepsTurnAndOwnerBlock(t *testing.T) {
 	}
 	if want := owner + "\n\nSOUL"; !strings.HasPrefix(strings.Join(model.systems, "\n"), want) {
 		t.Fatalf("system instruction = %q, want prefix %q", strings.Join(model.systems, "\n"), want)
-	}
-}
-
-func TestWithProfileContextRejectsNil(t *testing.T) {
-	if err := WithProfileContext(nil)(&ADKExecutor{}); err == nil {
-		t.Fatal("nil provider accepted")
 	}
 }

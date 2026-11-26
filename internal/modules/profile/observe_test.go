@@ -43,7 +43,7 @@ func (r *recordingObserver) waitForResult(t *testing.T, result string) Observati
 func TestExtractorObservesResults(t *testing.T) {
 	observer := &recordingObserver{}
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestExtractorObservesResults(t *testing.T) {
 func TestExtractorObservesDeadLetter(t *testing.T) {
 	observer := &recordingObserver{}
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestExtractorObservesDeadLetter(t *testing.T) {
 func TestExtractorObservesDroppedJob(t *testing.T) {
 	observer := &recordingObserver{}
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestExtractorObservesDroppedJob(t *testing.T) {
 func TestExpireObservesLag(t *testing.T) {
 	observer := &recordingObserver{}
 	registry := newFakeRegistry()
-	service, err := NewService(registry, Config{MinConfidence: 0.70, Observer: observer.observe})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70, Observer: observer.observe})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}

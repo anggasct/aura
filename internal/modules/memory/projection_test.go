@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 	"sync"
 	"testing"
@@ -151,7 +152,7 @@ func TestProjectBatchCrossSessionFallbackAndCrossOwnerNegative(t *testing.T) {
 
 func TestProjectBatchFallbackBudgetSeparation(t *testing.T) {
 	inner := newFakeDocumentStore()
-	service, err := NewService(inner, &fakeSecrets{known: map[string]bool{}}, &Config{FallbackMaxDocuments: 1, FallbackTokenBudget: 1000})
+	service, err := NewService(inner, &fakeSecrets{known: map[string]bool{}}, &ServiceOptions{FallbackMaxDocuments: 1, FallbackTokenBudget: 1000})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -190,7 +191,7 @@ func TestProjectBatchFallbackBudgetSeparation(t *testing.T) {
 func TestProjectBatchSecretDropIncrementsCounter(t *testing.T) {
 	secrets := &recordingSecrets{known: map[string]bool{"sk-live-canary": true}}
 	inner := newFakeDocumentStore()
-	service, err := NewService(inner, secrets, &Config{})
+	service, err := NewService(inner, secrets, &ServiceOptions{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -216,7 +217,7 @@ func TestProjectBatchSecretDropIncrementsCounter(t *testing.T) {
 }
 
 func TestProjectBatchFailOpenEmitsStale(t *testing.T) {
-	broken, err := NewService(&failingUpsertStore{fakeDocumentStore: newFakeDocumentStore(), err: errors.New("disk unavailable")}, nil, &Config{})
+	broken, err := NewService(&failingUpsertStore{fakeDocumentStore: newFakeDocumentStore(), err: errors.New("disk unavailable")}, nil, &ServiceOptions{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
@@ -225,7 +226,7 @@ func TestProjectBatchFailOpenEmitsStale(t *testing.T) {
 	if err == nil {
 		t.Fatal("store failure swallowed")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeProjectionStale {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProjectionStale {
 		t.Errorf("code = %v, %v; want memory_projection_stale", code, ok)
 	}
 	if got := broken.ProjectionFailureCount(); got != 1 {
@@ -275,7 +276,7 @@ func TestProjectBatchValidation(t *testing.T) {
 	if _, err := nilService.ProjectBatch(t.Context(), "owner-1", []*Event{event}); err == nil {
 		t.Error("nil service accepted")
 	}
-	broken, err := NewService(nil, nil, &Config{})
+	broken, err := NewService(nil, nil, &ServiceOptions{})
 	if err == nil || broken != nil {
 		t.Error("nil document store accepted")
 	}
@@ -293,7 +294,7 @@ func TestProjectBatchValidation(t *testing.T) {
 }
 
 func TestNewServiceRejectsOutOfRangeFallbackBudgets(t *testing.T) {
-	cases := []Config{
+	cases := []ServiceOptions{
 		{FallbackMaxDocuments: -1},
 		{FallbackMaxDocuments: hardMaxDocuments + 1},
 		{FallbackTokenBudget: -1},
@@ -302,11 +303,11 @@ func TestNewServiceRejectsOutOfRangeFallbackBudgets(t *testing.T) {
 	for i, config := range cases {
 		if _, err := NewService(newFakeDocumentStore(), nil, &config); err == nil {
 			t.Errorf("case %d accepted: %+v", i, config)
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeBudgetInvalid {
+		} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeBudgetInvalid {
 			t.Errorf("case %d code = %v, %v; want memory_budget_invalid", i, code, ok)
 		}
 	}
-	if _, err := NewService(newFakeDocumentStore(), nil, &Config{}); err != nil {
+	if _, err := NewService(newFakeDocumentStore(), nil, &ServiceOptions{}); err != nil {
 		t.Errorf("zero fallback budgets rejected: %v", err)
 	}
 }
@@ -324,7 +325,7 @@ func (s *fallbackFailingStore) Search(ctx context.Context, query *StoredQuery) (
 
 func TestRecallFallbackSearchFailureLeavesProjectionCounter(t *testing.T) {
 	inner := newFakeDocumentStore()
-	service, err := NewService(&fallbackFailingStore{fakeDocumentStore: inner}, nil, &Config{})
+	service, err := NewService(&fallbackFailingStore{fakeDocumentStore: inner}, nil, &ServiceOptions{})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}

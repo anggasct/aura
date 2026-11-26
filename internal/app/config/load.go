@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -122,7 +123,7 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	}, nil
 }
 
-func validateLoaded(cfg *Config, doc *document, profile capability.Profile) error {
+func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile) error {
 	return errors.Join(
 		configkit.Under("capabilities", cfg.Capabilities.Validate()),
 		configkit.Under("models", cfg.Models.Validate()),
@@ -130,7 +131,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateTools(cfg.Tools),
 		validateSkills(cfg.Skills),
 		validateContext(cfg.Context),
-		legacyconfig.ValidateProfile(cfg.Profile),
+		validateProfile(cfg.Profile),
 		legacyconfig.ValidateChildren(cfg.Children),
 		validateAccess(cfg.Access),
 		legacyconfig.ValidateSync(cfg.Sync),
@@ -153,13 +154,13 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
 		legacyconfig.ValidateEmail(&cfg.Channels.Email),
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
-		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
-		legacyconfig.ValidateScheduler(&cfg.Scheduler),
-		legacyconfig.ValidateMemory(&cfg.Memory),
+		configkit.Under("broadcast", cfg.Broadcast.Validate()),
+		configkit.Under("scheduler", cfg.Scheduler.Validate()),
+		configkit.Under("memory", cfg.Memory.Validate()),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),
 		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),
-		validateAgainstBuild(cfg, profile),
+		validateAgainstBuild(cfg, buildProfile),
 		validateReferences(cfg, doc),
 	)
 }
@@ -446,6 +447,13 @@ func validateSkills(section *skills.Config) error {
 		return nil
 	}
 	return configkit.Under("skills", section.Validate())
+}
+
+func validateProfile(section *profile.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("profile", section.Validate())
 }
 
 func validateWorkflows(section *workflow.Config) error {

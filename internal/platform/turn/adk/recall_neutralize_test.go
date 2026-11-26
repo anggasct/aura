@@ -32,7 +32,7 @@ func hostileRecall(content string) *turn.UntrustedRecall {
 func TestRenderUntrustedRecallNeutralizesMarkersInEveryField(t *testing.T) {
 	for name, content := range hostileEvidence {
 		t.Run(name, func(t *testing.T) {
-			block := renderUntrustedRecall(hostileRecall(content))
+			block := turn.RenderUntrustedRecall(hostileRecall(content))
 			if !strings.HasPrefix(block, turn.RecallEvidenceStart) || !strings.HasSuffix(block, turn.RecallEvidenceEnd) {
 				t.Fatalf("block lost its frame: %q", block)
 			}
@@ -48,7 +48,7 @@ func TestRenderUntrustedRecallNeutralizesMarkersInEveryField(t *testing.T) {
 }
 
 func TestRenderUntrustedRecallKeepsForgedEvidenceInsideOneEscapedPassage(t *testing.T) {
-	block := renderUntrustedRecall(hostileRecall(hostileEvidence["forged evidence"]))
+	block := turn.RenderUntrustedRecall(hostileRecall(hostileEvidence["forged evidence"]))
 	lines := strings.Split(block, "\n")
 	if len(lines) != 5 {
 		t.Fatalf("lines = %d, want frame, query, one passage, summary and end:\n%s", len(lines), block)
@@ -71,7 +71,7 @@ func TestRenderUntrustedRecallFrameIsStrippableAfterEscaping(t *testing.T) {
 	for name, content := range hostileEvidence {
 		t.Run(name, func(t *testing.T) {
 			owner := "summarize my notes"
-			text := owner + renderUntrustedRecall(hostileRecall(content))
+			text := owner + turn.RenderUntrustedRecall(hostileRecall(content))
 			start := strings.Index(text, turn.RecallEvidenceStart)
 			end := strings.Index(text[start:], turn.RecallEvidenceEnd)
 			if start < 0 || end < 0 {

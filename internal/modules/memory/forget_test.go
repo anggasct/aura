@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"fmt"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 	"testing"
 	"testing/synctest"
@@ -125,17 +126,17 @@ func TestForgetCrossOwnerRejectedWithZeroWrites(t *testing.T) {
 
 	if _, _, err := service.ForgetBySession(t.Context(), "owner-2", "sess-a", 10, false); err == nil {
 		t.Error("cross-owner session preview accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeForbidden {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("session code = %v, %v; want forbidden", code, ok)
 	}
 	if _, _, err := service.ForgetBySession(t.Context(), "owner-2", "sess-a", 10, true); err == nil {
 		t.Error("cross-owner session apply accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeForbidden {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("session apply code = %v, %v", code, ok)
 	}
 	if _, _, err := service.ForgetByID(t.Context(), "owner-2", "mem-a1", true); err == nil {
 		t.Error("cross-owner id accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeForbidden {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("id code = %v, %v", code, ok)
 	}
 	kept, err := service.Recall(t.Context(), &RecallRequest{AgentIDs: mainPersona, OwnerID: "owner-1", SessionID: "sess-a", Query: "alpha"})

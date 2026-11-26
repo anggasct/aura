@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func requireErasureReport(t *testing.T, got principal.ErasureReport, want map[string]int) {
@@ -597,9 +597,9 @@ func TestErasureWithoutSessionsKeepsOtherOrphanedTurnRuns(t *testing.T) {
 	db := newTestDB(t)
 	ctx := t.Context()
 	seedPersonaSession(t, db, "lobby/discord:owner/thread:7001", "discord:602", "lobby")
-	doc := testMemoryDocument("mem-601", "lobby/discord:owner/thread:7001", store.MemoryKindEventText)
+	doc := testMemoryDocument("mem-601", "lobby/discord:owner/thread:7001", memory.KindEventText)
 	doc.OwnerID = "discord:601"
-	if _, err := store.NewMemoryStore(db).UpsertDocument(ctx, doc); err != nil {
+	if _, err := newTestMemoryStore(t, db).UpsertDocument(ctx, doc); err != nil {
 		t.Fatalf("UpsertDocument: %v", err)
 	}
 	seedDurableRun(t, db, durableRunFixture{

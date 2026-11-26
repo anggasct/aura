@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -912,7 +913,7 @@ func TestRunner_RejectsBadWiring(t *testing.T) {
 	for _, payload := range []string{"job-1", `{"instant":"2026-09-12T21:00:00Z"}`, `{"job_id":"job-1","instant":"2026-09-12T21:00:00Z","chain":true}`} {
 		if err := runner.Handle(t.Context(), payloadInvocation{payload: []byte(payload)}); err == nil {
 			t.Errorf("payload %s accepted", payload)
-		} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+		} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 			t.Errorf("payload %s: code = %v, %v", payload, code, ok)
 		}
 	}

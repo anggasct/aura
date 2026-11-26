@@ -75,8 +75,10 @@ func TestPromptAssemblyGolden(t *testing.T) {
 	executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 		WithAgentResolver(resolver, nil),
 		WithOwnerContext(RenderOwnerContext(&OwnerContext{Name: "Angga"})),
-		WithProfileContext(&stubProfileContext{block: profileBlockFixture}),
-		WithSkillContext(&stubSkillContext{block: skillBlockFixture}),
+		WithContextProvider(&stubProfileContext{block: profileBlockFixture}),
+		WithContextProvider(&stubContextProvider{
+			blocks: []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: skillBlockFixture}},
+		}),
 		WithContextProvider(&stubContextProvider{
 			blocks: []turn.ContextBlock{{
 				Order:   turn.ContextOrderKnowledge,

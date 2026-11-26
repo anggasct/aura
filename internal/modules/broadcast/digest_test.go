@@ -6,6 +6,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func digestItem(id, dest, priority string, createdAt time.Time, size int) Item {
@@ -177,7 +179,7 @@ func TestCreateDigest_RejectsOversizeGroup(t *testing.T) {
 	}
 	if _, _, err := broadcaster.CreateDigest(t.Context(), group, 0); err == nil {
 		t.Fatal("oversize group accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("oversize group code = %v, %v; want invalid_argument", code, ok)
 	}
 	for _, item := range group {

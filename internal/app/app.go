@@ -19,6 +19,9 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -26,6 +29,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -52,6 +56,9 @@ const (
 	PartWorkflows Part = "workflows"
 	PartModels    Part = "models"
 	PartKnowledge Part = "knowledge"
+	PartMemory    Part = "memory"
+	PartProfile   Part = "profile"
+	PartSkills    Part = "skills"
 )
 
 type Options struct {
@@ -95,18 +102,22 @@ const (
 )
 
 type App struct {
-	surface     Surface
-	group       *server.LifecycleGroup
-	builtin     *toolsbuiltin.Executor
-	serve       func(ctx context.Context) error
-	logger      *slog.Logger
-	db          *sql.DB
-	turns       *turnstore.TurnStore
-	result      *appconfig.LoadResult
-	runtime     durable.Runtime
-	interpreter *workflow.Interpreter
-	models      *model.Registry
-	knowledge   *knowledge.Service
+	surface      Surface
+	group        *server.LifecycleGroup
+	builtin      *toolsbuiltin.Executor
+	serve        func(ctx context.Context) error
+	logger       *slog.Logger
+	db           *sql.DB
+	turns        *turnstore.TurnStore
+	result       *appconfig.LoadResult
+	runtime      durable.Runtime
+	interpreter  *workflow.Interpreter
+	models       *model.Registry
+	knowledge    *knowledge.Service
+	memory       *memory.Service
+	profile      *profile.Service
+	skillsEngine *skills.Engine
+	skillsRoot   string
 
 	mu    sync.Mutex
 	state appState
@@ -128,7 +139,8 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile,
+		skillsEngine: b.skillsEngine, skillsRoot: b.skillsRoot,
 	}, nil
 }
 
@@ -232,7 +244,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile, PartSkills:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -333,6 +345,10 @@ type build struct {
 	workflowMod  *workflow.Module
 	interpreter  *workflow.Interpreter
 	knowledge    *knowledge.Service
+	memory       *memory.Service
+	profile      *profile.Service
+	skillsEngine *skills.Engine
+	skillsRoot   string
 	quarantined  []workflow.Quarantined
 	artifactRoot string
 
@@ -345,8 +361,9 @@ type build struct {
 	routeModel func(route string) (string, error)
 	ledger     *usage.Ledger
 
-	execOpts []runtimeadk.ExecutorOption
-	modules  moduleParts
+	execOpts  []runtimeadk.ExecutorOption
+	turnHooks []turn.TurnHook
+	modules   moduleParts
 
 	executor *runtimeadk.ADKExecutor
 	engine   *runtimeengine.Engine
@@ -398,6 +415,67 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.knowledge = service
+	}
+	if slices.Contains(parts, PartMemory) {
+		if !b.cfg.Memory.Enabled {
+			return errors.New("memory is not enabled")
+		}
+		memStore, err := memory.NewSQLiteStore(b.db, turnstore.NewSessionService(b.db))
+		if err != nil {
+			return err
+		}
+		service, err := memory.NewService(memStore, secret.New(), &memory.ServiceOptions{
+			MaxDocuments:         b.cfg.Memory.MaxDocuments,
+			TokenBudget:          b.cfg.Memory.RecallTokenBudget,
+			SummaryPromptVersion: b.cfg.Memory.SummaryPromptVersion,
+			SummaryTTL:           time.Duration(b.cfg.Memory.SummaryTTL),
+			RangeThreshold:       b.cfg.Memory.RangeThreshold,
+			RangeLiveWindow:      b.cfg.Memory.RangeLiveWindow,
+		})
+		if err != nil {
+			return err
+		}
+		b.memory = service
+	}
+	if slices.Contains(parts, PartProfile) {
+		store, err := profile.NewSQLiteStore(b.db)
+		if err != nil {
+			return err
+		}
+		sink, err := profile.NewActionSink(turnstore.NewSessionService(b.db), turnstore.NewEventStore(b.db))
+		if err != nil {
+			return err
+		}
+		minConfidence := profile.Default().CandidateMinConfidence
+		if b.cfg.Profile != nil {
+			minConfidence = b.cfg.Profile.CandidateMinConfidence
+		}
+		service, err := profile.NewService(store, profile.ServiceOptions{
+			MinConfidence: minConfidence,
+			Actions:       sink,
+		})
+		if err != nil {
+			return err
+		}
+		b.profile = service
+	}
+	if slices.Contains(parts, PartSkills) {
+		if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {
+			return errors.New("skills are not enabled")
+		}
+		mod, err := skills.New(ctx, &skills.ModuleDeps{
+			Config:      b.cfg.Skills,
+			DB:          b.db,
+			Activations: &skillActivationLog{events: turnstore.NewEventKindReader(b.db)},
+			Logger:      b.logger,
+		})
+		if err != nil {
+			return err
+		}
+		b.skillsEngine = mod.Engine()
+		if len(b.cfg.Skills.Roots) > 0 {
+			b.skillsRoot = b.cfg.Skills.Roots[0]
+		}
 	}
 	return nil
 }
@@ -579,7 +657,7 @@ func (b *build) buildTurnRuntime() error {
 		return err
 	}
 	b.executor = executor
-	hooks := []postTurnHook{b.modules.memoryHook, b.modules.profileHook}
+	hooks := slices.Clone(b.turnHooks)
 	var durableConfig *runtimeengine.DurableConfig
 	var countTurn func(context.Context, *turn.TurnRequest)
 	var channels []runtimechannelhost.ChannelPort
@@ -601,7 +679,7 @@ func (b *build) buildTurnRuntime() error {
 		Personas:       registryPersonas{registry: b.registry},
 		Skills:         b.modules.skillRenderer,
 		Durable:        durableConfig,
-		PostTurnHook:   composePostTurnHooks(hooks...),
+		PostTurnHook:   composeTurnHooks(hooks),
 		CountTurn:      countTurn,
 		LiveEvents:     b.liveEvents,
 		Channels:       channels,

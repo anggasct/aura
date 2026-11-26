@@ -9,11 +9,19 @@ const (
 	ContextOrderKnowledge = 400
 )
 
+type ContextPlacement int
+
+const (
+	ContextPlacementEphemeral ContextPlacement = iota
+	ContextPlacementUserPart
+)
+
 type ContextBlock struct {
-	Order   int
-	Content string
-	Caveat  string
-	Events  []Event
+	Order     int
+	Placement ContextPlacement
+	Content   string
+	Caveat    string
+	Events    []Event
 }
 
 type ContextProvider interface {
