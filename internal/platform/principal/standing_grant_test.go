@@ -1,12 +1,14 @@
-package store
+package principal
 
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestStandingGrantLifecycle(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	ctx := t.Context()
 	grants := NewStandingGrantStore(db)
 	now := time.Date(2026, 11, 1, 10, 0, 0, 0, time.UTC)
@@ -55,7 +57,7 @@ func TestStandingGrantLifecycle(t *testing.T) {
 }
 
 func TestStandingGrantRejectsIncompleteGrants(t *testing.T) {
-	grants := NewStandingGrantStore(newTestDB(t))
+	grants := NewStandingGrantStore(storetest.OpenMigrated(t))
 	now := time.Now().UTC()
 	for name, grant := range map[string]StandingGrant{
 		"no principal": {AgentID: "kantor", ToolName: "exec", GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)},
@@ -69,7 +71,7 @@ func TestStandingGrantRejectsIncompleteGrants(t *testing.T) {
 }
 
 func TestAccessSchemaTablesExist(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	for _, table := range []string{"principal_grant", "pairing_request", "standing_grant", "session_handoff"} {
 		var name string
 		if err := db.QueryRowContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&name); err != nil {

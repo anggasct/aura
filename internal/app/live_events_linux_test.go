@@ -13,7 +13,6 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -48,11 +47,11 @@ func TestBuildRelaysAnEffectfulToolRequestToTheTurnSubscriber(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)
 	}
-	grant := store.StandingGrant{
+	grant := principal.StandingGrant{
 		PrincipalID: liveEventsPrincipal, AgentID: "desk", ToolName: "write_file",
 		GrantedBy: principal.OwnerID, GrantedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
-	if _, err := store.NewStandingGrantStore(b.db).Grant(t.Context(), &grant); err != nil {
+	if _, err := principal.NewStandingGrantStore(b.db).Grant(t.Context(), &grant); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if err := b.group.Start(t.Context()); err != nil {

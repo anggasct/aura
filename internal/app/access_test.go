@@ -11,7 +11,6 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func runGrantsCommand(t *testing.T, cfg string, args ...string) (string, error) {
@@ -37,7 +36,7 @@ func accessEventCount(t *testing.T, cfg, action string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var count int
-	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, store.AccessOwnerActionEventKind, action).Scan(&count); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, principal.AccessOwnerActionEventKind, action).Scan(&count); err != nil {
 		t.Fatalf("count owner actions: %v", err)
 	}
 	return count
@@ -59,7 +58,7 @@ func recordTestGrant(t *testing.T, cfg string) string {
 	}); err != nil {
 		t.Fatalf("RecordStandingGrant: %v", err)
 	}
-	grants, err := store.NewStandingGrantStore(db).List(t.Context(), "", time.Now().UTC())
+	grants, err := principal.NewStandingGrantStore(db).List(t.Context(), "", time.Now().UTC())
 	if err != nil || len(grants) != 1 {
 		t.Fatalf("grants = %+v, %v", grants, err)
 	}
@@ -129,9 +128,9 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 		t.Fatal("unknown persona reported a ceiling")
 	}
 	now := time.Now().UTC()
-	grants := store.NewStandingGrantStore(db)
+	grants := principal.NewStandingGrantStore(db)
 	for _, tool := range []string{"write_file", "exec"} {
-		if _, err := grants.Grant(t.Context(), &store.StandingGrant{PrincipalID: "discord:111", AgentID: "kantor", ToolName: tool, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		if _, err := grants.Grant(t.Context(), &principal.StandingGrant{PrincipalID: "discord:111", AgentID: "kantor", ToolName: tool, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
 			t.Fatalf("Grant %s: %v", tool, err)
 		}
 	}

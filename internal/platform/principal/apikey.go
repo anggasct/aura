@@ -1,4 +1,4 @@
-package store
+package principal
 
 import (
 	"context"
@@ -8,19 +8,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
-const (
-	APIKeyClassOwner   = "owner"
-	APIKeyClassTrusted = "trusted"
-	APIKeyClassPublic  = "public"
-)
-
-const (
-	apiKeyIDLength     = 12
-	apiKeyDigestLength = 64
-)
+const apiKeyDigestLength = 64
 
 type APIKey struct {
 	ID        string
@@ -57,25 +49,25 @@ func (s *sqliteAPIKeyStore) Create(ctx context.Context, key *APIKey) error {
 	if key == nil {
 		return errNilArgument("api key")
 	}
-	if len(key.ID) != apiKeyIDLength || len(key.KeySHA256) != apiKeyDigestLength {
-		return Errorf(ErrorCodeAPIKeyInvalid, "api key id and digest have the wrong length")
+	if len(key.ID) != HTTPKeyIDLength || len(key.KeySHA256) != apiKeyDigestLength {
+		return fault.New(ErrorCodeAPIKeyInvalid, "api key id and digest have the wrong length")
 	}
 	if strings.TrimSpace(key.PersonaID) == "" || strings.TrimSpace(key.Label) == "" {
-		return Errorf(ErrorCodeAPIKeyInvalid, "api key needs a persona and a label")
+		return fault.New(ErrorCodeAPIKeyInvalid, "api key needs a persona and a label")
 	}
 	if key.CreatedAt.IsZero() {
-		return Errorf(ErrorCodeAPIKeyInvalid, "api key needs a creation time")
+		return fault.New(ErrorCodeAPIKeyInvalid, "api key needs a creation time")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 INSERT INTO api_key (id, key_sha256, persona_id, class, label, created_at, revoked_at)
 VALUES (?, ?, ?, ?, ?, ?, NULL)`,
 		key.ID, key.KeySHA256, key.PersonaID, key.Class, key.Label, sqlite.FormatTime(key.CreatedAt))
 	if err != nil {
 		switch {
 		case isConstraintUnique(err):
-			return codedError(ErrorCodeAPIKeyConflict, "api key id or digest already exists", err)
+			return fault.Wrap(ErrorCodeAPIKeyConflict, "api key id or digest already exists", err)
 		case isConstraintCheck(err):
-			return codedError(ErrorCodeAPIKeyInvalid, "api key violates a storage constraint", err)
+			return fault.Wrap(ErrorCodeAPIKeyInvalid, "api key violates a storage constraint", err)
 		}
 		return classify(fmt.Errorf("create api key: %w", err))
 	}
@@ -83,10 +75,10 @@ VALUES (?, ?, ?, ?, ?, ?, NULL)`,
 }
 
 func (s *sqliteAPIKeyStore) GetByID(ctx context.Context, id string) (APIKey, error) {
-	row := s.db.QueryRowContext(ctx, `SELECT `+channelKeyColumns+` FROM api_key WHERE id = ?`, id)
+	row := sqlite.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT `+channelKeyColumns+` FROM api_key WHERE id = ?`, id)
 	key, err := scanAPIKey(row)
 	if errors.Is(err, sql.ErrNoRows) {
-		return APIKey{}, Errorf(ErrorCodeAPIKeyNotFound, "api key does not exist")
+		return APIKey{}, fault.New(ErrorCodeAPIKeyNotFound, "api key does not exist")
 	}
 	if err != nil {
 		return APIKey{}, classify(fmt.Errorf("read api key: %w", err))
@@ -95,7 +87,7 @@ func (s *sqliteAPIKeyStore) GetByID(ctx context.Context, id string) (APIKey, err
 }
 
 func (s *sqliteAPIKeyStore) List(ctx context.Context) ([]APIKey, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT `+channelKeyColumns+` FROM api_key ORDER BY created_at, id`)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, `SELECT `+channelKeyColumns+` FROM api_key ORDER BY created_at, id`)
 	if err != nil {
 		return nil, classify(fmt.Errorf("list api keys: %w", err))
 	}
@@ -115,7 +107,8 @@ func (s *sqliteAPIKeyStore) List(ctx context.Context) ([]APIKey, error) {
 }
 
 func (s *sqliteAPIKeyStore) Revoke(ctx context.Context, id string, at time.Time) (bool, error) {
-	result, err := s.db.ExecContext(ctx, `UPDATE api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at), id)
+	q := sqlite.Conn(ctx, s.db)
+	result, err := q.ExecContext(ctx, `UPDATE api_key SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`, sqlite.FormatTime(at), id)
 	if err != nil {
 		return false, classify(fmt.Errorf("revoke api key: %w", err))
 	}
@@ -126,8 +119,8 @@ func (s *sqliteAPIKeyStore) Revoke(ctx context.Context, id string, at time.Time)
 	if changed == 1 {
 		return true, nil
 	}
-	if !rowExists(ctx, s.db, `SELECT 1 FROM api_key WHERE id = ?`, id) {
-		return false, Errorf(ErrorCodeAPIKeyNotFound, "api key does not exist")
+	if !rowExists(ctx, q, `SELECT 1 FROM api_key WHERE id = ?`, id) {
+		return false, fault.New(ErrorCodeAPIKeyNotFound, "api key does not exist")
 	}
 	return false, nil
 }

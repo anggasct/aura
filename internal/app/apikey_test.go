@@ -21,7 +21,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const apiKeyTestWait = 30 * time.Second
@@ -68,11 +68,11 @@ func TestAPIKeyCreatePrintsOnceAndStoresOnlyTheHash(t *testing.T) {
 	}
 
 	db := openAccessDB(t, cfg)
-	key, err := store.NewAPIKeyStore(db).GetByID(t.Context(), id)
+	key, err := principal.NewAPIKeyStore(db).GetByID(t.Context(), id)
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
 	}
-	if key.KeySHA256 != httpchat.KeyDigest(plaintext) || key.PersonaID != "main" || key.Class != store.APIKeyClassTrusted || key.Label != "laptop" || !key.Active() {
+	if key.KeySHA256 != httpchat.KeyDigest(plaintext) || key.PersonaID != "main" || key.Class != string(principal.ClassTrusted) || key.Label != "laptop" || !key.Active() {
 		t.Fatalf("stored key = %+v", key)
 	}
 	var stored string
@@ -83,7 +83,7 @@ func TestAPIKeyCreatePrintsOnceAndStoresOnlyTheHash(t *testing.T) {
 		t.Fatalf("api_key row holds key material: %q", stored)
 	}
 	var payload string
-	if err := db.QueryRowContext(t.Context(), `SELECT payload_json FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, store.AccessOwnerActionEventKind, accessActionAPIKeyCreate).Scan(&payload); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT payload_json FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, principal.AccessOwnerActionEventKind, accessActionAPIKeyCreate).Scan(&payload); err != nil {
 		t.Fatalf("read create audit event: %v", err)
 	}
 	if strings.Contains(payload, secret) || !strings.Contains(payload, `"principal_id":"http:`+id+`"`) || !strings.Contains(payload, `"agent_id":"main"`) {
@@ -107,15 +107,15 @@ func TestAPIKeyCreateOwnerNeedsConfirmation(t *testing.T) {
 	if !errors.As(err, &usage) {
 		t.Fatalf("create owner without confirmation = %v, want a usage error", err)
 	}
-	if keys, listErr := store.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); listErr != nil || len(keys) != 0 {
+	if keys, listErr := principal.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); listErr != nil || len(keys) != 0 {
 		t.Fatalf("keys after refused create = %v, %v", keys, listErr)
 	}
 	stdout, _, err := runAPIKey(t, cfg, "create", "--persona", "main", "--class", "owner", "--label", "ops", "--confirm-owner")
 	if err != nil || !apiKeyShape.MatchString(strings.TrimSpace(stdout)) {
 		t.Fatalf("create owner with confirmation = %q, %v", stdout, err)
 	}
-	keys, err := store.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context())
-	if err != nil || len(keys) != 1 || keys[0].Class != store.APIKeyClassOwner {
+	keys, err := principal.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context())
+	if err != nil || len(keys) != 1 || keys[0].Class != string(principal.ClassOwner) {
 		t.Fatalf("keys = %+v, %v; want one owner key", keys, err)
 	}
 }
@@ -146,7 +146,7 @@ func TestAPIKeyCreateUsageErrors(t *testing.T) {
 			}
 		})
 	}
-	if keys, err := store.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); err != nil || len(keys) != 0 {
+	if keys, err := principal.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); err != nil || len(keys) != 0 {
 		t.Fatalf("keys after refused creates = %v, %v", keys, err)
 	}
 }
@@ -158,7 +158,7 @@ func TestAPIKeyCreateUnknownPersonaFailsWithStableCode(t *testing.T) {
 	if !ok || code != auraagent.ErrorCodeNotFound {
 		t.Fatalf("error = %v, want agent_not_found", err)
 	}
-	if keys, listErr := store.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); listErr != nil || len(keys) != 0 {
+	if keys, listErr := principal.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); listErr != nil || len(keys) != 0 {
 		t.Fatalf("keys after unknown persona = %v, %v", keys, listErr)
 	}
 }
@@ -249,7 +249,7 @@ func TestAPIKeyRevokeIsIdempotentAndAudited(t *testing.T) {
 	if err != nil || strings.TrimSpace(stdout) != "revoked "+id {
 		t.Fatalf("first revoke = %q, %v", stdout, err)
 	}
-	first, err := store.NewAPIKeyStore(openAccessDB(t, cfg)).GetByID(t.Context(), id)
+	first, err := principal.NewAPIKeyStore(openAccessDB(t, cfg)).GetByID(t.Context(), id)
 	if err != nil || first.Active() {
 		t.Fatalf("key after revoke = %+v, %v", first, err)
 	}
@@ -257,7 +257,7 @@ func TestAPIKeyRevokeIsIdempotentAndAudited(t *testing.T) {
 	if err != nil || strings.TrimSpace(stdout) != "already revoked "+id {
 		t.Fatalf("second revoke = %q, %v", stdout, err)
 	}
-	second, err := store.NewAPIKeyStore(openAccessDB(t, cfg)).GetByID(t.Context(), id)
+	second, err := principal.NewAPIKeyStore(openAccessDB(t, cfg)).GetByID(t.Context(), id)
 	if err != nil || !second.RevokedAt.Equal(first.RevokedAt) {
 		t.Fatalf("second revoke moved the timestamp: %v vs %v (%v)", second.RevokedAt, first.RevokedAt, err)
 	}
@@ -272,7 +272,7 @@ func TestAPIKeyRevokeIsIdempotentAndAudited(t *testing.T) {
 func TestAPIKeyRevokeUnknownKeyFailsWithStableCode(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	_, _, err := runAPIKey(t, cfg, "revoke", "zzzzzzzzzzzz")
-	if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeAPIKeyNotFound {
+	if code, ok := fault.CodeOf[principal.ErrorCode](err); !ok || code != principal.ErrorCodeAPIKeyNotFound {
 		t.Fatalf("error = %v, want apikey_not_found", err)
 	}
 	if got := accessEventCount(t, cfg, accessActionAPIKeyRevoke); got != 0 {

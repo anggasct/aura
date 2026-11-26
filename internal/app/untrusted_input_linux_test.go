@@ -25,7 +25,6 @@ import (
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const untrustedInputSearchPath = "/search"
@@ -147,8 +146,8 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 func (r *untrustedInputRig) grant(principalID, tool string) {
 	r.t.Helper()
 	now := time.Now().UTC()
-	grant := store.StandingGrant{PrincipalID: principalID, AgentID: auraagent.DefaultID, ToolName: tool, GrantedBy: principal.OwnerID, GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
-	if _, err := store.NewStandingGrantStore(r.db).Grant(r.t.Context(), &grant); err != nil {
+	grant := principal.StandingGrant{PrincipalID: principalID, AgentID: auraagent.DefaultID, ToolName: tool, GrantedBy: principal.OwnerID, GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if _, err := principal.NewStandingGrantStore(r.db).Grant(r.t.Context(), &grant); err != nil {
 		r.t.Fatalf("Grant: %v", err)
 	}
 }

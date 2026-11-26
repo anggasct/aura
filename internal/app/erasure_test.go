@@ -101,7 +101,7 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 			t.Errorf("session %s exists = %v, want %v", id, exists, want)
 		}
 	}
-	if granted, _ := store.NewPrincipalGrantStore(db).Active(t.Context(), "discord:23", "office"); !granted {
+	if granted, _ := principal.NewPrincipalGrantStore(db).Active(t.Context(), "discord:23", "office"); !granted {
 		t.Fatal("retention removed the pairing grant")
 	}
 	again, err := sweepRetention(t.Context(), loaded.Config, db, "", now)
