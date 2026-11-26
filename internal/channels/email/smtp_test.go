@@ -3,13 +3,16 @@ package email
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"net"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 const shortTimeout = 300 * time.Millisecond
@@ -36,7 +39,7 @@ func commandVerbs(connection *smtpConnection) []string {
 
 func wantCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	if code, ok := CodeOf(err); !ok || code != want {
+	if !fault.HasCode(err, want) {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}
 }
@@ -250,6 +253,9 @@ func TestSMTPMailer_FailureAfterDataIsAmbiguousOrRejectedNeverRetriedHere(t *tes
 			mailer.stepTimeout = shortTimeout
 			err := mailer.Submit(t.Context(), wireSubmission(t))
 			wantCode(t, err, tc.want)
+			if tc.want == ErrorCodeDeliveryAmbiguous && !errors.Is(err, runtimechannelhost.ErrDeliveryAmbiguous) {
+				t.Errorf("error %v does not match ErrDeliveryAmbiguous", err)
+			}
 			if len(server.received()) != 1 || len(server.sessions()) != 1 {
 				t.Errorf("messages %d, sessions %d; want exactly one of each", len(server.received()), len(server.sessions()))
 			}
@@ -259,6 +265,24 @@ func TestSMTPMailer_FailureAfterDataIsAmbiguousOrRejectedNeverRetriedHere(t *tes
 				}
 			}
 		})
+	}
+}
+
+func TestSMTPMailer_WriteFailureAfterDataPreservesCause(t *testing.T) {
+	authority := newAuthority(t)
+	server := newFakeSMTP(t, authority)
+	server.script(smtpBehavior{afterData: "drop_during_body"})
+	mailer := newTestMailer(t, server, authority)
+	mailer.stepTimeout = shortTimeout
+	payload := []byte("From: " + testAddress + "\r\nTo: " + ownerAddress + "\r\n\r\n" + strings.Repeat("a", 4<<20) + "\r\n")
+	err := mailer.Submit(t.Context(), &Submission{From: testAddress, To: ownerAddress, Message: payload})
+	wantCode(t, err, ErrorCodeDeliveryAmbiguous)
+	if !errors.Is(err, runtimechannelhost.ErrDeliveryAmbiguous) {
+		t.Fatalf("error %v does not match ErrDeliveryAmbiguous", err)
+	}
+	var opErr *net.OpError
+	if !errors.As(err, &opErr) {
+		t.Fatalf("error %v lost underlying *net.OpError write cause", err)
 	}
 }
 

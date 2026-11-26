@@ -192,7 +192,7 @@ func (b *build) buildServerTools(ctx context.Context) error {
 	if err := b.registerModule("handoff", handoffMod); err != nil {
 		return err
 	}
-	b.builtin.SetEmailOutbox(&emailOutbox{adapters: s.emailMailboxes})
+	b.builtin.SetEmailOutbox(&emailOutboxBridge{outbox: email.NewOutbox(s.emailMailboxes)})
 	pluginMod, err := buildPluginModule(ctx, cfg, db, b.builtin.Broker(), b.result.CapabilityReport, b.logger)
 	if err != nil {
 		return err

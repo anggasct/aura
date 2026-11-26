@@ -7,15 +7,6 @@ internal/channels/discord Adapter.SetPrincipalResolver  # the adapter takes this
 internal/channels/discord Adapter.SetSecretVault  # the adapter takes this collaborator at construction when the channels move
 internal/channels/discord Adapter.SetSessionResolver  # the adapter takes this collaborator at construction when the channels move
 internal/channels/discord Adapter.SetVisionService  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetAccess  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetAdmissionObserver  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetDropObserver  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetHandoffNotifier  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetMediaStore  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetOwnerRoute  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetPersonaRouter  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetPrincipalResolver  # the adapter takes this collaborator at construction when the channels move
-internal/channels/email Adapter.SetVisionService  # the adapter takes this collaborator at construction when the channels move
 internal/channels/telegram Adapter.SetAccess  # the adapter takes this collaborator at construction when the channels move
 internal/channels/telegram Adapter.SetAdmissionObserver  # the adapter takes this collaborator at construction when the channels move
 internal/channels/telegram Adapter.SetCommands  # the adapter takes this collaborator at construction when the channels move

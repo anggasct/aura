@@ -12,14 +12,21 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type approvalAdapter interface {
@@ -263,35 +270,122 @@ func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute
 	if !bc.cfg.Channels.Email.Enabled {
 		return nil, nil, nil, nil
 	}
-	adapters := make(emailAdapters, 0, len(bc.cfg.Channels.Email.Accounts))
+	cursors, err := email.NewSQLiteCursorStore(bc.db)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(bc.db))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(bc.db, bc.artifactRoot, int64(bc.cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	visionSvc := newVisionService(bc.cfg, bc.db, bc.artifactRoot)
+	adapters := make(email.Adapters, 0, len(bc.cfg.Channels.Email.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Email.Accounts))
 	for i := range bc.cfg.Channels.Email.Accounts {
-		adapter, err := newEmailAdapter(bc.cfg, &bc.cfg.Channels.Email.Accounts[i], bc.db, bc.artifactRoot, bc.logger)
+		account := &bc.cfg.Channels.Email.Accounts[i]
+		connector, err := email.NewIMAPConnector(account)
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		adapter.SetPrincipalResolver(bc.owners)
-		adapter.SetPersonaRouter(bc.router)
+		mailer, err := email.NewSMTPMailer(account)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		executor, err := toolsbuiltin.NewChannelEffects(bc.db, bc.logger)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		settings := channelAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
-		adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-			bc.principalRec.Admitted(ctx, string(class), principal.ChannelEmail)
+		adapter, err := email.New(&email.Deps{
+			Config:            &bc.cfg.Channels.Email,
+			Account:           account,
+			Connector:         connector,
+			Mailer:            mailer,
+			Cursors:           cursors,
+			Effects:           executor,
+			Sessions:          sessions,
+			Logger:            bc.logger,
+			PrincipalResolver: bc.owners,
+			PersonaRouter:     bc.router,
+			Access:            &email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure},
+			OwnerRoute:        ownerRoute,
+			HandoffNotifier:   handoffs,
+			Media:             mediaStore,
+			Vision:            visionSvc,
+			OnAdmitted: func(ctx context.Context, class principal.Class) {
+				bc.principalRec.Admitted(ctx, string(class), principal.ChannelEmail)
+			},
+			OnDropped: func(ctx context.Context, reason string) {
+				bc.ingressRec.Dropped(ctx, principal.ChannelEmail, reason)
+			},
 		})
-		adapter.SetDropObserver(func(ctx context.Context, reason string) {
-			bc.ingressRec.Dropped(ctx, principal.ChannelEmail, reason)
-		})
-		adapter.SetOwnerRoute(ownerRoute)
-		adapter.SetHandoffNotifier(handoffs)
+		if err != nil {
+			return nil, nil, nil, err
+		}
 		adapters = append(adapters, adapter)
 		ports = append(ports, adapter)
 	}
-	checks := []health.RegisteredCheck{
-		{
-			ID:          "email",
-			Checker:     adapters,
-			Timeout:     time.Duration(bc.cfg.Health.CheckTimeout),
-			Remediation: email.RemediationReviewMailbox,
-		},
+	checks := adapters.HealthChecks()
+	for i := range checks {
+		if checks[i].Timeout == 0 {
+			checks[i].Timeout = time.Duration(bc.cfg.Health.CheckTimeout)
+		}
 	}
 	return ports, checks, []*email.Adapter(adapters), nil
+}
+
+type emailOutboxBridge struct {
+	outbox *email.Outbox
+}
+
+var _ toolsbuiltin.EmailOutbox = (*emailOutboxBridge)(nil)
+
+func (b *emailOutboxBridge) RouteOf(sessionID string) (toolsbuiltin.EmailRoute, bool) {
+	route, ok := b.outbox.RouteOf(sessionID)
+	return toolsbuiltin.EmailRoute{Account: route.Account, Sender: route.Sender}, ok
+}
+
+func (b *emailOutboxBridge) Send(ctx context.Context, message *toolsbuiltin.EmailMessage) (string, error) {
+	if message == nil {
+		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "the message cannot be sent as written")
+	}
+	messageID, err := b.outbox.Send(ctx, &email.Outgoing{
+		SessionID:      message.SessionID,
+		IdempotencyKey: message.IdempotencyKey,
+		To:             message.To,
+		Subject:        message.Subject,
+		Body:           message.Body,
+	})
+	if err == nil {
+		return messageID, nil
+	}
+	if ctx.Err() != nil {
+		return "", ctx.Err()
+	}
+	if errors.Is(err, email.ErrNoRoute) {
+		return "", toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "this session has no email account to send from")
+	}
+	switch code, _ := fault.CodeOf[email.ErrorCode](err); code {
+	case email.ErrorCodeMessageInvalid, email.ErrorCodeInvalidArgument:
+		return "", toolbroker.Errorf(toolbroker.ResultInvalidArgument, "the message cannot be sent as written")
+	case email.ErrorCodeDeliveryAmbiguous:
+		return "", toolbroker.Errorf(toolbroker.ResultExecutionFailed, "the delivery outcome is unknown and the message was not resent")
+	default:
+		return "", toolbroker.Errorf(toolbroker.ResultExecutionFailed, "email could not be sent")
+	}
+}
+
+func recoverEmailEffects(ctx context.Context, cfg *appconfig.Config, db *sql.DB, logger *slog.Logger) error {
+	if !cfg.Channels.Email.Enabled {
+		return nil
+	}
+	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if err != nil {
+		return err
+	}
+	return email.RecoverEffects(ctx, executor.Journal(), logger)
 }
