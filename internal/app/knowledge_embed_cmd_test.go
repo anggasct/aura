@@ -655,7 +655,7 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
 		t.Fatalf("embedding reached no loopback server: %v", err)
 	}
-	client := newKnowledgeHTTPClient(nil)
+	client := knowledge.NewHTTPClient(nil)
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, strings.Replace(rig.provider.server.URL, "http://", "https://", 1), http.NoBody)
 	if err != nil {
 		t.Fatalf("request: %v", err)

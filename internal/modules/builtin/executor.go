@@ -36,7 +36,6 @@ type Executor struct {
 	handoff   *handoffHolder
 	emails    *emailHolder
 	workflows *workflowHolder
-	knowledge *knowledgeHolder
 	code      *codeHolder
 	artifacts storage.ArtifactStore
 	host      []string
@@ -84,9 +83,8 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 	handoff := &handoffHolder{}
 	emails := &emailHolder{}
 	workflows := &workflowHolder{}
-	knowledge := &knowledgeHolder{}
 	code := &codeHolder{}
-	adapters, err := builtinAdapters(toolsCfg, handoff, emails, workflows, knowledge, code)
+	adapters, err := builtinAdapters(toolsCfg, handoff, emails, workflows, code)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +116,7 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 	if err != nil {
 		return nil, err
 	}
-	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, knowledge: knowledge, code: code, artifacts: artifacts, host: host}, nil
+	return &Executor{broker: broker, journal: journal, handoff: handoff, emails: emails, workflows: workflows, code: code, artifacts: artifacts, host: host}, nil
 }
 
 func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error) {
@@ -135,7 +133,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	return effect.NewExecutor(journal)
 }
 
-func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *emailHolder, workflows *workflowHolder, knowledge *knowledgeHolder, code *codeHolder) (map[string]toolbroker.Adapter, error) {
+func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *emailHolder, workflows *workflowHolder, code *codeHolder) (map[string]toolbroker.Adapter, error) {
 	if toolsCfg == nil {
 		return nil, errors.New("tools configuration is required")
 	}
@@ -188,7 +186,6 @@ func builtinAdapters(toolsCfg *config.Tools, handoff *handoffHolder, emails *ema
 	adapters["web_search@v1"] = searchAdapter
 	adapters[tools.HandoffToolName+"@"+tools.Version] = handoff.adapter
 	adapters[tools.EmailSendToolName+"@"+tools.Version] = emails.adapter
-	adapters[tools.KBSearchToolName+"@"+tools.Version] = knowledge.adapter
 	adapters[codeKey()] = code.adapter
 	maps.Copy(adapters, workflows.adapters())
 	return adapters, nil

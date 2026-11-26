@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
@@ -25,14 +26,19 @@ type kbRetrievalRig struct {
 func newKBRetrievalRig(t *testing.T) *kbRetrievalRig {
 	t.Helper()
 	cfg, db, dbPath := kbTestStorage(t, writeMemoryCLIConfig(t))
-	pool, err := openKnowledgeReadPool(t.Context(), dbPath)
+	pool, err := sqlite.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
-		t.Fatalf("openKnowledgeReadPool: %v", err)
+		t.Fatalf("OpenReadOnly: %v", err)
 	}
+	pool.SetMaxOpenConns(4)
 	t.Cleanup(func() { _ = pool.Close() })
-	retriever, err := newKnowledgeRetriever(cfg, pool)
+	index, err := knowledge.NewSQLiteIndex(pool)
 	if err != nil {
-		t.Fatalf("newKnowledgeRetriever: %v", err)
+		t.Fatalf("NewSQLiteIndex: %v", err)
+	}
+	retriever, err := knowledge.NewRetriever(index, &knowledgeSecrets{cfg: cfg})
+	if err != nil {
+		t.Fatalf("NewRetriever: %v", err)
 	}
 	service, err := newKnowledgeService(cfg, db, nil)
 	if err != nil {

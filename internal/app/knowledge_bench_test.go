@@ -59,10 +59,11 @@ func BenchmarkKnowledgeSearchLargeScope(b *testing.B) {
 	b.Cleanup(func() { _ = db.Close() })
 	seedBulkKBScope(b, db, "bench", benchTargetChunks, benchTargetContent())
 	seedBulkKBScope(b, db, "noise", benchNoiseChunks, benchNoiseContent())
-	pool, err := openKnowledgeReadPool(b.Context(), path)
+	pool, err := sqlite.OpenReadOnly(b.Context(), path)
 	if err != nil {
-		b.Fatalf("openKnowledgeReadPool: %v", err)
+		b.Fatalf("OpenReadOnly: %v", err)
 	}
+	pool.SetMaxOpenConns(4)
 	b.Cleanup(func() { _ = pool.Close() })
 	kbIndex, err := knowledge.NewSQLiteIndex(pool)
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -52,6 +53,7 @@ const (
 	PartDurable   Part = "durable"
 	PartWorkflows Part = "workflows"
 	PartModels    Part = "models"
+	PartKnowledge Part = "knowledge"
 )
 
 type Options struct {
@@ -106,6 +108,7 @@ type App struct {
 	runtime     durable.Runtime
 	interpreter *workflow.Interpreter
 	models      *model.Registry
+	knowledge   *knowledge.Service
 
 	mu    sync.Mutex
 	state appState
@@ -127,7 +130,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge,
 	}, nil
 }
 
@@ -231,7 +234,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -342,6 +345,7 @@ type build struct {
 	models       *model.Registry
 	runtime      durable.Runtime
 	interpreter  *workflow.Interpreter
+	knowledge    *knowledge.Service
 	quarantined  []workflow.Quarantined
 	artifactRoot string
 
@@ -397,7 +401,16 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 		}
 	}
 	if slices.Contains(parts, PartModels) {
-		return b.newModelRegistry(ctx, evaluationModelOptions(b.cfg, b.db))
+		if err := b.newModelRegistry(ctx, evaluationModelOptions(b.cfg, b.db)); err != nil {
+			return err
+		}
+	}
+	if slices.Contains(parts, PartKnowledge) {
+		service, err := newKnowledgeService(b.cfg, b.db, nil)
+		if err != nil {
+			return err
+		}
+		b.knowledge = service
 	}
 	return nil
 }

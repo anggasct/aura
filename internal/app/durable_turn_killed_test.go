@@ -176,7 +176,7 @@ func retrievals(t *testing.T, events []turn.Event) []retrievedPayload {
 	t.Helper()
 	var payloads []retrievedPayload
 	for i := range events {
-		if events[i].Kind != turn.EventKindKnowledgeRetrieved {
+		if events[i].Kind != knowledge.EventKindRetrieved {
 			continue
 		}
 		if strings.Contains(string(events[i].Payload), originalKnowledge) {

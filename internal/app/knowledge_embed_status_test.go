@@ -12,14 +12,18 @@ import (
 
 func embeddingFindings(t *testing.T, rig *kbRetrievalRig) []health.Finding {
 	t.Helper()
-	registry, err := buildHealthRegistry(rig.cfg, nil, func() (bool, string) { return true, "ok" }, func() (health.ProcessStatus, bool) { return health.ProcessStatus{}, false })
+	extra, err := knowledgeStatusChecks(rig.cfg)
+	if err != nil {
+		t.Fatalf("knowledgeStatusChecks: %v", err)
+	}
+	registry, err := buildHealthRegistry(rig.cfg, nil, func() (bool, string) { return true, "ok" }, func() (health.ProcessStatus, bool) { return health.ProcessStatus{}, false }, extra...)
 	if err != nil {
 		t.Fatalf("buildHealthRegistry: %v", err)
 	}
 	var found []health.Finding
 	all := registry.Evaluate(t.Context())
 	for i := range all {
-		if all[i].Component == health.ComponentKnowledgeEmbedding {
+		if all[i].Component == knowledge.ComponentKnowledgeEmbedding {
 			found = append(found, all[i])
 		}
 	}

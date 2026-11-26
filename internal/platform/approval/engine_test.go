@@ -639,3 +639,59 @@ func TestEngineRegisterAndUnregisterRule(t *testing.T) {
 		t.Fatal("expected evaluate to fail after unregistering rule")
 	}
 }
+
+func TestEngineRegisterRulesIsAtomicOnFailure(t *testing.T) {
+	engine := newTestEngine(t)
+	ctx := t.Context()
+
+	valid := Rule{
+		ToolName:     "batch_tool_a",
+		AllowedTrust: []TrustLabel{TrustOwnerInput},
+		Constraints:  Constraints{MaxOutputBytes: 1024},
+	}
+	overwriteReadFile := Rule{
+		ToolName:         "read_file",
+		RequiresApproval: true,
+		AllowedTrust:     []TrustLabel{TrustOwnerInput},
+	}
+	invalid := Rule{
+		ToolName:    "batch_tool_b",
+		Constraints: Constraints{MaxOutputBytes: -1},
+	}
+
+	if err := engine.RegisterRules([]Rule{overwriteReadFile, valid, invalid}); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("RegisterRules with invalid entry err = %v, want %q", err, ErrorCodeInvalidArgument)
+	}
+	reqA := testRequest("batch_tool_a")
+	if _, err := engine.Evaluate(ctx, &reqA); !fault.HasCode(err, ErrorCodePolicyDenied) {
+		t.Fatalf("batch_tool_a was registered despite batch failure: %v", err)
+	}
+	reqRead := testRequest("read_file")
+	dec, err := engine.Evaluate(ctx, &reqRead)
+	if err != nil || dec.Outcome != OutcomeAllow {
+		t.Fatalf("pre-existing read_file rule mutated: dec = %+v, err = %v", dec, err)
+	}
+
+	if err := engine.RegisterRules([]Rule{valid, valid}); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("RegisterRules with duplicate tool name err = %v, want %q", err, ErrorCodeInvalidArgument)
+	}
+	if _, err := engine.Evaluate(ctx, &reqA); !fault.HasCode(err, ErrorCodePolicyDenied) {
+		t.Fatalf("batch_tool_a was registered despite duplicate failure: %v", err)
+	}
+
+	second := Rule{
+		ToolName:     "batch_tool_b",
+		AllowedTrust: []TrustLabel{TrustOwnerInput},
+		Constraints:  Constraints{MaxOutputBytes: 2048},
+	}
+	if err := engine.RegisterRules([]Rule{valid, second}); err != nil {
+		t.Fatalf("RegisterRules valid batch: %v", err)
+	}
+	if dec, err := engine.Evaluate(ctx, &reqA); err != nil || dec.Outcome != OutcomeAllow {
+		t.Fatalf("Evaluate batch_tool_a = %+v, %v", dec, err)
+	}
+	reqB := testRequest("batch_tool_b")
+	if dec, err := engine.Evaluate(ctx, &reqB); err != nil || dec.Outcome != OutcomeAllow {
+		t.Fatalf("Evaluate batch_tool_b = %+v, %v", dec, err)
+	}
+}

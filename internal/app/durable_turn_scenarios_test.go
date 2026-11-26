@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
@@ -46,7 +48,7 @@ type stubTool struct {
 type lifeWiring struct {
 	renderer     runtimeengine.SkillRenderer
 	skillContext runtimeadk.SkillContextProvider
-	knowledge    runtimeadk.KnowledgeContextProvider
+	knowledge    turn.ContextProvider
 }
 
 type turnScenario struct {
@@ -193,38 +195,70 @@ func transientSkillRender(_ *testing.T, ledger *turnLedger) lifeWiring {
 	return lifeWiring{renderer: stub, skillContext: stub}
 }
 
-type ledgerKnowledge struct {
-	ledger   *turnLedger
-	evidence turn.KnowledgeEvidence
-	err      error
+type ledgerKnowledgeIndex struct {
+	ledger *turnLedger
+	hits   []knowledge.Hit
+	err    error
 }
 
-func (k *ledgerKnowledge) KnowledgeContext(_ context.Context, req *turn.TurnRequest) (turn.KnowledgeEvidence, error) {
-	scope, err := json.Marshal(req.Knowledge)
+func (k *ledgerKnowledgeIndex) ScopeChunks(context.Context, []string) (int, error) {
+	return max(len(k.hits), 1), nil
+}
+
+func (k *ledgerKnowledgeIndex) TermFrequency(context.Context, []string, string, int) (int, error) {
+	return 1, nil
+}
+
+func (k *ledgerKnowledgeIndex) Search(_ context.Context, scope, _ []string, _ int) ([]knowledge.Hit, error) {
+	encoded, err := json.Marshal(scope)
 	if err != nil {
-		return turn.KnowledgeEvidence{}, err
+		return nil, err
 	}
-	if _, err := k.ledger.record(knowledgeCalls, string(scope)); err != nil {
-		return turn.KnowledgeEvidence{}, err
+	if _, err := k.ledger.record(knowledgeCalls, string(encoded)); err != nil {
+		return nil, err
 	}
-	return k.evidence, k.err
+	if k.err != nil {
+		return nil, k.err
+	}
+	return k.hits, nil
 }
 
-func knowledgeAcrossLives(_ *testing.T, ledger *turnLedger) lifeWiring {
-	block := turn.KnowledgeContextStart + ": reference passages]\npassage [source=faq.md#1 trust=untrusted_external] heading: \"Refunds\" text: \"" + originalKnowledge + "\"\n" + turn.KnowledgeContextEnd
-	stub := &ledgerKnowledge{ledger: ledger, evidence: turn.KnowledgeEvidence{Block: block, ChunkIDs: []string{originalChunk}, Retrieved: knowledgeRetrievals}}
+func newLedgerKnowledgeProvider(t *testing.T, idx knowledge.Index) turn.ContextProvider {
+	t.Helper()
+	retriever, err := knowledge.NewRetriever(idx, emptyVaultSource{})
+	if err != nil {
+		t.Fatalf("NewRetriever: %v", err)
+	}
+	provider, err := knowledge.NewContextProvider(retriever, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("NewContextProvider: %v", err)
+	}
+	return provider
+}
+
+func knowledgeAcrossLives(t *testing.T, ledger *turnLedger) lifeWiring {
+	t.Helper()
+	idx := &ledgerKnowledgeIndex{
+		ledger: ledger,
+		hits: []knowledge.Hit{
+			{ChunkID: originalChunk, Collection: knowledgeScope, Label: "faq.md", Heading: "Refunds", Ordinal: 1, Content: originalKnowledge + " " + strings.Repeat("a", 5000)},
+			{ChunkID: "kbc_extra_1", Collection: knowledgeScope, Label: "faq.md", Heading: "Refunds", Ordinal: 2, Content: strings.Repeat("b", 2000)},
+			{ChunkID: "kbc_extra_2", Collection: knowledgeScope, Label: "faq.md", Heading: "Refunds", Ordinal: 3, Content: strings.Repeat("c", 2000)},
+		},
+	}
 	if ledger.life > 1 {
-		stub = &ledgerKnowledge{
-			ledger:   ledger,
-			evidence: turn.KnowledgeEvidence{Block: turn.KnowledgeContextStart + "]\n" + changedKnowledge + "\n" + turn.KnowledgeContextEnd, ChunkIDs: []string{"kbc_changed"}, Retrieved: 9},
-			err:      errors.New("index unavailable after the restart"),
+		idx = &ledgerKnowledgeIndex{
+			ledger: ledger,
+			hits:   []knowledge.Hit{{ChunkID: "kbc_changed", Collection: knowledgeScope, Label: "faq.md", Heading: "Refunds", Ordinal: 1, Content: changedKnowledge}},
+			err:    errors.New("index unavailable after the restart"),
 		}
 	}
-	return lifeWiring{knowledge: stub}
+	return lifeWiring{knowledge: newLedgerKnowledgeProvider(t, idx)}
 }
 
-func failingKnowledge(_ *testing.T, ledger *turnLedger) lifeWiring {
-	return lifeWiring{knowledge: &ledgerKnowledge{ledger: ledger, err: errors.New("index unavailable")}}
+func failingKnowledge(t *testing.T, ledger *turnLedger) lifeWiring {
+	t.Helper()
+	return lifeWiring{knowledge: newLedgerKnowledgeProvider(t, &ledgerKnowledgeIndex{ledger: ledger, err: errors.New("index unavailable")})}
 }
 
 type emptyVault struct{}
@@ -306,7 +340,7 @@ func embeddingAcrossLives(t *testing.T, ledger *turnLedger) lifeWiring {
 	if err != nil {
 		t.Fatalf("NewRetriever: %v", err)
 	}
-	provider, err := knowledge.NewContextProvider(retriever)
+	provider, err := knowledge.NewContextProvider(retriever, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}

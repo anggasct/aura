@@ -38,6 +38,5 @@ internal/channels/terminal Console.SetTTY  # the console takes this collaborator
 internal/modules/builtin Executor.SetCodeRunner  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetEmailOutbox  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetHandoffOpener  # builtin assembles tool adapters until each module provides its tools
-internal/modules/builtin Executor.SetKnowledgeSearcher  # builtin assembles tool adapters until each module provides its tools
 internal/modules/builtin Executor.SetWorkflowController  # builtin assembles tool adapters until each module provides its tools
 internal/modules/child Handler.SetSignaler  # until the child handler takes its signaler at construction

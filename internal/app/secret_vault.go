@@ -122,7 +122,8 @@ func additionalConfiguredSecrets(cfg *appconfig.Config) []configuredSecret {
 	if ref := cfg.Telemetry.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 		secrets = append(secrets, referenceSecret("telemetry_credential", ref))
 	}
-	if embeddingConfig := configuredEmbedding(cfg); embeddingConfig != nil {
+	if cfg.Knowledge != nil && cfg.Knowledge.Embedding != nil {
+		embeddingConfig := cfg.Knowledge.Embedding
 		if ref := embeddingConfig.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {
 			entry := referenceSecret("knowledge_embedding_credential", ref)
 			entry.optional = true

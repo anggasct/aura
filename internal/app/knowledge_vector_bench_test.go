@@ -90,16 +90,17 @@ func BenchmarkKnowledgeHybridSearchOverAHundredThousandVectors(b *testing.B) {
 	seedBulkKBScope(b, db, "bench", benchVectorChunks, `'passage ' || i || ' about topic ' || (i % 50) || CASE WHEN i % 1000 = 0 THEN ' rare' ELSE '' END`)
 	seedBenchVectors(b, db, "bench")
 
-	pool, err := openKnowledgeReadPool(b.Context(), path)
+	pool, err := sqlite.OpenReadOnly(b.Context(), path)
 	if err != nil {
-		b.Fatalf("openKnowledgeReadPool: %v", err)
+		b.Fatalf("OpenReadOnly: %v", err)
 	}
+	pool.SetMaxOpenConns(4)
 	b.Cleanup(func() { _ = pool.Close() })
 	loader, err := sqlite.OpenReadOnly(b.Context(), path)
 	if err != nil {
 		b.Fatalf("OpenReadOnly: %v", err)
 	}
-	loader.SetMaxOpenConns(knowledgeLoaderConns)
+	loader.SetMaxOpenConns(1)
 	b.Cleanup(func() { _ = loader.Close() })
 
 	reader, err := knowledge.NewSQLiteVectorSource(pool)
