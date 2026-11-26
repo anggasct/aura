@@ -15,13 +15,12 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func hasErrorCode(err error, want ErrorCode) bool {
-	code, ok := CodeOf(err)
-	return ok && code == want
+	return fault.HasCode(err, want)
 }
 
 func TestNewRunnerRejectsIncompleteOptions(t *testing.T) {
@@ -51,7 +50,7 @@ func TestNewRunnerRejectsIncompleteOptions(t *testing.T) {
 		{name: "zero run directory limit", mutate: func(o *Options) { o.Limits.MaxRunDirBytes = 0 }},
 		{name: "zero file limit", mutate: func(o *Options) { o.Limits.MaxFileBytes = 0 }},
 		{name: "zero output file limit", mutate: func(o *Options) { o.Limits.MaxOutputFiles = 0 }},
-		{name: "output file limit above the tool maximum", mutate: func(o *Options) { o.Limits.MaxOutputFiles = tools.MaxCodeOutputFiles + 1 }},
+		{name: "output file limit above the tool maximum", mutate: func(o *Options) { o.Limits.MaxOutputFiles = MaxCodeOutputFiles + 1 }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

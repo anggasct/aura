@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestDefaultManifestPinsEveryRuntime(t *testing.T) {
@@ -274,7 +276,7 @@ func FuzzParseManifest(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		manifest, err := ParseManifest(data)
 		if err != nil {
-			if _, ok := CodeOf(err); !ok {
+			if _, ok := fault.CodeOf[ErrorCode](err); !ok {
 				t.Fatalf("error without a code: %v", err)
 			}
 			return

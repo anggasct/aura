@@ -6,7 +6,5 @@ internal/channels/kit/chatcommand  # until this channel's errors move to platfor
 internal/channels/kit/media  # until this channel's errors move to platform/fault with the channels
 internal/channels/telegram  # until this channel's errors move to platform/fault with the channels
 internal/modules/child  # until this module's errors move to platform/fault with the module
-internal/modules/codeexec  # until this module's errors move to platform/fault with the module
-internal/modules/codeexec/interpreter  # until this module's errors move to platform/fault with the module
 internal/modules/fetch  # until this module's errors move to platform/fault with the module
 internal/modules/gitsync  # until this module's errors move to platform/fault with the module

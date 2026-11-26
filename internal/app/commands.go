@@ -10,6 +10,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
@@ -37,6 +38,7 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(mcp.Commands(mcpOpener(gf))...)
 	root.AddCommand(skills.Commands(skillsOpener(gf))...)
 	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
+	root.AddCommand(codeexec.Commands(interpreterOpener(gf))...)
 }
 
 func mcpTrustRegistryPath(cfg *appconfig.Config) (string, error) {

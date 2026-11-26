@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -341,7 +342,7 @@ func TestLiveTamperedBundleIsUnavailable(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err = runner.Execute(t.Context(), &Request{Runtime: tc.runtime, Source: tc.source})
-			if code, _ := CodeOf(err); code != ErrorCodeUnavailable {
+			if !fault.HasCode(err, ErrorCodeUnavailable) {
 				t.Fatalf("Execute on a tampered bundle = %v, want %s", err, ErrorCodeUnavailable)
 			}
 			if outcome := host.execute(t, runner, "javascript", "console.log(1)", ""); outcome.Class != ClassOK {
