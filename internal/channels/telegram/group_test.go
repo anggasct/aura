@@ -363,7 +363,7 @@ func TestGroupSendersResolveToTheSameClassesAsPrivateChats(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig := newGroupRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, public: tc.public, settings: AccessSettings{Pairing: granted}})
+			rig := newGroupRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, public: tc.public, settings: access.Settings{Pairing: granted}})
 			rig.runGroup(t, mentioning(10, tc.userID, handle+" hello", handle))
 			if tc.wantID == "" {
 				rig.assertQuiet(t, tc.wantDrops...)
@@ -385,12 +385,12 @@ func TestPairingNeverIssuesACodeInAGroup(t *testing.T) {
 	pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD-2345"}}
 	trusted := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
 	t.Run("unknown sender", func(t *testing.T) {
-		rig := newGroupRig(t, accessOpts{definition: trusted, settings: AccessSettings{Pairing: pairing}})
+		rig := newGroupRig(t, accessOpts{definition: trusted, settings: access.Settings{Pairing: pairing}})
 		rig.runGroup(t, mentioning(10, strangerID, handle+" let me in", handle))
 		rig.assertQuiet(t, "author_not_allowed")
 	})
 	t.Run("public sender below the audience", func(t *testing.T) {
-		rig := newGroupRig(t, accessOpts{definition: trusted, public: true, settings: AccessSettings{Pairing: pairing}})
+		rig := newGroupRig(t, accessOpts{definition: trusted, public: true, settings: access.Settings{Pairing: pairing}})
 		rig.runGroup(t, mentioning(10, publicUserID, handle+" let me in", handle))
 		rig.assertQuiet(t, "audience")
 	})
@@ -404,7 +404,7 @@ func TestGroupSendersPassThroughTheSharedGates(t *testing.T) {
 	trustedID := strconv.Itoa(allowedUserID)
 	t.Run("budget refusal answers inside the topic", func(t *testing.T) {
 		budgets := &fakeBudgets{refusal: access.BudgetRefusalExhausted}
-		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, settings: AccessSettings{Budgets: budgets}})
+		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, settings: access.Settings{Budgets: budgets}})
 		rig.runGroup(t, inTopic(mentioning(10, allowedUserID, handle+" hello", handle), 7))
 		rig.assertQuiet(t, "budget_exhausted")
 		sends := rig.h.api.sends()
@@ -418,7 +418,7 @@ func TestGroupSendersPassThroughTheSharedGates(t *testing.T) {
 	t.Run("eval gate answers in the group", func(t *testing.T) {
 		evals := &fakeEvals{}
 		trusted := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted}
-		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, definition: trusted, settings: AccessSettings{Evals: evals}})
+		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, definition: trusted, settings: access.Settings{Evals: evals}})
 		rig.runGroup(t, mentioning(10, allowedUserID, handle+" hello", handle))
 		rig.assertQuiet(t, "persona_eval_missing")
 		if got := sentTo(rig.h.api, groupChatID); len(got) != 1 {
@@ -427,7 +427,7 @@ func TestGroupSendersPassThroughTheSharedGates(t *testing.T) {
 	})
 	t.Run("forget-me addressed to the bot", func(t *testing.T) {
 		eraser := &fakeEraser{}
-		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, settings: AccessSettings{Erasure: eraser}})
+		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, settings: access.Settings{Erasure: eraser}})
 		command := groupMessage(10, allowedUserID, "/forgetme"+handle+" confirm")
 		command.Message.Entities = []messageEntity{entityOf(command.Message.Text, "/forgetme"+handle, entityBotCommand)}
 		rig.runGroup(t, command)
@@ -440,7 +440,7 @@ func TestGroupSendersPassThroughTheSharedGates(t *testing.T) {
 	})
 	t.Run("open handoff holds the message", func(t *testing.T) {
 		handoffs := &fakeHandoffs{state: access.HandoffStateOpen}
-		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, settings: AccessSettings{Handoffs: handoffs}})
+		rig := newGroupRig(t, accessOpts{allowed: []string{trustedID}, settings: access.Settings{Handoffs: handoffs}})
 		rig.runGroup(t, mentioning(10, allowedUserID, handle+" hello", handle))
 		if accepted := rig.sink.accepted(); len(accepted) != 0 {
 			t.Errorf("held message reached the runtime: %d envelopes", len(accepted))

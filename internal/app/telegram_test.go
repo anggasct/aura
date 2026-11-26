@@ -6,8 +6,8 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/telegram"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -17,7 +17,7 @@ func enabledTelegramConfig() appconfig.Config {
 	defaults := appconfig.Default()
 	defaults.Owner = &principal.Owner{Identities: []string{"telegram:424242"}}
 	defaults.Channels.Telegram.Enabled = true
-	defaults.Channels.Telegram.Accounts = []config.TelegramAccount{{
+	defaults.Channels.Telegram.Accounts = []telegram.Account{{
 		Name:        "pocket",
 		BotTokenRef: secrettest.Ref("env://AURA_TELEGRAM_BOT_TOKEN"),
 		Persona:     auraagent.DefaultID,
@@ -83,7 +83,7 @@ func TestBuildSecretVaultRedactsTelegramTokens(t *testing.T) {
 
 func webhookTelegramConfig() appconfig.Config {
 	cfg := enabledTelegramConfig()
-	cfg.Channels.Telegram.Accounts[0].Mode = config.TelegramModeWebhook
+	cfg.Channels.Telegram.Accounts[0].Mode = telegram.ModeWebhook
 	cfg.Channels.Telegram.Accounts[0].WebhookSecretRef = secrettest.Ref("env://AURA_TELEGRAM_WEBHOOK_SECRET")
 	cfg.Channels.Telegram.Webhook.PublicBaseURL = "https://aura.example.com"
 	return cfg
@@ -106,7 +106,7 @@ func TestBuildTelegramWebhookServer(t *testing.T) {
 			}
 			listener, err := buildTelegramWebhookServer(&tc.cfg, ports)
 			if tc.wantErr {
-				if code, ok := telegram.CodeOf(err); !ok || code != telegram.ErrorCodeInvalidArgument || listener != nil {
+				if !fault.HasCode(err, telegram.ErrorCodeInvalidArgument) || listener != nil {
 					t.Fatalf("buildTelegramWebhookServer() = %v, %v; want invalid_argument", listener, err)
 				}
 				return

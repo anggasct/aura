@@ -1,10 +1,9 @@
 package config
 
 import (
-	"time"
-
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/channels/terminal"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
@@ -37,10 +36,10 @@ import (
 )
 
 type Channels struct {
-	Discord  discord.Config        `json:"discord"`
-	Telegram legacyconfig.Telegram `json:"telegram"`
-	Email    email.Config          `json:"email"`
-	HTTP     legacyconfig.HTTP     `json:"http"`
+	Discord  discord.Config    `json:"discord"`
+	Telegram telegram.Config   `json:"telegram"`
+	Email    email.Config      `json:"email"`
+	HTTP     legacyconfig.HTTP `json:"http"`
 }
 
 type Config struct {
@@ -104,21 +103,9 @@ func Default() Config {
 		Terminal:     terminal.Default(),
 		Webhook:      platformwebhook.Default(),
 		Channels: Channels{
-			Discord: discord.Default(),
-			Telegram: legacyconfig.Telegram{
-				Polling: legacyconfig.TelegramPolling{
-					Timeout:    configkit.Duration(30 * time.Second),
-					MaxBackoff: configkit.Duration(time.Minute),
-				},
-				MinEditInterval:    configkit.Duration(2 * time.Second),
-				MaxAttachmentBytes: legacyconfig.TelegramMaxAttachmentBytes,
-				Webhook: legacyconfig.TelegramWebhook{
-					ListenAddress:  legacyconfig.TelegramWebhookListenAddress,
-					MaxBodyBytes:   legacyconfig.TelegramWebhookMaxBodyBytes,
-					MaxConnections: legacyconfig.TelegramWebhookMaxConnections,
-				},
-			},
-			Email: email.Default(),
+			Discord:  discord.Default(),
+			Telegram: telegram.Default(),
+			Email:    email.Default(),
 			HTTP: legacyconfig.HTTP{
 				ListenAddress:       legacyconfig.HTTPListenAddress,
 				MaxBodyBytes:        legacyconfig.HTTPMaxBodyBytes,

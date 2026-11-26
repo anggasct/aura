@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ErrorCode string
@@ -16,8 +15,4 @@ const (
 
 func Errorf(code ErrorCode, format string, args ...any) error {
 	return fault.New(code, fmt.Sprintf(format, args...))
-}
-
-func classify(err error) error {
-	return sqlite.Classify(err)
 }

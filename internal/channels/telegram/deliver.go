@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -46,10 +47,10 @@ type messageReceipt struct {
 
 func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
 	if req == nil {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request must not be nil")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
 	}
 	if req.Channel == "" || req.ConversationID == "" {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
 	}
 	var texts []string
 	for _, part := range req.Parts {
@@ -58,11 +59,11 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 		}
 	}
 	if len(texts) == 0 {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery request carries no text")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request carries no text")
 	}
 	var target replyReference
 	if err := json.Unmarshal(req.ReplyContext, &target); err != nil || target.ChatID == 0 {
-		return runtimechannelhost.ProviderReceipt{}, Errorf(ErrorCodeInvalidArgument, "delivery reply context carries no chat")
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery reply context carries no chat")
 	}
 	if req.EffectID != "" {
 		a.stopPresence(req.EffectID)
@@ -91,7 +92,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 func (a *Adapter) executeSend(ctx context.Context, req *runtimechannelhost.DeliveryRequest, index int, operation *sendOperation) (int64, error) {
 	request, err := json.Marshal(operation)
 	if err != nil {
-		return 0, Errorf(ErrorCodeProtocolInvalid, "send request is not serializable")
+		return 0, fault.New(ErrorCodeProtocolInvalid, "send request is not serializable")
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID:      req.ConversationID,
@@ -138,19 +139,19 @@ func effectKey(base string, chatID int64, slot, digestSlot, text string) string 
 
 func receiptMessageID(intent *effect.Intent) (int64, error) {
 	if intent == nil {
-		return 0, Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return 0, deliveryAmbiguous("delivery outcome is unknown")
 	}
 	switch intent.State {
 	case effect.StateSucceeded:
 		var receipt messageReceipt
 		if err := json.Unmarshal(intent.ProviderReceipt, &receipt); err != nil || receipt.MessageID == 0 {
-			return 0, Errorf(ErrorCodeDeliveryAmbiguous, "delivery receipt is missing the message id")
+			return 0, deliveryAmbiguous("delivery receipt is missing the message id")
 		}
 		return receipt.MessageID, nil
 	case effect.StateUnknown, effect.StateStarted:
-		return 0, Errorf(ErrorCodeDeliveryAmbiguous, "delivery outcome is unknown")
+		return 0, deliveryAmbiguous("delivery outcome is unknown")
 	default:
-		return 0, Errorf(ErrorCodeDeliveryFailed, "delivery settled without success")
+		return 0, fault.New(ErrorCodeDeliveryFailed, "delivery settled without success")
 	}
 }
 
@@ -160,7 +161,7 @@ func (a *Adapter) SupportsIdempotency() bool {
 
 func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	if invocation == nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
 	switch invocation.Operation {
 	case OpSendMessage:
@@ -168,17 +169,17 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 	case opEditMessage:
 		return a.invokeEdit(ctx, invocation.Request)
 	default:
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "unsupported effect operation")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
 }
 
 func (a *Adapter) invokeSend(ctx context.Context, raw json.RawMessage) (effect.Outcome, error) {
 	var operation sendOperation
 	if err := json.Unmarshal(raw, &operation); err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is not decodable")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "send request is not decodable")
 	}
 	if operation.ChatID == 0 || strings.TrimSpace(operation.Text) == "" {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is missing chat or text")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "send request is missing chat or text")
 	}
 	request := &sendMessageRequest{ChatID: operation.ChatID, MessageThreadID: operation.ThreadID, Text: operation.Text, LinkPreviewOptions: previewsDisabledUnlessOptedIn(a.account.LinkPreviews)}
 	if operation.HTML != "" {
@@ -202,10 +203,10 @@ func (a *Adapter) invokeSend(ctx context.Context, raw json.RawMessage) (effect.O
 func (a *Adapter) invokeEdit(ctx context.Context, raw json.RawMessage) (effect.Outcome, error) {
 	var operation editOperation
 	if err := json.Unmarshal(raw, &operation); err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "edit request is not decodable")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "edit request is not decodable")
 	}
 	if operation.ChatID == 0 || operation.MessageID == 0 || strings.TrimSpace(operation.Text) == "" {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "edit request is missing chat, message, or text")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "edit request is missing chat, message, or text")
 	}
 	request := &editMessageTextRequest{ChatID: operation.ChatID, MessageID: operation.MessageID, Text: operation.Text, LinkPreviewOptions: previewsDisabledUnlessOptedIn(a.account.LinkPreviews)}
 	return a.dispatch(ctx, operation.ChatID, false, func(call context.Context, token string) (int64, error) {
@@ -233,7 +234,7 @@ func (a *Adapter) dispatch(ctx context.Context, chatID int64, waitOnLimit bool, 
 			}
 			receipt, marshalErr := json.Marshal(messageReceipt{ChatID: chatID, MessageID: messageID})
 			if marshalErr != nil {
-				return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "receipt is not serializable")
+				return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "receipt is not serializable")
 			}
 			return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
 		}

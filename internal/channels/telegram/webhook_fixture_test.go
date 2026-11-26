@@ -12,7 +12,6 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -137,15 +136,16 @@ type webhookResult struct {
 	body   string
 }
 
-func newWebhookRig(t *testing.T, configure func(*config.Telegram, *config.TelegramAccount)) *webhookRig {
+func newWebhookRig(t *testing.T, configure func(*Config, *Account)) *webhookRig {
 	t.Helper()
 	h := newHarness(t)
 	t.Setenv(testWebhookSecretEnv, testWebhookSecret)
-	adapter := h.adapterWith(t, nil, func(cfg *config.Telegram, account *config.TelegramAccount) {
-		account.Mode = config.TelegramModeWebhook
+	ledger := &countingLedger{}
+	adapter := h.adapterWithDeps(t, nil, func(cfg *Config, account *Account) {
+		account.Mode = ModeWebhook
 		account.WebhookSecretRef = secrettest.Ref("env://" + testWebhookSecretEnv)
-		cfg.Webhook = config.TelegramWebhook{
-			ListenAddress:  config.TelegramWebhookListenAddress,
+		cfg.Webhook = WebhookConfig{
+			ListenAddress:  WebhookListenAddress,
 			PublicBaseURL:  testPublicBase,
 			MaxBodyBytes:   testWebhookBodyBytes,
 			MaxConnections: testWebhookConns,
@@ -153,16 +153,16 @@ func newWebhookRig(t *testing.T, configure func(*config.Telegram, *config.Telegr
 		if configure != nil {
 			configure(cfg, account)
 		}
+	}, func(deps *Deps) {
+		deps.UpdateLedger = ledger
 	})
-	peer := h.adapterWith(t, nil, func(_ *config.Telegram, account *config.TelegramAccount) {
+	peer := h.adapterWith(t, nil, func(_ *Config, account *Account) {
 		account.Name = "lounge"
 	})
 	handler, err := NewWebhookHandler([]*Adapter{adapter, peer})
 	if err != nil {
 		t.Fatalf("NewWebhookHandler: %v", err)
 	}
-	ledger := &countingLedger{}
-	adapter.SetUpdateLedger(ledger)
 	rig := &webhookRig{h: h, adapter: adapter, peer: peer, handler: handler, ledger: ledger}
 	rig.http = httptest.NewServer(handler)
 	t.Cleanup(rig.http.Close)
@@ -173,7 +173,7 @@ func (r *webhookRig) start(t *testing.T, sink runtimeingress.IngressSink) func()
 	t.Helper()
 	stop := startAdapter(t, r.adapter, sink)
 	eventually(t, "webhook registration", func() bool {
-		return r.adapter.Health(t.Context()).Detail == config.TelegramModeWebhook
+		return r.adapter.Health(t.Context()).Detail == ModeWebhook
 	})
 	return stop
 }

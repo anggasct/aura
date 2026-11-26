@@ -259,45 +259,91 @@ func buildDiscordAdapters(bc *channelBuildContext) ([]runtimechannelhost.Channel
 	return ports, checks, approvers, nil
 }
 
+const telegramWebhookDrainDivisor = 2
+
 func buildTelegramAdapters(bc *channelBuildContext) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if !bc.cfg.Channels.Telegram.Enabled {
 		return nil, nil, nil, nil
 	}
-	adapters := make(telegramAdapters, 0, len(bc.cfg.Channels.Telegram.Accounts))
+	cursors, err := telegram.NewSQLiteCursorStore(bc.db)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	executor, err := toolsbuiltin.NewChannelEffects(bc.db, bc.logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(bc.db))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	resolver, err := access.NewConversationResolver(turnstore.NewConversationSessionStore(bc.db))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(bc.db, bc.artifactRoot, int64(bc.cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	vault := buildSecretVault(bc.cfg)
+	ledger := turnstore.NewDedupeStore(bc.db)
+	visionSvc := newVisionService(bc.cfg, bc.db, bc.artifactRoot)
+	settings := channelAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
+	adapters := make(telegram.Adapters, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	approvers := make([]approvalAdapter, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	for i := range bc.cfg.Channels.Telegram.Accounts {
-		adapter, err := newTelegramAdapter(bc.cfg, &bc.cfg.Channels.Telegram.Accounts[i], bc.db, bc.artifactRoot, bc.logger)
+		adapter, err := telegram.New(&telegram.Deps{
+			Config:            &bc.cfg.Channels.Telegram,
+			Account:           &bc.cfg.Channels.Telegram.Accounts[i],
+			Cursors:           cursors,
+			Effects:           executor,
+			Sessions:          sessions,
+			Logger:            bc.logger,
+			SessionResolver:   resolver,
+			PersonaRouter:     bc.router,
+			PrincipalResolver: bc.owners,
+			Commands:          bc.commands,
+			SecretVault:       vault,
+			Media:             mediaStore,
+			Vision:            visionSvc,
+			UpdateLedger:      ledger,
+			Access:            &settings,
+			OnAdmitted: func(ctx context.Context, class principal.Class) {
+				bc.principalRec.Admitted(ctx, string(class), principal.ChannelTelegram)
+			},
+			OnDropped: func(ctx context.Context, reason string) {
+				bc.ingressRec.Dropped(ctx, principal.ChannelTelegram, reason)
+			},
+		})
 		if err != nil {
 			return nil, nil, nil, err
-		}
-		adapter.SetPrincipalResolver(bc.owners)
-		adapter.SetPersonaRouter(bc.router)
-		settings := telegramAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
-		adapter.SetAccess(&settings)
-		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-			bc.principalRec.Admitted(ctx, string(class), principal.ChannelTelegram)
-		})
-		adapter.SetDenialObserver(bc.accessRec.Denied)
-		adapter.SetDropObserver(func(ctx context.Context, reason string) {
-			bc.ingressRec.Dropped(ctx, principal.ChannelTelegram, reason)
-		})
-		if bc.commands != nil {
-			adapter.SetCommands(bc.commands)
 		}
 		adapters = append(adapters, adapter)
 		ports = append(ports, adapter)
 		approvers = append(approvers, adapter)
 	}
-	checks := []health.RegisteredCheck{
-		{
-			ID:          "telegram",
-			Checker:     adapters,
-			Timeout:     time.Duration(bc.cfg.Health.CheckTimeout),
-			Remediation: telegram.RemediationReviewBot,
-		},
+	checks := adapters.HealthChecks()
+	for i := range checks {
+		if checks[i].Timeout == 0 {
+			checks[i].Timeout = time.Duration(bc.cfg.Health.CheckTimeout)
+		}
 	}
 	return ports, checks, approvers, nil
+}
+
+func buildTelegramWebhookServer(cfg *appconfig.Config, ports []runtimechannelhost.ChannelPort) (*telegram.WebhookServer, error) {
+	adapters := make([]*telegram.Adapter, 0, len(ports))
+	for _, port := range ports {
+		if adapter, ok := port.(*telegram.Adapter); ok {
+			adapters = append(adapters, adapter)
+		}
+	}
+	handler, err := telegram.NewWebhookHandler(adapters)
+	if err != nil {
+		return nil, err
+	}
+	return telegram.NewWebhookServer(handler, cfg.Channels.Telegram.Webhook.ListenAddress, time.Duration(cfg.Runtime.ShutdownTimeout)/telegramWebhookDrainDivisor)
 }
 
 func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute, handoffs email.HandoffNotifier) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []*email.Adapter, error) {

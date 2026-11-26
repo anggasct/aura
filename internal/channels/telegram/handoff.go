@@ -7,8 +7,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -28,18 +28,18 @@ func (a *Adapter) NotifyHandoff(ctx context.Context, sessionID, reason string) (
 
 func (a *Adapter) NotifyOwnerHandoff(ctx context.Context, requester *approval.Requester, sessionID, reason string) error {
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if requester == nil || requester.Principal == "" || requester.Persona == "" || sessionID == "" {
-		return Errorf(ErrorCodeInvalidArgument, "handoff requester or session is missing")
+		return fault.New(ErrorCodeInvalidArgument, "handoff requester or session is missing")
 	}
 	ownerChat, ok := a.ownerChatID()
 	if !ok {
-		return Errorf(ErrorCodeHandoffUnavailable, "owner has no telegram identity")
+		return fault.New(ErrorCodeHandoffUnavailable, "owner has no telegram identity")
 	}
 	token, ok := a.botToken()
 	if !ok {
-		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	definition, _ := a.personaDefinition(requester.Persona)
 	if definition.ID == "" {
@@ -69,12 +69,12 @@ func (a *Adapter) handoffTarget(requester *approvalTarget) access.HandoffTarget 
 	return target
 }
 
-func DeliverText(ctx context.Context, account *config.TelegramAccount, chatID, threadID, text string) error {
+func DeliverText(ctx context.Context, account *Account, chatID, threadID, text string) error {
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if account == nil {
-		return Errorf(ErrorCodeInvalidArgument, "telegram account must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "telegram account must not be nil")
 	}
 	dest, err := parseDestination(chatID, threadID)
 	if err != nil {
@@ -87,7 +87,7 @@ func DeliverText(ctx context.Context, account *config.TelegramAccount, chatID, t
 	token, err := tokenRef.Resolve()
 	token = strings.TrimSpace(token)
 	if err != nil || token == "" {
-		return Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	return sendPlainText(ctx, newBotClient(), token, dest, text)
 }
@@ -95,21 +95,21 @@ func DeliverText(ctx context.Context, account *config.TelegramAccount, chatID, t
 func parseDestination(chatID, threadID string) (destination, error) {
 	chatValue, err := strconv.ParseInt(chatID, 10, 64)
 	if err != nil || chatValue == 0 {
-		return destination{}, Errorf(ErrorCodeInvalidArgument, "chat id is not a telegram chat id")
+		return destination{}, fault.New(ErrorCodeInvalidArgument, "chat id is not a telegram chat id")
 	}
 	if threadID == "" {
 		return destination{chatID: chatValue}, nil
 	}
 	thread, err := strconv.ParseInt(threadID, 10, 64)
 	if err != nil || thread <= 0 {
-		return destination{}, Errorf(ErrorCodeInvalidArgument, "thread id is not a telegram topic id")
+		return destination{}, fault.New(ErrorCodeInvalidArgument, "thread id is not a telegram topic id")
 	}
 	return destination{chatID: chatValue, threadID: thread}, nil
 }
 
 func sendPlainText(ctx context.Context, bot *botClient, token string, dest destination, text string) error {
 	if strings.TrimSpace(text) == "" {
-		return Errorf(ErrorCodeInvalidArgument, "text must not be empty")
+		return fault.New(ErrorCodeInvalidArgument, "text must not be empty")
 	}
 	for _, chunk := range splitMessage(text) {
 		call, cancel := context.WithTimeout(ctx, sendTimeout)
