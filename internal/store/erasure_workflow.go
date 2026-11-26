@@ -11,6 +11,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -215,35 +217,63 @@ func heldProposalDefinitionKeys(ctx context.Context, conn workflowErasureConn, p
 	return keys, nil
 }
 
-func eraseWorkflowData(ctx context.Context, conn workflowErasureConn, principalID string, apply bool, counts *ErasureCounts) error {
+type WorkflowEraser struct {
+	db *sql.DB
+}
+
+func NewWorkflowEraser(db *sql.DB) *WorkflowEraser {
+	return &WorkflowEraser{db: db}
+}
+
+func (e *WorkflowEraser) ErasePrincipal(ctx context.Context, state *principal.ErasureState) error {
+	if e == nil || e.db == nil {
+		return errNilArgument("db")
+	}
+	if state == nil {
+		return errNilArgument("state")
+	}
+	return eraseWorkflowData(ctx, sqlite.Conn(ctx, e.db), state)
+}
+
+func eraseWorkflowData(ctx context.Context, conn workflowErasureConn, state *principal.ErasureState) error {
+	scope := state.Scope()
+	principalID := scope.PrincipalID
 	live, err := reconciledLiveRuns(ctx, conn, principalID)
 	if err != nil {
 		return err
 	}
-	counts.LiveWorkflowRuns = len(live)
-	if apply && len(live) > 0 {
+	if err := state.Record(principal.ErasureLineLiveWorkflowRuns, len(live)); err != nil {
+		return err
+	}
+	if scope.Apply && len(live) > 0 {
 		return fault.New(
-			ErrorCodeErasureBlocked,
+			principal.ErrorCodeErasureBlocked,
 			fmt.Sprintf("runs %s are still running; run forget again", strings.Join(live, ", ")),
 		)
 	}
-	for _, count := range []struct {
-		field *int
+	for _, item := range []struct {
+		line  string
 		query string
 	}{
-		{&counts.WorkflowRuns, `SELECT COUNT(*) FROM workflow_run WHERE principal_id = ?1`},
-		{&counts.WorkflowApprovals, `SELECT COUNT(*) FROM workflow_approval WHERE ` + heldProposalApprovals},
+		{principal.ErasureLineWorkflowRuns, `SELECT COUNT(*) FROM workflow_run WHERE principal_id = ?1`},
+		{principal.ErasureLineWorkflowApprovals, `SELECT COUNT(*) FROM workflow_approval WHERE ` + heldProposalApprovals},
 	} {
-		if err := conn.QueryRowContext(ctx, count.query, principalID).Scan(count.field); err != nil {
+		var count int
+		if err := conn.QueryRowContext(ctx, item.query, principalID).Scan(&count); err != nil {
 			return classify(fmt.Errorf("count workflow data: %w", err))
+		}
+		if err := state.Record(item.line, count); err != nil {
+			return err
 		}
 	}
 	legacy, err := existingLegacyStepSessions(ctx, conn, principalID)
 	if err != nil {
 		return err
 	}
-	counts.LegacyStepSessions = len(legacy)
-	if !apply {
+	if err := state.Record(principal.ErasureLineLegacyStepSessions, len(legacy)); err != nil {
+		return err
+	}
+	if !scope.Apply {
 		return nil
 	}
 	keys, err := heldProposalDefinitionKeys(ctx, conn, principalID)

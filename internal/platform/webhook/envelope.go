@@ -27,8 +27,6 @@ type Envelope struct {
 
 func ParseEnvelope(body []byte) (Envelope, error) {
 	var envelope Envelope
-	// One byte past the body proves the decoder consumed exactly the input
-	// and never allocated beyond the request bound already enforced upstream.
 	decoder := json.NewDecoder(io.LimitReader(bytes.NewReader(body), int64(len(body))+1))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&envelope); err != nil {

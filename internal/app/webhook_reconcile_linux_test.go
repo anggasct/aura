@@ -10,8 +10,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 const (
@@ -51,9 +51,13 @@ func admitLeftWebhookTurn(t *testing.T, db *sql.DB) {
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)
 	}
-	if err := store.NewWebhookExecutionStore(db).InsertExecution(t.Context(), &store.WebhookExecution{
+	executions, err := platformwebhook.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := executions.InsertExecution(t.Context(), &platformwebhook.Execution{
 		ID: recoveredWebhookExecutionID, KeyID: "primary", EventID: "evt-left", Nonce: "nonce-left-0123456789", BodyDigest: "digest-left",
-		TurnID: recoveredWebhookTurnID, SessionID: recoveredWebhookSessionID, State: store.WebhookExecutionStateAccepted,
+		TurnID: recoveredWebhookTurnID, SessionID: recoveredWebhookSessionID, State: platformwebhook.StateAccepted,
 		CreatedAt: now, UpdatedAt: now, ExpiresAt: now.Add(time.Hour),
 	}); err != nil {
 		t.Fatalf("InsertExecution: %v", err)
@@ -76,9 +80,12 @@ func admitLeftWebhookTurn(t *testing.T, db *sql.DB) {
 	}
 }
 
-func awaitExecutionState(t *testing.T, db *sql.DB, want string) store.WebhookExecution {
+func awaitExecutionState(t *testing.T, db *sql.DB, want string) platformwebhook.Execution {
 	t.Helper()
-	executions := store.NewWebhookExecutionStore(db)
+	executions, err := platformwebhook.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
 	deadline := time.NewTimer(recoveredExecutionWait)
 	defer deadline.Stop()
 	tick := time.NewTicker(recoveredExecutionPoll)
@@ -110,7 +117,7 @@ func TestServerSettlesTheExecutionOfARecoveredWebhookTurn(t *testing.T) {
 	admitLeftWebhookTurn(t, db)
 	srv := buildTurnServer(t, path)
 	srv.run(t)
-	execution := awaitExecutionState(t, db, store.WebhookExecutionStateCompleted)
+	execution := awaitExecutionState(t, db, platformwebhook.StateCompleted)
 	var completedEventID string
 	if err := db.QueryRowContext(t.Context(), `SELECT id FROM runtime_event WHERE session_id = ? AND turn_id = ? AND kind = ?`,
 		recoveredWebhookSessionID, recoveredWebhookTurnID, turn.EventKindTurnCompleted).Scan(&completedEventID); err != nil {

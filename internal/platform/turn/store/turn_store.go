@@ -113,6 +113,30 @@ func (s *TurnStore) SessionOwner(ctx context.Context, sessionID string) (string,
 	return ownerID, nil
 }
 
+func (s *TurnStore) SessionIDs(ctx context.Context, ownerID string, runSessions bool) ([]string, error) {
+	query := `SELECT id FROM session WHERE owner_id = ? AND id NOT GLOB 'wf-*'`
+	if runSessions {
+		query = `SELECT id FROM session WHERE owner_id = ? AND id GLOB 'wf-*'`
+	}
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query, ownerID)
+	if err != nil {
+		return nil, classify(fmt.Errorf("read session ids: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, classify(fmt.Errorf("scan session id: %w", err))
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classify(fmt.Errorf("read session ids: %w", err))
+	}
+	return ids, nil
+}
+
 type acceptedTurnPair struct {
 	SessionID string `json:"session_id"`
 	TurnID    string `json:"turn_id"`

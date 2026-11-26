@@ -9,22 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-type Webhook struct {
-	Enabled            bool               `json:"enabled"`
-	Listen             string             `json:"listen_address"`
-	MaxBodySize        configkit.ByteSize `json:"max_body_size"`
-	TimestampTolerance configkit.Duration `json:"timestamp_tolerance"`
-	ReplayRetention    configkit.Duration `json:"replay_retention"`
-	RequestsPerMinute  int                `json:"requests_per_minute"`
-	Keys               []WebhookKey       `json:"keys"`
-}
-
-type WebhookKey struct {
-	ID          string `json:"id"`
-	SecretEnv   string `json:"secret_env"`
-	AcceptUntil string `json:"accept_until"`
-}
-
 type Channels struct {
 	Discord  Discord  `json:"discord"`
 	Telegram Telegram `json:"telegram"`
@@ -359,7 +343,6 @@ type MCPStaticAuth struct {
 }
 
 var (
-	envNamePattern       = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 	mcpServerNamePattern = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,62}$`)
 	syncBranchPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
 )
@@ -401,16 +384,6 @@ func DefaultTerminal() Terminal {
 		InMemoryHistory:     100,
 		SecondInterruptTime: configkit.Duration(2 * time.Second),
 		PlainApproval:       "deny",
-	}
-}
-
-func DefaultWebhook() Webhook {
-	return Webhook{
-		Listen:             "127.0.0.1:8282",
-		MaxBodySize:        configkit.ByteSize(1 << 20),
-		TimestampTolerance: configkit.Duration(5 * time.Minute),
-		ReplayRetention:    configkit.Duration(24 * time.Hour),
-		RequestsPerMinute:  60,
 	}
 }
 

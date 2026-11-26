@@ -5,9 +5,11 @@ import (
 	"database/sql"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func durableRowsOf(t *testing.T, db *sql.DB, turnID string) (runs, actions int) {
@@ -40,14 +42,33 @@ func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
 			t.Fatalf("durable rows of %s before the erasure = %d runs, %d actions; want its run and its journal", tc.turnID, runs, actions)
 		}
 	}
-	counts, err := store.ErasePrincipal(t.Context(), rig.db, "discord:601", true, store.ErasureOptions{})
-	if err != nil || counts.Sessions != 1 {
-		t.Fatalf("ErasePrincipal = %+v, %v; want one session erased", counts, err)
+	orphanedTurns, err := NewOrphanedTurnRunEraser(rig.db, rig.runtime, turnstore.NewTurnStore(rig.db))
+	if err != nil {
+		t.Fatalf("NewOrphanedTurnRunEraser: %v", err)
+	}
+	report, err := principal.Erase(t.Context(), rig.db, principal.ErasureScope{PrincipalID: "discord:601", Apply: true}, []principal.Eraser{
+		turnstore.NewSessionEraser(rig.db, false),
+		orphanedTurns,
+	})
+	if err != nil || report.Count(principal.ErasureLineSessions) != 1 {
+		t.Fatalf("Erase = %v, %v; want one session erased", report.Lines(), err)
 	}
 	if runs, actions := durableRowsOf(t, rig.db, "turn-erased"); runs != 0 || actions != 0 {
 		t.Errorf("durable rows of the erased principal's turn = %d runs, %d actions; want none", runs, actions)
 	}
 	if runs, actions := durableRowsOf(t, rig.db, "turn-kept"); runs != 1 || actions == 0 {
 		t.Errorf("durable rows of the other principal's turn = %d runs, %d actions; want its run and its journal", runs, actions)
+	}
+}
+
+func TestOrphanedTurnRunEraserRefusesNilPorts(t *testing.T) {
+	db := storetest.OpenMigrated(t)
+	turns := turnstore.NewTurnStore(db)
+	runs := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, newHoldingExecutor()).runtime
+	if _, err := NewOrphanedTurnRunEraser(db, nil, turns); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+		t.Fatalf("NewOrphanedTurnRunEraser(db, nil, turns) = %v, want %s", err, turn.ErrorCodeInvalidArgument)
+	}
+	if _, err := NewOrphanedTurnRunEraser(db, runs, nil); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+		t.Fatalf("NewOrphanedTurnRunEraser(db, runs, nil) = %v, want %s", err, turn.ErrorCodeInvalidArgument)
 	}
 }

@@ -15,8 +15,14 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/platform/durable"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/storage"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -27,21 +33,63 @@ const (
 	erasureRunBound             = 30 * time.Second
 )
 
-func erasureLines(counts *store.ErasureCounts) []string {
-	return []string{
-		fmt.Sprintf("sessions: %d", counts.Sessions),
-		fmt.Sprintf("run_sessions: %d", counts.RunSessions),
-		fmt.Sprintf("memory_documents: %d", counts.MemoryDocuments),
-		fmt.Sprintf("grants: %d", counts.Grants),
-		fmt.Sprintf("standing_grants: %d", counts.StandingGrants),
-		fmt.Sprintf("pairing_requests: %d", counts.PairingRequests),
-		fmt.Sprintf("usage_links: %d", counts.UsageLinks),
-		fmt.Sprintf("email_effects: %d", counts.EmailEffects),
-		fmt.Sprintf("workflow_runs: %d", counts.WorkflowRuns),
-		fmt.Sprintf("workflow_approvals: %d", counts.WorkflowApprovals),
-		fmt.Sprintf("legacy_step_sessions: %d", counts.LegacyStepSessions),
-		fmt.Sprintf("live_workflow_runs: %d", counts.LiveWorkflowRuns),
+func erasureParticipants(db *sql.DB) ([]principal.Eraser, error) {
+	turns := turnstore.NewTurnStore(db)
+	runs, err := durablesqlite.New(&durablesqlite.Options{DB: db})
+	if err != nil {
+		return nil, err
 	}
+	sessionApprovals, err := effect.NewSessionApprovalEraser(db, turns, false)
+	if err != nil {
+		return nil, err
+	}
+	runSessionApprovals, err := effect.NewSessionApprovalEraser(db, turns, true)
+	if err != nil {
+		return nil, err
+	}
+	orphanedTurns, err := runtimeengine.NewOrphanedTurnRunEraser(db, runs, turns)
+	if err != nil {
+		return nil, err
+	}
+	return []principal.Eraser{
+		store.NewWorkflowEraser(db),
+		effect.NewEmailEffectEraser(db),
+		store.NewMemoryEraser(db),
+		sessionApprovals,
+		turnstore.NewSessionEraser(db, false),
+		orphanedTurns,
+		runSessionApprovals,
+		turnstore.NewSessionEraser(db, true),
+		principal.NewAccessEraser(db),
+		usage.NewUsageLinkEraser(db),
+	}, nil
+}
+
+func erasePrincipal(ctx context.Context, db *sql.DB, scope principal.ErasureScope, artifactRoot string) (principal.ErasureReport, int, error) {
+	if db == nil {
+		report, err := principal.Erase(ctx, nil, scope, nil)
+		return report, 0, err
+	}
+	participants, err := erasureParticipants(db)
+	if err != nil {
+		return principal.ErasureReport{}, 0, err
+	}
+	report, err := principal.Erase(ctx, db, scope, participants)
+	if err != nil {
+		return report, 0, err
+	}
+	var blobs int
+	if scope.Apply && artifactRoot != "" &&
+		(report.Count(principal.ErasureLineSessions) > 0 ||
+			report.Count(principal.ErasureLineRunSessions) > 0 ||
+			report.Count(principal.ErasureLineLegacyStepSessions) > 0) {
+		collected, err := storage.Collect(ctx, db, artifactRoot, time.Now().UTC().Add(time.Second))
+		if err != nil {
+			return report, 0, fmt.Errorf("collect erased blobs: %w", err)
+		}
+		blobs = collected.DeletedBlobs
+	}
+	return report, blobs, nil
 }
 
 type runCanceller interface {
@@ -115,14 +163,14 @@ func (r *erasureRuns) stop(ctx context.Context, db *sql.DB, principalID string) 
 	}
 }
 
-func forgetPrincipal(ctx context.Context, db *sql.DB, runs *erasureRuns, principalID string, apply bool, opts store.ErasureOptions) (cancelled []string, counts store.ErasureCounts, err error) {
-	if apply {
-		if cancelled, err = runs.stop(ctx, db, principalID); err != nil {
-			return nil, counts, err
+func forgetPrincipal(ctx context.Context, db *sql.DB, runs *erasureRuns, scope principal.ErasureScope, artifactRoot string) (cancelled []string, report principal.ErasureReport, err error) {
+	if scope.Apply {
+		if cancelled, err = runs.stop(ctx, db, scope.PrincipalID); err != nil {
+			return nil, report, err
 		}
 	}
-	counts, err = store.ErasePrincipal(ctx, db, principalID, apply, opts)
-	return cancelled, counts, err
+	report, _, err = erasePrincipal(ctx, db, scope, artifactRoot)
+	return cancelled, report, err
 }
 
 type principalEraser struct {
@@ -133,8 +181,8 @@ type principalEraser struct {
 }
 
 func (e *principalEraser) Forget(ctx context.Context, principalID string) error {
-	if _, _, err := forgetPrincipal(ctx, e.db, e.runs, principalID, true, store.ErasureOptions{ArtifactRoot: e.artifactRoot}); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeErasureBlocked {
+	if _, _, err := forgetPrincipal(ctx, e.db, e.runs, principal.ErasureScope{PrincipalID: principalID, Apply: true}, e.artifactRoot); err != nil {
+		if fault.HasCode(err, principal.ErrorCodeErasureBlocked) {
 			return fmt.Errorf("%w: %w", access.ErrForgetRunsStopping, err)
 		}
 		return err
@@ -188,11 +236,11 @@ func forgetCommand(ctx context.Context, cmd *cobra.Command, cfg *appconfig.Confi
 	if err != nil {
 		return err
 	}
-	cancelled, counts, err := forgetPrincipal(ctx, db, runs, principalID, apply, store.ErasureOptions{ArtifactRoot: artifactRoot})
+	cancelled, report, err := forgetPrincipal(ctx, db, runs, principal.ErasureScope{PrincipalID: principalID, Apply: apply}, artifactRoot)
 	if err != nil {
 		return err
 	}
-	lines := erasureLines(&counts)
+	lines := report.Lines()
 	if len(cancelled) > 0 {
 		lines = append([]string{"cancelled_runs: " + strings.Join(cancelled, ", ")}, lines...)
 	}
@@ -223,8 +271,8 @@ func sweepRetention(ctx context.Context, cfg *appconfig.Config, db *sql.DB, arti
 		if !ok || summary.lastActive.IsZero() || now.Sub(summary.lastActive) <= limit {
 			continue
 		}
-		if _, err := store.ErasePrincipal(ctx, db, summary.id, true, store.ErasureOptions{KeepGrants: true, ArtifactRoot: artifactRoot}); err != nil {
-			if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeErasureBlocked {
+		if _, _, err := erasePrincipal(ctx, db, principal.ErasureScope{PrincipalID: summary.id, Apply: true, KeepGrants: true}, artifactRoot); err != nil {
+			if fault.HasCode(err, principal.ErrorCodeErasureBlocked) {
 				continue
 			}
 			return swept, err

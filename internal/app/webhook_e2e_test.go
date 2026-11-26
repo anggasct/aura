@@ -11,16 +11,15 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
-	"github.com/anggasct/aura/internal/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 const webhookE2ESecret = "e2e-secret-0123456789abcdef"
 
-func webhookE2EHandler(t *testing.T, backend *fakeTurnRuntime) (http.Handler, store.WebhookExecutionStore) {
+func webhookE2EHandler(t *testing.T, backend *fakeTurnRuntime) (http.Handler, platformwebhook.ExecutionStore) {
 	t.Helper()
 	now := time.Unix(1750000000, 0).UTC()
 	ring, err := gatewaywebhook.NewKeyRing(
@@ -45,7 +44,7 @@ func webhookE2EHandler(t *testing.T, backend *fakeTurnRuntime) (http.Handler, st
 		t.Fatalf("status handler construction failed: %v", err)
 	}
 	mux := http.NewServeMux()
-	mux.Handle(gatewaywebhook.StatusPathPrefix, status)
+	mux.Handle(platformwebhook.StatusPathPrefix, status)
 	mux.Handle("/", handler)
 	return mux, executions
 }
@@ -86,14 +85,14 @@ func TestBuildWebhookListener(t *testing.T) {
 	runtime := durabletest.NewFake()
 	t.Cleanup(runtime.Close)
 	cfg := &appconfig.Config{
-		Webhook: config.Webhook{
+		Webhook: platformwebhook.Config{
 			Enabled:            true,
 			Listen:             "127.0.0.1:0",
 			MaxBodySize:        configkit.ByteSize(4096),
 			TimestampTolerance: configkit.Duration(5 * time.Minute),
 			ReplayRetention:    configkit.Duration(24 * time.Hour),
 			RequestsPerMinute:  60,
-			Keys:               []config.WebhookKey{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_SECRET"}},
+			Keys:               []platformwebhook.Key{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_SECRET"}},
 		},
 	}
 	listener, err := buildWebhookListener(&webhookListenerInput{cfg: cfg, db: db, backend: backend, logger: slog.New(slog.DiscardHandler), runtime: runtime})
@@ -105,7 +104,7 @@ func TestBuildWebhookListener(t *testing.T) {
 	}
 
 	missing := *cfg
-	missing.Webhook.Keys = []config.WebhookKey{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_MISSING"}}
+	missing.Webhook.Keys = []platformwebhook.Key{{ID: "primary", SecretEnv: "AURA_WEBHOOK_E2E_MISSING"}}
 	if _, err := buildWebhookListener(&webhookListenerInput{cfg: &missing, db: db, backend: backend, logger: slog.New(slog.DiscardHandler), runtime: runtime}); err == nil {
 		t.Error("expected listener build to fail without a resolvable secret, got nil")
 	}
@@ -136,7 +135,7 @@ func TestWebhookEndToEnd_AcceptThenStatus(t *testing.T) {
 		t.Errorf("Location = %q, want the status path", location)
 	}
 
-	waitForExecutionState(t, executions, accepted.ExecutionID, store.WebhookExecutionStateCompleted)
+	waitForExecutionState(t, executions, accepted.ExecutionID, platformwebhook.StateCompleted)
 
 	statusRec := httptest.NewRecorder()
 	mux.ServeHTTP(statusRec, webhookSignedGet(t, "/webhook/executions/"+accepted.ExecutionID, "nonce-status-12345678"))
