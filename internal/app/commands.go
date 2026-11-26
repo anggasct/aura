@@ -2,16 +2,19 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/profile"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
+	root.AddCommand(profile.Commands(profileOpener(gf))...)
 }
 
 func knowledgeOpener(gf *globalFlags) knowledge.Opener {
@@ -22,6 +25,21 @@ func knowledgeOpener(gf *globalFlags) knowledge.Opener {
 		}
 		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartKnowledge}}, func(ctx context.Context, app *App) error {
 			return fn(ctx, app.logger, app.knowledge)
+		})
+	}
+}
+
+func profileOpener(gf *globalFlags) profile.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, service *profile.Service) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		if result.Config.Profile == nil || !result.Config.Profile.Enabled {
+			return errors.New("user profiling is not enabled")
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartProfile}}, func(ctx context.Context, app *App) error {
+			return fn(ctx, app.profile)
 		})
 	}
 }

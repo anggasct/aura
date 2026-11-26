@@ -2,13 +2,16 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
+	"slices"
 	"time"
 
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -16,13 +19,38 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
+
+type postTurnHook func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
+
+type turnHookFunc func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
+
+func (f turnHookFunc) AfterTurn(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
+	return f(ctx, req, events)
+}
+
+func composeTurnHooks(hooks []turn.TurnHook) func(context.Context, *turn.TurnRequest, []turn.Event) error {
+	active := slices.DeleteFunc(slices.Clone(hooks), func(hook turn.TurnHook) bool { return hook == nil })
+	switch len(active) {
+	case 0:
+		return nil
+	case 1:
+		return active[0].AfterTurn
+	}
+	return func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
+		errs := make([]error, 0, len(active))
+		for _, hook := range active {
+			errs = append(errs, hook.AfterTurn(ctx, req, events))
+		}
+		return errors.Join(errs...)
+	}
+}
 
 type moduleParts struct {
 	memoryHook    postTurnHook
-	profileHook   postTurnHook
 	skillRenderer runtimeengine.SkillRenderer
 	skills        command.Skills
 }
@@ -57,6 +85,9 @@ func (b *build) registerModule(name string, mod any) error {
 	}
 	if cp, ok := mod.(turn.ContextProvider); ok {
 		b.execOpts = append(b.execOpts, runtimeadk.WithContextProvider(cp))
+	}
+	if th, ok := mod.(turn.TurnHook); ok {
+		b.turnHooks = append(b.turnHooks, th)
 	}
 	if hp, ok := mod.(health.HealthProvider); ok {
 		for _, check := range hp.HealthChecks() {
@@ -113,18 +144,27 @@ func (b *build) buildProfile(ctx context.Context) error {
 	if cfg.Profile == nil || !cfg.Profile.Enabled {
 		return nil
 	}
-	runtime, err := buildProfileRuntime(ctx, cfg, b.db, b.models, b.meters(), b.logger)
+	mod, err := profile.New(ctx, &profile.Deps{
+		Config:       *cfg.Profile,
+		DB:           b.db,
+		Sessions:     turnstore.NewSessionService(b.db),
+		Events:       turnstore.NewEventStore(b.db),
+		Models:       b.models,
+		ModelConfig:  cfg.Models,
+		ModelRoutes:  cfg.ModelRoutes,
+		Scanner:      buildSecretVault(cfg),
+		Owner:        cfg.Owner,
+		Meters:       b.meters(),
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       b.logger,
+	})
 	if err != nil {
 		return err
 	}
-	b.execOpts = append(b.execOpts, runtimeadk.WithProfileContext(runtime))
-	b.modules.profileHook = runtime.hook
-	if err := b.group.Add(server.Background("profile_extraction", runtime.run)); err != nil {
+	if err := b.registerModule("profile", mod); err != nil {
 		return err
 	}
-	check := runtime.check(cfg)
-	b.addHealthCheck(&check)
-	return nil
+	return b.group.Add(server.Background("profile_extraction", mod.Run))
 }
 
 func (b *build) buildSkills(ctx context.Context) error {

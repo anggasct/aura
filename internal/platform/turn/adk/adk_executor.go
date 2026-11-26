@@ -55,17 +55,12 @@ type ADKExecutor struct {
 	modelDefinitionID string
 	recall            RecallProvider
 	ownerContext      string
-	profile           ProfileContextProvider
 	skills            SkillContextProvider
 	providers         []turn.ContextProvider
 }
 
 type RecallProvider interface {
 	RecallTurn(ctx context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error)
-}
-
-type ProfileContextProvider interface {
-	ProfileContext(ctx context.Context, req *turn.TurnRequest) (string, error)
 }
 
 type SkillContextProvider interface {
@@ -186,16 +181,6 @@ func WithRecallProvider(provider RecallProvider) ExecutorOption {
 func WithOwnerContext(block string) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		e.ownerContext = strings.TrimSpace(block)
-		return nil
-	}
-}
-
-func WithProfileContext(provider ProfileContextProvider) ExecutorOption {
-	return func(e *ADKExecutor) error {
-		if provider == nil {
-			return invalidArgument("profile context provider must not be nil")
-		}
-		e.profile = provider
 		return nil
 	}
 }
@@ -341,18 +326,6 @@ func (x *ADKExecutor) ownerContextFor(req *turn.TurnRequest) string {
 	return x.ownerContext
 }
 
-func (x *ADKExecutor) profileContextFor(ctx context.Context, req *turn.TurnRequest) string {
-	if x.profile == nil || req.PrincipalClass != principal.ClassOwner {
-		return ""
-	}
-	block, err := x.profile.ProfileContext(ctx, req)
-	if err != nil {
-		x.logger.WarnContext(ctx, "profile context unavailable", "component", "profile", "error", err, "turn_id", req.TurnID)
-		return ""
-	}
-	return strings.TrimSpace(block)
-}
-
 type turnContext struct {
 	blocks         []turn.ContextBlock
 	knowledgeScope []string
@@ -360,12 +333,6 @@ type turnContext struct {
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
 	var blocks []turn.ContextBlock
-	if profile := x.profileContextFor(ctx, req); profile != "" {
-		blocks = append(blocks, turn.ContextBlock{
-			Order:   turn.ContextOrderProfile,
-			Content: profile,
-		})
-	}
 	if skills := x.skillContextFor(ctx, req); skills != "" {
 		blocks = append(blocks, turn.ContextBlock{
 			Order:   turn.ContextOrderSkills,

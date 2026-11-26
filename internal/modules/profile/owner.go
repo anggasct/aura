@@ -1,12 +1,12 @@
 package profile
 
 import (
+	stdcontext "context"
 	"strconv"
 	"strings"
 	"time"
 
-	stdcontext "context"
-
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -57,10 +57,10 @@ func (s *Service) AcceptFact(ctx stdcontext.Context, ownerID, factID string, now
 		return Fact{}, err
 	}
 	if !found || fact.OwnerID != ownerID {
-		return Fact{}, Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return Fact{}, fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	if fact.Status == StatusDeleted {
-		return Fact{}, Errorf(ErrorCodeProfileConflict, "deleted facts cannot be accepted")
+		return Fact{}, fault.New(ErrorCodeProfileConflict, "deleted facts cannot be accepted")
 	}
 	actives, err := s.registry.Active(ctx, ownerID, fact.Category, fact.Key)
 	if err != nil {
@@ -68,7 +68,7 @@ func (s *Service) AcceptFact(ctx stdcontext.Context, ownerID, factID string, now
 	}
 	for i := range actives {
 		if actives[i].ID != factID && actives[i].OwnerVerified {
-			return Fact{}, Errorf(ErrorCodeProfileConflict, "an owner-verified fact already holds this slot")
+			return Fact{}, fault.New(ErrorCodeProfileConflict, "an owner-verified fact already holds this slot")
 		}
 	}
 	for i := range actives {
@@ -97,7 +97,7 @@ func (s *Service) RejectFact(ctx stdcontext.Context, ownerID, factID string, now
 		return err
 	}
 	if !found || fact.OwnerID != ownerID {
-		return Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	if fact.Status == StatusDeleted {
 		return nil
@@ -110,7 +110,7 @@ func (s *Service) RejectFact(ctx stdcontext.Context, ownerID, factID string, now
 
 func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value string, expiresAt *time.Time, now time.Time) (Fact, error) {
 	if ctx == nil {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return Fact{}, err
@@ -119,10 +119,10 @@ func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value 
 		return Fact{}, err
 	}
 	if reason := SensitiveReason(category, key, value, s.scanner); reason != "" {
-		return Fact{}, Errorf(ErrorCodeProfileInvalid, "fact is not persistable")
+		return Fact{}, fault.New(ErrorCodeProfileInvalid, "fact is not persistable")
 	}
 	if now.IsZero() {
-		return Fact{}, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
 	actives, err := s.registry.Active(ctx, ownerID, category, key)
 	if err != nil {
@@ -171,30 +171,30 @@ func (s *Service) mustGet(ctx stdcontext.Context, factID string) (Fact, error) {
 		return Fact{}, err
 	}
 	if !found {
-		return Fact{}, Errorf(ErrorCodeProfileNotFound, "fact does not exist")
+		return Fact{}, fault.New(ErrorCodeProfileNotFound, "fact does not exist")
 	}
 	return fact, nil
 }
 
 func (s *Service) ownerArgs(ctx stdcontext.Context, ownerID, factID string, now time.Time) error {
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(factID) == "" {
-		return Errorf(ErrorCodeInvalidArgument, "owner and fact id must not be empty")
+		return fault.New(ErrorCodeInvalidArgument, "owner and fact id must not be empty")
 	}
 	if now.IsZero() {
-		return Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+		return fault.New(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
 	return nil
 }
 
 func (s *Service) recordAction(ctx stdcontext.Context, ownerID, factID, action string, fact *Fact, now time.Time) error {
 	if !ownerActions[action] {
-		return Errorf(ErrorCodeInvalidArgument, "unknown owner action")
+		return fault.New(ErrorCodeInvalidArgument, "unknown owner action")
 	}
 	if fact == nil || s.actions == nil {
 		return nil

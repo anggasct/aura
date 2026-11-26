@@ -67,15 +67,6 @@ type Sync struct {
 	Include            []string           `json:"include"`
 }
 
-type Profile struct {
-	Enabled                 bool    `json:"enabled"`
-	MaxContextFacts         int     `json:"max_context_facts"`
-	MaxContextTokens        int     `json:"max_context_tokens"`
-	ExtractionQueueCapacity int     `json:"extraction_queue_capacity"`
-	CandidateMinConfidence  float64 `json:"candidate_min_confidence"`
-	PromptVersion           string  `json:"prompt_version"`
-}
-
 type Children struct {
 	Enabled            bool               `json:"enabled"`
 	MaxDepth           int                `json:"max_depth"`
@@ -469,17 +460,6 @@ func DefaultSync() *Sync {
 		GitBinary:          "/usr/bin/git",
 		SSHBinary:          "/usr/bin/ssh",
 		Include:            []string{"skills/**", "config-templates/**"},
-	}
-}
-
-func DefaultProfile() *Profile {
-	return &Profile{
-		Enabled:                 true,
-		MaxContextFacts:         20,
-		MaxContextTokens:        1024,
-		ExtractionQueueCapacity: 64,
-		CandidateMinConfidence:  0.70,
-		PromptVersion:           "v1",
 	}
 }
 

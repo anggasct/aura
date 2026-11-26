@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/telegram"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -111,6 +112,27 @@ func recordAccessOwnerAction(ctx context.Context, db *sql.DB, action string, gra
 		Action: action, GrantID: grant.ID, Principal: grant.PrincipalID, Persona: grant.AgentID, Tool: grant.ToolName,
 		ExpiresAt: grant.ExpiresAt.UTC().Format(time.RFC3339Nano),
 	}, grant.ID, at)
+}
+
+const profileOwnerSessionPrefix = "profile-"
+
+func ensureOwnerActionSession(ctx context.Context, db *sql.DB, ownerID string) (string, error) {
+	sessionID := profileOwnerSessionPrefix + ownerID
+	sessions := turnstore.NewSessionService(db)
+	if _, err := sessions.Get(ctx, sessionID); err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", err
+		}
+		now := time.Now().UTC()
+		if err := sessions.Create(ctx, &turn.Session{
+			ID: sessionID, OwnerID: ownerID, CreatedAt: now, UpdatedAt: now, Metadata: json.RawMessage(`{}`),
+		}); err != nil {
+			if !fault.HasCode(err, turnstore.ErrorCodeSessionIDConflict) {
+				return "", err
+			}
+		}
+	}
+	return sessionID, nil
 }
 
 func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, subject string, at time.Time) error {

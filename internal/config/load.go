@@ -621,29 +621,6 @@ func validHourMinute(value string) bool {
 	return hour >= 0 && hour < 24 && minute >= 0 && minute < 60
 }
 
-func ValidateProfile(profileConfig *Profile) error {
-	if profileConfig == nil {
-		return nil
-	}
-	var problems []error
-	if profileConfig.MaxContextFacts <= 0 || profileConfig.MaxContextFacts > 1000 {
-		problems = append(problems, configkit.Invalid("profile.max_context_facts", "must be between 1 and 1000"))
-	}
-	if profileConfig.MaxContextTokens <= 0 || profileConfig.MaxContextTokens > 128000 {
-		problems = append(problems, configkit.Invalid("profile.max_context_tokens", "must be between 1 and 128000"))
-	}
-	if profileConfig.ExtractionQueueCapacity <= 0 || profileConfig.ExtractionQueueCapacity > 10000 {
-		problems = append(problems, configkit.Invalid("profile.extraction_queue_capacity", "must be between 1 and 10000"))
-	}
-	if profileConfig.CandidateMinConfidence < 0 || profileConfig.CandidateMinConfidence > 1 {
-		problems = append(problems, configkit.Invalid("profile.candidate_min_confidence", "must be in [0,1]"))
-	}
-	if strings.TrimSpace(profileConfig.PromptVersion) == "" {
-		problems = append(problems, configkit.Invalid("profile.prompt_version", "must not be empty"))
-	}
-	return errors.Join(problems...)
-}
-
 func validBroadcastAlias(alias string) bool {
 	return broadcastpkg.ValidAlias(alias)
 }
