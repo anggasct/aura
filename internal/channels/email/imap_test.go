@@ -22,8 +22,8 @@ import (
 	"github.com/emersion/go-imap/v2/imapserver"
 	"github.com/emersion/go-imap/v2/imapserver/imapmemserver"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
@@ -194,21 +194,21 @@ func (f *imapFixture) append(raw []byte) {
 	}
 }
 
-func (f *imapFixture) account(poll time.Duration) *config.EmailAccount {
-	return &config.EmailAccount{
+func (f *imapFixture) account(poll time.Duration) *Account {
+	return &Account{
 		Name:           testAccount,
 		Persona:        testPersona,
 		Address:        testAddress,
 		AuthservID:     testAuthserv,
 		AllowedSenders: []string{friendAddress},
-		IMAP: config.EmailIMAP{
+		IMAP: IMAPConfig{
 			Host: f.host, Port: f.port, Username: imapUser, PasswordRef: secrettest.Ref("env://" + imapPasswordName),
 			Folder: "INBOX", PollInterval: configkit.Duration(poll),
 		},
 	}
 }
 
-func (f *imapFixture) connector(account *config.EmailAccount) *imapConnector {
+func (f *imapFixture) connector(account *Account) *imapConnector {
 	f.t.Helper()
 	connector, err := newIMAPConnector(account, f.ca.pool)
 	if err != nil {
@@ -219,7 +219,7 @@ func (f *imapFixture) connector(account *config.EmailAccount) *imapConnector {
 
 func (f *imapFixture) harness(poll time.Duration, polling bool, opts harnessOptions) *harness {
 	f.t.Helper()
-	opts.account = func(a *config.EmailAccount) { *a = *f.account(poll) }
+	opts.account = func(a *Account) { *a = *f.account(poll) }
 	h := newHarness(f.t, opts)
 	var connector Connector = f.connector(h.adapter.account)
 	if polling {
@@ -432,12 +432,12 @@ func TestIMAP_SessionBoundsWhatItReads(t *testing.T) {
 		t.Fatalf("Message() = %q, %v; want the whole message", full, err)
 	}
 	_, err = session.Header(t.Context(), 99, maxHeaderBytes)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeMessageUnavailable {
+	if !fault.HasCode(err, ErrorCodeMessageUnavailable) {
 		t.Fatalf("Header(missing) error = %v, want message_unavailable", err)
 	}
 	if _, err := session.Select(t.Context(), "No such folder"); err == nil {
 		t.Fatal("Select() accepted a missing folder")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProtocolInvalid {
+	} else if !fault.HasCode(err, ErrorCodeProtocolInvalid) {
 		t.Fatalf("Select(missing) error = %v, want protocol_invalid", err)
 	}
 }
@@ -445,11 +445,11 @@ func TestIMAP_SessionBoundsWhatItReads(t *testing.T) {
 func TestIMAP_ConnectFailuresAreClassified(t *testing.T) {
 	server := startIMAPServer(t, rev1Caps)
 	cases := map[string]struct {
-		prepare func(t *testing.T, account *config.EmailAccount) *imapConnector
+		prepare func(t *testing.T, account *Account) *imapConnector
 		want    ErrorCode
 	}{
 		"wrong password": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				t.Setenv("AURA_TEST_WRONG_PASSWORD", "wrong")
 				account.IMAP.PasswordRef = secrettest.Ref("env://AURA_TEST_WRONG_PASSWORD")
 				return server.connector(account)
@@ -457,21 +457,21 @@ func TestIMAP_ConnectFailuresAreClassified(t *testing.T) {
 			want: ErrorCodeLoginRejected,
 		},
 		"unset password": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				account.IMAP.PasswordRef = secrettest.Ref("env://AURA_TEST_UNSET_PASSWORD")
 				return server.connector(account)
 			},
 			want: ErrorCodeCredentialsUnavailable,
 		},
 		"missing password file": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				account.IMAP.PasswordRef = secrettest.Ref("file://" + t.TempDir() + "/absent")
 				return server.connector(account)
 			},
 			want: ErrorCodeCredentialsUnavailable,
 		},
 		"untrusted certificate authority": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				connector, err := newIMAPConnector(account, x509.NewCertPool())
 				if err != nil {
 					t.Fatal(err)
@@ -481,7 +481,7 @@ func TestIMAP_ConnectFailuresAreClassified(t *testing.T) {
 			want: ErrorCodeConnectionFailed,
 		},
 		"system roots do not trust the test authority": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				connector, err := newIMAPConnector(account, nil)
 				if err != nil {
 					t.Fatal(err)
@@ -491,14 +491,14 @@ func TestIMAP_ConnectFailuresAreClassified(t *testing.T) {
 			want: ErrorCodeConnectionFailed,
 		},
 		"certificate for another host name": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				account.IMAP.Host = "localhost"
 				return server.connector(account)
 			},
 			want: ErrorCodeConnectionFailed,
 		},
 		"nothing is listening": {
-			prepare: func(t *testing.T, account *config.EmailAccount) *imapConnector {
+			prepare: func(t *testing.T, account *Account) *imapConnector {
 				listener, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 				if err != nil {
 					t.Fatal(err)
@@ -517,7 +517,7 @@ func TestIMAP_ConnectFailuresAreClassified(t *testing.T) {
 			if session != nil {
 				_ = session.Close()
 			}
-			if code, ok := CodeOf(err); !ok || code != tc.want {
+			if !fault.HasCode(err, tc.want) {
 				t.Fatalf("Connect() error = %v, want %s", err, tc.want)
 			}
 		})
@@ -545,7 +545,7 @@ func TestIMAP_PlaintextServerIsNeverSpoken(t *testing.T) {
 		received <- buf[:n]
 	}()
 	t.Setenv(imapPasswordName, imapPassword)
-	account := &config.EmailAccount{IMAP: config.EmailIMAP{
+	account := &Account{IMAP: IMAPConfig{
 		Host: "127.0.0.1", Port: listenerPort(t, listener), Username: imapUser, PasswordRef: secrettest.Ref("env://" + imapPasswordName),
 	}}
 	connector, err := NewIMAPConnector(account)
@@ -564,9 +564,9 @@ func TestNewIMAPConnector_RejectsBadInput(t *testing.T) {
 	if _, err := NewIMAPConnector(nil); err == nil {
 		t.Error("NewIMAPConnector(nil) succeeded")
 	}
-	account := &config.EmailAccount{IMAP: config.EmailIMAP{Host: "imap.example.com", Port: 993}}
+	account := &Account{IMAP: IMAPConfig{Host: "imap.example.com", Port: 993}}
 	_, err := NewIMAPConnector(account)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 		t.Errorf("NewIMAPConnector without a password reference error = %v, want invalid_argument", err)
 	}
 }

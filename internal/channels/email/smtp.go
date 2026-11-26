@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
@@ -44,13 +44,13 @@ type smtpMailer struct {
 	attemptTimeout time.Duration
 }
 
-func NewSMTPMailer(account *config.EmailAccount) (Mailer, error) {
+func NewSMTPMailer(account *Account) (Mailer, error) {
 	return newSMTPMailer(account, nil)
 }
 
-func newSMTPMailer(account *config.EmailAccount, roots *x509.CertPool) (*smtpMailer, error) {
+func newSMTPMailer(account *Account, roots *x509.CertPool) (*smtpMailer, error) {
 	if account == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "email account must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "email account must not be nil")
 	}
 	password, err := parsePasswordRef(account.SMTP.PasswordRef)
 	if err != nil {
@@ -89,18 +89,18 @@ func (c *stepConn) Write(p []byte) (int, error) {
 
 func (m *smtpMailer) Submit(ctx context.Context, submission *Submission) error {
 	if submission == nil {
-		return Errorf(ErrorCodeInvalidArgument, "submission must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "submission must not be nil")
 	}
 	password, err := m.password.Resolve()
 	if err != nil || strings.TrimSpace(password) == "" {
-		return Errorf(ErrorCodeCredentialsUnavailable, "submission password is unavailable")
+		return fault.New(ErrorCodeCredentialsUnavailable, "submission password is unavailable")
 	}
 	call, cancel := context.WithTimeout(ctx, m.attemptTimeout)
 	defer cancel()
 	dialer := &net.Dialer{Timeout: dialTimeout}
 	conn, err := dialer.DialContext(call, "tcp", m.address)
 	if err != nil {
-		return refusal(ErrorCodeConnectionFailed, "submission server is unreachable", err)
+		return fault.Wrap(ErrorCodeConnectionFailed, "submission server is unreachable", err)
 	}
 	defer context.AfterFunc(call, func() { _ = conn.Close() })()
 	client, err := smtp.NewClient(&stepConn{Conn: conn, timeout: m.stepTimeout}, m.host)
@@ -120,16 +120,16 @@ func (m *smtpMailer) secure(client *smtp.Client, password string) error {
 		return classifyCommand(err)
 	}
 	if offered, _ := client.Extension("STARTTLS"); !offered {
-		return Errorf(ErrorCodeTLSRequired, "submission server does not offer STARTTLS")
+		return fault.New(ErrorCodeTLSRequired, "submission server does not offer STARTTLS")
 	}
 	if err := client.StartTLS(&tls.Config{ServerName: m.host, MinVersion: tls.VersionTLS12, RootCAs: m.roots}); err != nil {
 		return classifyTLS(err)
 	}
 	if state, encrypted := client.TLSConnectionState(); !encrypted || !state.HandshakeComplete {
-		return Errorf(ErrorCodeTLSRequired, "submission connection is not encrypted")
+		return fault.New(ErrorCodeTLSRequired, "submission connection is not encrypted")
 	}
 	if offered, _ := client.Extension("AUTH"); !offered {
-		return Errorf(ErrorCodeLoginRejected, "submission server offers no authentication")
+		return fault.New(ErrorCodeLoginRejected, "submission server offers no authentication")
 	}
 	if err := client.Auth(smtp.PlainAuth("", m.username, password, m.host)); err != nil {
 		return classifyAuth(err)
@@ -149,14 +149,14 @@ func transfer(client *smtp.Client, submission *Submission) error {
 		return classifyCommand(err)
 	}
 	if _, err := writer.Write(submission.Message); err != nil {
-		return refusal(ErrorCodeDeliveryAmbiguous, "submission outcome is unknown", err)
+		return deliveryAmbiguous("submission outcome is unknown", err)
 	}
 	if err := writer.Close(); err != nil {
 		var reply *textproto.Error
 		if errors.As(err, &reply) && reply.Code/smtpClassDivisor == smtpPermanentClass {
-			return Errorf(ErrorCodeSubmissionRejected, "submission server rejected the message")
+			return fault.New(ErrorCodeSubmissionRejected, "submission server rejected the message")
 		}
-		return Errorf(ErrorCodeDeliveryAmbiguous, "submission outcome is unknown")
+		return deliveryAmbiguous("submission outcome is unknown", nil)
 	}
 	_ = client.Quit()
 	return nil
@@ -166,36 +166,32 @@ func classifyCommand(err error) error {
 	var reply *textproto.Error
 	if errors.As(err, &reply) {
 		if reply.Code/smtpClassDivisor == smtpPermanentClass {
-			return Errorf(ErrorCodeSubmissionRejected, "submission server refused the command")
+			return fault.New(ErrorCodeSubmissionRejected, "submission server refused the command")
 		}
-		return Errorf(ErrorCodeSubmissionDeferred, "submission server deferred the command")
+		return fault.New(ErrorCodeSubmissionDeferred, "submission server deferred the command")
 	}
-	return refusal(ErrorCodeConnectionFailed, "submission connection failed", err)
+	return fault.Wrap(ErrorCodeConnectionFailed, "submission connection failed", err)
 }
 
 func classifyTLS(err error) error {
 	var reply *textproto.Error
 	if errors.As(err, &reply) {
-		return Errorf(ErrorCodeTLSRequired, "submission server refused STARTTLS")
+		return fault.New(ErrorCodeTLSRequired, "submission server refused STARTTLS")
 	}
 	var unknownAuthority x509.UnknownAuthorityError
 	var hostname x509.HostnameError
 	var invalid x509.CertificateInvalidError
 	var verification *tls.CertificateVerificationError
 	if errors.As(err, &unknownAuthority) || errors.As(err, &hostname) || errors.As(err, &invalid) || errors.As(err, &verification) {
-		return &Error{Code: ErrorCodeTLSUntrusted, Detail: "submission server certificate is not trusted", Cause: err}
+		return fault.Wrap(ErrorCodeTLSUntrusted, "submission server certificate is not trusted", err)
 	}
-	return &Error{Code: ErrorCodeTLSRequired, Detail: "submission server did not complete a verified TLS handshake", Cause: err}
+	return fault.Wrap(ErrorCodeTLSRequired, "submission server did not complete a verified TLS handshake", err)
 }
 
 func classifyAuth(err error) error {
 	var reply *textproto.Error
 	if errors.As(err, &reply) {
-		return Errorf(ErrorCodeLoginRejected, "submission server refused the credentials")
+		return fault.New(ErrorCodeLoginRejected, "submission server refused the credentials")
 	}
-	return &Error{Code: ErrorCodeLoginRejected, Detail: "submission authentication did not complete", Cause: err}
-}
-
-func refusal(code ErrorCode, detail string, cause error) error {
-	return &Error{Code: code, Detail: detail, Cause: cause}
+	return fault.Wrap(ErrorCodeLoginRejected, "submission authentication did not complete", err)
 }

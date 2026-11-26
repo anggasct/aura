@@ -9,9 +9,9 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -103,9 +103,29 @@ type AccessSettings struct {
 	Erasure  access.PrincipalEraser
 }
 
+type Deps struct {
+	Config            *Config
+	Account           *Account
+	Connector         Connector
+	Mailer            Mailer
+	Cursors           CursorStore
+	Effects           EffectRunner
+	Sessions          Sessions
+	Logger            *slog.Logger
+	PersonaRouter     PersonaRouter
+	PrincipalResolver *principal.Resolver
+	Access            *AccessSettings
+	OwnerRoute        *approval.OwnerRoute
+	HandoffNotifier   HandoffNotifier
+	Media             MediaStore
+	Vision            *vision.Service
+	OnAdmitted        func(ctx context.Context, class principal.Class)
+	OnDropped         func(ctx context.Context, reason string)
+}
+
 type Adapter struct {
-	cfg       *config.Email
-	account   *config.EmailAccount
+	cfg       *Config
+	account   *Account
 	connector Connector
 	mailer    Mailer
 	effects   EffectRunner
@@ -119,7 +139,7 @@ type Adapter struct {
 	approvals *approval.OwnerRoute
 	notifier  HandoffNotifier
 	artifacts MediaStore
-	images    atomic.Pointer[vision.Service]
+	images    *vision.Service
 	targets   sessionTargets
 	logger    *slog.Logger
 	sink      runtimeingress.IngressSink
@@ -136,74 +156,62 @@ type Adapter struct {
 	validityChanged atomic.Bool
 }
 
-func New(cfg *config.Email, account *config.EmailAccount, connector Connector, mailer Mailer, cursors CursorStore, effects EffectRunner, sessions Sessions, logger *slog.Logger) (*Adapter, error) {
-	switch {
-	case cfg == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "email config must not be nil")
-	case account == nil || account.Name == "":
-		return nil, Errorf(ErrorCodeInvalidArgument, "email account must not be nil or unnamed")
-	case connector == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "mailbox connector must not be nil")
-	case mailer == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "mail submitter must not be nil")
-	case cursors == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "cursor store must not be nil")
-	case effects == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "effect runner must not be nil")
-	case sessions == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "session store must not be nil")
+func New(deps *Deps) (*Adapter, error) {
+	if deps == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "email dependencies must not be nil")
 	}
+	switch {
+	case deps.Config == nil:
+		return nil, fault.New(ErrorCodeInvalidArgument, "email config must not be nil")
+	case deps.Account == nil || deps.Account.Name == "":
+		return nil, fault.New(ErrorCodeInvalidArgument, "email account must not be nil or unnamed")
+	case deps.Connector == nil:
+		return nil, fault.New(ErrorCodeInvalidArgument, "mailbox connector must not be nil")
+	case deps.Mailer == nil:
+		return nil, fault.New(ErrorCodeInvalidArgument, "mail submitter must not be nil")
+	case deps.Cursors == nil:
+		return nil, fault.New(ErrorCodeInvalidArgument, "cursor store must not be nil")
+	case deps.Effects == nil:
+		return nil, fault.New(ErrorCodeInvalidArgument, "effect runner must not be nil")
+	case deps.Sessions == nil:
+		return nil, fault.New(ErrorCodeInvalidArgument, "session store must not be nil")
+	}
+	logger := deps.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	var accessSettings AccessSettings
+	if deps.Access != nil {
+		accessSettings = *deps.Access
+	}
 	adapter := &Adapter{
-		cfg:       cfg,
-		account:   account,
-		connector: connector,
-		mailer:    mailer,
-		effects:   effects,
-		cursors:   cursors,
-		sessions:  sessions,
-		logger:    logger,
-		retryBase: backoffBase,
-		retryCap:  backoffCap,
-		window:    fetchWindow,
-		now:       time.Now,
-
+		cfg:        deps.Config,
+		account:    deps.Account,
+		connector:  deps.Connector,
+		mailer:     deps.Mailer,
+		effects:    deps.Effects,
+		cursors:    deps.Cursors,
+		sessions:   deps.Sessions,
+		router:     deps.PersonaRouter,
+		owners:     deps.PrincipalResolver,
+		admitted:   deps.OnAdmitted,
+		dropped:    deps.OnDropped,
+		access:     accessSettings,
+		approvals:  deps.OwnerRoute,
+		notifier:   deps.HandoffNotifier,
+		artifacts:  deps.Media,
+		images:     deps.Vision,
+		logger:     logger,
+		retryBase:  backoffBase,
+		retryCap:   backoffCap,
+		window:     fetchWindow,
+		now:        time.Now,
 		deliverSem: make(chan struct{}, maxDeliverInflight),
 	}
 	adapter.state.Store(int32(stateDown))
 	adapter.fault.Store(faultNone)
 	adapter.smtpFault.Store(faultNone)
 	return adapter, nil
-}
-
-func (a *Adapter) SetPrincipalResolver(owners *principal.Resolver) {
-	if a == nil {
-		return
-	}
-	a.owners = owners
-}
-
-func (a *Adapter) SetPersonaRouter(router PersonaRouter) {
-	if a == nil {
-		return
-	}
-	a.router = router
-}
-
-func (a *Adapter) SetAccess(settings *AccessSettings) {
-	if a == nil || settings == nil {
-		return
-	}
-	a.access = *settings
-}
-
-func (a *Adapter) SetAdmissionObserver(observe func(ctx context.Context, class principal.Class)) {
-	if a == nil {
-		return
-	}
-	a.admitted = observe
 }
 
 func (a *Adapter) Account() string {
@@ -223,7 +231,7 @@ func (a *Adapter) ChannelName() string {
 
 func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) error {
 	if sink == nil {
-		return Errorf(ErrorCodeInvalidArgument, "ingress sink must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "ingress sink must not be nil")
 	}
 	a.sink = sink
 	a.run(ctx)
@@ -266,13 +274,13 @@ func (a *Adapter) finding(code, detail string) health.Finding {
 }
 
 func (a *Adapter) currentFault() string {
-	fault, _ := a.fault.Load().(string)
-	return fault
+	code, _ := a.fault.Load().(string)
+	return code
 }
 
 func (a *Adapter) currentSMTPFault() string {
-	fault, _ := a.smtpFault.Load().(string)
-	return fault
+	code, _ := a.smtpFault.Load().(string)
+	return code
 }
 
 var submitFaults = map[ErrorCode]string{
@@ -285,8 +293,8 @@ var submitFaults = map[ErrorCode]string{
 }
 
 func (a *Adapter) noteSubmitFailure(code ErrorCode) {
-	if fault, ok := submitFaults[code]; ok {
-		a.smtpFault.Store(fault)
+	if name, ok := submitFaults[code]; ok {
+		a.smtpFault.Store(name)
 	}
 }
 
@@ -295,14 +303,14 @@ func (a *Adapter) markLive() {
 	a.fault.Store(faultNone)
 }
 
-func (a *Adapter) markFault(fault string) {
+func (a *Adapter) markFault(name string) {
 	a.state.Store(int32(stateDown))
-	a.fault.Store(fault)
+	a.fault.Store(name)
 }
 
 func parsePasswordRef(ref secret.Ref) (secret.Reference, error) {
 	if ref.IsZero() {
-		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "mailbox password reference must use env:// or file://")
+		return secret.Reference{}, fault.New(ErrorCodeInvalidArgument, "mailbox password reference must use env:// or file://")
 	}
 	return ref.Reference(), nil
 }

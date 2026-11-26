@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -104,15 +105,15 @@ func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *principal.Owne
 	return nil
 }
 
-func emailOwnerProblem(email *legacyconfig.Email, owner *principal.Owner) error {
-	if email == nil {
+func emailOwnerProblem(cfg *email.Config, owner *principal.Owner) error {
+	if cfg == nil {
 		return configkit.Invalid("channels.email", "must not be nil")
 	}
-	if !email.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
+	if !cfg.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
 		return nil
 	}
-	for i := range email.Accounts {
-		if len(email.Accounts[i].AllowedSenders) == 0 {
+	for i := range cfg.Accounts {
+		if len(cfg.Accounts[i].AllowedSenders) == 0 {
 			return configkit.Invalid("channels.email.enabled", "requires an email:<address> entry in owner.identities or an allowed_senders entry on every account")
 		}
 	}

@@ -77,48 +77,6 @@ type TelegramPolling struct {
 }
 
 const (
-	EmailMaxAttachmentBytes  int64 = 20971520
-	EmailDefaultIMAPPort           = 993
-	EmailDefaultSMTPPort           = 587
-	EmailDefaultFolder             = "INBOX"
-	EmailDefaultPollInterval       = time.Minute
-	EmailMinPollInterval           = 10 * time.Second
-	EmailMaxPollInterval           = time.Hour
-)
-
-type Email struct {
-	Enabled            bool           `json:"enabled"`
-	Accounts           []EmailAccount `json:"accounts"`
-	MaxAttachmentBytes int64          `json:"max_attachment_bytes"`
-}
-
-type EmailAccount struct {
-	Name           string    `json:"name"`
-	Persona        string    `json:"persona"`
-	Address        string    `json:"address"`
-	IMAP           EmailIMAP `json:"imap"`
-	SMTP           EmailSMTP `json:"smtp"`
-	AuthservID     string    `json:"authserv_id"`
-	AllowedSenders []string  `json:"allowed_senders"`
-}
-
-type EmailSMTP struct {
-	Host        string     `json:"host"`
-	Port        int        `json:"port"`
-	Username    string     `json:"username"`
-	PasswordRef secret.Ref `json:"password_ref"`
-}
-
-type EmailIMAP struct {
-	Host         string             `json:"host"`
-	Port         int                `json:"port"`
-	Username     string             `json:"username"`
-	PasswordRef  secret.Ref         `json:"password_ref"`
-	Folder       string             `json:"folder"`
-	PollInterval configkit.Duration `json:"poll_interval"`
-}
-
-const (
 	HTTPListenAddress            = "127.0.0.1:8284"
 	HTTPMaxBodyBytes             = 1048576
 	HTTPMaxBodyCeiling           = 10485760

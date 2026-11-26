@@ -13,6 +13,7 @@ import (
 	"github.com/emersion/go-message"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -45,7 +46,7 @@ func stageAttachments(raw []byte, limit int64) (*attachmentStage, error) {
 	stage := &attachmentStage{limit: limit}
 	entity, err := message.Read(bytes.NewReader(raw))
 	if entity == nil || !tolerableMIMEError(err) {
-		return nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "message structure is not readable", Cause: err}
+		return nil, fault.Wrap(ErrorCodeAttachmentRejected, "message structure is not readable", err)
 	}
 	stage.walk(entity, 0)
 	if stage.err != nil {
@@ -64,7 +65,7 @@ func (s *attachmentStage) walk(entity *message.Entity, depth int) {
 		return
 	}
 	if depth > maxMIMEDepth || s.seen >= maxMIMEParts {
-		s.err = Errorf(ErrorCodeAttachmentRejected, "message structure is deeper or wider than supported")
+		s.err = fault.New(ErrorCodeAttachmentRejected, "message structure is deeper or wider than supported")
 		return
 	}
 	s.seen++
@@ -75,7 +76,7 @@ func (s *attachmentStage) walk(entity *message.Entity, depth int) {
 				return
 			}
 			if child == nil || !tolerableMIMEError(err) {
-				s.err = &Error{Code: ErrorCodeAttachmentRejected, Detail: "message structure is not readable", Cause: err}
+				s.err = fault.Wrap(ErrorCodeAttachmentRejected, "message structure is not readable", err)
 				return
 			}
 			s.walk(child, depth+1)
@@ -88,12 +89,12 @@ func (s *attachmentStage) walk(entity *message.Entity, depth int) {
 	}
 	mediaType = media.BaseType(mediaType)
 	if len(s.items) >= maxAttachmentsPerMessage {
-		s.err = Errorf(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
+		s.err = fault.New(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
 		return
 	}
 	file, err := media.Spool(entity.Body, s.limit)
 	if err != nil {
-		s.err = &Error{Code: ErrorCodeAttachmentRejected, Detail: "attachment is over the bound or unreadable", Cause: err}
+		s.err = fault.Wrap(ErrorCodeAttachmentRejected, "attachment is over the bound or unreadable", err)
 		return
 	}
 	s.items = append(s.items, stagedAttachment{file: file, filename: attachmentName(entity, params, mediaType), mediaType: mediaType})
@@ -133,13 +134,13 @@ func (a *Adapter) storeAttachments(ctx context.Context, stage *attachmentStage, 
 		return nil, nil, nil
 	}
 	if a.artifacts == nil {
-		return nil, nil, Errorf(ErrorCodeAttachmentRejected, "media storage is not configured")
+		return nil, nil, fault.New(ErrorCodeAttachmentRejected, "media storage is not configured")
 	}
 	summaries := make([]media.ArtifactSummary, 0, len(stage.items))
 	var images []json.RawMessage
 	for i := range stage.items {
 		item := &stage.items[i]
-		if svc := a.images.Load(); svc != nil && media.IsVisionImage(item.mediaType) {
+		if svc := a.images; svc != nil && media.IsVisionImage(item.mediaType) {
 			summary, raw, err := a.putVisionImage(ctx, svc, item, found)
 			if err != nil {
 				return nil, nil, err
@@ -159,7 +160,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, stage *attachmentStage, 
 
 func (a *Adapter) putVisionImage(ctx context.Context, svc *vision.Service, item *stagedAttachment, found *admission) (media.ArtifactSummary, json.RawMessage, error) {
 	if _, err := item.file.Seek(0, io.SeekStart); err != nil {
-		return media.ArtifactSummary{}, nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "attachment is not rewindable", Cause: err}
+		return media.ArtifactSummary{}, nil, fault.Wrap(ErrorCodeAttachmentRejected, "attachment is not rewindable", err)
 	}
 	part, err := svc.Ingest(ctx, &vision.IngestRequest{
 		Content:      item.file,
@@ -173,11 +174,11 @@ func (a *Adapter) putVisionImage(ctx context.Context, svc *vision.Service, item 
 		},
 	})
 	if err != nil {
-		return media.ArtifactSummary{}, nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "image intake failed", Cause: err}
+		return media.ArtifactSummary{}, nil, fault.Wrap(ErrorCodeAttachmentRejected, "image intake failed", err)
 	}
 	raw, err := vision.MarshalPart(&part)
 	if err != nil {
-		return media.ArtifactSummary{}, nil, &Error{Code: ErrorCodeAttachmentRejected, Detail: "image reference is not serializable", Cause: err}
+		return media.ArtifactSummary{}, nil, fault.Wrap(ErrorCodeAttachmentRejected, "image reference is not serializable", err)
 	}
 	return media.ArtifactSummary{RefID: part.ArtifactID, Digest: part.DerivedDigest, SizeBytes: part.EncodedBytes, Filename: item.filename}, raw, nil
 }
@@ -185,7 +186,7 @@ func (a *Adapter) putVisionImage(ctx context.Context, svc *vision.Service, item 
 func (a *Adapter) putAttachment(ctx context.Context, item *stagedAttachment, found *admission) (media.ArtifactSummary, error) {
 	extra, err := json.Marshal(map[string]string{"message_id": found.messageID})
 	if err != nil {
-		return media.ArtifactSummary{}, Errorf(ErrorCodeAttachmentRejected, "artifact metadata is not serializable")
+		return media.ArtifactSummary{}, fault.New(ErrorCodeAttachmentRejected, "artifact metadata is not serializable")
 	}
 	receipt, err := a.artifacts.Put(ctx, item.file, &media.Meta{
 		SessionID: found.session,
@@ -194,7 +195,7 @@ func (a *Adapter) putAttachment(ctx context.Context, item *stagedAttachment, fou
 		Extra:     extra,
 	})
 	if err != nil {
-		return media.ArtifactSummary{}, &Error{Code: ErrorCodeAttachmentRejected, Detail: "artifact storage failed", Cause: err}
+		return media.ArtifactSummary{}, fault.Wrap(ErrorCodeAttachmentRejected, "artifact storage failed", err)
 	}
 	return media.ArtifactSummary{RefID: receipt.RefID, Digest: receipt.Digest, SizeBytes: receipt.SizeBytes, Filename: item.filename}, nil
 }
@@ -202,12 +203,12 @@ func (a *Adapter) putAttachment(ctx context.Context, item *stagedAttachment, fou
 func attachArtifacts(found *admission, summaries []media.ArtifactSummary) error {
 	var reference replyReference
 	if err := json.Unmarshal(found.reply, &reference); err != nil {
-		return Errorf(ErrorCodeAttachmentRejected, "reply context is not decodable")
+		return fault.New(ErrorCodeAttachmentRejected, "reply context is not decodable")
 	}
 	reference.Artifacts = summaries
 	raw, err := json.Marshal(reference)
 	if err != nil {
-		return Errorf(ErrorCodeAttachmentRejected, "reply context is not serializable")
+		return fault.New(ErrorCodeAttachmentRejected, "reply context is not serializable")
 	}
 	found.reply = raw
 	return nil

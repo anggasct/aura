@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/child"
@@ -37,7 +38,7 @@ import (
 type Channels struct {
 	Discord  discord.Config        `json:"discord"`
 	Telegram legacyconfig.Telegram `json:"telegram"`
-	Email    legacyconfig.Email    `json:"email"`
+	Email    email.Config          `json:"email"`
 	HTTP     legacyconfig.HTTP     `json:"http"`
 }
 
@@ -116,9 +117,7 @@ func Default() Config {
 					MaxConnections: legacyconfig.TelegramWebhookMaxConnections,
 				},
 			},
-			Email: legacyconfig.Email{
-				MaxAttachmentBytes: legacyconfig.EmailMaxAttachmentBytes,
-			},
+			Email: email.Default(),
 			HTTP: legacyconfig.HTTP{
 				ListenAddress:       legacyconfig.HTTPListenAddress,
 				MaxBodyBytes:        legacyconfig.HTTPMaxBodyBytes,
