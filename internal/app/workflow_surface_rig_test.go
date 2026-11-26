@@ -24,7 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -150,7 +150,7 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
 	built, err := newWorkflowToolRunner(&workflowToolRunnerInput{
-		Executor: executor, Sessions: store.NewSessionService(in.db), Registry: registry, Runs: workflow.NewStore(in.db),
+		Executor: executor, Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: workflow.NewStore(in.db),
 		Route: route, Logger: logger,
 	})
 	if err != nil {

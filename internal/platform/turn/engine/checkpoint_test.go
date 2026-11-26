@@ -13,8 +13,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/checkpoint"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func checkpointFixture(eventSequence uint64) *turn.Checkpoint {
@@ -52,7 +52,7 @@ func validResumeValidation(checkpoint *turn.Checkpoint, currentSequence uint64) 
 	}
 }
 
-func checkpointRuntime(t *testing.T) (*Engine, *sql.DB, store.EventStore, uint64) {
+func checkpointRuntime(t *testing.T) (*Engine, *sql.DB, turnstore.EventStore, uint64) {
 	t.Helper()
 	engine, db, events := newTestRuntime(t, Deps{Config: Default()}, turntest.NewFakeExecutor(nil))
 	mustCreateSession(t, db, "session-1")
@@ -102,7 +102,7 @@ func TestSaveAndLoadCheckpoint(t *testing.T) {
 	if latest.ResumeGeneration != 2 || latest.EventSequence != currentSequence {
 		t.Fatalf("latest checkpoint = %+v, want generation 2 at boundary %d", latest, currentSequence)
 	}
-	restarted, err := New(&Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default()})
+	restarted, err := New(&Deps{Events: turnstore.NewEventStore(db), Dedupe: turnstore.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default()})
 	if err != nil {
 		t.Fatalf("New after restart: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestSaveCheckpointRejectsMutatedRetry(t *testing.T) {
 
 func TestConcurrentCheckpointMutationHasOneAuthoritativePayload(t *testing.T) {
 	engine, db, _, last := checkpointRuntime(t)
-	other, err := New(&Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default()})
+	other, err := New(&Deps{Events: turnstore.NewEventStore(db), Dedupe: turnstore.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default()})
 	if err != nil {
 		t.Fatalf("New second writer: %v", err)
 	}

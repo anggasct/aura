@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type Classification string
@@ -244,7 +244,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	var sequence uint64
 	var schemaVersion uint16
 	if kind == EventKindChannelRequested || req.AllocateSequence {
-		sequence, err = store.AllocateSequenceTx(ctx, tx, req.SessionID)
+		sequence, err = turnstore.AllocateSequenceTx(ctx, tx, req.SessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -287,7 +287,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 			return nil, err
 		}
 	}
-	if err := store.AppendEventTx(ctx, tx, &turn.Event{
+	if err := turnstore.AppendEventTx(ctx, tx, &turn.Event{
 		ID:            eventID,
 		SessionID:     req.SessionID,
 		Sequence:      sequence,

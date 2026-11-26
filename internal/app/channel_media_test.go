@@ -8,13 +8,14 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
 func TestChannelMediaStorePersistsContentUnderTheSession(t *testing.T) {
 	db := discordTestDB(t)
 	sessionID := "main/telegram:pocket/chat:5"
-	if err := (&discordSessionEnsurer{sessions: store.NewSessionService(db)}).EnsureSession(t.Context(), sessionID, "telegram:5", "main"); err != nil {
+	if err := (&discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}).EnsureSession(t.Context(), sessionID, "telegram:5", "main"); err != nil {
 		t.Fatalf("EnsureSession: %v", err)
 	}
 	artifacts := store.NewArtifactStore(db, t.TempDir(), 1<<20)

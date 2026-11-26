@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -35,14 +36,14 @@ func hookTurnRequest() *turn.TurnRequest {
 func TestMemoryProjectionJournalSeeded(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	admitted := &turn.Event{
 		ID: "ev-admit-1", SessionID: "sess-1", TurnID: "turn-1", Author: "user",
-		Kind: store.EventKindADK, SchemaVersion: 1,
+		Kind: turnstore.EventKindADK, SchemaVersion: 1,
 		Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
 		CreatedAt: time.Now().UTC(),
 	}
@@ -112,7 +113,7 @@ func TestMemoryProjectionJournalSeeded(t *testing.T) {
 func TestMemoryProjectionCrossSessionFallbackRealStore(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, seed := range []struct{ session, owner string }{
 		{"sess-1", "owner-1"}, {"sess-2", "owner-1"}, {"sess-9", "owner-2"},
 	} {
@@ -161,7 +162,7 @@ func TestMemoryProjectionCrossSessionFallbackRealStore(t *testing.T) {
 func TestMemoryProjectionSecretDropRealStore(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -198,7 +199,7 @@ func TestMemoryProjectionSecretDropRealStore(t *testing.T) {
 func TestMemoryHookProjectsAndPurges(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -209,7 +210,7 @@ func TestMemoryHookProjectsAndPurges(t *testing.T) {
 	hook := buildMemoryHook(service, nil, nil, nil)
 	hookEvents := []turn.Event{{
 		ID: "ev-hook-1", SessionID: "sess-1", Sequence: 1, TurnID: "turn-1", Author: "user",
-		Kind: store.EventKindADK, SchemaVersion: 1,
+		Kind: turnstore.EventKindADK, SchemaVersion: 1,
 		Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
 		CreatedAt: time.Now().UTC(),
 	}}
@@ -239,7 +240,7 @@ func TestMemoryHookLabelsUserInputByPrincipal(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
 			db := newMemoryTestDB(t)
-			sessions := store.NewSessionService(db)
+			sessions := turnstore.NewSessionService(db)
 			if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: tc.principal, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 				t.Fatalf("create session: %v", err)
 			}
@@ -252,7 +253,7 @@ func TestMemoryHookLabelsUserInputByPrincipal(t *testing.T) {
 			req.PrincipalID = tc.principal
 			events := []turn.Event{{
 				ID: "ev-hook-1", SessionID: "sess-1", Sequence: 1, TurnID: "turn-1", Author: "user",
-				Kind: store.EventKindADK, SchemaVersion: 1,
+				Kind: turnstore.EventKindADK, SchemaVersion: 1,
 				Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
 				CreatedAt: time.Now().UTC(),
 			}}
@@ -293,7 +294,7 @@ func capableMemorySummaryModel() *memory.SummaryModel {
 func TestMemoryHookSummarizesClosedRange(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestMemoryHookSummarizesClosedRange(t *testing.T) {
 		}
 		events = append(events, turn.Event{
 			ID: fmt.Sprintf("ev-hook-%d", i), SessionID: "sess-1", Sequence: uint64(i), TurnID: "turn-1", Author: "user",
-			Kind: store.EventKindADK, SchemaVersion: 1,
+			Kind: turnstore.EventKindADK, SchemaVersion: 1,
 			Payload:   journalPayload(t, "user", content),
 			CreatedAt: time.Now().UTC(),
 		})
@@ -356,7 +357,7 @@ func TestMemoryHookSummarizesClosedRange(t *testing.T) {
 func TestMemoryHookSkipsRangeSummaryWithoutSummarizer(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner-1", Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
@@ -367,7 +368,7 @@ func TestMemoryHookSkipsRangeSummaryWithoutSummarizer(t *testing.T) {
 	hook := buildMemoryHook(service, nil, nil, nil)
 	if err := hook(ctx, hookTurnRequest(), []turn.Event{{
 		ID: "ev-hook-1", SessionID: "sess-1", Sequence: 1, TurnID: "turn-1", Author: "user",
-		Kind: store.EventKindADK, SchemaVersion: 1,
+		Kind: turnstore.EventKindADK, SchemaVersion: 1,
 		Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
 		CreatedAt: time.Now().UTC(),
 	}}); err != nil {
@@ -385,7 +386,7 @@ func TestMemoryHookSkipsRangeSummaryWithoutSummarizer(t *testing.T) {
 func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for id, owner := range map[string]string{"dm:777": principal.OwnerID, "dm:111": "discord:111", "terminal-1": principal.OwnerID} {
 		if err := sessions.Create(ctx, &turn.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
@@ -398,7 +399,7 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	ownerTurn := &turn.TurnRequest{TurnID: "turn-1", SessionID: "dm:777", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: "discord:owner"}
 	if err := buildMemoryHook(service, nil, nil, nil)(ctx, ownerTurn, []turn.Event{{
 		ID: "ev-owner-1", SessionID: "dm:777", Sequence: 1, TurnID: "turn-1", Author: principal.OwnerID,
-		Kind: store.EventKindADK, SchemaVersion: 1,
+		Kind: turnstore.EventKindADK, SchemaVersion: 1,
 		Payload:   journalPayload(t, "user", "the nightly backup finished cleanly"),
 		CreatedAt: time.Now().UTC(),
 	}}); err != nil {

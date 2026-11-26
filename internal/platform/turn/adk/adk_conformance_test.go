@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/session"
 )
@@ -38,7 +38,7 @@ func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 
 	original := loadGoldenADKEvent(t)
 
-	re, err := store.RuntimeEventFromADK("session-golden", "turn-golden", original)
+	re, err := turnstore.RuntimeEventFromADK("session-golden", "turn-golden", original)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
@@ -101,12 +101,12 @@ func TestADKGoldenEventSurvivesFullRoundTrip(t *testing.T) {
 
 func TestADKGoldenEventStoredBytesStable(t *testing.T) {
 	original := loadGoldenADKEvent(t)
-	re, err := store.RuntimeEventFromADK("session-golden", "turn-1", original)
+	re, err := turnstore.RuntimeEventFromADK("session-golden", "turn-1", original)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
 
-	roundTripped, err := store.RuntimeEventToADK(&re)
+	roundTripped, err := turnstore.RuntimeEventToADK(&re)
 	if err != nil {
 		t.Fatalf("RuntimeEventToADK: %v", err)
 	}

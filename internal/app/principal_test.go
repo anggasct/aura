@@ -6,7 +6,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestWebhookTurnsAreTrustedClassWithUntrustedInput(t *testing.T) {
@@ -21,7 +21,7 @@ func TestWebhookTurnsAreTrustedClassWithUntrustedInput(t *testing.T) {
 
 func TestCronSessionsAreOwnerKeyed(t *testing.T) {
 	db := discordTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := ensureCronSession(t.Context(), sessions, "cron:job-1"); err != nil {
 		t.Fatalf("ensureCronSession: %v", err)
 	}

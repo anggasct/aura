@@ -2,6 +2,7 @@ package store
 
 import (
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"testing"
 	"time"
 
@@ -125,7 +126,7 @@ func TestPairingFailedApprovalsReadOwnerActions(t *testing.T) {
 	db := newTestDB(t)
 	ctx := t.Context()
 	seedPersonaSession(t, db, "profile-local-owner", "local-owner", "main")
-	events := NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	base := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	for i, entry := range []struct {
 		action, channel string

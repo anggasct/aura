@@ -12,12 +12,7 @@ import (
 type ErrorCode string
 
 const (
-	ErrorCodeEventSequenceConflict     ErrorCode = "event_sequence_conflict"
-	ErrorCodeEventSequenceInvalid      ErrorCode = "event_sequence_invalid"
-	ErrorCodeEventSchemaVersionInvalid ErrorCode = "event_schema_version_invalid"
-	ErrorCodeEventPayloadInvalid       ErrorCode = "event_payload_invalid"
 	ErrorCodeInvalidArgument           ErrorCode = "invalid_argument"
-	ErrorCodeSessionIDConflict         ErrorCode = "session_id_conflict"
 	ErrorCodeSessionNotFound           ErrorCode = "session_not_found"
 	ErrorCodeEventNotFound             ErrorCode = "event_not_found"
 	ErrorCodeArtifactQuotaExceeded     ErrorCode = "artifact_quota_exceeded"
@@ -77,6 +72,20 @@ func errNilArgument(name string) error {
 
 func classify(err error) error {
 	return sqlite.Classify(err)
+}
+
+func isConstraintUnique(err error) bool {
+	classified := sqlite.Classify(err)
+	return fault.HasCode(classified, sqlite.ErrorCodeConstraintUnique) ||
+		fault.HasCode(classified, sqlite.ErrorCodeConstraintPrimaryKey)
+}
+
+func isConstraintForeignKey(err error) bool {
+	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintForeignKey)
+}
+
+func isConstraintCheck(err error) bool {
+	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck)
 }
 
 type rowChecker interface {

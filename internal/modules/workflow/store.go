@@ -13,7 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type Store struct {
@@ -196,11 +196,11 @@ func (s *Store) createRun(ctx context.Context, create *runCreate) (*RunSummary, 
 		return nil, fmt.Errorf("begin run create: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := store.CreateSessionTx(ctx, tx, &turn.Session{
+	if err := turnstore.CreateSessionTx(ctx, tx, &turn.Session{
 		ID: RunSessionID(summary.ID), OwnerID: origin.PrincipalID, AgentID: origin.AgentID,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return nil, codedError(ErrorCodeSessionInvalid, "session "+RunSessionID(summary.ID)+" already exists")
 		}
 		return nil, fmt.Errorf("create run session: %w", err)

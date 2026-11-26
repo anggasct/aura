@@ -34,6 +34,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -238,7 +239,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], h.mail, h.submissions,
 		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		&emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}}, slog.New(slog.DiscardHandler))
+		&emailSessions{discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}}, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("email.New: %v", err)
 	}
@@ -259,8 +260,8 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	mailboxes := wireEmailOwnerAccess([]runtimechannelhost.ChannelPort{adapter}, route, approvers)
 	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
 	builtin.SetHandoffOpener(newHandoffService(db, []handoffNotifier{adapter}))
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, store.NewSessionService(db), builtin, nil, nil,
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, turnstore.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -269,7 +270,7 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,

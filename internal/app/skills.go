@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -161,7 +162,7 @@ func (b *skillCommandBridge) Activate(ctx context.Context, name string) (command
 }
 
 type skillActivationLog struct {
-	events store.EventKindReader
+	events turnstore.EventKindReader
 }
 
 func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, limit int) ([]turn.SkillActivation, error) {
@@ -191,7 +192,7 @@ func buildSkillRuntime(ctx context.Context, cfg *config.Skills, db *sql.DB, logg
 	if err != nil {
 		return nil, err
 	}
-	sessionContext, err := skills.NewSessionContext(engine, &skillActivationLog{events: store.NewEventKindReader(db)}, cfg.MaxSessionContextTokens*skills.CharsPerToken)
+	sessionContext, err := skills.NewSessionContext(engine, &skillActivationLog{events: turnstore.NewEventKindReader(db)}, cfg.MaxSessionContextTokens*skills.CharsPerToken)
 	if err != nil {
 		return nil, err
 	}

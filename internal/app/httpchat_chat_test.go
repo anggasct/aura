@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -168,8 +169,8 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 	}
 	passEvals(t, db, registry, "lobby", "staff")
 	name := "http-chat-model"
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -178,7 +179,7 @@ func newHTTPChatHarnessWithModel(t *testing.T, turnsPerMinute string, llm adkmod
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
@@ -368,11 +369,11 @@ func TestHTTPChatRunsTurnsThroughTheRealRuntime(t *testing.T) {
 			t.Errorf("model input lacks %q:\n%s", want, user)
 		}
 	}
-	session, err := store.NewSessionService(h.db).Get(t.Context(), first.session)
+	session, err := turnstore.NewSessionService(h.db).Get(t.Context(), first.session)
 	if err != nil || session.OwnerID != "http:"+keyID || session.AgentID != "lobby" {
 		t.Fatalf("stored session = %+v, %v", session, err)
 	}
-	accepted, err := store.NewEventStore(h.db).LastSequence(t.Context(), first.session)
+	accepted, err := turnstore.NewEventStore(h.db).LastSequence(t.Context(), first.session)
 	if err != nil || accepted == 0 {
 		t.Fatalf("session events = %d, %v", accepted, err)
 	}
@@ -524,14 +525,14 @@ func TestPrincipalForgetCoversHTTPKeyPrincipals(t *testing.T) {
 	if err != nil || !strings.Contains(dry, "sessions: 1") || !strings.Contains(dry, "dry run: pass --apply to erase "+principalID) {
 		t.Fatalf("dry run = %q, %v", dry, err)
 	}
-	if _, err := store.NewSessionService(h.db).Get(t.Context(), created.session); err != nil {
+	if _, err := turnstore.NewSessionService(h.db).Get(t.Context(), created.session); err != nil {
 		t.Fatalf("a dry run removed the session: %v", err)
 	}
 	applied, err := runAccessCommand(t, newPrincipalCmd, h.config, "forget", principalID, "--apply")
 	if err != nil || !strings.Contains(applied, "erased "+principalID) {
 		t.Fatalf("apply = %q, %v", applied, err)
 	}
-	if _, err := store.NewSessionService(h.db).Get(t.Context(), created.session); err == nil {
+	if _, err := turnstore.NewSessionService(h.db).Get(t.Context(), created.session); err == nil {
 		t.Fatal("the key's session survived erasure")
 	}
 	if _, err := runAccessCommand(t, newPrincipalCmd, h.config, "forget", "http:not-a-key-id"); err == nil {

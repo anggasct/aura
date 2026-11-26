@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -17,6 +17,12 @@ const (
 	defaultSessionAgentID = "main"
 	workflowSessionPrefix = "wf-"
 )
+
+type SessionService interface {
+	Create(ctx context.Context, sess *turn.Session) error
+	Get(ctx context.Context, sessionID string) (turn.Session, error)
+	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]turn.Event, error)
+}
 
 type sqliteSessionService struct {
 	db *sql.DB

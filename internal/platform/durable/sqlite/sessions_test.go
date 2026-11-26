@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -60,7 +61,7 @@ func newSessionStore(t *testing.T, db *sql.DB, clock durable.Clock) *SessionStor
 
 func createSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: testSessionOwner}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: testSessionOwner}); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
@@ -492,8 +493,8 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 	}
 	t.Run("unknown session", func(t *testing.T) {
 		_, err := f.sessions.Admit(t.Context(), admitRequest(turnSpec{turnID: "turn-1", key: "key-1", sessionID: "session-missing"}))
-		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
-			t.Fatalf("err = %v, want store code %s", err, store.ErrorCodeSessionNotFound)
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionNotFound {
+			t.Fatalf("err = %v, want store code %s", err, turnstore.ErrorCodeSessionNotFound)
 		}
 		requireUnchanged(t, f.db, before)
 	})

@@ -40,6 +40,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -138,7 +139,7 @@ func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbui
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	wiring := r.wiring
@@ -420,8 +421,8 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 		t.Fatalf("newToolExecutor: %v", err)
 	}
 	name := "http-chat-model"
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -430,7 +431,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,

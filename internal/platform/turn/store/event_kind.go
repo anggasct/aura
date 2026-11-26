@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -18,7 +18,7 @@ func NewEventKindReader(db *sql.DB) EventKindReader {
 
 func (s *sqliteEventStore) LatestByKind(ctx context.Context, sessionID, kind string, limit int) ([]turn.Event, error) {
 	if limit <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "limit must be positive")
+		return nil, errorf(ErrorCodeInvalidArgument, "limit must be positive")
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`

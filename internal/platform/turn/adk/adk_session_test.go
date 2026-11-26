@@ -11,14 +11,14 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 )
 
-func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventStore) {
+func newSessionTestDB(t *testing.T) (*sql.DB, turnstore.SessionService, turnstore.EventStore) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
@@ -28,13 +28,13 @@ func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventS
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return db, store.NewSessionService(db), store.NewEventStore(db)
+	return db, turnstore.NewSessionService(db), turnstore.NewEventStore(db)
 }
 
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
 	sess := turn.Session{ID: id, OwnerID: "user-1"}
-	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
@@ -110,7 +110,7 @@ func TestADKSessionServiceAppendValidatesButDoesNotPersist(t *testing.T) {
 		t.Fatalf("events = %d, want 0 (AppendEvent must not persist)", got.Session.Events().Len())
 	}
 
-	re, err := store.RuntimeEventFromADK("session-1", "turn-1", ev)
+	re, err := turnstore.RuntimeEventFromADK("session-1", "turn-1", ev)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
@@ -191,7 +191,7 @@ func TestSessionHistoryLeavesOutTheTurnBeingExecuted(t *testing.T) {
 			Author:       "model",
 		}
 		ev.Content = genai.NewContentFromText("answer of "+turnID, genai.RoleModel)
-		re, err := store.RuntimeEventFromADK("session-1", turnID, ev)
+		re, err := turnstore.RuntimeEventFromADK("session-1", turnID, ev)
 		if err != nil {
 			t.Fatalf("RuntimeEventFromADK: %v", err)
 		}

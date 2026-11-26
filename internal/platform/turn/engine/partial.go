@@ -5,11 +5,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func partialModelText(ev *turn.Event) (text string, partial bool) {
-	if ev.Kind != store.EventKindADK {
+	if ev.Kind != turnstore.EventKindADK {
 		return "", false
 	}
 	var decoded struct {

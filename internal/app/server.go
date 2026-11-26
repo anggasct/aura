@@ -28,6 +28,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -291,7 +292,7 @@ func (b *build) buildChannelHost() error {
 	if err != nil {
 		return err
 	}
-	if err := wireChatCommands(s.channels, b.engine, b.sessions, b.events, store.NewConversationSessionStore(b.db), b.modules.skills, commandRecorder); err != nil {
+	if err := wireChatCommands(s.channels, b.engine, b.sessions, b.events, turnstore.NewConversationSessionStore(b.db), b.modules.skills, commandRecorder); err != nil {
 		return err
 	}
 	s.host, err = runtimeengine.NewHost(b.engine, b.logger)

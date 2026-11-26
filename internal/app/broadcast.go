@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -193,7 +194,7 @@ func mapBroadcastStoreError(err error) error {
 type discordBroadcastSender struct {
 	adapter  *discord.Adapter
 	effects  *effect.Executor
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s *discordBroadcastSender) Send(ctx context.Context, req *broadcast.SendRequest) (broadcast.SendOutcome, error) {
@@ -254,14 +255,14 @@ type broadcastChannels struct {
 	providers map[string]effect.Provider
 }
 
-func ensureBroadcastSession(ctx context.Context, sessions store.SessionService, sessionID string) error {
+func ensureBroadcastSession(ctx context.Context, sessions turnstore.SessionService, sessionID string) error {
 	if sessions == nil {
 		return nil
 	}
 	if _, err := sessions.Get(ctx, sessionID); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionNotFound {
 			return err
 		}
 	}
@@ -273,13 +274,13 @@ func ensureBroadcastSession(ctx context.Context, sessions store.SessionService, 
 		CreatedAt: now,
 		UpdatedAt: now,
 	})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err
 }
 
-func buildBroadcastSenders(adapters []runtimechannelhost.ChannelPort, effects *effect.Executor, sessions store.SessionService) *broadcastChannels {
+func buildBroadcastSenders(adapters []runtimechannelhost.ChannelPort, effects *effect.Executor, sessions turnstore.SessionService) *broadcastChannels {
 	out := &broadcastChannels{senders: map[string]broadcast.Sender{}, providers: map[string]effect.Provider{}}
 	for _, adapter := range adapters {
 		concrete, ok := adapter.(*discord.Adapter)

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -61,7 +62,7 @@ type storedTurnOutcome struct {
 }
 
 type webhookReconciler struct {
-	sessions   store.SessionService
+	sessions   turnstore.SessionService
 	executions store.WebhookExecutionStore
 	clock      func() time.Time
 	page       int

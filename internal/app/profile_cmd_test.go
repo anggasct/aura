@@ -12,7 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeProfileCLIConfig(t *testing.T) string {
@@ -137,12 +137,12 @@ func seedProfileCandidate(t *testing.T, cfg string) string {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-prof", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	if _, err := events.AppendSequenced(t.Context(), "sess-prof", &turn.Event{
 		ID: "evt-prof-1", SessionID: "sess-prof", TurnID: "t1", InvocationID: "inv-1",
 		Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
@@ -175,12 +175,12 @@ func seedProfileConflictingCandidate(t *testing.T, cfg string) string {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-conf", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	if _, err := events.AppendSequenced(t.Context(), "sess-conf", &turn.Event{
 		ID: "evt-conf-1", SessionID: "sess-conf", TurnID: "t1", InvocationID: "inv-1",
 		Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,

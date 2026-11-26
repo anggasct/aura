@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -269,7 +270,7 @@ func TestPrincipalListAndShow(t *testing.T) {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for id, owner := range map[string]string{"main/discord:office/dm:1": "discord:1", "main/discord:office/dm:9": "discord:9", "main/discord:office/dm:777": "local-owner"} {
 		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session: %v", err)

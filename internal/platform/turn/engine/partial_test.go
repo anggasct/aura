@@ -13,18 +13,18 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func adkPartialStep(text string) turntest.FakeStep {
 	payload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":` + strconv.Quote(text) + `}]},"partial":true}`)
-	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
+	return turntest.FakeStep{Kind: turnstore.EventKindADK, Payload: payload}
 }
 
 func adkFinalStep(text string) turntest.FakeStep {
 	payload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":` + strconv.Quote(text) + `}]},"finishReason":"STOP"}`)
-	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
+	return turntest.FakeStep{Kind: turnstore.EventKindADK, Payload: payload}
 }
 
 func kindsOf(events []turn.Event) []string {
@@ -62,7 +62,7 @@ func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 
-		wantKinds := []string{turn.EventKindTurnAccepted, turn.EventKindModelDelta, turn.EventKindModelDelta, store.EventKindADK, turn.EventKindTurnCompleted}
+		wantKinds := []string{turn.EventKindTurnAccepted, turn.EventKindModelDelta, turn.EventKindModelDelta, turnstore.EventKindADK, turn.EventKindTurnCompleted}
 		if got := kindsOf(live); !slices.Equal(got, wantKinds) {
 			t.Fatalf("live kinds = %v, want %v", got, wantKinds)
 		}
@@ -76,11 +76,11 @@ func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 			}
 		}
 
-		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-partial")
+		stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-partial")
 		if err != nil {
 			t.Fatalf("ListTurnEvents: %v", err)
 		}
-		wantStored := []string{turn.EventKindTurnAccepted, store.EventKindADK, turn.EventKindTurnCompleted}
+		wantStored := []string{turn.EventKindTurnAccepted, turnstore.EventKindADK, turn.EventKindTurnCompleted}
 		if got := kindsOf(stored); !slices.Equal(got, wantStored) {
 			t.Fatalf("stored kinds = %v, want %v", got, wantStored)
 		}
@@ -172,7 +172,7 @@ func TestSlowSubscriberLosesDeltasButKeepsLifecycleEvents(t *testing.T) {
 		if last := rest[len(rest)-1]; last.Kind != turn.EventKindTurnCompleted {
 			t.Fatalf("last event = %q, want turn.completed", last.Kind)
 		}
-		if !slices.Contains(kindsOf(rest), store.EventKindADK) {
+		if !slices.Contains(kindsOf(rest), turnstore.EventKindADK) {
 			t.Errorf("the completed message was lost: %v", kindsOf(rest))
 		}
 		deltas := decodeDeltas(t, rest)
@@ -311,11 +311,11 @@ func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
 	if lastDelta < 0 || lastDelta > terminal {
 		t.Errorf("deltas did not arrive before the turn ended: %v", kindsOf(live))
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
+	stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
 	if err != nil {
 		t.Fatalf("ListTurnEvents: %v", err)
 	}
-	wantStored := []string{turn.EventKindTurnAccepted, store.EventKindADK, turn.EventKindTurnCompleted}
+	wantStored := []string{turn.EventKindTurnAccepted, turnstore.EventKindADK, turn.EventKindTurnCompleted}
 	if got := kindsOf(stored); !slices.Equal(got, wantStored) {
 		t.Errorf("stored kinds = %v, want %v", got, wantStored)
 	}

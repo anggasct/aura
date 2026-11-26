@@ -17,8 +17,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 var errDeliveryBoom = errors.New("boom delivery")
@@ -348,7 +348,7 @@ func TestTerminalTurnSkipsWithoutAdapter(t *testing.T) {
 func TestDeliveryExtractsADKModelText(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		adkPayload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":"adk hello"}]},"partial":false}`)
-		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: store.EventKindADK, Payload: adkPayload}})
+		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turnstore.EventKindADK, Payload: adkPayload}})
 		capture := &capturingAdapter{}
 		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
 		mustCreateSession(t, db, "channel:333")

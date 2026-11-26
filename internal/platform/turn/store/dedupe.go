@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -33,10 +33,10 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *turn.DedupeClaim) (or
 		return "", false, errNilArgument("claim")
 	}
 	if claim.Source == "" || claim.ExternalID == "" {
-		return "", false, Errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
+		return "", false, errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
 	}
 	if claim.Now.IsZero() {
-		return "", false, Errorf(ErrorCodeInvalidArgument, "dedupe claim must have a current time")
+		return "", false, errorf(ErrorCodeInvalidArgument, "dedupe claim must have a current time")
 	}
 	var claimedTurnID string
 	var expiresAtRaw string
@@ -76,7 +76,7 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 		return "", false, errNilArgument("accepted")
 	}
 	if source == "" || externalID == "" {
-		return "", false, Errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
+		return "", false, errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -113,7 +113,7 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 
 func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID string) (bool, error) {
 	if source == "" || externalID == "" {
-		return false, Errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
+		return false, errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
 	}
 	var expiresAtRaw string
 	err := s.db.QueryRowContext(ctx,
@@ -131,7 +131,7 @@ func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID stri
 
 func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]turn.Event, error) {
 	if sessionID == "" || turnID == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "turn events read must name a session and a turn")
+		return nil, errorf(ErrorCodeInvalidArgument, "turn events read must name a session and a turn")
 	}
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`

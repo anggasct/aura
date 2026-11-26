@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -208,7 +209,7 @@ func TestDurableTransientRenderFailureKeepsItsOwnCode(t *testing.T) {
 	if journaled {
 		t.Fatal("transient render failure journaled a skill-activation result")
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
+	stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -257,7 +258,7 @@ func TestDurableUnavailableSkillJournalsNullOnce(t *testing.T) {
 	if renderer.calls != 1 {
 		t.Errorf("renderer calls = %d, want the replay to reuse the journal", renderer.calls)
 	}
-	if stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID); err != nil || len(stored) != 0 {
+	if stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID); err != nil || len(stored) != 0 {
 		t.Fatalf("stored activations = %v (%v), want none", kinds(stored), err)
 	}
 }
@@ -386,7 +387,7 @@ func TestDurableReplayReusesTheJournaledActivation(t *testing.T) {
 	if err := attempt(); err != nil {
 		t.Fatalf("replayed attempt: %v", err)
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
+	stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

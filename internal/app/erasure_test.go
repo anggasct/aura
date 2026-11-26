@@ -9,10 +9,11 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
-func seedIdleSession(t *testing.T, sessions store.SessionService, id, owner string, at time.Time) {
+func seedIdleSession(t *testing.T, sessions turnstore.SessionService, id, owner string, at time.Time) {
 	t.Helper()
 	if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, CreatedAt: at, UpdatedAt: at, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session %s: %v", id, err)
@@ -32,7 +33,7 @@ func TestPrincipalForgetDryRunThenApply(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	db := openAccessDB(t, cfg)
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/discord:office/dm:9", "discord:9", now)
 	seedIdleSession(t, sessions, "main/discord:office/dm:777", principal.OwnerID, now)
 	if _, err := newPairingService(db, nil).Request(t.Context(), "discord:9", "office"); err != nil {
@@ -73,7 +74,7 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/discord:office/dm:21", "discord:21", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/discord:office/dm:22", "discord:22", now.Add(-719*time.Hour))
 	seedIdleSession(t, sessions, "main/discord:office/dm:5", "discord:5", now.Add(-721*time.Hour))

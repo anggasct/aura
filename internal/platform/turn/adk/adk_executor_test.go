@@ -15,7 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/agent"
 	adkmodel "google.golang.org/adk/v2/model"
@@ -100,7 +100,7 @@ type liveEventPublisher interface {
 type fakeBuiltinExecutor struct {
 	definitions []BuiltinToolDefinition
 	requests    []*BuiltinToolRequest
-	events      store.EventStore
+	events      turnstore.EventStore
 	output      json.RawMessage
 	err         error
 	live        liveEventPublisher
@@ -156,7 +156,7 @@ func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (a
 	return approval.PolicyDecision{Outcome: "allow"}, nil
 }
 
-func newADKTestExecutor(t *testing.T, modelName string, models auramodel.Set, broker turn.ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, store.EventStore) {
+func newADKTestExecutor(t *testing.T, modelName string, models auramodel.Set, broker turn.ToolBroker, tools ...tool.Tool) (*ADKExecutor, *sql.DB, turnstore.EventStore) {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
 	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, tools, nil)
@@ -201,7 +201,7 @@ func TestADKExecutorRunsTurnAndPersists(t *testing.T) {
 	}
 	var final string
 	for _, ev := range events {
-		if ev.Kind == store.EventKindADK && ev.TurnID == "turn-1" {
+		if ev.Kind == turnstore.EventKindADK && ev.TurnID == "turn-1" {
 			final = string(ev.Payload)
 		}
 	}
@@ -355,7 +355,7 @@ func TestBuiltinToolRequestStreamsWhileProviderRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: bus})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: bus})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}

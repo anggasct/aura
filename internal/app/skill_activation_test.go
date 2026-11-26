@@ -23,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
@@ -141,13 +142,13 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 	if err != nil {
 		t.Fatalf("tool: %v", err)
 	}
-	sessions, events := store.NewSessionService(db), store.NewEventStore(db)
+	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
 	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
 		runtimeadk.WithSkillContext(rt.context))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: rt.context, LiveEvents: turn.NewEventBus(nil)})
+	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: rt.context, LiveEvents: turn.NewEventBus(nil)})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}
@@ -190,7 +191,7 @@ func (h *skillHarness) turn(t *testing.T, text string, class principal.Class, pi
 
 func (h *skillHarness) activations(t *testing.T) []turn.SkillActivation {
 	t.Helper()
-	activations, err := (&skillActivationLog{events: store.NewEventKindReader(h.db)}).Activations(t.Context(), "sess_skill", 16)
+	activations, err := (&skillActivationLog{events: turnstore.NewEventKindReader(h.db)}).Activations(t.Context(), "sess_skill", 16)
 	if err != nil {
 		t.Fatalf("activations: %v", err)
 	}

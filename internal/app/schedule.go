@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -252,7 +253,7 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 
 type engineTurnRunner struct {
 	engine    cronTurnEngine
-	sessions  store.SessionService
+	sessions  turnstore.SessionService
 	workflows *scheduleWorkflows
 }
 
@@ -309,14 +310,14 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 	return result, nil
 }
 
-func ensureCronSession(ctx context.Context, sessions store.SessionService, sessionID string) error {
+func ensureCronSession(ctx context.Context, sessions turnstore.SessionService, sessionID string) error {
 	if sessions == nil {
 		return nil
 	}
 	if _, err := sessions.Get(ctx, sessionID); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionNotFound {
 			return err
 		}
 	}
@@ -325,7 +326,7 @@ func ensureCronSession(ctx context.Context, sessions store.SessionService, sessi
 		ID: sessionID, OwnerID: principal.OwnerID,
 		Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err
@@ -378,7 +379,7 @@ func buildScheduleRunner(in *scheduleRunnerInput) (*schedule.Runner, error) {
 	}
 	return schedule.NewRunner(&schedule.RunnerDeps{
 		Jobs:      &scheduleStore{store: store.NewScheduleStore(in.db)},
-		Turns:     &engineTurnRunner{engine: in.engine, sessions: store.NewSessionService(in.db), workflows: in.workflows},
+		Turns:     &engineTurnRunner{engine: in.engine, sessions: turnstore.NewSessionService(in.db), workflows: in.workflows},
 		Notify:    &cronNotifier{broadcaster: in.broadcaster},
 		Starter:   in.starter,
 		Logger:    in.logger,

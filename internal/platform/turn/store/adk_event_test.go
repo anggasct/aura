@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -83,7 +83,7 @@ func TestReplayTurnReturnsTerminalEvent(t *testing.T) {
 		Author:       "model",
 	}
 	thinking.Content = genai.NewContentFromText("thinking...", genai.RoleModel)
-	thinking.Partial = true // not a final response
+	thinking.Partial = true
 
 	final := &session.Event{
 		ID:           "event-final",

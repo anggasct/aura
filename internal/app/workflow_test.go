@@ -23,7 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeWorkflowFixtures(t *testing.T, definition string) *globalFlags {
@@ -394,8 +394,8 @@ func seedRunSession(t *testing.T, db *sql.DB, call *workflow.StepCall) {
 	}
 	defer func() { _ = tx.Rollback() }()
 	sess := &turn.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
-	if err := store.CreateSessionTx(t.Context(), tx, sess); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	if err := turnstore.CreateSessionTx(t.Context(), tx, sess); err != nil {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return
 		}
 		t.Fatalf("create run session: %v", err)

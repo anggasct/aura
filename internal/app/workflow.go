@@ -27,7 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func newWorkflowCmd(gf *globalFlags) *cobra.Command {
@@ -222,7 +222,7 @@ func workflowMaxConcurrentSteps(cfg *appconfig.Config) int {
 
 type workflowToolRunnerInput struct {
 	Executor *toolsbuiltin.Executor
-	Sessions store.SessionService
+	Sessions turnstore.SessionService
 	Registry *auraagent.Registry
 	Runs     *workflow.Store
 	Route    *kitapproval.OwnerRoute

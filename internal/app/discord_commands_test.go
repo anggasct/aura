@@ -18,7 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -123,13 +123,13 @@ func (s *stubActivity) CancelActive(_ context.Context, sessionID string) (turnID
 
 func (s *stubActivity) SessionActivity(string) (activeTurnID string, queued int) { return "turn-1", 3 }
 
-func newCommandStore(t *testing.T) (store.SessionService, store.EventStore, store.ConversationSessionStore, *sql.DB) {
+func newCommandStore(t *testing.T) (turnstore.SessionService, turnstore.EventStore, turnstore.ConversationSessionStore, *sql.DB) {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
-	return store.NewSessionService(db), store.NewEventStore(db), store.NewConversationSessionStore(db), db
+	return turnstore.NewSessionService(db), turnstore.NewEventStore(db), turnstore.NewConversationSessionStore(db), db
 }
 
-func seedCommandSession(t *testing.T, sessions store.SessionService, id, owner, agent string) {
+func seedCommandSession(t *testing.T, sessions turnstore.SessionService, id, owner, agent string) {
 	t.Helper()
 	now := time.Now().UTC()
 	sess := turn.Session{ID: id, OwnerID: owner, AgentID: agent, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}

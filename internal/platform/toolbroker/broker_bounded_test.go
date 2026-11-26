@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -173,7 +174,7 @@ func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 func TestBrokerOversizedOutputSpillsToArtifact(t *testing.T) {
 	output := oversizedOutput(8192)
 	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	if err := sessions.Create(context.Background(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}

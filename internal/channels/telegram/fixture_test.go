@@ -24,6 +24,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -439,7 +440,7 @@ func (fixedRouter) ServesPersona(channel, account, persona string) bool {
 }
 
 type storeSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
@@ -448,7 +449,7 @@ func (s storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, ag
 	}
 	now := time.Now().UTC()
 	err := s.sessions.Create(ctx, &turn.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err
@@ -515,7 +516,7 @@ func newHarness(t *testing.T) *harness {
 		api:      newFakeBotAPI(t),
 		cursors:  store.NewTelegramCursorStore(db),
 		effects:  executor,
-		sessions: storeSessions{sessions: store.NewSessionService(db)},
+		sessions: storeSessions{sessions: turnstore.NewSessionService(db)},
 		logs:     &logCapture{},
 	}
 }

@@ -12,8 +12,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -69,8 +69,8 @@ func newRefusingTestRuntime(t *testing.T, executor TurnExecutor, refusedKind str
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	events := store.NewEventStore(db)
-	dedupe := store.NewDedupeStore(db)
+	events := turnstore.NewEventStore(db)
+	dedupe := turnstore.NewDedupeStore(db)
 	engine, err := New(&Deps{Events: &refusingEventStore{EventStore: events, kind: refusedKind}, Dedupe: dedupe, Executor: executor, Config: testLimits(4, 16)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -101,7 +101,7 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
-			stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-refused", "turn-refused")
+			stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-refused", "turn-refused")
 			if err != nil {
 				t.Fatalf("list turn events: %v", err)
 			}
@@ -142,7 +142,7 @@ func TestRunStreamMatchesTheStoredTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	stored, err := store.NewSessionService(db).ListEvents(context.Background(), "session-entry", 0, 100)
+	stored, err := turnstore.NewSessionService(db).ListEvents(context.Background(), "session-entry", 0, 100)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}

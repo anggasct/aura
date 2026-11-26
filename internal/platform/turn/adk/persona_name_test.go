@@ -8,13 +8,13 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 )
 
-func newPersonaNameExecutor(t *testing.T, model *capturingModel, definition auraagent.Definition) (*ADKExecutor, store.EventStore) {
+func newPersonaNameExecutor(t *testing.T, model *capturingModel, definition auraagent.Definition) (*ADKExecutor, turnstore.EventStore) {
 	t.Helper()
 	db, sessions, events := newSessionTestDB(t)
 	resolver := &stubResolver{definition: definition}
@@ -27,7 +27,7 @@ func newPersonaNameExecutor(t *testing.T, model *capturingModel, definition aura
 	return executor, events
 }
 
-func seedHistory(t *testing.T, events store.EventStore, author string) {
+func seedHistory(t *testing.T, events turnstore.EventStore, author string) {
 	t.Helper()
 	turns := []*session.Event{
 		{ID: "seed-user", InvocationID: "inv-0", Author: userAuthor},
@@ -36,7 +36,7 @@ func seedHistory(t *testing.T, events store.EventStore, author string) {
 	turns[0].Content = genai.NewContentFromText("earlier question", genai.RoleUser)
 	turns[1].Content = genai.NewContentFromText("earlier answer", genai.RoleModel)
 	for i, ev := range turns {
-		stored, err := store.RuntimeEventFromADK("session-1", "turn-0", ev)
+		stored, err := turnstore.RuntimeEventFromADK("session-1", "turn-0", ev)
 		if err != nil {
 			t.Fatalf("RuntimeEventFromADK: %v", err)
 		}
@@ -96,7 +96,7 @@ func TestEarlierRepliesStayThePersonasOwn(t *testing.T) {
 				t.Fatalf("model-role history = %q, want the earlier answer as the persona's own turn", replayed)
 			}
 			for i := range produced {
-				if produced[i].Kind == store.EventKindADK && produced[i].Author != userAuthor && produced[i].Author != persona {
+				if produced[i].Kind == turnstore.EventKindADK && produced[i].Author != userAuthor && produced[i].Author != persona {
 					t.Fatalf("new event author = %q, want %q", produced[i].Author, persona)
 				}
 			}

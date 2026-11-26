@@ -29,6 +29,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -236,8 +237,8 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	passEvals(t, db, registry, "desk")
 	model := &countingModel{turns: make(chan struct{}, 16)}
 	name := "email-model"
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -260,7 +261,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	}
 	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], mail, submissions,
 		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		&emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}},
+		&emailSessions{discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}},
 		slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("email.New: %v", err)
@@ -271,7 +272,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
@@ -473,7 +474,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			db := storetest.OpenMigrated(t)
-			ensurer := discordSessionEnsurer{sessions: store.NewSessionService(db)}
+			ensurer := discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}
 			if err := ensurer.EnsureSession(t.Context(), "desk/email:work/thread:recover", principal.OwnerID, "desk"); err != nil {
 				t.Fatalf("EnsureSession: %v", err)
 			}

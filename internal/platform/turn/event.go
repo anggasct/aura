@@ -36,3 +36,10 @@ type DedupeClaim struct {
 	Now        time.Time
 	ExpiresAt  time.Time
 }
+
+type EventFilter struct {
+	AfterSequence uint64
+	Kind          string
+	IDPrefix      string
+	Limit         int
+}

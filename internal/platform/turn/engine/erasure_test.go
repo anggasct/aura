@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -26,7 +27,7 @@ func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
 	}
 	for _, tc := range turns {
 		sess := turn.Session{ID: tc.session, OwnerID: tc.principal}
-		if err := store.NewSessionService(rig.db).Create(t.Context(), &sess); err != nil {
+		if err := turnstore.NewSessionService(rig.db).Create(t.Context(), &sess); err != nil {
 			t.Fatalf("create session %s: %v", tc.session, err)
 		}
 		req := sampleRequest(tc.session, tc.turnID)

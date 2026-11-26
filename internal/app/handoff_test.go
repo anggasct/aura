@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -45,7 +46,7 @@ func captureDeliveries(t *testing.T) *[]deliveredText {
 func TestHandoffServiceRecordsTheRequesterTarget(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	db := openAccessDB(t, cfg)
-	seedIdleSession(t, store.NewSessionService(db), "main/discord:office/dm:9", "discord:9", time.Now().UTC())
+	seedIdleSession(t, turnstore.NewSessionService(db), "main/discord:office/dm:9", "discord:9", time.Now().UTC())
 	elsewhere := &stubHandoffNotifier{err: access.ErrNoHandoffTarget}
 	office := &stubHandoffNotifier{target: access.HandoffTarget{Channel: "discord", Account: "office", ChannelID: "4400"}}
 	service := newHandoffService(db, []handoffNotifier{elsewhere, office})
@@ -79,7 +80,7 @@ func TestReplyAndReleaseAHandoff(t *testing.T) {
 	db := openAccessDB(t, cfg)
 	delivered := captureDeliveries(t)
 	session := "main/discord:office/dm:9"
-	seedIdleSession(t, store.NewSessionService(db), session, "discord:9", time.Now().UTC())
+	seedIdleSession(t, turnstore.NewSessionService(db), session, "discord:9", time.Now().UTC())
 	if _, err := runAccessCommand(t, newReplyCmd, cfg, session, "hi"); err == nil || !strings.Contains(err.Error(), "handoff_not_open") {
 		t.Fatalf("reply without handoff err = %v", err)
 	}
@@ -96,11 +97,11 @@ func TestReplyAndReleaseAHandoff(t *testing.T) {
 	if len(*delivered) != 1 || (*delivered)[0] != (deliveredText{"office", "4400", "Your refund is approved."}) {
 		t.Fatalf("delivered = %+v", *delivered)
 	}
-	events, err := store.NewSessionService(db).ListEvents(t.Context(), session, 0, 10)
+	events, err := turnstore.NewSessionService(db).ListEvents(t.Context(), session, 0, 10)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events = %+v, %v", events, err)
 	}
-	adk, err := store.RuntimeEventToADK(&events[0])
+	adk, err := turnstore.RuntimeEventToADK(&events[0])
 	if err != nil || adk.Author != "Aura" || adk.Content == nil || adk.Content.Role != "model" || adk.Content.Parts[0].Text != "Your refund is approved." {
 		t.Fatalf("journaled reply = %+v, %v", adk, err)
 	}
@@ -141,7 +142,7 @@ func TestHandoffServiceRecordsATelegramRequesterTarget(t *testing.T) {
 	cfg := writeTelegramAccessConfig(t)
 	db := openAccessDB(t, cfg)
 	session := "main/telegram:pocket/chat:-1001234567890/topic:7"
-	seedIdleSession(t, store.NewSessionService(db), session, "telegram:555001", time.Now().UTC())
+	seedIdleSession(t, turnstore.NewSessionService(db), session, "telegram:555001", time.Now().UTC())
 	discordElsewhere := &stubHandoffNotifier{err: access.ErrNoHandoffTarget}
 	telegramNotifier := &stubHandoffNotifier{target: access.HandoffTarget{Channel: "telegram", Account: "pocket", ChannelID: "-1001234567890", ThreadID: "7"}}
 	service := newHandoffService(db, []handoffNotifier{discordElsewhere, telegramNotifier})
@@ -163,7 +164,7 @@ func TestReplyAndReleaseATelegramHandoff(t *testing.T) {
 	db := openAccessDB(t, cfg)
 	delivered := captureTelegramDeliveries(t, nil)
 	session := "main/telegram:pocket/chat:-1001234567890/topic:7"
-	seedIdleSession(t, store.NewSessionService(db), session, "telegram:555001", time.Now().UTC())
+	seedIdleSession(t, turnstore.NewSessionService(db), session, "telegram:555001", time.Now().UTC())
 	if err := store.NewHandoffStore(db).Open(t.Context(), &store.Handoff{
 		SessionID: session, Reason: "refund", PrincipalID: "telegram:555001", AgentID: "main", Account: "pocket",
 		Channel: store.HandoffChannelTelegram, ReplyChannelID: "-1001234567890", ReplyThreadID: "7", OpenedAt: time.Now().UTC(),
@@ -181,11 +182,11 @@ func TestReplyAndReleaseATelegramHandoff(t *testing.T) {
 	if len(*delivered) != 1 || (*delivered)[0] != want {
 		t.Fatalf("delivered = %+v, want %+v", *delivered, want)
 	}
-	events, err := store.NewSessionService(db).ListEvents(t.Context(), session, 0, 10)
+	events, err := turnstore.NewSessionService(db).ListEvents(t.Context(), session, 0, 10)
 	if err != nil || len(events) != 1 {
 		t.Fatalf("events = %+v, %v", events, err)
 	}
-	if adk, err := store.RuntimeEventToADK(&events[0]); err != nil || adk.Content == nil || adk.Content.Parts[0].Text != "Your refund is approved." {
+	if adk, err := turnstore.RuntimeEventToADK(&events[0]); err != nil || adk.Content == nil || adk.Content.Parts[0].Text != "Your refund is approved." {
 		t.Fatalf("journaled reply = %+v, %v", adk, err)
 	}
 	if _, err := runAccessCommand(t, newHandoffCmd, cfg, "release", session); err != nil {
@@ -205,7 +206,7 @@ func TestReplyToATelegramHandoffFailsWithoutJournaling(t *testing.T) {
 	open := func(t *testing.T, cfg, account, chatID string) {
 		t.Helper()
 		db := openAccessDB(t, cfg)
-		seedIdleSession(t, store.NewSessionService(db), session, "telegram:555001", time.Now().UTC())
+		seedIdleSession(t, turnstore.NewSessionService(db), session, "telegram:555001", time.Now().UTC())
 		if err := store.NewHandoffStore(db).Open(t.Context(), &store.Handoff{
 			SessionID: session, Reason: "refund", PrincipalID: "telegram:555001", AgentID: "main", Account: account,
 			Channel: store.HandoffChannelTelegram, ReplyChannelID: chatID, OpenedAt: time.Now().UTC(),

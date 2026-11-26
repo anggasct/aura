@@ -40,7 +40,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -409,7 +409,7 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps}
-	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, store.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
+	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, turnstore.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -446,10 +446,10 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 		opts = append(opts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
 	}
 	executor := newLedgerExecutor(t, db, &ledgerTurn{scenario: scenario, ledger: ledger, options: opts})
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Logger:         logger,
 		Config:         engineLimits(4, 16),
@@ -537,7 +537,7 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 		t.Fatalf("open the database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
 		t.Fatalf("create %s: %v", suiteSession, err)
 	}
 	return plan, db
@@ -762,7 +762,7 @@ func turnEvents(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	if err != nil {
 		t.Fatalf("read the session of %s: %v", turnID, err)
 	}
-	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), sessionID, turnID)
+	events, err := turnstore.NewDedupeStore(db).ListTurnEvents(t.Context(), sessionID, turnID)
 	if err != nil {
 		t.Fatalf("list the events of %s: %v", turnID, err)
 	}
@@ -832,10 +832,10 @@ func storedUserText(t *testing.T, events []turn.Event, text string) int {
 	t.Helper()
 	n := 0
 	for i := range events {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
-		ev, err := store.RuntimeEventToADK(&events[i])
+		ev, err := turnstore.RuntimeEventToADK(&events[i])
 		if err != nil {
 			t.Fatalf("decode the stored ADK event %s: %v", events[i].ID, err)
 		}

@@ -1,4 +1,4 @@
-package store
+package turnstore
 
 import (
 	"context"
@@ -13,6 +13,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
+
+type EventStore interface {
+	Append(ctx context.Context, e *turn.Event) error
+	AppendBatch(ctx context.Context, events []turn.Event) error
+	LastSequence(ctx context.Context, sessionID string) (uint64, error)
+	AppendSequenced(ctx context.Context, sessionID string, e *turn.Event) (uint64, error)
+	UpsertEvent(ctx context.Context, e *turn.Event) (uint64, bool, error)
+}
 
 const insertRuntimeEventSQL = `
 INSERT INTO runtime_event (
@@ -102,7 +110,7 @@ func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *turn.Event) (sequ
 		return 0, false, errNilArgument("event")
 	}
 	if e.ID == "" {
-		return 0, false, Errorf(ErrorCodeInvalidArgument, "upsert event requires an id")
+		return 0, false, errorf(ErrorCodeInvalidArgument, "upsert event requires an id")
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -353,20 +361,6 @@ func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sq
 		return classify(fmt.Errorf("append event %s: %w", e.ID, err))
 	}
 	return nil
-}
-
-func isConstraintUnique(err error) bool {
-	classified := sqlite.Classify(err)
-	return fault.HasCode(classified, sqlite.ErrorCodeConstraintUnique) ||
-		fault.HasCode(classified, sqlite.ErrorCodeConstraintPrimaryKey)
-}
-
-func isConstraintForeignKey(err error) bool {
-	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintForeignKey)
-}
-
-func isConstraintCheck(err error) bool {
-	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck)
 }
 
 func nullableJSON(raw json.RawMessage) any {

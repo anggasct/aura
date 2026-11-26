@@ -11,7 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -281,7 +281,7 @@ func (r *streamRun) openMessage() string {
 
 func (r *streamRun) deliver(event *turn.Event) (consistent bool, err error) {
 	live := r.live
-	if event.Kind == store.EventKindADK {
+	if event.Kind == turnstore.EventKindADK {
 		r.live = &liveMessage{}
 	}
 	for i, text := range r.chat.answerTexts(r.events[len(r.events)-1:]) {

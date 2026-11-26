@@ -23,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -154,7 +155,7 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 	}
 	db := storetest.OpenMigrated(t)
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: auditSessionID, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: auditSessionID, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	harness.artifacts = store.NewArtifactStore(db, artifactRoot, artifactQuota)

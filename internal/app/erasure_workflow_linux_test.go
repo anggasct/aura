@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -89,7 +90,7 @@ func TestForgetStopsLiveRunsBeforeErasing(t *testing.T) {
 		gf := writeWorkflowFixtures(t, validWorkflowYAML)
 		db := openAccessDB(t, gf.configPath)
 		seedLiveRunRows(t, db, "run-stuck", "stuck", forgottenPrincipal)
-		seedIdleSession(t, store.NewSessionService(db), "main/discord:office/dm:601", forgottenPrincipal, time.Now())
+		seedIdleSession(t, turnstore.NewSessionService(db), "main/discord:office/dm:601", forgottenPrincipal, time.Now())
 		canceller := &recordingCanceller{}
 		runs := &erasureRuns{poll: time.Millisecond, bound: 50 * time.Millisecond}
 		runs.set(canceller)

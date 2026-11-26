@@ -20,7 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const deliverySession = "main/email:work/thread:abc"
@@ -48,7 +48,7 @@ func newDeliveryFixture(t *testing.T, behaviors ...smtpBehavior) *deliveryFixtur
 
 func (f *deliveryFixture) request(effectID string, reply *replyReference, texts ...string) *runtimechannelhost.DeliveryRequest {
 	f.t.Helper()
-	if err := (&storeSessions{sessions: store.NewSessionService(f.h.db)}).EnsureSession(f.t.Context(), deliverySession, "local-owner", testPersona); err != nil {
+	if err := (&storeSessions{sessions: turnstore.NewSessionService(f.h.db)}).EnsureSession(f.t.Context(), deliverySession, "local-owner", testPersona); err != nil {
 		f.t.Fatalf("EnsureSession: %v", err)
 	}
 	replyContext, err := json.Marshal(reply)
@@ -74,7 +74,7 @@ func defaultReply() *replyReference {
 }
 
 type storeSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s *storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
@@ -83,7 +83,7 @@ func (s *storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, a
 	}
 	now := time.Now().UTC()
 	err := s.sessions.Create(ctx, &turn.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err

@@ -18,7 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type sessionActivity interface {
@@ -43,9 +43,9 @@ type sequenceReader interface {
 }
 
 type discordCommandSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 	events   sequenceReader
-	pointers store.ConversationSessionStore
+	pointers turnstore.ConversationSessionStore
 	now      func() time.Time
 }
 
@@ -135,12 +135,12 @@ func conversationSessionSuffix() (string, error) {
 }
 
 func missingSession(err error) bool {
-	code, ok := fault.CodeOf[store.ErrorCode](err)
-	return errors.Is(err, sql.ErrNoRows) || (ok && code == store.ErrorCodeSessionNotFound)
+	code, ok := fault.CodeOf[turnstore.ErrorCode](err)
+	return errors.Is(err, sql.ErrNoRows) || (ok && code == turnstore.ErrorCodeSessionNotFound)
 }
 
 type discordConversationResolver struct {
-	pointers store.ConversationSessionStore
+	pointers turnstore.ConversationSessionStore
 }
 
 func (r *discordConversationResolver) ActiveSession(ctx context.Context, conversationKey string) (string, error) {
@@ -154,7 +154,7 @@ func (r *discordConversationResolver) ActiveSession(ctx context.Context, convers
 	return id, nil
 }
 
-func wireChatCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions store.SessionService, events sequenceReader, pointers store.ConversationSessionStore, skills command.Skills, recorder command.Recorder) error {
+func wireChatCommands(ports []runtimechannelhost.ChannelPort, engine sessionActivity, sessions turnstore.SessionService, events sequenceReader, pointers turnstore.ConversationSessionStore, skills command.Skills, recorder command.Recorder) error {
 	registry, err := command.New(discord.CommandBinding(), telegram.CommandBinding())
 	if err != nil {
 		return err

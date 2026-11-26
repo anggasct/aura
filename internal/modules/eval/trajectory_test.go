@@ -12,8 +12,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/history"
 )
 
@@ -34,11 +34,11 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 		return nil, nil, fmt.Errorf("eval: migrate: %w", err)
 	}
 	session := turn.Session{ID: SessionID, OwnerID: "eval"}
-	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
+	if err := turnstore.NewSessionService(db).Create(ctx, &session); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: create session: %w", err)
 	}
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(script), Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: turnstore.NewEventStore(db), Dedupe: turnstore.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(script), Config: runtimeengine.Default()})
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: build engine: %w", err)

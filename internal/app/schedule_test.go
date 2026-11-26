@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -74,7 +75,7 @@ func cronCompletedBatch(turnID, text string) []turn.Event {
 func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	db := cronTestDB(t)
 	engine := &fakeCronEngine{batches: [][]turn.Event{cronCompletedBatch("turn-1", "nightly done")}}
-	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+	runner := &engineTurnRunner{engine: engine, sessions: turnstore.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "cron:job-1:20260912T210000",
@@ -85,7 +86,7 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	if !result.Succeeded || result.TurnID != "turn-1" || result.Text != "nightly done" {
 		t.Errorf("result = %+v", result)
 	}
-	if _, err := store.NewSessionService(db).Get(t.Context(), "cron:job-1"); err != nil {
+	if _, err := turnstore.NewSessionService(db).Get(t.Context(), "cron:job-1"); err != nil {
 		t.Errorf("cron session not ensured: %v", err)
 	}
 	call := engine.calls[0]
@@ -102,7 +103,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 			{Kind: turn.EventKindTurnFailed, TurnID: "turn-9"},
 		},
 	}}
-	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+	runner := &engineTurnRunner{engine: engine, sessions: turnstore.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-9", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-9",
@@ -117,7 +118,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	starved := &fakeCronEngine{batches: [][]turn.Event{
 		{{Kind: turn.EventKindTurnAccepted, TurnID: "turn-8"}},
 	}}
-	starvedRunner := &engineTurnRunner{engine: starved, sessions: store.NewSessionService(db)}
+	starvedRunner := &engineTurnRunner{engine: starved, sessions: turnstore.NewSessionService(db)}
 	if _, err := starvedRunner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-8", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-8",
@@ -129,7 +130,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	db := cronTestDB(t)
 	engine := &fakeCronEngine{errs: []error{fault.New(turn.ErrorCodeRuntimeOverloaded, "full")}}
-	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+	runner := &engineTurnRunner{engine: engine, sessions: turnstore.NewSessionService(db)}
 	_, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-1",

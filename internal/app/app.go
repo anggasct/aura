@@ -34,6 +34,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -344,8 +345,8 @@ type build struct {
 	artifactRoot string
 
 	registry   *auraagent.Registry
-	sessions   store.SessionService
-	events     store.EventStore
+	sessions   turnstore.SessionService
+	events     turnstore.EventStore
 	wiring     toolWiring
 	liveEvents *turn.EventBus
 	builtin    *toolsbuiltin.Executor
@@ -514,8 +515,8 @@ func (b *build) buildKernel(ctx context.Context) error {
 		return err
 	}
 	b.registry = registry
-	b.sessions = store.NewSessionService(b.db)
-	b.events = store.NewEventStore(b.db)
+	b.sessions = turnstore.NewSessionService(b.db)
+	b.events = turnstore.NewEventStore(b.db)
 	b.liveEvents = turn.NewEventBus(b.logger)
 	if b.onServer() {
 		logPersonas(ctx, b.logger, registry)
@@ -590,7 +591,7 @@ func (b *build) buildTurnRuntime() error {
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         b.events,
-		Dedupe:         store.NewDedupeStore(b.db),
+		Dedupe:         turnstore.NewDedupeStore(b.db),
 		Executor:       executor,
 		Logger:         b.logger,
 		Config:         b.cfg.Runtime,

@@ -27,7 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -326,7 +326,7 @@ func leftTurnDescriptor() runtimesessions.Descriptor {
 func admitLeftTurn(t *testing.T, db *sql.DB) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: leftSessionID, OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)

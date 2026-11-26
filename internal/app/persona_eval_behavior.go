@@ -20,6 +20,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -42,8 +43,8 @@ func routedBehaviorModels(cfg *appconfig.Config, models runtimeadk.ModelSource) 
 
 func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Definition, class principal.Class, turns []string) ([]personaeval.Exchange, error) {
 	return personaeval.WithEvalDB(ctx, "discord:eval", func(db *sql.DB) ([]personaeval.Exchange, error) {
-		events := store.NewEventStore(db)
-		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
+		events := turnstore.NewEventStore(db)
+		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 			runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 			runtimeadk.WithAgentResolver(&staticResolver{definition: *definition}, m.route),
 			runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
@@ -76,7 +77,7 @@ func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Defi
 	})
 }
 
-func persistEvalEvent(ctx context.Context, events store.EventStore, req *turn.TurnRequest, event *turn.Event) error {
+func persistEvalEvent(ctx context.Context, events turnstore.EventStore, req *turn.TurnRequest, event *turn.Event) error {
 	if event.ID == "" {
 		event.ID = runtimeengine.NewTurnID()
 	}

@@ -14,7 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -120,10 +120,10 @@ func completionMessage(definition *auraagent.Definition, run *workflow.RunSummar
 }
 
 func appendSessionText(ctx context.Context, db *sql.DB, sessionID, id, author, text string, at time.Time) error {
-	event, err := store.RuntimeEventFromADK(sessionID, id, sessionEventWithText(id, author, text, at))
+	event, err := turnstore.RuntimeEventFromADK(sessionID, id, sessionEventWithText(id, author, text, at))
 	if err != nil {
 		return err
 	}
-	_, err = store.NewEventStore(db).AppendSequenced(ctx, sessionID, &event)
+	_, err = turnstore.NewEventStore(db).AppendSequenced(ctx, sessionID, &event)
 	return err
 }

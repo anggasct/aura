@@ -25,6 +25,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -71,7 +72,7 @@ func (s *discordResumeStore) Delete(ctx context.Context) error {
 }
 
 type discordSessionEnsurer struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s *discordSessionEnsurer) SessionExists(ctx context.Context, sessionID string) (bool, error) {
@@ -85,7 +86,7 @@ func (s *discordSessionEnsurer) SessionExists(ctx context.Context, sessionID str
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionNotFound {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionNotFound {
 		return false, nil
 	}
 	return false, err
@@ -98,7 +99,7 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 	if _, err := s.sessions.Get(ctx, sessionID); err == nil {
 		return nil
 	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionNotFound {
 			return err
 		}
 	}
@@ -111,7 +112,7 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 		CreatedAt: now,
 		UpdatedAt: now,
 	})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err
@@ -255,11 +256,11 @@ func newDiscordAdapter(cfg *appconfig.Config, account *config.DiscordAccount, db
 		instance: account.Name,
 	}, executor, &channelMediaStore{
 		store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
-	}, &discordSessionEnsurer{sessions: store.NewSessionService(db)}, logger)
+	}, &discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}, logger)
 	if err != nil {
 		return nil, err
 	}
-	adapter.SetSessionResolver(&discordConversationResolver{pointers: store.NewConversationSessionStore(db)})
+	adapter.SetSessionResolver(&discordConversationResolver{pointers: turnstore.NewConversationSessionStore(db)})
 	adapter.SetSecretVault(buildSecretVault(cfg))
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)

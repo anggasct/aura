@@ -14,7 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -71,7 +71,7 @@ func TestADKExecutorRunsTurnThroughResolvedDefinition(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if ev.Kind == store.EventKindADK {
+		if ev.Kind == turnstore.EventKindADK {
 			final = string(ev.Payload)
 		}
 	}

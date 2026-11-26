@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -173,13 +174,13 @@ func TestDiscordResumeStore_RoundTrip(t *testing.T) {
 
 func TestDiscordSessionEnsurer_CreatesOnce(t *testing.T) {
 	db := discordTestDB(t)
-	ensurer := &discordSessionEnsurer{sessions: store.NewSessionService(db)}
+	ensurer := &discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}
 	ctx := t.Context()
 
 	if err := ensurer.EnsureSession(ctx, "kuma/discord:home/dm:111", "111", "kuma"); err != nil {
 		t.Fatalf("EnsureSession(): %v", err)
 	}
-	session, err := store.NewSessionService(db).Get(ctx, "kuma/discord:home/dm:111")
+	session, err := turnstore.NewSessionService(db).Get(ctx, "kuma/discord:home/dm:111")
 	if err != nil {
 		t.Fatalf("Get(): %v", err)
 	}
@@ -233,7 +234,7 @@ func TestBuildChannelAdapters_RequiresRouter(t *testing.T) {
 
 func TestDiscordSessionEnsurer_ReportsExistence(t *testing.T) {
 	db := discordTestDB(t)
-	ensurer := &discordSessionEnsurer{sessions: store.NewSessionService(db)}
+	ensurer := &discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}
 	ctx := t.Context()
 	exists, err := ensurer.SessionExists(ctx, "kuma/discord:home/thread:9")
 	if err != nil || exists {

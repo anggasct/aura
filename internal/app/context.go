@@ -14,7 +14,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const contextSummaryAuthor = "runtime"
@@ -126,11 +126,11 @@ func mapContextEvent(row *turn.Event) compaction.Event {
 }
 
 type contextSummaryStore struct {
-	sessions store.SessionService
-	events   store.EventStore
+	sessions turnstore.SessionService
+	events   turnstore.EventStore
 }
 
-func newContextSummaryStore(sessions store.SessionService, events store.EventStore) *contextSummaryStore {
+func newContextSummaryStore(sessions turnstore.SessionService, events turnstore.EventStore) *contextSummaryStore {
 	return &contextSummaryStore{sessions: sessions, events: events}
 }
 

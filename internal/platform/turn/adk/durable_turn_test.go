@@ -23,7 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -234,8 +234,8 @@ type durableTurnRig struct {
 	model    adkmodel.LLM
 	tools    turnTools
 	gated    *gatedBrokerTools
-	sessions store.SessionService
-	events   store.EventStore
+	sessions turnstore.SessionService
+	events   turnstore.EventStore
 	stopHost func()
 }
 
@@ -290,7 +290,7 @@ func (r *durableTurnRig) startLife(t *testing.T) {
 	limits.TurnTimeout = configkit.Duration(time.Minute)
 	eng, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:     r.events,
-		Dedupe:     store.NewDedupeStore(r.db),
+		Dedupe:     turnstore.NewDedupeStore(r.db),
 		Executor:   executor,
 		Logger:     slog.New(slog.DiscardHandler),
 		Config:     limits,
@@ -380,7 +380,7 @@ func (r *durableTurnRig) runClaim(t *testing.T) int {
 
 func (r *durableTurnRig) turnEvents(t *testing.T) []turn.Event {
 	t.Helper()
-	events, err := store.NewDedupeStore(r.db).ListTurnEvents(t.Context(), "session-1", "turn-1")
+	events, err := turnstore.NewDedupeStore(r.db).ListTurnEvents(t.Context(), "session-1", "turn-1")
 	if err != nil {
 		t.Fatalf("list the events of turn-1: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestReplayedTurnGivesTheModelEachMessageOnce(t *testing.T) {
 		switch events[i].Kind {
 		case turn.EventKindTurnCompleted, turn.EventKindTurnFailed, turn.EventKindTurnCancelled:
 			terminals = append(terminals, events[i])
-		case store.EventKindADK:
+		case turnstore.EventKindADK:
 			adk = append(adk, events[i])
 		}
 	}

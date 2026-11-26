@@ -28,8 +28,8 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 
 	adkmodel "google.golang.org/adk/v2/model"
@@ -115,15 +115,15 @@ func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.Builti
 
 type approvalE2EStack struct {
 	engine   turn.AgentRuntime
-	sessions store.SessionService
+	sessions turnstore.SessionService
 	calls    *atomic.Int32
 }
 
 func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answer string) *approvalE2EStack {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	liveEvents := turn.NewEventBus(nil)
 	journal, err := effect.NewJournal(db, effect.Options{Events: liveEvents})
 	if err != nil {
@@ -154,7 +154,7 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: liveEvents})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: liveEvents})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -305,7 +305,7 @@ func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) i
 			yield(turn.Event{}, err)
 			return
 		}
-		if !yield(turn.Event{Kind: store.EventKindADK, Payload: payload}, nil) {
+		if !yield(turn.Event{Kind: turnstore.EventKindADK, Payload: payload}, nil) {
 			return
 		}
 		yield(turn.Event{Kind: turn.EventKindTurnCompleted}, nil)
@@ -314,8 +314,8 @@ func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) i
 
 func TestTerminalOverloadSurfacesError(t *testing.T) {
 	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	now := time.Now().UTC()
 	for _, id := range []string{"seed-a", "seed-b"} {
 		if err := sessions.Create(context.Background(), &turn.Session{ID: id, OwnerID: "e2e-owner", CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -325,7 +325,7 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 	blocker := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
 	limits := runtimeengine.Default()
 	limits.MaxActiveTurns, limits.MaxPendingTurns = 1, 1
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: blocker, Config: limits})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: blocker, Config: limits})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -405,12 +405,12 @@ func TestTerminalRestartResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	sessions1 := store.NewSessionService(db1)
-	events1 := store.NewEventStore(db1)
+	sessions1 := turnstore.NewSessionService(db1)
+	events1 := turnstore.NewEventStore(db1)
 	executor1 := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
 	})
-	engine1, err := runtimeengine.New(&runtimeengine.Deps{Events: events1, Dedupe: store.NewDedupeStore(db1), Executor: executor1, Config: runtimeengine.Default()})
+	engine1, err := runtimeengine.New(&runtimeengine.Deps{Events: events1, Dedupe: turnstore.NewDedupeStore(db1), Executor: executor1, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -439,12 +439,12 @@ func TestTerminalRestartResume(t *testing.T) {
 		t.Fatalf("open second process store: %v", err)
 	}
 	t.Cleanup(func() { _ = db2.Close() })
-	sessions2 := store.NewSessionService(db2)
-	events2 := store.NewEventStore(db2)
+	sessions2 := turnstore.NewSessionService(db2)
+	events2 := turnstore.NewEventStore(db2)
 	executor2 := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
 	})
-	engine2, err := runtimeengine.New(&runtimeengine.Deps{Events: events2, Dedupe: store.NewDedupeStore(db2), Executor: executor2, Config: runtimeengine.Default()})
+	engine2, err := runtimeengine.New(&runtimeengine.Deps{Events: events2, Dedupe: turnstore.NewDedupeStore(db2), Executor: executor2, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("second engine: %v", err)
 	}
@@ -494,14 +494,14 @@ func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"canary-output-7b1c"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"canary-output-7b1c"}]},"partial":false}`)},
 	})
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(logBuf, nil))
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Logger: logger, Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Logger: logger, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}

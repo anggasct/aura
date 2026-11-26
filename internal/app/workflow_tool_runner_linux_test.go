@@ -31,7 +31,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type effectIntentIDs struct {
@@ -400,7 +400,7 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 			t.Fatalf("begin: %v", err)
 		}
 		defer func() { _ = tx.Rollback() }()
-		if err := store.CreateSessionTx(t.Context(), tx, &turn.Session{ID: workflow.RunSessionID(runID), OwnerID: owner, AgentID: agent}); err != nil {
+		if err := turnstore.CreateSessionTx(t.Context(), tx, &turn.Session{ID: workflow.RunSessionID(runID), OwnerID: owner, AgentID: agent}); err != nil {
 			t.Fatalf("create run session: %v", err)
 		}
 		if err := tx.Commit(); err != nil {

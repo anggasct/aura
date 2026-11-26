@@ -21,7 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type githubHarness struct {
@@ -213,7 +213,7 @@ func unplannedProposal(t *testing.T, runs *workflow.Store, db *sql.DB, plan ...s
 		ID: workflow.NewProposalID(), SessionID: "ops/terminal:" + spec.ID, AgentID: "ops", PrincipalID: principal.OwnerID,
 		Spec: spec, PlanText: strings.Join(plan, ""), Digest: digest, CreatedAt: time.Now().UTC(),
 	}
-	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runs.CreateProposal(t.Context(), proposal); err != nil {

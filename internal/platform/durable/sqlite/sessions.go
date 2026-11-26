@@ -12,7 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -110,7 +110,7 @@ type admission struct {
 func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool, error) {
 	desc := &a.req.Turn
 	if desc.IdempotencyKey != "" {
-		original, created, err := store.ClaimDedupeTx(ctx, a.tx, &turn.DedupeClaim{
+		original, created, err := turnstore.ClaimDedupeTx(ctx, a.tx, &turn.DedupeClaim{
 			Source:     desc.Origin,
 			ExternalID: desc.IdempotencyKey,
 			TurnID:     desc.TurnID,
@@ -165,7 +165,7 @@ func (a *admission) appendAccepted(ctx context.Context) (*turn.Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("durable session admit: encode accepted payload: %w", err)
 	}
-	sequence, err := store.AllocateSequenceTx(ctx, a.tx, desc.SessionID)
+	sequence, err := turnstore.AllocateSequenceTx(ctx, a.tx, desc.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("durable session admit: %w", err)
 	}
@@ -180,7 +180,7 @@ func (a *admission) appendAccepted(ctx context.Context) (*turn.Event, error) {
 		Payload:       payload,
 		CreatedAt:     a.now,
 	}
-	if err := store.AppendEventTx(ctx, a.tx, accepted); err != nil {
+	if err := turnstore.AppendEventTx(ctx, a.tx, accepted); err != nil {
 		return nil, fmt.Errorf("durable session admit: %w", err)
 	}
 	return accepted, nil

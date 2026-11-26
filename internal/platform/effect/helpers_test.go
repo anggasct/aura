@@ -11,7 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -39,7 +39,7 @@ func newTestJournalWithEvents(t *testing.T, events EventPublisher) (*Journal, *s
 
 func seedSession(t *testing.T, db *sql.DB) error {
 	t.Helper()
-	svc := store.NewSessionService(db)
+	svc := turnstore.NewSessionService(db)
 	return svc.Create(context.Background(), &turn.Session{
 		ID:        "sess-1",
 		OwnerID:   "owner-1",

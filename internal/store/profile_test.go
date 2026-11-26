@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"strings"
 	"sync"
 	"testing"
@@ -23,7 +24,7 @@ func testProfileFact(id string) *ProfileFact {
 func seedProfileEvent(t *testing.T, db *sql.DB, sessionID, eventID string) {
 	t.Helper()
 	seedMemorySession(t, db, sessionID, "owner-1")
-	events := NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	if _, err := events.AppendSequenced(t.Context(), sessionID, &turn.Event{
 		ID: eventID, SessionID: sessionID, TurnID: "t1", InvocationID: "inv-1",
 		Author: "owner-1", Kind: "message.completed", SchemaVersion: 1,

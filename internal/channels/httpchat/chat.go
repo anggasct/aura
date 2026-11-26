@@ -18,7 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -446,7 +446,7 @@ func tokenUsage(events []turn.Event) usage {
 
 func finishReason(events []turn.Event) string {
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
 		var decoded struct {

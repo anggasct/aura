@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,7 +34,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 	db := newTestDB(t)
 	mustCreateSession(t, db, "session-1")
 	e := newEvent("session-1", 1)
-	if err := NewEventStore(db).Append(ctx, &e); err != nil {
+	if err := turnstore.NewEventStore(db).Append(ctx, &e); err != nil {
 		t.Fatalf("Append: %v", err)
 	}
 	artifactRoot := t.TempDir()
@@ -62,7 +63,7 @@ func TestRestoreRoundTrip(t *testing.T) {
 	if err := sqlite.Migrate(ctx, restored, history.Migrations()); err != nil {
 		t.Fatalf("Migrate restored db: %v", err)
 	}
-	sessions := NewSessionService(restored)
+	sessions := turnstore.NewSessionService(restored)
 	got, err := sessions.Get(ctx, "session-1")
 	if err != nil {
 		t.Fatalf("Get restored session: %v", err)
@@ -137,7 +138,7 @@ func TestRestoreForceReplacesLiveDB(t *testing.T) {
 	if err := sqlite.Migrate(ctx, restored, history.Migrations()); err != nil {
 		t.Fatalf("Migrate restored db: %v", err)
 	}
-	if _, err := NewSessionService(restored).Get(ctx, "session-1"); err != nil {
+	if _, err := turnstore.NewSessionService(restored).Get(ctx, "session-1"); err != nil {
 		t.Errorf("restored session missing: %v", err)
 	}
 }

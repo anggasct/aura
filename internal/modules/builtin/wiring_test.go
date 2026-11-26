@@ -17,7 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -49,7 +49,7 @@ func TestWiringConnectsEffectJournalAndEventPublisher(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	sess := turn.Session{ID: "session-1", OwnerID: "owner-1"}
-	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	toolsCfg := config.DefaultTools()

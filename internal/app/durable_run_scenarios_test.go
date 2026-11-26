@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -342,7 +343,7 @@ func seedChild(t *testing.T, suite *runSuite) {
 	t.Helper()
 	now := time.Now().UTC()
 	for _, id := range []string{childParent, childSession} {
-		if err := store.NewSessionService(suite.db).Create(t.Context(), &turn.Session{ID: id, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := turnstore.NewSessionService(suite.db).Create(t.Context(), &turn.Session{ID: id, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
 	}
