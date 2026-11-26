@@ -13,13 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-type Channels struct {
-	Discord  Discord  `json:"discord"`
-	Telegram Telegram `json:"telegram"`
-	Email    Email    `json:"email"`
-	HTTP     HTTP     `json:"http"`
-}
-
 type Sync struct {
 	Enabled            bool               `json:"enabled"`
 	Remote             string             `json:"remote"`
@@ -238,41 +231,6 @@ func DefaultTerminal() Terminal {
 		InMemoryHistory:     100,
 		SecondInterruptTime: configkit.Duration(2 * time.Second),
 		PlainApproval:       "deny",
-	}
-}
-
-func DefaultChannels() Channels {
-	return Channels{
-		Discord: Discord{
-			MinEditInterval:          configkit.Duration(2 * time.Second),
-			MaxAttachmentBytes:       20971520,
-			ThreadAutoArchiveMinutes: 1440,
-		},
-		Telegram: Telegram{
-			Polling: TelegramPolling{
-				Timeout:    configkit.Duration(30 * time.Second),
-				MaxBackoff: configkit.Duration(time.Minute),
-			},
-			MinEditInterval:    configkit.Duration(2 * time.Second),
-			MaxAttachmentBytes: TelegramMaxAttachmentBytes,
-			Webhook: TelegramWebhook{
-				ListenAddress:  TelegramWebhookListenAddress,
-				MaxBodyBytes:   TelegramWebhookMaxBodyBytes,
-				MaxConnections: TelegramWebhookMaxConnections,
-			},
-		},
-		Email: Email{
-			MaxAttachmentBytes: EmailMaxAttachmentBytes,
-		},
-		HTTP: HTTP{
-			ListenAddress:       HTTPListenAddress,
-			MaxBodyBytes:        HTTPMaxBodyBytes,
-			RequestsPerMinute:   HTTPRequestsPerMinute,
-			MaxConcurrentPerKey: HTTPMaxConcurrentPerKey,
-			MaxHistoryMessages:  HTTPMaxHistoryMessages,
-			MaxHistoryBytes:     HTTPMaxHistoryBytes,
-			KeepaliveInterval:   configkit.Duration(HTTPKeepaliveInterval),
-		},
 	}
 }
 

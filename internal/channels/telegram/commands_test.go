@@ -12,7 +12,9 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
 type commandSessions struct {
@@ -365,4 +367,48 @@ func TestCommandBindingNamesTheSharedSetOnAMessengerChannel(t *testing.T) {
 	if binding.Channel != principal.ChannelTelegram || binding.Style != command.StyleMessenger || !slices.Equal(binding.Names, command.MessengerNames()) {
 		t.Errorf("binding = %+v", binding)
 	}
+}
+
+type failingEffects struct {
+	err error
+}
+
+func (f failingEffects) Execute(context.Context, *effect.PrepareRequest, effect.Provider) (*effect.Intent, error) {
+	return nil, f.err
+}
+
+func TestCommandsSwallowChatCommandValidationErrors(t *testing.T) {
+	msg := privateText(10, ownerUserID, "/unregistered").Message
+	envelope := &runtimeingress.IngressEnvelope{
+		Source:         "telegram:pocket",
+		ExternalID:     "update:10",
+		ConversationID: "main/telegram:pocket/chat:" + strconv.Itoa(ownerUserID),
+		PrincipalID:    principal.OwnerID,
+		PrincipalClass: string(principal.ClassOwner),
+		AgentID:        testPersona,
+	}
+
+	t.Run("validation rejection is swallowed as handled", func(t *testing.T) {
+		rig := newCommandRig(t, accessOpts{})
+		handled, err := rig.adapter.runCommand(t.Context(), msg, &command.Invocation{Name: "unregistered"}, envelope)
+		if err != nil || !handled {
+			t.Fatalf("runCommand() = %v, %v; want handled with nil error", handled, err)
+		}
+		if replies := sentTo(rig.h.api, ownerUserID); len(replies) != 0 {
+			t.Errorf("replies = %q, want none", replies)
+		}
+	})
+
+	t.Run("non-validation failure propagates as intake failed", func(t *testing.T) {
+		rig := newCommandRig(t, accessOpts{})
+		cause := errors.New("journal down")
+		rig.adapter.effects = failingEffects{err: cause}
+		handled, err := rig.adapter.runCommand(t.Context(), msg, &command.Invocation{Name: "help"}, envelope)
+		if handled || err == nil {
+			t.Fatalf("runCommand() = %v, %v; want unhandled error", handled, err)
+		}
+		if code, ok := CodeOf(err); !ok || code != ErrorCodeIntakeFailed || !errors.Is(err, cause) {
+			t.Errorf("runCommand() error = %v, want %q wrapping %v", err, ErrorCodeIntakeFailed, cause)
+		}
+	})
 }

@@ -118,15 +118,15 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 	}
 	record := toolObserver(recorder)
 	var route *kitapproval.OwnerRoute
-	var targets []approvalChannel
+	var targets []kitapproval.Channel
 	if in.owner != nil {
-		route, err = kitapproval.NewOwnerRoute(&workflowOwnerApprover{owners: in.owner, now: time.Now})
+		route, err = kitapproval.NewOwnerRoute(kitapproval.NewWorkflowApprover(in.owner, time.Now))
 		if err != nil {
 			t.Fatalf("NewOwnerRoute: %v", err)
 		}
 		targets = append(targets, route)
 	}
-	inner := channelApprovalDecider(targets)
+	inner := kitapproval.Decider(targets)
 	wiring := &toolWiring{
 		observer: func(ctx context.Context, observation toolbroker.Observation) {
 			rig.observed.record(observation)
@@ -140,7 +140,7 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 			return inner(ctx, prompt)
 		},
 		access:    newAccessPolicy(registry, in.db, nil),
-		reachable: channelApprovalReachable(targets),
+		reachable: kitapproval.Reachable(targets),
 	}
 	executor, err := newToolExecutor(&toolExecutorInput{
 		result: result, db: in.db, artifactRoot: artifactRoot, logger: slog.New(slog.DiscardHandler), wiring: wiring,

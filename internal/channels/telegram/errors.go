@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -42,7 +43,16 @@ func (e *Error) Unwrap() error {
 }
 
 func (e *Error) Is(target error) bool {
-	return target == runtimechannelhost.ErrDeliveryAmbiguous && e.Code == ErrorCodeDeliveryAmbiguous
+	switch target {
+	case runtimechannelhost.ErrDeliveryAmbiguous:
+		return e.Code == ErrorCodeDeliveryAmbiguous
+	case approval.ErrUnavailable:
+		return e.Code == ErrorCodeApprovalUnavailable
+	case approval.ErrTimeout:
+		return e.Code == ErrorCodeApprovalTimeout
+	default:
+		return false
+	}
 }
 
 func CodeOf(err error) (ErrorCode, bool) {

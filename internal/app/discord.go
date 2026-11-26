@@ -3,30 +3,19 @@ package app
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
-	"errors"
 	"log/slog"
 	"strings"
-	"time"
-
-	"go.opentelemetry.io/otel/metric"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
-	"github.com/anggasct/aura/internal/channels/email"
-	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
-	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/storage"
-	"github.com/anggasct/aura/internal/platform/telemetry"
-	"github.com/anggasct/aura/internal/platform/turn"
-	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -72,53 +61,6 @@ func (s *discordResumeStore) Delete(ctx context.Context) error {
 	return s.store.Delete(ctx, "discord", s.instance)
 }
 
-type discordSessionEnsurer struct {
-	sessions turnstore.SessionService
-}
-
-func (s *discordSessionEnsurer) SessionExists(ctx context.Context, sessionID string) (bool, error) {
-	if s.sessions == nil {
-		return false, nil
-	}
-	_, err := s.sessions.Get(ctx, sessionID)
-	if err == nil {
-		return true, nil
-	}
-	if errors.Is(err, sql.ErrNoRows) {
-		return false, nil
-	}
-	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionNotFound {
-		return false, nil
-	}
-	return false, err
-}
-
-func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
-	if s.sessions == nil {
-		return nil
-	}
-	if _, err := s.sessions.Get(ctx, sessionID); err == nil {
-		return nil
-	} else if !errors.Is(err, sql.ErrNoRows) {
-		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionNotFound {
-			return err
-		}
-	}
-	now := time.Now().UTC()
-	err := s.sessions.Create(ctx, &turn.Session{
-		ID:        sessionID,
-		OwnerID:   ownerID,
-		AgentID:   agentID,
-		Metadata:  json.RawMessage(`{}`),
-		CreatedAt: now,
-		UpdatedAt: now,
-	})
-	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
-		return nil
-	}
-	return err
-}
-
 type discordAdapters []*discord.Adapter
 
 func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
@@ -129,139 +71,31 @@ func (adapters discordAdapters) Check(ctx context.Context) []health.Finding {
 	return findings
 }
 
-func buildChannelAdapters(cfg *appconfig.Config, router *auraagent.Router, db *sql.DB, artifactRoot string, mp metric.MeterProvider, runs *erasureRuns, logger *slog.Logger) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
-	if cfg == nil || (!cfg.Channels.Discord.Enabled && !cfg.Channels.Telegram.Enabled && !cfg.Channels.Email.Enabled) {
-		return nil, nil, nil, nil
-	}
-	if router == nil {
-		return nil, nil, nil, errors.New("persona router must not be nil")
-	}
-	owners, err := ownerResolver(cfg)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	recorder, err := telemetry.NewPrincipalRecorder(mp)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	accessRecorder, err := telemetry.NewAccessRecorder(mp)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	ingressRecorder, err := telemetry.NewIngressRecorder(mp)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	var ports []runtimechannelhost.ChannelPort
-	var checks []health.RegisteredCheck
-	var approvers []approvalAdapter
-	if cfg.Channels.Discord.Enabled {
-		adapters := make(discordAdapters, 0, len(cfg.Channels.Discord.Accounts))
-		for i := range cfg.Channels.Discord.Accounts {
-			adapter, err := newDiscordAdapter(cfg, &cfg.Channels.Discord.Accounts[i], db, artifactRoot, logger)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			adapter.SetPrincipalResolver(owners)
-			adapter.SetPersonaRouter(router)
-			settings := discordAccessSettings(cfg, db, accessRecorder, runs)
-			adapter.SetAccess(&settings)
-			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-				recorder.Admitted(ctx, string(class), principal.ChannelDiscord)
-			})
-			adapter.SetDropObserver(func(ctx context.Context, reason string) {
-				ingressRecorder.Dropped(ctx, principal.ChannelDiscord, reason)
-			})
-			adapters = append(adapters, adapter)
-			ports = append(ports, adapter)
-			approvers = append(approvers, adapter)
-		}
-		checks = append(checks, health.RegisteredCheck{
-			ID:          "discord",
-			Checker:     adapters,
-			Timeout:     time.Duration(cfg.Health.CheckTimeout),
-			Remediation: discord.RemediationReviewGateway,
-		}, health.RegisteredCheck{
-			ID:          "principal",
-			Checker:     identityMappingCheck{owners: owners},
-			Timeout:     time.Duration(cfg.Health.CheckTimeout),
-			Remediation: remediationMapOwnerIdentity,
-		})
-	}
-	if cfg.Channels.Telegram.Enabled {
-		adapters := make(telegramAdapters, 0, len(cfg.Channels.Telegram.Accounts))
-		for i := range cfg.Channels.Telegram.Accounts {
-			adapter, err := newTelegramAdapter(cfg, &cfg.Channels.Telegram.Accounts[i], db, artifactRoot, logger)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			adapter.SetPrincipalResolver(owners)
-			adapter.SetPersonaRouter(router)
-			settings := telegramAccessSettings(cfg, db, accessRecorder, runs)
-			adapter.SetAccess(&settings)
-			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-				recorder.Admitted(ctx, string(class), principal.ChannelTelegram)
-			})
-			adapter.SetDenialObserver(accessRecorder.Denied)
-			adapter.SetDropObserver(func(ctx context.Context, reason string) {
-				ingressRecorder.Dropped(ctx, principal.ChannelTelegram, reason)
-			})
-			adapters = append(adapters, adapter)
-			ports = append(ports, adapter)
-			approvers = append(approvers, adapter)
-		}
-		checks = append(checks, health.RegisteredCheck{
-			ID:          "telegram",
-			Checker:     adapters,
-			Timeout:     time.Duration(cfg.Health.CheckTimeout),
-			Remediation: telegram.RemediationReviewBot,
-		})
-	}
-	if cfg.Channels.Email.Enabled {
-		adapters := make(emailAdapters, 0, len(cfg.Channels.Email.Accounts))
-		for i := range cfg.Channels.Email.Accounts {
-			adapter, err := newEmailAdapter(cfg, &cfg.Channels.Email.Accounts[i], db, artifactRoot, logger)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			adapter.SetPrincipalResolver(owners)
-			adapter.SetPersonaRouter(router)
-			settings := discordAccessSettings(cfg, db, accessRecorder, runs)
-			adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-			adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-				recorder.Admitted(ctx, string(class), principal.ChannelEmail)
-			})
-			adapter.SetDropObserver(func(ctx context.Context, reason string) {
-				ingressRecorder.Dropped(ctx, principal.ChannelEmail, reason)
-			})
-			adapters = append(adapters, adapter)
-			ports = append(ports, adapter)
-		}
-		checks = append(checks, health.RegisteredCheck{
-			ID:          "email",
-			Checker:     adapters,
-			Timeout:     time.Duration(cfg.Health.CheckTimeout),
-			Remediation: email.RemediationReviewMailbox,
-		})
-	}
-	return ports, checks, approvers, nil
-}
-
 func newDiscordAdapter(cfg *appconfig.Config, account *config.DiscordAccount, db *sql.DB, artifactRoot string, logger *slog.Logger) (*discord.Adapter, error) {
 	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if err != nil {
+		return nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+	if err != nil {
+		return nil, err
+	}
+	resolver, err := access.NewConversationResolver(turnstore.NewConversationSessionStore(db))
 	if err != nil {
 		return nil, err
 	}
 	adapter, err := discord.New(&cfg.Channels.Discord, account, &discordResumeStore{
 		store:    store.NewChannelResumeStore(db),
 		instance: account.Name,
-	}, executor, &channelMediaStore{
-		store: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)),
-	}, &discordSessionEnsurer{sessions: turnstore.NewSessionService(db)}, logger)
+	}, executor, mediaStore, sessions, logger)
 	if err != nil {
 		return nil, err
 	}
-	adapter.SetSessionResolver(&discordConversationResolver{pointers: turnstore.NewConversationSessionStore(db)})
+	adapter.SetSessionResolver(resolver)
 	adapter.SetSecretVault(buildSecretVault(cfg))
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)
