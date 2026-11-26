@@ -367,3 +367,49 @@ func TestListSessionEventsFiltersByKindAndIDPrefix(t *testing.T) {
 		wantCode(t, err, ErrorCodeInvalidArgument)
 	}
 }
+
+func TestAcceptedTurnsReportsOnlyAcceptedPairs(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-a")
+	mustCreateSession(t, db, "session-b")
+	events := NewEventStore(db)
+	seed := []struct {
+		session string
+		turnID  string
+		kind    string
+	}{
+		{"session-a", "turn-1", turn.EventKindTurnAccepted},
+		{"session-b", "turn-2", turn.EventKindTurnAccepted},
+		{"session-a", "turn-3", "turn.cancelled"},
+	}
+	for i, s := range seed {
+		ev := newEvent(s.session, 0)
+		ev.ID = fmt.Sprintf("ev-%d", i)
+		ev.TurnID = s.turnID
+		ev.Kind = s.kind
+		if _, err := events.AppendSequenced(ctx, s.session, &ev); err != nil {
+			t.Fatalf("seed %d: %v", i, err)
+		}
+	}
+
+	ts := NewTurnStore(db)
+	empty, err := ts.AcceptedTurns(ctx, nil)
+	if err != nil || empty != nil {
+		t.Fatalf("AcceptedTurns(nil) = %v, %v; want nil, nil", empty, err)
+	}
+
+	got, err := ts.AcceptedTurns(ctx, []turn.SessionTurn{
+		{SessionID: "session-a", TurnID: "turn-1"},
+		{SessionID: "session-a", TurnID: "turn-2"},
+		{SessionID: "session-a", TurnID: "turn-3"},
+		{SessionID: "session-missing", TurnID: "turn-1"},
+	})
+	if err != nil {
+		t.Fatalf("AcceptedTurns: %v", err)
+	}
+	want := []turn.SessionTurn{{SessionID: "session-a", TurnID: "turn-1"}}
+	if !slices.Equal(got, want) {
+		t.Fatalf("AcceptedTurns = %+v, want %+v", got, want)
+	}
+}

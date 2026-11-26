@@ -29,7 +29,6 @@ import (
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func newServerCmd(gf *globalFlags) *cobra.Command {
@@ -540,10 +539,17 @@ func (b *build) registerRunRetention() error {
 	if !ok {
 		return invalidOptions("the durable runtime cannot prune ended runs")
 	}
+	runs, ok := b.server.broadcastRuntime.(runtimeengine.TurnRunStore)
+	if !ok {
+		return invalidOptions("the durable runtime cannot list and delete turn runs")
+	}
 	db := b.db
+	turns := b.turns
 	sweep := &runRetention{
-		pruner:    prune,
-		orphans:   func(ctx context.Context) (int, error) { return store.DeleteOrphanedTurnRuns(ctx, db) },
+		pruner: prune,
+		orphans: func(ctx context.Context) (int, error) {
+			return runtimeengine.DeleteOrphanedTurnRuns(ctx, db, runs, turns)
+		},
 		retention: time.Duration(b.cfg.Runtime.RunRetention),
 		batch:     runRetentionBatch,
 		interval:  runRetentionInterval,

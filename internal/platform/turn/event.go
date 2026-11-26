@@ -43,3 +43,8 @@ type EventFilter struct {
 	IDPrefix      string
 	Limit         int
 }
+
+type SessionTurn struct {
+	SessionID string
+	TurnID    string
+}

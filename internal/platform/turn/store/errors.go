@@ -3,7 +3,6 @@ package turnstore
 import (
 	"context"
 	"database/sql"
-	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -22,8 +21,8 @@ const (
 	ErrorCodeEventPayloadInvalid       ErrorCode = "event_payload_invalid"
 )
 
-func errorf(code ErrorCode, format string, args ...any) error {
-	return fault.New(code, fmt.Sprintf(format, args...))
+func errorf(code ErrorCode, detail string) error {
+	return fault.New(code, detail)
 }
 
 func errNilArgument(name string) error {

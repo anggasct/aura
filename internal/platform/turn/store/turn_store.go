@@ -3,6 +3,7 @@ package turnstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -109,4 +110,48 @@ func (s *TurnStore) SessionOwner(ctx context.Context, sessionID string) (string,
 		return "", classify(fmt.Errorf("read session %s owner: %w", sessionID, err))
 	}
 	return ownerID, nil
+}
+
+type acceptedTurnPair struct {
+	SessionID string `json:"session_id"`
+	TurnID    string `json:"turn_id"`
+}
+
+func (s *TurnStore) AcceptedTurns(ctx context.Context, turns []turn.SessionTurn) ([]turn.SessionTurn, error) {
+	if len(turns) == 0 {
+		return nil, nil
+	}
+	pairs := make([]acceptedTurnPair, len(turns))
+	for i, t := range turns {
+		pairs[i] = acceptedTurnPair{SessionID: t.SessionID, TurnID: t.TurnID}
+	}
+	encoded, err := json.Marshal(pairs)
+	if err != nil {
+		return nil, fmt.Errorf("encode accepted turn pairs: %w", err)
+	}
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, `
+		SELECT DISTINCT runtime_event.session_id, runtime_event.turn_id
+		FROM runtime_event
+		JOIN json_each(?) AS wanted
+		  ON runtime_event.session_id = json_extract(wanted.value, '$.session_id')
+		 AND runtime_event.turn_id = json_extract(wanted.value, '$.turn_id')
+		WHERE runtime_event.kind = ?`,
+		string(encoded), turn.EventKindTurnAccepted,
+	)
+	if err != nil {
+		return nil, classify(fmt.Errorf("read accepted turns: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var accepted []turn.SessionTurn
+	for rows.Next() {
+		var pair turn.SessionTurn
+		if err := rows.Scan(&pair.SessionID, &pair.TurnID); err != nil {
+			return nil, classify(fmt.Errorf("scan accepted turn: %w", err))
+		}
+		accepted = append(accepted, pair)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classify(fmt.Errorf("read accepted turns: %w", err))
+	}
+	return accepted, nil
 }
