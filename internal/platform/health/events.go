@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -57,6 +58,12 @@ func NewEventLog(events EventAppender, sessions SessionEnsurer) *EventLog {
 }
 
 func (l *EventLog) Sink(ctx context.Context, t *Transition) error {
+	if l == nil || l.events == nil || l.sessions == nil {
+		return errors.New("health event: event appender and session ensurer are required")
+	}
+	if t == nil {
+		return errors.New("health event: transition must not be nil")
+	}
 	payload, err := json.Marshal(t)
 	if err != nil {
 		return fmt.Errorf("health event: encode transition: %w", err)
@@ -91,6 +98,9 @@ func (l *EventLog) Sink(ctx context.Context, t *Transition) error {
 }
 
 func (l *EventLog) History(ctx context.Context) ([]Transition, error) {
+	if l == nil || l.sessions == nil {
+		return nil, errors.New("health event history: session ensurer is required")
+	}
 	var transitions []Transition
 	var after uint64
 	for {

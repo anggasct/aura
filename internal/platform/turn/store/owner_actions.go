@@ -112,6 +112,7 @@ func (r *OwnerActionRecorder) RecordOwnerRekey(ctx context.Context, report princ
 	if r == nil || r.db == nil {
 		return fault.New(ErrorCodeInvalidArgument, "owner action recorder requires a database")
 	}
+	at = at.UTC()
 	sessionID, err := EnsureOwnerActionSession(ctx, r.db, principal.OwnerID)
 	if err != nil {
 		return err

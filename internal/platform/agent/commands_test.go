@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 func TestCommandsNilOpenerReturnsInvalidArgument(t *testing.T) {
@@ -75,5 +76,30 @@ func TestBindingsExplainUsageError(t *testing.T) {
 	err := root.ExecuteContext(t.Context())
 	if !clikit.IsUsageError(err) {
 		t.Fatalf("bindings explain without --account = %v, want clikit.UsageError", err)
+	}
+}
+
+func TestPolicyAndPersonaNilGuards(t *testing.T) {
+	var nilPolicy *AccessPolicy
+	if ceiling, ok := nilPolicy.ToolCeiling("main", principal.ClassTrusted); ok || ceiling != nil {
+		t.Fatalf("nil ToolCeiling = (%v, %v), want (nil, false)", ceiling, ok)
+	}
+	if _, err := nilPolicy.StandingGrant(t.Context(), "discord:1", "main", "read_file", ""); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("nil StandingGrant = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	emptyPolicy := &AccessPolicy{}
+	if _, err := emptyPolicy.StandingGrant(t.Context(), "discord:1", "main", "read_file", ""); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("empty StandingGrant = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	var emptyPersonas RegistryPersonas
+	if _, ok := emptyPersonas.Fingerprint("main"); ok {
+		t.Fatal("empty RegistryPersonas.Fingerprint = true, want false")
+	}
+	if got := emptyPersonas.Knowledge("main", principal.ClassOwner); got != nil {
+		t.Fatalf("empty RegistryPersonas.Knowledge = %v, want nil", got)
+	}
+	LogPersonas(t.Context(), nil, nil)
+	if _, err := ResolveChatPersona(t.Context(), nil, nil, "", ""); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("ResolveChatPersona(nil) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }

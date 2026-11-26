@@ -52,6 +52,9 @@ func githubCredentials(cfg *Config) []github.Credential {
 }
 
 func ConfiguredSecrets(cfg *Config) []ConfiguredSecret {
+	if cfg == nil {
+		return nil
+	}
 	var secrets []ConfiguredSecret
 	for i := range cfg.Channels.Discord.Accounts {
 		account := &cfg.Channels.Discord.Accounts[i]
@@ -118,6 +121,9 @@ func ConfiguredSecrets(cfg *Config) []ConfiguredSecret {
 }
 
 func AdditionalConfiguredSecrets(cfg *Config) []ConfiguredSecret {
+	if cfg == nil {
+		return nil
+	}
 	var secrets []ConfiguredSecret
 	if cfg.Tools != nil {
 		if ref := cfg.Tools.WebSearch.CredentialRef.Reference(); ref.Env != "" || ref.File != "" {

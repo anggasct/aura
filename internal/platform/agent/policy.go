@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -30,6 +31,9 @@ func (p *AccessPolicy) WithClock(now func() time.Time) {
 }
 
 func (p *AccessPolicy) ToolCeiling(agentID string, class principal.Class) ([]string, bool) {
+	if p == nil || p.registry == nil {
+		return nil, false
+	}
 	definition, ok := p.registry.Lookup(agentID)
 	if !ok {
 		return nil, false
@@ -39,6 +43,9 @@ func (p *AccessPolicy) ToolCeiling(agentID string, class principal.Class) ([]str
 }
 
 func (p *AccessPolicy) StandingGrant(ctx context.Context, principalID, agentID, toolName, server string) (bool, error) {
+	if p == nil || p.registry == nil || p.grants == nil {
+		return false, fault.New(ErrorCodeInvalidArgument, "access policy requires a registry and standing grant store")
+	}
 	definition, ok := p.registry.Lookup(agentID)
 	if !ok || !definition.AllowsPrincipalTool(toolName, server) {
 		return false, nil

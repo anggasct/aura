@@ -19,6 +19,9 @@ type RegistryPersonas struct {
 }
 
 func (p RegistryPersonas) Fingerprint(agentID string) (turn.PersonaFingerprint, bool) {
+	if p.Registry == nil {
+		return turn.PersonaFingerprint{}, false
+	}
 	definition, ok := p.Registry.Lookup(agentID)
 	if !ok {
 		return turn.PersonaFingerprint{}, false
@@ -33,6 +36,9 @@ func (p RegistryPersonas) Fingerprint(agentID string) (turn.PersonaFingerprint, 
 }
 
 func (p RegistryPersonas) Knowledge(agentID string, class principal.Class) []string {
+	if p.Registry == nil {
+		return nil
+	}
 	definition, ok := p.Registry.Lookup(agentID)
 	if !ok {
 		return nil
@@ -41,6 +47,9 @@ func (p RegistryPersonas) Knowledge(agentID string, class principal.Class) []str
 }
 
 func LogPersonas(ctx context.Context, logger *slog.Logger, registry *Registry) {
+	if logger == nil || registry == nil {
+		return
+	}
 	definitions := registry.Definitions()
 	for i := range definitions {
 		definition := &definitions[i]
@@ -51,6 +60,9 @@ func LogPersonas(ctx context.Context, logger *slog.Logger, registry *Registry) {
 }
 
 func ResolveChatPersona(ctx context.Context, registry *Registry, sessions SessionAgentGetter, sessionID, requested string) (string, error) {
+	if registry == nil {
+		return "", fault.New(ErrorCodeInvalidArgument, "agent registry must not be nil")
+	}
 	if requested != "" {
 		if _, ok := registry.Lookup(requested); !ok {
 			return "", fault.New(turn.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", requested))

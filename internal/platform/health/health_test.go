@@ -192,3 +192,24 @@ func TestEvaluatorEmptyIsUp(t *testing.T) {
 		t.Errorf("empty evaluator status = %s, want up", got)
 	}
 }
+
+func TestEventLogAndStorageIntakeProbeNilGuards(t *testing.T) {
+	var nilLog *health.EventLog
+	if err := nilLog.Sink(t.Context(), &health.Transition{}); err == nil {
+		t.Fatal("nil EventLog.Sink = nil, want error")
+	}
+	if _, err := nilLog.History(t.Context()); err == nil {
+		t.Fatal("nil EventLog.History = nil, want error")
+	}
+	emptyLog := health.NewEventLog(nil, nil)
+	if err := emptyLog.Sink(t.Context(), nil); err == nil {
+		t.Fatal("empty EventLog.Sink = nil, want error")
+	}
+	if _, err := emptyLog.History(t.Context()); err == nil {
+		t.Fatal("empty EventLog.History = nil, want error")
+	}
+	probe := health.StorageIntakeProbe("/nonexistent", nil, nil, nil)
+	if state, _ := probe(t.Context()); state != health.StorageIntakeUnknown {
+		t.Fatalf("StorageIntakeProbe with nil deps = %s, want %s", state, health.StorageIntakeUnknown)
+	}
+}

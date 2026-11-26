@@ -60,10 +60,16 @@ func (p *PairingService) WithClock(now func() time.Time) {
 }
 
 func (p *PairingService) Granted(ctx context.Context, principalID, account string) (bool, error) {
+	if p == nil || p.grants == nil {
+		return false, errNilArgument("principal grant store")
+	}
 	return p.grants.Active(ctx, principalID, account)
 }
 
 func (p *PairingService) Request(ctx context.Context, principalID, account string) (PairingResult, error) {
+	if p == nil || p.pairings == nil || p.grants == nil {
+		return PairingResult{}, errNilArgument("pairing store")
+	}
 	now := p.now().UTC()
 	channel, _, _ := strings.Cut(principalID, ":")
 	if _, locked, err := PairingLock(ctx, p.pairings, channel, now); err != nil {

@@ -61,6 +61,9 @@ func LastBackupTime(backupDir string) (time.Time, error) {
 
 func StorageIntakeProbe(dbPath string, writable func(string) error, isReadOnly func(error) bool, freeBytes func(string) (int64, error)) func(context.Context) (StorageIntakeState, string) {
 	return func(context.Context) (StorageIntakeState, string) {
+		if writable == nil || isReadOnly == nil || freeBytes == nil {
+			return StorageIntakeUnknown, "storage probe dependencies are unavailable"
+		}
 		if _, err := os.Stat(dbPath); err != nil {
 			return StorageIntakeUnreachable, "storage database is unreachable"
 		}

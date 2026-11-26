@@ -962,7 +962,9 @@ func channelAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 	}
 	if db != nil {
 		if pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db)); err == nil {
-			settings.Pairing = principal.NewPairingService(pairings, principal.NewPrincipalGrantStore(db), onPairing)
+			if svc := principal.NewPairingService(pairings, principal.NewPrincipalGrantStore(db), onPairing); svc != nil {
+				settings.Pairing = svc
+			}
 		}
 	}
 	if cfg.Access != nil {
@@ -971,7 +973,9 @@ func channelAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetr
 	}
 	if db != nil && cfg.Access != nil {
 		if ledger, err := usage.NewLedger(db, usage.LedgerOptions{}); err == nil {
-			settings.Budgets = usage.NewPrincipalBudgetGate(cfg.Access, ledger, onBudget)
+			if gate := usage.NewPrincipalBudgetGate(cfg.Access, ledger, onBudget); gate != nil {
+				settings.Budgets = gate
+			}
 		}
 	}
 	if db != nil {

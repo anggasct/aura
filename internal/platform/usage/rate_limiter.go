@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -54,6 +55,9 @@ func NewTurnLedger(cfg Config, access *principal.Config, db *sql.DB, prices *Pri
 }
 
 func LoadPrices(ctx context.Context, logger *slog.Logger, configPath, explicit string, reg *PriceRegistry) error {
+	if reg == nil {
+		return fault.New(ErrorCodeInvalidArgument, "usage price registry must not be nil")
+	}
 	path := explicit
 	explicitGiven := explicit != ""
 	if path == "" {
@@ -87,6 +91,9 @@ type PrincipalBudgetGate struct {
 }
 
 func NewPrincipalBudgetGate(access *principal.Config, tokens PrincipalTokenReader, observer BudgetExhaustedObserver) *PrincipalBudgetGate {
+	if access == nil || tokens == nil {
+		return nil
+	}
 	return &PrincipalBudgetGate{
 		tokens: tokens,
 		limits: map[principal.Class]principal.Budget{
@@ -106,6 +113,9 @@ func (g *PrincipalBudgetGate) WithClock(now func() time.Time) {
 }
 
 func (g *PrincipalBudgetGate) Admit(ctx context.Context, principalID string, class principal.Class) (string, error) {
+	if g == nil || g.tokens == nil {
+		return "", fault.New(ErrorCodeInvalidArgument, "principal budget gate requires a token reader")
+	}
 	limits, ok := g.limits[class]
 	if !ok {
 		return "", nil

@@ -72,3 +72,29 @@ func TestTableAndWriteLines(t *testing.T) {
 		t.Fatalf("NoPositionalArgs(extra) = %v, want UsageError", err)
 	}
 }
+
+func TestErrorNilReceiversAndNilInnerDoNotPanic(t *testing.T) {
+	var nilUsage *UsageError
+	if nilUsage.Error() != "" || nilUsage.Unwrap() != nil {
+		t.Fatalf("nil UsageError = (%q, %v)", nilUsage.Error(), nilUsage.Unwrap())
+	}
+	emptyUsage := &UsageError{}
+	if emptyUsage.Error() != "" || emptyUsage.Unwrap() != nil {
+		t.Fatalf("empty UsageError = (%q, %v)", emptyUsage.Error(), emptyUsage.Unwrap())
+	}
+	if IsUsageError(nilUsage) {
+		t.Fatal("IsUsageError(typed nil) = true, want false")
+	}
+
+	var nilExit *ExitCodeError
+	if nilExit.Error() != "" || nilExit.Unwrap() != nil || nilExit.ExitCode() != 0 {
+		t.Fatalf("nil ExitCodeError = (%q, %v, %d)", nilExit.Error(), nilExit.Unwrap(), nilExit.ExitCode())
+	}
+	emptyExit := &ExitCodeError{Code: 3}
+	if emptyExit.Error() != "" || emptyExit.Unwrap() != nil || emptyExit.ExitCode() != 3 {
+		t.Fatalf("empty ExitCodeError = (%q, %v, %d)", emptyExit.Error(), emptyExit.Unwrap(), emptyExit.ExitCode())
+	}
+	if _, ok := ExitCodeOf(nilExit); ok {
+		t.Fatal("ExitCodeOf(typed nil) = true, want false")
+	}
+}

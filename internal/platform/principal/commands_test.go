@@ -65,3 +65,23 @@ func TestPrincipalCommandsUsageErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestPairingServiceNilGuards(t *testing.T) {
+	if svc := NewPairingService(nil, nil, nil); svc != nil {
+		t.Fatalf("NewPairingService(nil, nil, nil) = %v, want nil", svc)
+	}
+	var nilSvc *PairingService
+	if _, err := nilSvc.Granted(t.Context(), "discord:1", "office"); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("nil Granted = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	if _, err := nilSvc.Request(t.Context(), "discord:1", "office"); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("nil Request = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	empty := &PairingService{}
+	if _, err := empty.Granted(t.Context(), "discord:1", "office"); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("empty Granted = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	if _, err := empty.Request(t.Context(), "discord:1", "office"); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("empty Request = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+}

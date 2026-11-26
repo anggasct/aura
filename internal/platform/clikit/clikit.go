@@ -21,10 +21,16 @@ func NewUsageError(err error) error {
 }
 
 func (e *UsageError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
 	return e.Err.Error()
 }
 
 func (e *UsageError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.Err
 }
 
@@ -34,7 +40,7 @@ func (e *UsageError) UsageError() bool {
 
 func IsUsageError(err error) bool {
 	var target *UsageError
-	return errors.As(err, &target)
+	return errors.As(err, &target) && target != nil
 }
 
 type ExitCodeError struct {
@@ -50,20 +56,29 @@ func NewExitCodeError(code int, err error) error {
 }
 
 func (e *ExitCodeError) Error() string {
+	if e == nil || e.Err == nil {
+		return ""
+	}
 	return e.Err.Error()
 }
 
 func (e *ExitCodeError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
 	return e.Err
 }
 
 func (e *ExitCodeError) ExitCode() int {
+	if e == nil {
+		return 0
+	}
 	return e.Code
 }
 
 func ExitCodeOf(err error) (int, bool) {
 	var target *ExitCodeError
-	if errors.As(err, &target) {
+	if errors.As(err, &target) && target != nil {
 		return target.Code, true
 	}
 	return 0, false

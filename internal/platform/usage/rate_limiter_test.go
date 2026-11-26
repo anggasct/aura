@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -93,5 +94,25 @@ func TestPrincipalBudgetGateSweepsIdlePrincipals(t *testing.T) {
 	}
 	if len(gate.turns) != 1 {
 		t.Fatalf("tracked principals = %d, want idle ones swept", len(gate.turns))
+	}
+}
+
+func TestPrincipalBudgetGateAndLoadPricesNilGuards(t *testing.T) {
+	if gate := NewPrincipalBudgetGate(nil, &fakeTokenReader{}, nil); gate != nil {
+		t.Fatalf("NewPrincipalBudgetGate(nil, ...) = %v, want nil", gate)
+	}
+	if gate := NewPrincipalBudgetGate(&principal.Config{}, nil, nil); gate != nil {
+		t.Fatalf("NewPrincipalBudgetGate(..., nil) = %v, want nil", gate)
+	}
+	var nilGate *PrincipalBudgetGate
+	if _, err := nilGate.Admit(t.Context(), "discord:1", principal.ClassTrusted); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("nil Admit = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	emptyGate := &PrincipalBudgetGate{}
+	if _, err := emptyGate.Admit(t.Context(), "discord:1", principal.ClassTrusted); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("empty Admit = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+	if err := LoadPrices(t.Context(), nil, "", "", nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("LoadPrices(nil registry) = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }

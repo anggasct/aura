@@ -74,13 +74,12 @@ func OpenAndMigrate(ctx context.Context, cfg *Config, migrations []sqlite.Migrat
 		return nil, err
 	}
 	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
-		_ = db.Close()
-		return nil, err
+		return nil, errors.Join(err, db.Close())
 	}
 	return db, nil
 }
 
-func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migrations []sqlite.Migration, now time.Time) error {
+func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migrations []sqlite.Migration, now time.Time) (retErr error) {
 	if cfg == nil {
 		return errNilArgument("storage config")
 	}
@@ -105,7 +104,7 @@ func RunUpgrade(ctx context.Context, logger *slog.Logger, cfg *Config, migration
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
+	defer func() { retErr = errors.Join(retErr, db.Close()) }()
 	start := time.Now()
 	result, err := UpgradeWithBackup(ctx, db, migrations, backupDir, artifactRoot, now)
 	if err != nil {
@@ -204,7 +203,7 @@ func newStorageVerifyCmd(open CommandOpener) *cobra.Command {
 					if _, ok := fault.CodeOf[ErrorCode](err); ok {
 						return err
 					}
-					return Errorf(ErrorCodeBackupInvalid, "storage verification failed: %v", err)
+					return fault.Wrap(ErrorCodeBackupInvalid, "storage verification failed", err)
 				}
 				env.Logger.InfoContext(ctx, "storage verification complete",
 					"component", "storage",
