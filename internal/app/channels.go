@@ -12,14 +12,19 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type approvalAdapter interface {
@@ -172,49 +177,83 @@ func newChannelBuildContext(cfg *appconfig.Config, router *auraagent.Router, db 
 	}, nil
 }
 
+func buildDiscordAdapter(cfg *appconfig.Config, account *discord.Account, db *sql.DB, artifactRoot string, deps *discord.Deps) (*discord.Adapter, error) {
+	executor, err := toolsbuiltin.NewChannelEffects(db, deps.Logger)
+	if err != nil {
+		return nil, err
+	}
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		return nil, err
+	}
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+	if err != nil {
+		return nil, err
+	}
+	resolver, err := access.NewConversationResolver(turnstore.NewConversationSessionStore(db))
+	if err != nil {
+		return nil, err
+	}
+	resumes, err := discord.NewSQLiteResumeStore(db, account.Name)
+	if err != nil {
+		return nil, err
+	}
+	full := *deps
+	full.Config = &cfg.Channels.Discord
+	full.Account = account
+	full.Resumes = resumes
+	full.Effects = executor
+	full.Media = mediaStore
+	full.Sessions = sessions
+	full.SessionResolver = resolver
+	full.SecretVault = buildSecretVault(cfg)
+	full.Vision = newVisionService(cfg, db, artifactRoot)
+	return discord.New(&full)
+}
+
 func buildDiscordAdapters(bc *channelBuildContext) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if !bc.cfg.Channels.Discord.Enabled {
 		return nil, nil, nil, nil
 	}
-	adapters := make(discordAdapters, 0, len(bc.cfg.Channels.Discord.Accounts))
+	adapters := make(discord.Adapters, 0, len(bc.cfg.Channels.Discord.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Discord.Accounts))
 	approvers := make([]approvalAdapter, 0, len(bc.cfg.Channels.Discord.Accounts))
 	for i := range bc.cfg.Channels.Discord.Accounts {
-		adapter, err := newDiscordAdapter(bc.cfg, &bc.cfg.Channels.Discord.Accounts[i], bc.db, bc.artifactRoot, bc.logger)
+		settings := channelAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
+		adapter, err := buildDiscordAdapter(bc.cfg, &bc.cfg.Channels.Discord.Accounts[i], bc.db, bc.artifactRoot, &discord.Deps{
+			Logger:            bc.logger,
+			PrincipalResolver: bc.owners,
+			PersonaRouter:     bc.router,
+			Access:            &settings,
+			Commands:          bc.commands,
+			OnAdmitted: func(ctx context.Context, class principal.Class) {
+				bc.principalRec.Admitted(ctx, string(class), principal.ChannelDiscord)
+			},
+			OnDropped: func(ctx context.Context, reason string) {
+				bc.ingressRec.Dropped(ctx, principal.ChannelDiscord, reason)
+			},
+		})
 		if err != nil {
 			return nil, nil, nil, err
-		}
-		adapter.SetPrincipalResolver(bc.owners)
-		adapter.SetPersonaRouter(bc.router)
-		settings := discordAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
-		adapter.SetAccess(&settings)
-		adapter.SetAdmissionObserver(func(ctx context.Context, class principal.Class) {
-			bc.principalRec.Admitted(ctx, string(class), principal.ChannelDiscord)
-		})
-		adapter.SetDropObserver(func(ctx context.Context, reason string) {
-			bc.ingressRec.Dropped(ctx, principal.ChannelDiscord, reason)
-		})
-		if bc.commands != nil {
-			adapter.SetCommands(bc.commands)
 		}
 		adapters = append(adapters, adapter)
 		ports = append(ports, adapter)
 		approvers = append(approvers, adapter)
 	}
-	checks := []health.RegisteredCheck{
-		{
-			ID:          "discord",
-			Checker:     adapters,
-			Timeout:     time.Duration(bc.cfg.Health.CheckTimeout),
-			Remediation: discord.RemediationReviewGateway,
-		},
-		{
-			ID:          "principal",
-			Checker:     identityMappingCheck{owners: bc.owners},
-			Timeout:     time.Duration(bc.cfg.Health.CheckTimeout),
-			Remediation: remediationMapOwnerIdentity,
-		},
+	timeout := time.Duration(bc.cfg.Health.CheckTimeout)
+	checks := make([]health.RegisteredCheck, 0, len(adapters.HealthChecks())+1)
+	for _, check := range adapters.HealthChecks() {
+		if check.Timeout == 0 {
+			check.Timeout = timeout
+		}
+		checks = append(checks, check)
 	}
+	checks = append(checks, health.RegisteredCheck{
+		ID:          "principal",
+		Checker:     identityMappingCheck{owners: bc.owners},
+		Timeout:     timeout,
+		Remediation: remediationMapOwnerIdentity,
+	})
 	return ports, checks, approvers, nil
 }
 

@@ -9,6 +9,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/chatcommand"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -20,13 +21,6 @@ func CommandBinding() command.Binding {
 		Style:   command.StyleMessenger,
 		Names:   command.MessengerNames(),
 	}
-}
-
-func (a *Adapter) SetCommands(commands *command.Dispatcher) {
-	if a == nil {
-		return
-	}
-	a.commands = commands
 }
 
 type commandScope struct {
@@ -133,7 +127,7 @@ func (a *Adapter) replyCommand(ctx context.Context, msg *messagePayload, intentI
 	}
 	reference, err := json.Marshal(replyReference{ChannelID: msg.ChannelID, MessageID: msg.ID, GuildID: msg.GuildID})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	_, err = a.postChunks(ctx, &runtimechannelhost.DeliveryRequest{
 		Channel:        a.source(),

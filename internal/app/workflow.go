@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -160,7 +159,7 @@ func (a *workflowSessionTextAppender) AppendSessionText(ctx context.Context, ses
 
 type workflowCompletionDeliverer struct {
 	cfg     *appconfig.Config
-	deliver func(ctx context.Context, account *config.DiscordAccount, channelID, text string) error
+	deliver func(ctx context.Context, account *discord.Account, channelID, text string) error
 }
 
 func (d *workflowCompletionDeliverer) DeliverDiscordText(ctx context.Context, accountName, channelID, text string) error {

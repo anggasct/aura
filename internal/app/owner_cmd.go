@@ -14,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -171,10 +171,10 @@ func ownerRekeyMoves(cfg *appconfig.Config, osUser string) ([]principal.OwnerMov
 	return moves, nil
 }
 
-func discordAllowedUserIDs(discord *config.Discord) []string {
+func discordAllowedUserIDs(cfg *discord.Config) []string {
 	var ids []string
-	for i := range discord.Accounts {
-		ids = append(ids, discord.Accounts[i].AllowedUserIDs...)
+	for i := range cfg.Accounts {
+		ids = append(ids, cfg.Accounts[i].AllowedUserIDs...)
 	}
 	slices.Sort(ids)
 	return slices.Compact(ids)

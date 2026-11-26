@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -33,7 +34,7 @@ func newHandoffAdapter(t *testing.T, gate *fakeHandoffGate) (*Adapter, *memorySi
 	adapter, sink, observer := newAccessAdapter(t, "lobby", []string{"discord:777"}, accessPersonas())
 	settings := observer.settings()
 	settings.Handoffs = gate
-	adapter.SetAccess(&settings)
+	adapter.access = settings
 	adapter.restBase = stub.srv.URL
 	return adapter, sink, stub
 }
@@ -105,7 +106,7 @@ func TestNotifyOwnerHandoffRefusals(t *testing.T) {
 				stub.dmCode = tc.dmCode
 				adapter, _ := newHTTPOwnerAdapter(t, stub, tc.owners, accessPersonas())
 				err := adapter.NotifyOwnerHandoff(t.Context(), httpRequester(principal.ClassPublic), "team/http/abcdefghijkl/token", "x")
-				if code, ok := CodeOf(err); !ok || code != ErrorCodeApprovalUnavailable {
+				if !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
 					t.Fatalf("err = %v, want %s", err, ErrorCodeApprovalUnavailable)
 				}
 				if posts, _, _ := stub.counts(); posts != 0 {
@@ -129,7 +130,7 @@ func TestNotifyOwnerHandoffRefusals(t *testing.T) {
 		}
 		for name, tc := range cases {
 			err := adapter.NotifyOwnerHandoff(t.Context(), tc.requester, tc.session, "x")
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("%s: err = %v, want %s", name, err, ErrorCodeInvalidArgument)
 			}
 		}

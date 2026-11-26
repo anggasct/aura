@@ -25,29 +25,6 @@ type Sync struct {
 	Include            []string           `json:"include"`
 }
 
-type Discord struct {
-	Enabled                  bool               `json:"enabled"`
-	Accounts                 []DiscordAccount   `json:"accounts"`
-	MinEditInterval          configkit.Duration `json:"min_edit_interval"`
-	MaxAttachmentBytes       int64              `json:"max_attachment_bytes"`
-	ThreadAutoArchiveMinutes int                `json:"thread_auto_archive_minutes"`
-}
-
-type DiscordAccount struct {
-	Name              string     `json:"name"`
-	BotTokenRef       secret.Ref `json:"bot_token_ref"`
-	Persona           string     `json:"persona,omitempty"`
-	AllowedUserIDs    []string   `json:"allowed_user_ids"`
-	AllowedGuildIDs   []string   `json:"allowed_guild_ids"`
-	AllowedChannelIDs []string   `json:"allowed_channel_ids"`
-	AcceptDMs         bool       `json:"accept_dms"`
-	LinkPreviews      bool       `json:"link_previews"`
-}
-
-func (*DiscordAccount) Default() any {
-	return DiscordAccount{AcceptDMs: true}
-}
-
 type Telegram struct {
 	Enabled            bool               `json:"enabled"`
 	Accounts           []TelegramAccount  `json:"accounts"`

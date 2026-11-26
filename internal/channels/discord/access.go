@@ -5,15 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -45,18 +46,7 @@ type (
 	PairingService = access.PairingService
 )
 
-type AccessSettings struct {
-	ApprovalTimeout  time.Duration
-	StandingGrantTTL time.Duration
-	Grants           StandingGrantRecorder
-	Pairing          PairingService
-	Budgets          BudgetGate
-	Erasure          PrincipalEraser
-	Handoffs         HandoffGate
-	Evals            EvalGate
-	Denied           func(ctx context.Context, reason string)
-	ApprovalRouted   func(ctx context.Context, result string)
-}
+type AccessSettings = access.Settings
 
 const (
 	BudgetRefusalRateLimited = access.BudgetRefusalRateLimited
@@ -68,13 +58,6 @@ type (
 	EvalGate        = access.EvalGate
 	BudgetGate      = access.BudgetGate
 )
-
-func (a *Adapter) SetAccess(settings *AccessSettings) {
-	if a == nil || settings == nil {
-		return
-	}
-	a.access = *settings
-}
 
 func (a *Adapter) servesPublic() bool {
 	return a.router != nil && a.router.ServesPublic(auraagent.BindingChannelDiscord, a.account.Name)
@@ -270,7 +253,7 @@ func (a *Adapter) ownerDMChannel(ctx context.Context, token, ownerID string) (st
 	}
 	payload, err := json.Marshal(map[string]string{"recipient_id": ownerID})
 	if err != nil {
-		return "", Errorf(ErrorCodeProtocolInvalid, "owner dm request is not serializable")
+		return "", fault.New(ErrorCodeProtocolInvalid, "owner dm request is not serializable")
 	}
 	call, cancel := context.WithTimeout(ctx, restTimeout)
 	defer cancel()
@@ -290,13 +273,13 @@ func (a *Adapter) ownerDMChannel(ctx context.Context, token, ownerID string) (st
 		return "", err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", Errorf(ErrorCodeApprovalUnavailable, "owner dm channel could not be opened")
+		return "", approvalUnavailable("owner dm channel could not be opened")
 	}
 	var channel struct {
 		ID string `json:"id"`
 	}
 	if err := json.Unmarshal(body, &channel); err != nil || !isChannelID(channel.ID) {
-		return "", Errorf(ErrorCodeApprovalUnavailable, "owner dm channel has no id")
+		return "", approvalUnavailable("owner dm channel has no id")
 	}
 	a.ownerDMsMu.Lock()
 	a.ownerDMs[ownerID] = channel.ID
@@ -320,7 +303,7 @@ func sendText(ctx context.Context, client *http.Client, base, token, channelID, 
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
 	if err != nil {
-		return Errorf(ErrorCodeProtocolInvalid, "notice is not serializable")
+		return fault.New(ErrorCodeProtocolInvalid, "notice is not serializable")
 	}
 	call, cancel := context.WithTimeout(ctx, restTimeout)
 	defer cancel()
@@ -337,7 +320,7 @@ func sendText(ctx context.Context, client *http.Client, base, token, channelID, 
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, approvalHTTPBytes))
 	_ = resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return Errorf(ErrorCodeConnectionFailed, "notice delivery returned status %d", resp.StatusCode)
+		return fault.New(ErrorCodeConnectionFailed, fmt.Sprintf("notice delivery returned status %d", resp.StatusCode))
 	}
 	return nil
 }
