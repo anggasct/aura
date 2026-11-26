@@ -1,15 +1,16 @@
-package store
+package model
 
 import (
-	"context"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
-	db := newTestDB(t)
-	s := NewCircuitCheckpointStore(db)
-	ctx := context.Background()
+	db := storetest.OpenMigrated(t)
+	s := NewSQLiteCircuitCheckpointStore(db)
+	ctx := t.Context()
 
 	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
 	openUntil := now.Add(5 * time.Minute)
@@ -17,7 +18,7 @@ func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
 	cp1 := CircuitCheckpoint{
 		CircuitKey:          "primary|https://api.openai.com",
 		ConfigDigest:        "abc12345",
-		State:               "open",
+		State:               CircuitStateOpen,
 		ConsecutiveFailures: 3,
 		OpenUntil:           &openUntil,
 		UpdatedAt:           now,
@@ -42,7 +43,7 @@ func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
 	}
 
 	cp1.ConsecutiveFailures = 4
-	cp1.State = "half_open"
+	cp1.State = CircuitStateHalfOpen
 	if err := s.Save(ctx, &cp1); err != nil {
 		t.Fatalf("Save updated cp1: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestCircuitCheckpointStore_SaveLoadDelete(t *testing.T) {
 	if err != nil || len(loaded) != 1 {
 		t.Fatalf("Load() after update: %v, len = %d", err, len(loaded))
 	}
-	if loaded[0].ConsecutiveFailures != 4 || loaded[0].State != "half_open" {
+	if loaded[0].ConsecutiveFailures != 4 || loaded[0].State != CircuitStateHalfOpen {
 		t.Errorf("updated checkpoint mismatch: %+v", loaded[0])
 	}
 

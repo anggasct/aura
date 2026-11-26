@@ -41,7 +41,6 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -339,8 +338,8 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	grant := &store.StandingGrant{PrincipalID: "discord:111", AgentID: "ops", ToolName: github.ToolComment, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
-	if _, err := store.NewStandingGrantStore(db).Grant(t.Context(), grant); err != nil {
+	grant := &principal.StandingGrant{PrincipalID: "discord:111", AgentID: "ops", ToolName: github.ToolComment, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if _, err := principal.NewStandingGrantStore(db).Grant(t.Context(), grant); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if active, err := policy.StandingGrant(t.Context(), "discord:111", "ops", github.ToolComment, ""); err != nil || !active {

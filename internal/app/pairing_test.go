@@ -13,9 +13,9 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func runAccessCommand(t *testing.T, build func(*globalFlags) *cobra.Command, cfg string, args ...string) (string, error) {
@@ -110,15 +110,19 @@ func TestPairingLockLooksBackFarEnoughForTheOldestRun(t *testing.T) {
 	first := now.Add(-2*time.Hour + time.Minute)
 	for i := range pairingLockoutFailures {
 		at := first.Add(time.Duration(i) * 15 * time.Minute)
-		if err := recordAccessAction(t.Context(), db, &accessAction{Action: store.AccessActionPairingInvalid, Channel: "discord"}, "discord", at); err != nil {
+		if err := recordAccessAction(t.Context(), db, &accessAction{Action: principal.AccessActionPairingInvalid, Channel: "discord"}, "discord", at); err != nil {
 			t.Fatalf("recordAccessAction: %v", err)
 		}
 	}
-	until, locked, err := pairingLock(t.Context(), store.NewPairingStore(db), "discord", now)
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewPairingStore: %v", err)
+	}
+	until, locked, err := pairingLock(t.Context(), pairings, "discord", now)
 	if err != nil || !locked || !until.Equal(first.Add(2*time.Hour)) {
 		t.Fatalf("pairingLock() = %v, %v, %v; want locked until %v", until, locked, err, first.Add(2*time.Hour))
 	}
-	if _, locked, _ := pairingLock(t.Context(), store.NewPairingStore(db), "telegram", now); locked {
+	if _, locked, _ := pairingLock(t.Context(), pairings, "telegram", now); locked {
 		t.Fatal("discord wrong codes locked another channel")
 	}
 }
@@ -141,7 +145,7 @@ func TestPairingServiceIssuesPendingAndLocked(t *testing.T) {
 		t.Fatalf("repeat Request() = %+v, want pending without a code", again)
 	}
 	for i := range pairingLockoutFailures {
-		if err := recordAccessAction(t.Context(), db, &accessAction{Action: store.AccessActionPairingInvalid, Channel: "discord"}, "discord", now.Add(-time.Duration(i)*time.Second)); err != nil {
+		if err := recordAccessAction(t.Context(), db, &accessAction{Action: principal.AccessActionPairingInvalid, Channel: "discord"}, "discord", now.Add(-time.Duration(i)*time.Second)); err != nil {
 			t.Fatalf("record failure: %v", err)
 		}
 	}
@@ -216,14 +220,14 @@ func TestPairingWrongCodesLockApprovals(t *testing.T) {
 			t.Fatalf("wrong code %d err = %v", i, err)
 		}
 	}
-	if accessEventCount(t, cfg, store.AccessActionPairingInvalid) != pairingLockoutFailures {
+	if accessEventCount(t, cfg, principal.AccessActionPairingInvalid) != pairingLockoutFailures {
 		t.Fatal("wrong codes were not recorded")
 	}
 	_, err = runAccessCommand(t, newPairingCmd, cfg, "approve", "discord", issued.Code)
 	if err == nil || !strings.Contains(err.Error(), "pairing_locked") {
 		t.Fatalf("approve during lockout err = %v", err)
 	}
-	if accessEventCount(t, cfg, store.AccessActionPairingInvalid) != pairingLockoutFailures {
+	if accessEventCount(t, cfg, principal.AccessActionPairingInvalid) != pairingLockoutFailures {
 		t.Fatal("attempts during the lockout were counted")
 	}
 	if granted, _ := newPairingService(db, nil).Granted(t.Context(), "discord:1", "office"); granted {
@@ -266,7 +270,11 @@ func TestPrincipalListAndShow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if _, _, err := store.NewPairingStore(db).Approve(t.Context(), "discord", pairingCodeDigest(issued.Code), "local-owner", time.Now().UTC()); err != nil {
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewPairingStore: %v", err)
+	}
+	if _, _, err := pairings.Approve(t.Context(), "discord", pairingCodeDigest(issued.Code), "local-owner", time.Now().UTC()); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC()

@@ -453,8 +453,8 @@ func TestEmailSendTool(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newEmailAccessHarness(t, emailAccessOptions{approvers: tc.approvers})
 			if tc.standing {
-				grant := store.StandingGrant{PrincipalID: "email:" + tc.from, AgentID: "desk", ToolName: "email_send", GrantedBy: principal.OwnerID, GrantedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)}
-				if _, err := store.NewStandingGrantStore(h.db).Grant(t.Context(), &grant); err != nil {
+				grant := principal.StandingGrant{PrincipalID: "email:" + tc.from, AgentID: "desk", ToolName: "email_send", GrantedBy: principal.OwnerID, GrantedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)}
+				if _, err := principal.NewStandingGrantStore(h.db).Grant(t.Context(), &grant); err != nil {
 					t.Fatalf("Grant: %v", err)
 				}
 			}

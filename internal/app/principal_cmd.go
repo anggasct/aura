@@ -15,7 +15,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type principalSummary struct {
@@ -73,7 +73,7 @@ func collectPrincipals(ctx context.Context, cfg *appconfig.Config, db *sql.DB) (
 			summary.access = append(summary.access, "allowlist:"+account.Name)
 		}
 	}
-	grants, err := store.NewPrincipalGrantStore(db).List(ctx)
+	grants, err := principal.NewPrincipalGrantStore(db).List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -82,7 +82,7 @@ func collectPrincipals(ctx context.Context, cfg *appconfig.Config, db *sql.DB) (
 		summary.class = principal.ClassTrusted
 		summary.access = append(summary.access, "grant:"+grants[i].Account)
 	}
-	keys, err := store.NewAPIKeyStore(db).List(ctx)
+	keys, err := principal.NewAPIKeyStore(db).List(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func collectPrincipals(ctx context.Context, cfg *appconfig.Config, db *sql.DB) (
 		summary.class = class
 		summary.access = append(summary.access, keyAccess(key))
 	}
-	activities, err := store.ListPrincipalActivity(ctx, db)
+	activities, err := turnstore.NewTurnStore(db).PrincipalActivity(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -115,7 +115,7 @@ func collectPrincipals(ctx context.Context, cfg *appconfig.Config, db *sql.DB) (
 	return summaries, nil
 }
 
-func keyAccess(key *store.APIKey) string {
+func keyAccess(key *principal.APIKey) string {
 	if key.Active() {
 		return "key:" + key.PersonaID
 	}
@@ -194,11 +194,15 @@ func newPrincipalShowCmd(gf *globalFlags) *cobra.Command {
 				if !ok {
 					return &exitCodeError{code: 1, err: errors.New("principal_not_found: no trusted or public principal has this id")}
 				}
-				standing, err := store.NewStandingGrantStore(db).List(ctx, summary.id, time.Now().UTC())
+				standing, err := principal.NewStandingGrantStore(db).List(ctx, summary.id, time.Now().UTC())
 				if err != nil {
 					return err
 				}
-				pending, err := store.NewPairingStore(db).Pending(ctx, time.Now().UTC())
+				pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+				if err != nil {
+					return err
+				}
+				pending, err := pairings.Pending(ctx, time.Now().UTC())
 				if err != nil {
 					return err
 				}

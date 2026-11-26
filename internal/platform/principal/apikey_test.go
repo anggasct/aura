@@ -1,4 +1,4 @@
-package store
+package principal
 
 import (
 	"strings"
@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func testAPIKey(id string) *APIKey {
@@ -13,7 +14,7 @@ func testAPIKey(id string) *APIKey {
 		ID:        id,
 		KeySHA256: strings.Repeat(id[:1], apiKeyDigestLength),
 		PersonaID: "main",
-		Class:     APIKeyClassTrusted,
+		Class:     string(ClassTrusted),
 		Label:     "laptop",
 		CreatedAt: time.Date(2026, 11, 5, 10, 0, 0, 0, time.UTC),
 	}
@@ -21,7 +22,7 @@ func testAPIKey(id string) *APIKey {
 
 func TestAPIKeyRoundTrip(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(newTestDB(t))
+	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
 	want := testAPIKey("aaaaaaaaaaaa")
 	if err := keys.Create(ctx, want); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -36,7 +37,7 @@ func TestAPIKeyRoundTrip(t *testing.T) {
 }
 
 func TestAPIKeyGetByIDUnknown(t *testing.T) {
-	keys := NewAPIKeyStore(newTestDB(t))
+	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
 	_, err := keys.GetByID(t.Context(), "zzzzzzzzzzzz")
 	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeAPIKeyNotFound {
 		t.Fatalf("GetByID error = %v, want %s", err, ErrorCodeAPIKeyNotFound)
@@ -45,7 +46,7 @@ func TestAPIKeyGetByIDUnknown(t *testing.T) {
 
 func TestAPIKeyListOrdersByCreation(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(newTestDB(t))
+	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
 	if listed, err := keys.List(ctx); err != nil || len(listed) != 0 {
 		t.Fatalf("List on empty store = %v, %v", listed, err)
 	}
@@ -67,7 +68,7 @@ func TestAPIKeyListOrdersByCreation(t *testing.T) {
 
 func TestAPIKeyRevokeIsIdempotent(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(newTestDB(t))
+	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
 	key := testAPIKey("aaaaaaaaaaaa")
 	if err := keys.Create(ctx, key); err != nil {
 		t.Fatalf("Create: %v", err)
@@ -89,7 +90,7 @@ func TestAPIKeyRevokeIsIdempotent(t *testing.T) {
 }
 
 func TestAPIKeyRevokeUnknown(t *testing.T) {
-	keys := NewAPIKeyStore(newTestDB(t))
+	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
 	_, err := keys.Revoke(t.Context(), "zzzzzzzzzzzz", time.Now())
 	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeAPIKeyNotFound {
 		t.Fatalf("Revoke error = %v, want %s", err, ErrorCodeAPIKeyNotFound)
@@ -98,7 +99,7 @@ func TestAPIKeyRevokeUnknown(t *testing.T) {
 
 func TestAPIKeyCreateRejects(t *testing.T) {
 	ctx := t.Context()
-	keys := NewAPIKeyStore(newTestDB(t))
+	keys := NewAPIKeyStore(storetest.OpenMigrated(t))
 	if err := keys.Create(ctx, testAPIKey("aaaaaaaaaaaa")); err != nil {
 		t.Fatalf("seed Create: %v", err)
 	}
