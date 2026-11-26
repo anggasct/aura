@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -199,15 +198,15 @@ func TestOwnerRekeyMoves(t *testing.T) {
 	}
 	cases := map[string]struct {
 		osUser string
-		want   []store.OwnerMove
+		want   []principal.OwnerMove
 	}{
-		"os user moves to owner": {osUser: "kuma", want: []store.OwnerMove{
+		"os user moves to owner": {osUser: "kuma", want: []principal.OwnerMove{
 			{From: "kuma", To: principal.OwnerID},
 			{From: "cron", To: principal.OwnerID},
 			{From: testOwnerDiscordID, To: principal.OwnerID},
 			{From: testTrustedDiscordID, To: "discord:" + testTrustedDiscordID},
 		}},
-		"os user already canonical": {osUser: principal.OwnerID, want: []store.OwnerMove{
+		"os user already canonical": {osUser: principal.OwnerID, want: []principal.OwnerMove{
 			{From: "cron", To: principal.OwnerID},
 			{From: testOwnerDiscordID, To: principal.OwnerID},
 			{From: testTrustedDiscordID, To: "discord:" + testTrustedDiscordID},

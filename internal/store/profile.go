@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
@@ -515,4 +516,43 @@ func ProfileConflictsWith(conflictsWith string) any {
 		return nil
 	}
 	return conflictsWith
+}
+
+type ProfileRekeyer struct {
+	db *sql.DB
+}
+
+func NewProfileRekeyer(db *sql.DB) *ProfileRekeyer {
+	return &ProfileRekeyer{db: db}
+}
+
+func (r *ProfileRekeyer) RekeyOwner(ctx context.Context, state *principal.RekeyState, move principal.OwnerMove) error {
+	if r == nil || r.db == nil {
+		return errNilArgument("db")
+	}
+	if state == nil {
+		return errNilArgument("state")
+	}
+	conn := sqlite.Conn(ctx, r.db)
+	result, err := conn.ExecContext(ctx, `UPDATE profile_fact SET owner_id = ?1 WHERE owner_id = ?2 AND NOT EXISTS (
+		SELECT 1 FROM profile_fact AS target
+		WHERE target.owner_id = ?1 AND target.category = profile_fact.category
+			AND target.fact_key = profile_fact.fact_key AND target.value_digest = profile_fact.value_digest)`,
+		move.To, move.From,
+	)
+	if err != nil {
+		return classify(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return classify(err)
+	}
+	if err := state.Record(principal.RekeyLineProfileFacts, affected); err != nil {
+		return err
+	}
+	var conflicts int64
+	if err := conn.QueryRowContext(ctx, `SELECT COUNT(*) FROM profile_fact WHERE owner_id = ?`, move.From).Scan(&conflicts); err != nil {
+		return classify(err)
+	}
+	return state.Record(principal.RekeyLineProfileFactConflicts, conflicts)
 }

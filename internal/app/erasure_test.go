@@ -10,7 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func seedIdleSession(t *testing.T, sessions turnstore.SessionService, id, owner string, at time.Time) {
@@ -111,7 +110,14 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 }
 
 func TestErasureLinesPrintRunSessionsAfterSessions(t *testing.T) {
-	lines := erasureLines(&store.ErasureCounts{Sessions: 2, RunSessions: 5})
+	report, err := principal.NewErasureReport(map[string]int{
+		principal.ErasureLineSessions:    2,
+		principal.ErasureLineRunSessions: 5,
+	})
+	if err != nil {
+		t.Fatalf("NewErasureReport: %v", err)
+	}
+	lines := report.Lines()
 	if len(lines) < 2 || lines[0] != "sessions: 2" || lines[1] != "run_sessions: 5" {
 		t.Fatalf("erasure lines = %v, want sessions then run_sessions", lines)
 	}
