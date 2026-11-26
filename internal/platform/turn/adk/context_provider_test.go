@@ -123,7 +123,7 @@ func TestContextProviderOrdersBlocksAndCaveatsByOrder(t *testing.T) {
 		},
 	}
 	executor, persistedCount := newContextProviderExecutor(t, model, nil,
-		WithProfileContext(&stubProfileContext{block: profileBlockFixture}),
+		WithContextProvider(&stubProfileContext{block: profileBlockFixture}),
 		WithContextProvider(&stubContextProvider{
 			blocks: []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: skillBlockFixture}},
 		}),

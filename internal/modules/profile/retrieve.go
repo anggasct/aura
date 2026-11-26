@@ -1,11 +1,12 @@
 package profile
 
 import (
+	stdcontext "context"
 	"strings"
 	"time"
 	"unicode"
 
-	stdcontext "context"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type SearchHit struct {
@@ -20,11 +21,9 @@ type RetrieveQuery struct {
 	MaxFacts     int
 	MaxTokens    int
 	VerifiedOnly bool
-	// StatedKeys are keys the owner states elsewhere; a matching learned fact is withheld, never served over them.
-	StatedKeys []string
+	StatedKeys   []string
 }
 
-// NormalizeKey makes "Preferred_Editor" and "preferred  editor" the same key.
 func NormalizeKey(key string) string {
 	return strings.Join(strings.FieldsFunc(strings.ToLower(key), func(r rune) bool {
 		return r == '_' || r == '-' || unicode.IsSpace(r)
@@ -40,22 +39,22 @@ func estimateTokens(text string) int {
 
 func (s *Service) Retrieve(ctx stdcontext.Context, query *RetrieveQuery, now time.Time) (*ContextPart, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if query == nil {
-		return nil, errNilArgument("query")
+		return nil, fault.New(ErrorCodeInvalidArgument, "query must not be nil")
 	}
 	if strings.TrimSpace(query.OwnerID) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if query.MaxFacts <= 0 || query.MaxTokens <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "retrieval budgets must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "retrieval budgets must be positive")
 	}
 	if now.IsZero() {
-		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp must not be zero")
+		return nil, fault.New(ErrorCodeInvalidArgument, "timestamp must not be zero")
 	}
 	hits, err := s.registry.Search(ctx, query.OwnerID, query.Category, strings.TrimSpace(query.Query), query.VerifiedOnly, query.MaxFacts*4, now)
 	if err != nil {

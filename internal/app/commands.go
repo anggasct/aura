@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 
 	"github.com/spf13/cobra"
@@ -10,12 +11,14 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/skills"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
+	root.AddCommand(profile.Commands(profileOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
@@ -42,6 +45,21 @@ func knowledgeOpener(gf *globalFlags) knowledge.Opener {
 		}
 		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartKnowledge}}, func(ctx context.Context, app *App) error {
 			return fn(ctx, app.logger, app.knowledge)
+		})
+	}
+}
+
+func profileOpener(gf *globalFlags) profile.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, service *profile.Service) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		if result.Config.Profile == nil || !result.Config.Profile.Enabled {
+			return errors.New("user profiling is not enabled")
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartProfile}}, func(ctx context.Context, app *App) error {
+			return fn(ctx, app.profile)
 		})
 	}
 }

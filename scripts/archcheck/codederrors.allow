@@ -13,6 +13,5 @@ internal/modules/gitsync  # until this module's errors move to platform/fault wi
 internal/modules/mcp  # until this module's errors move to platform/fault with the module
 internal/modules/memory  # until this module's errors move to platform/fault with the module
 internal/modules/plugin/wire  # plugin protocol errors; plugins import only the wire contract
-internal/modules/profile  # until this module's errors move to platform/fault with the module
 internal/modules/workflow  # until this module's errors move to platform/fault with the module
 plugins/gmail/connector  # plugin protocol errors; plugins import only the wire contract

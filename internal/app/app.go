@@ -19,6 +19,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -53,6 +54,7 @@ const (
 	PartWorkflows Part = "workflows"
 	PartModels    Part = "models"
 	PartKnowledge Part = "knowledge"
+	PartProfile   Part = "profile"
 	PartSkills    Part = "skills"
 )
 
@@ -109,6 +111,7 @@ type App struct {
 	interpreter  *workflow.Interpreter
 	models       *model.Registry
 	knowledge    *knowledge.Service
+	profile      *profile.Service
 	skillsEngine *skills.Engine
 	skillsRoot   string
 
@@ -132,7 +135,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, profile: b.profile,
 		skillsEngine: b.skillsEngine, skillsRoot: b.skillsRoot,
 	}, nil
 }
@@ -237,7 +240,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartSkills:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartProfile, PartSkills:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -337,6 +340,7 @@ type build struct {
 	runtime      durable.Runtime
 	interpreter  *workflow.Interpreter
 	knowledge    *knowledge.Service
+	profile      *profile.Service
 	skillsEngine *skills.Engine
 	skillsRoot   string
 	quarantined  []workflow.Quarantined
@@ -351,8 +355,9 @@ type build struct {
 	routeModel func(route string) (string, error)
 	ledger     *usage.Ledger
 
-	execOpts []runtimeadk.ExecutorOption
-	modules  moduleParts
+	execOpts  []runtimeadk.ExecutorOption
+	turnHooks []turn.TurnHook
+	modules   moduleParts
 
 	executor *runtimeadk.ADKExecutor
 	engine   *runtimeengine.Engine
@@ -404,6 +409,28 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.knowledge = service
+	}
+	if slices.Contains(parts, PartProfile) {
+		store, err := profile.NewSQLiteStore(b.db)
+		if err != nil {
+			return err
+		}
+		sink, err := profile.NewActionSink(turnstore.NewSessionService(b.db), turnstore.NewEventStore(b.db))
+		if err != nil {
+			return err
+		}
+		minConfidence := profile.Default().CandidateMinConfidence
+		if b.cfg.Profile != nil {
+			minConfidence = b.cfg.Profile.CandidateMinConfidence
+		}
+		service, err := profile.NewService(store, profile.ServiceOptions{
+			MinConfidence: minConfidence,
+			Actions:       sink,
+		})
+		if err != nil {
+			return err
+		}
+		b.profile = service
 	}
 	if slices.Contains(parts, PartSkills) {
 		if b.cfg.Skills == nil || !b.cfg.Skills.Enabled {
@@ -603,7 +630,11 @@ func (b *build) buildTurnRuntime() error {
 		return err
 	}
 	b.executor = executor
-	hooks := []postTurnHook{b.modules.memoryHook, b.modules.profileHook}
+	hooks := make([]turn.TurnHook, 0, len(b.turnHooks)+1)
+	if b.modules.memoryHook != nil {
+		hooks = append(hooks, turnHookFunc(b.modules.memoryHook))
+	}
+	hooks = append(hooks, b.turnHooks...)
 	var durableConfig *runtimeengine.DurableConfig
 	var countTurn func(context.Context, *turn.TurnRequest)
 	var channels []runtimechannelhost.ChannelPort
@@ -625,7 +656,7 @@ func (b *build) buildTurnRuntime() error {
 		Personas:       registryPersonas{registry: b.registry},
 		Skills:         b.modules.skillRenderer,
 		Durable:        durableConfig,
-		PostTurnHook:   composePostTurnHooks(hooks...),
+		PostTurnHook:   composeTurnHooks(hooks),
 		CountTurn:      countTurn,
 		LiveEvents:     b.liveEvents,
 		Channels:       channels,

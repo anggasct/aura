@@ -15,6 +15,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -65,12 +66,26 @@ func newOwnerWhoamiCmd(gf *globalFlags) *cobra.Command {
 	}
 }
 
-func rekeyParticipants(db *sql.DB) []principal.Rekeyer {
+func writeProfileLines(cmd *cobra.Command, lines []string) error {
+	out := cmd.OutOrStdout()
+	for _, line := range lines {
+		if _, err := fmt.Fprintln(out, line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func rekeyParticipants(db *sql.DB) ([]principal.Rekeyer, error) {
+	profileRekeyer, err := profile.NewRekeyer(db)
+	if err != nil {
+		return nil, err
+	}
 	return []principal.Rekeyer{
 		turnstore.NewSessionRekeyer(db),
 		store.NewMemoryRekeyer(db),
-		store.NewProfileRekeyer(db),
-	}
+		profileRekeyer,
+	}, nil
 }
 
 func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
@@ -90,7 +105,11 @@ func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				report, err := principal.Rekey(ctx, db, moves, apply, rekeyParticipants(db))
+				participants, err := rekeyParticipants(db)
+				if err != nil {
+					return err
+				}
+				report, err := principal.Rekey(ctx, db, moves, apply, participants)
 				if err != nil {
 					return err
 				}

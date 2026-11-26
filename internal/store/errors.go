@@ -16,9 +16,6 @@ const (
 	ErrorCodeMemoryConflict       ErrorCode = "memory_conflict"
 	ErrorCodeMemoryNotFound       ErrorCode = "memory_not_found"
 	ErrorCodeMemoryInvalid        ErrorCode = "memory_invalid"
-	ErrorCodeProfileConflict      ErrorCode = "profile_conflict"
-	ErrorCodeProfileNotFound      ErrorCode = "profile_not_found"
-	ErrorCodeProfileInvalid       ErrorCode = "profile_invalid"
 	ErrorCodeChildConflict        ErrorCode = "child_conflict"
 	ErrorCodeChildNotFound        ErrorCode = "child_not_found"
 	ErrorCodeChildInvalid         ErrorCode = "child_invalid"
@@ -50,10 +47,6 @@ func isConstraintUnique(err error) bool {
 	classified := sqlite.Classify(err)
 	return fault.HasCode(classified, sqlite.ErrorCodeConstraintUnique) ||
 		fault.HasCode(classified, sqlite.ErrorCodeConstraintPrimaryKey)
-}
-
-func isConstraintForeignKey(err error) bool {
-	return fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintForeignKey)
 }
 
 func isConstraintCheck(err error) bool {
