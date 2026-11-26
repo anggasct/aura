@@ -136,7 +136,7 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		LiveEvents:     liveEvents,
 	})
 	if err != nil {

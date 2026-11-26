@@ -22,7 +22,7 @@ func writeScheduleCLIConfig(t *testing.T, dataDir string) string {
 	return path
 }
 
-func runScheduleCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func runScheduleCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
 	cmd := schedule.Commands(scheduleOpener(gf))[0]
@@ -35,7 +35,7 @@ func runScheduleCommand(t *testing.T, gf *globalFlags, args ...string) (string, 
 	return out.String(), err
 }
 
-func addScheduleJob(t *testing.T, gf *globalFlags, extra ...string) string {
+func addScheduleJob(t *testing.T, gf *GlobalFlags, extra ...string) string {
 	t.Helper()
 	args := []string{"add",
 		"--name", "nightly", "--schedule", "0 21 * * *", "--timezone", "UTC",
@@ -55,7 +55,7 @@ func addScheduleJob(t *testing.T, gf *globalFlags, extra ...string) string {
 
 func TestScheduleAddListRunsRoundTrip(t *testing.T) {
 	dataDir := t.TempDir()
-	gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 	id := addScheduleJob(t, gf)
 
 	out, err := runScheduleCommand(t, gf, "list")
@@ -82,7 +82,7 @@ func TestScheduleAddListRunsRoundTrip(t *testing.T) {
 
 func TestScheduleAddRejectsInvalid(t *testing.T) {
 	dataDir := t.TempDir()
-	gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 	if _, err := runScheduleCommand(t, gf, "add", "--name", "x"); err == nil {
 		t.Error("add without flags accepted")
 	}
@@ -95,7 +95,7 @@ func TestScheduleAddRejectsInvalid(t *testing.T) {
 
 func TestSchedulePauseResumeDelete(t *testing.T) {
 	dataDir := t.TempDir()
-	gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 	id := addScheduleJob(t, gf)
 
 	if out, err := runScheduleCommand(t, gf, "pause", id); err != nil {
@@ -125,7 +125,7 @@ func TestSchedulePauseResumeDelete(t *testing.T) {
 
 func TestScheduleRunNowStartsRun(t *testing.T) {
 	dataDir := t.TempDir()
-	gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 	id := addScheduleJob(t, gf)
 
 	out, err := runScheduleCommand(t, gf, "run-now", id)
@@ -161,7 +161,7 @@ func requireNoNote(t *testing.T, out string) {
 func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 	t.Run("add", func(t *testing.T) {
 		dataDir := t.TempDir()
-		gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+		gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 		out, err := runScheduleCommand(t, gf, "add",
 			"--name", "nightly", "--schedule", dailySchedule, "--timezone", "UTC",
 			"--channel", "discord", "--destination", "default", "--prompt", "summarize")
@@ -180,7 +180,7 @@ func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 	})
 	t.Run("resume", func(t *testing.T) {
 		dataDir := t.TempDir()
-		gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+		gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 		db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))
 		jobs, err := schedule.NewSQLiteStore(db)
 		if err != nil {
@@ -215,7 +215,7 @@ func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 	})
 	t.Run("run-now", func(t *testing.T) {
 		dataDir := t.TempDir()
-		gf := &globalFlags{configPath: writeScheduleCLIConfig(t, dataDir)}
+		gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 		id := addScheduleJob(t, gf)
 		out, err := runScheduleCommand(t, gf, "run-now", id)
 		if err != nil {

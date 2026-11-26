@@ -49,7 +49,7 @@ channels:
 
 func runOwnerCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newOwnerCmd(&globalFlags{configPath: cfg})
+	cmd := newOwnerCmd(&GlobalFlags{ConfigPath: cfg})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)

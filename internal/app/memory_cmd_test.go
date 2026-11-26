@@ -45,7 +45,7 @@ children:
 func runMemoryCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &globalFlags{configPath: cfg}
+	gf := &GlobalFlags{ConfigPath: cfg}
 	cmd := memory.Commands(memoryOpener(gf))[0]
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)

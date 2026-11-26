@@ -227,26 +227,46 @@ func retentionRuntime(t *testing.T, db *sql.DB) *sqlite.Runtime {
 	return rt
 }
 
-func newTestRunRetention(t *testing.T, db *sql.DB, interval time.Duration) (*runRetention, *syncBuffer) {
+func testRetentionHandlers() []string {
+	return []string{broadcast.HandlerName, schedule.HandlerName, child.HandlerName, workflow.HandlerName, runtimeengine.HandlerName}
+}
+
+func newTestRunRetentionWith(t *testing.T, db *sql.DB, pruner sqlite.Pruner, orphans func(context.Context) (int, error), batch int, interval time.Duration) (*sqlite.RetentionSweeper, *syncBuffer) {
 	t.Helper()
 	logs := &syncBuffer{}
 	rt := retentionRuntime(t, db)
-	turns := turnstore.NewTurnStore(db)
-	return &runRetention{
-		pruner: rt,
-		orphans: func(ctx context.Context) (int, error) {
+	if pruner == nil {
+		pruner = rt
+	}
+	if orphans == nil {
+		turns := turnstore.NewTurnStore(db)
+		orphans = func(ctx context.Context) (int, error) {
 			return runtimeengine.DeleteOrphanedTurnRuns(ctx, db, rt, turns)
-		},
-		retention: testRunRetention,
-		batch:     runRetentionBatch,
-		interval:  interval,
-		logger:    slog.New(slog.NewJSONHandler(logs, nil)),
-	}, logs
+		}
+	}
+	sweeper, err := sqlite.NewRetentionSweeper(&sqlite.RetentionSweeperOptions{
+		Pruner:    pruner,
+		Handlers:  testRetentionHandlers(),
+		Orphans:   orphans,
+		Retention: testRunRetention,
+		Batch:     batch,
+		Interval:  interval,
+		Logger:    slog.New(slog.NewJSONHandler(logs, nil)),
+	})
+	if err != nil {
+		t.Fatalf("NewRetentionSweeper: %v", err)
+	}
+	return sweeper, logs
 }
 
-func startRunRetention(t *testing.T, sweep *runRetention) func() {
+func newTestRunRetention(t *testing.T, db *sql.DB, interval time.Duration) (*sqlite.RetentionSweeper, *syncBuffer) {
 	t.Helper()
-	task := server.Background("run_retention", sweep.run)
+	return newTestRunRetentionWith(t, db, nil, nil, sqlite.DefaultRetentionBatch, interval)
+}
+
+func startRunRetention(t *testing.T, sweep *sqlite.RetentionSweeper) func() {
+	t.Helper()
+	task := server.Background("run_retention", sweep.Run)
 	if err := task.Start(t.Context()); err != nil {
 		t.Fatalf("start the sweep: %v", err)
 	}
@@ -258,7 +278,7 @@ func startRunRetention(t *testing.T, sweep *runRetention) func() {
 }
 
 type failingOncePruner struct {
-	next    pruner
+	next    sqlite.Pruner
 	release chan struct{}
 	mu      sync.Mutex
 	calls   int
@@ -281,12 +301,11 @@ func (p *failingOncePruner) PruneEnded(ctx context.Context, req sqlite.PruneRequ
 }
 
 func TestRunRetentionSweepPrunesEndedRuns(t *testing.T) {
-	for _, batch := range []int{runRetentionBatch, 2} {
+	for _, batch := range []int{sqlite.DefaultRetentionBatch, 2} {
 		t.Run("one sweep in batches of "+strconv.Itoa(batch), func(t *testing.T) {
 			db := cronTestDB(t)
 			seedRetentionRuns(t, db)
-			sweep, logs := newTestRunRetention(t, db, time.Hour)
-			sweep.batch = batch
+			sweep, logs := newTestRunRetentionWith(t, db, nil, nil, batch, time.Hour)
 			stop := startRunRetention(t, sweep)
 			awaitSchedule(t, "the first sweep is logged", func() bool { return len(recordsAt(t, logs, "INFO")) > 0 })
 			stop()
@@ -304,9 +323,9 @@ func TestRunRetentionSweepPrunesEndedRuns(t *testing.T) {
 	t.Run("a failing prune ends that sweep and the next interval prunes again", func(t *testing.T) {
 		db := cronTestDB(t)
 		seedRetentionRuns(t, db)
-		sweep, logs := newTestRunRetention(t, db, 5*time.Millisecond)
-		prune := &failingOncePruner{next: sweep.pruner, release: make(chan struct{})}
-		sweep.pruner = prune
+		rt := retentionRuntime(t, db)
+		prune := &failingOncePruner{next: rt, release: make(chan struct{})}
+		sweep, logs := newTestRunRetentionWith(t, db, prune, nil, sqlite.DefaultRetentionBatch, 5*time.Millisecond)
 		stop := startRunRetention(t, sweep)
 		awaitSchedule(t, "the failed sweep is logged", func() bool { return len(recordsAt(t, logs, "WARN")) > 0 })
 		if got, want := runKeys(t, db), seedKeys(slices.Concat(prunableRunSeeds, keptRunSeeds)); !slices.Equal(got, want) {
@@ -325,8 +344,9 @@ func TestRunRetentionSweepPrunesEndedRuns(t *testing.T) {
 	t.Run("a failing prune reports the orphans its sweep deleted", func(t *testing.T) {
 		db := cronTestDB(t)
 		kept := seedOrphanRuns(t, db)
-		sweep, logs := newTestRunRetention(t, db, time.Hour)
-		sweep.pruner = &failingOncePruner{next: sweep.pruner, release: make(chan struct{})}
+		rt := retentionRuntime(t, db)
+		prune := &failingOncePruner{next: rt, release: make(chan struct{})}
+		sweep, logs := newTestRunRetentionWith(t, db, prune, nil, sqlite.DefaultRetentionBatch, time.Hour)
 		stop := startRunRetention(t, sweep)
 		awaitSchedule(t, "the failed sweep is logged", func() bool { return len(recordsAt(t, logs, "WARN")) > 0 })
 		stop()
@@ -348,7 +368,7 @@ func TestRunRetentionSweepPrunesEndedRuns(t *testing.T) {
 		sweep, logs := newTestRunRetention(t, db, time.Hour)
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
-		sweep.run(ctx)
+		sweep.Run(ctx)
 		if got := logs.String(); got != "" {
 			t.Errorf("logs of a sweep under an ended context = %q, want none", got)
 		}
@@ -410,9 +430,16 @@ func TestRunRetentionSweepDeletesOrphanedTurnRuns(t *testing.T) {
 		seedRetentionRuns(t, db)
 		kept := slices.Sorted(slices.Values(slices.Concat(seedKeys(keptRunSeeds), seedOrphanRuns(t, db))))
 		seeded := len(prunableRunSeeds) + len(keptRunSeeds) + len(orphanRunSeeds)
-		sweep, logs := newTestRunRetention(t, db, 5*time.Millisecond)
-		orphans := &failingOnceOrphans{next: sweep.orphans, retried: make(chan struct{}), release: make(chan struct{})}
-		sweep.orphans = orphans.delete
+		rt := retentionRuntime(t, db)
+		turns := turnstore.NewTurnStore(db)
+		orphans := &failingOnceOrphans{
+			next: func(ctx context.Context) (int, error) {
+				return runtimeengine.DeleteOrphanedTurnRuns(ctx, db, rt, turns)
+			},
+			retried: make(chan struct{}),
+			release: make(chan struct{}),
+		}
+		sweep, logs := newTestRunRetentionWith(t, db, rt, orphans.delete, sqlite.DefaultRetentionBatch, 5*time.Millisecond)
 		stop := startRunRetention(t, sweep)
 		select {
 		case <-orphans.retried:

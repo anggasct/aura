@@ -18,10 +18,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func runAccessCommand(t *testing.T, build func(*globalFlags) *cobra.Command, cfg string, args ...string) (string, error) {
+func runAccessCommand(t *testing.T, build func(*GlobalFlags) *cobra.Command, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := build(&globalFlags{configPath: cfg})
+	cmd := build(&GlobalFlags{ConfigPath: cfg})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -132,7 +132,7 @@ func TestPairingServiceIssuesPendingAndLocked(t *testing.T) {
 	db := openAccessDB(t, cfg)
 	service := newPairingService(db, nil)
 	now := time.Now().UTC()
-	service.now = func() time.Time { return now }
+	service.WithClock(func() time.Time { return now })
 	issued, err := service.Request(t.Context(), "discord:1", "office")
 	if err != nil || issued.Outcome != discord.PairingOutcomeIssued || len(issued.Code) != pairingCodeLength {
 		t.Fatalf("first Request() = %+v, %v", issued, err)

@@ -225,7 +225,7 @@ func TestWorkflowProposalShowRunsThroughTheCommand(t *testing.T) {
 		ID: workflow.NewProposalID(), SessionID: "ops/terminal:owner", AgentID: "ops", PrincipalID: principal.OwnerID,
 		Spec: spec, Digest: digest, CreatedAt: time.Now().UTC(),
 	}
-	db := openAccessDB(t, gf.configPath)
+	db := openAccessDB(t, gf.ConfigPath)
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}

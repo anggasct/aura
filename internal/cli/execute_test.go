@@ -5,8 +5,6 @@ import (
 	"os"
 	"testing"
 	"time"
-
-	"github.com/anggasct/aura/internal/app"
 )
 
 func TestExecuteContextExitCodes(t *testing.T) {
@@ -62,7 +60,7 @@ func TestExecuteContextUnknownCommandViaProcessArgs(t *testing.T) {
 func TestContextForCommandCancelsOnInterrupt(t *testing.T) {
 	signals := make(chan os.Signal, 1)
 	ctx := context.Background()
-	executionCtx, stop := contextForCommand(ctx, app.NewRootCommand(), []string{"server"}, signals)
+	executionCtx, stop := contextForCommand(ctx, NewRootCommand(), []string{"server"}, signals)
 	signals <- os.Interrupt
 	select {
 	case <-executionCtx.Done():
@@ -75,7 +73,7 @@ func TestContextForCommandCancelsOnInterrupt(t *testing.T) {
 func TestContextForChatLeavesInterruptsForConsole(t *testing.T) {
 	signals := make(chan os.Signal, 1)
 	ctx := context.Background()
-	executionCtx, stop := contextForCommand(ctx, app.NewRootCommand(), []string{"chat"}, signals)
+	executionCtx, stop := contextForCommand(ctx, NewRootCommand(), []string{"chat"}, signals)
 	defer stop()
 	signals <- os.Interrupt
 	select {

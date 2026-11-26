@@ -19,6 +19,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -26,12 +27,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func writeWorkflowFixtures(t *testing.T, definition string) *globalFlags {
+func writeWorkflowFixtures(t *testing.T, definition string) *GlobalFlags {
 	t.Helper()
 	return writeWorkflowFixturesWith(t, definition, "")
 }
 
-func writeWorkflowFixturesWith(t *testing.T, definition, extraConfig string) *globalFlags {
+func writeWorkflowFixturesWith(t *testing.T, definition, extraConfig string) *GlobalFlags {
 	t.Helper()
 	dir := t.TempDir()
 	defsDir := filepath.Join(dir, "workflows")
@@ -65,7 +66,7 @@ workflows:
 		t.Fatalf("write config: %v", err)
 	}
 	seedConfiguredStorage(t, configPath)
-	return &globalFlags{configPath: configPath}
+	return &GlobalFlags{ConfigPath: configPath}
 }
 
 const validWorkflowYAML = `id: demo
@@ -87,7 +88,7 @@ func mustWorkflowInterpreter(t *testing.T, store *workflow.Store, durableRuntime
 	return interpreter
 }
 
-func runWorkflowCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func runWorkflowCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
 	cmd := workflow.Commands(workflowOpener(gf))[0]
@@ -189,10 +190,10 @@ workflows:
   definitions_dir: DEFS
 `
 
-func writeBrokenAgentFixtures(t *testing.T, definition string) *globalFlags {
+func writeBrokenAgentFixtures(t *testing.T, definition string) *GlobalFlags {
 	t.Helper()
 	gf := writeWorkflowFixtures(t, "")
-	cfgPath := gf.configPath
+	cfgPath := gf.ConfigPath
 	dir := filepath.Dir(cfgPath)
 	defsDir := filepath.Join(dir, "workflows")
 	cfg := strings.ReplaceAll(brokenAgentConfig, "DIR", dir)
@@ -242,11 +243,11 @@ func TestWorkflowValidateAcceptsOmittedTimeoutWithConfiguredDefault(t *testing.T
 func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	dir := filepath.Dir(gf.configPath)
+	dir := filepath.Dir(gf.ConfigPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
@@ -308,11 +309,11 @@ steps:
 func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	gf := writeWorkflowFixtures(t, outputWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	dir := filepath.Dir(gf.configPath)
+	dir := filepath.Dir(gf.ConfigPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
@@ -357,15 +358,15 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 
 func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
-	content, err := os.ReadFile(gf.configPath)
+	content, err := os.ReadFile(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	trimmed := strings.ReplaceAll(string(content), "storage:\n  path: "+filepath.Dir(gf.configPath)+"\n", "")
+	trimmed := strings.ReplaceAll(string(content), "storage:\n  path: "+filepath.Dir(gf.ConfigPath)+"\n", "")
 	if trimmed == string(content) {
 		t.Fatal("fixture rewrite removed no storage path")
 	}
-	if err := os.WriteFile(gf.configPath, []byte(trimmed), 0o600); err != nil {
+	if err := os.WriteFile(gf.ConfigPath, []byte(trimmed), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("HOME", "")
@@ -603,7 +604,7 @@ func (b *syncBuffer) String() string {
 func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -619,15 +620,15 @@ func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T
 	}
 	defer func() { _ = app.Close(ctx) }()
 	interpreter := app.interpreter
-	runHost, ok := app.runtime.(durableRunHost)
+	runHost, ok := app.runtime.(durablesqlite.RunHost)
 	if !ok {
 		t.Fatal("the command build's durable runtime cannot host runs")
 	}
-	stage := &durableHostStage{host: runHost, handlers: []string{workflow.HandlerName}, logger: app.logger}
-	if err := stage.start(ctx); err != nil {
+	stage := durablesqlite.NewHostStage(runHost, []string{workflow.HandlerName}, app.logger)
+	if err := stage.Start(ctx); err != nil {
 		t.Fatalf("start the durable host: %v", err)
 	}
-	defer func() { _ = stage.stop(ctx) }()
+	defer func() { _ = stage.Stop(ctx) }()
 
 	db, err := openStorage(ctx, result.Config)
 	if err != nil {
@@ -696,7 +697,7 @@ func TestWorkflowSignalUnknownRunFailsClosed(t *testing.T) {
 func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -705,7 +706,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := mustWorkflowStore(t, db)
-	dir := filepath.Dir(gf.configPath)
+	dir := filepath.Dir(gf.ConfigPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)

@@ -2,91 +2,57 @@ package httpchat
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
-	"crypto/subtle"
 	"encoding/base32"
-	"encoding/hex"
 	"io"
-	"log/slog"
-	"strings"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const (
-	KeyPrefix = "aura_sk_"
-
-	KeyIDLength     = principal.HTTPKeyIDLength
-	keyIDBytes      = 8
-	keySecretBytes  = 32
-	keySecretLength = 52
-	keySeparator    = '_'
+	KeyPrefix   = principal.KeyPrefix
+	KeyIDLength = principal.KeyIDLength
+	keyIDBytes  = 8
 )
 
 var keyEncoding = base32.StdEncoding.WithPadding(base32.NoPadding)
 
-type IssuedKey struct {
-	ID        string
-	Plaintext string
-	Digest    string
+func isKeyAlphabet(text string) bool {
+	return principal.IsKeyAlphabet(text)
 }
 
-func (k IssuedKey) String() string {
-	return "api key " + k.ID
-}
-
-func (k IssuedKey) LogValue() slog.Value {
-	return slog.StringValue(k.String())
-}
+type IssuedKey = principal.IssuedKey
 
 func NewKey() (IssuedKey, error) {
 	return issueKey(rand.Reader)
 }
 
 func issueKey(source io.Reader) (IssuedKey, error) {
-	idBytes := make([]byte, keyIDBytes)
-	secretBytes := make([]byte, keySecretBytes)
-	if _, err := io.ReadFull(source, idBytes); err != nil {
-		return IssuedKey{}, fault.Wrap(ErrorCodeKeyGeneration, "random source failed", err)
+	issued, err := principal.IssueKey(source)
+	if err != nil {
+		if fault.HasCode(err, principal.ErrorCodeKeyGeneration) {
+			return IssuedKey{}, fault.Wrap(ErrorCodeKeyGeneration, "random source failed", err)
+		}
+		return IssuedKey{}, err
 	}
-	if _, err := io.ReadFull(source, secretBytes); err != nil {
-		return IssuedKey{}, fault.Wrap(ErrorCodeKeyGeneration, "random source failed", err)
-	}
-	id := strings.ToLower(keyEncoding.EncodeToString(idBytes))[:KeyIDLength]
-	secret := strings.ToLower(keyEncoding.EncodeToString(secretBytes))
-	plaintext := KeyPrefix + id + string(keySeparator) + secret
-	return IssuedKey{ID: id, Plaintext: plaintext, Digest: KeyDigest(plaintext)}, nil
+	return issued, nil
 }
 
 func KeyDigest(plaintext string) string {
-	sum := sha256.Sum256([]byte(plaintext))
-	return hex.EncodeToString(sum[:])
+	return principal.KeyDigest(plaintext)
 }
 
 func ParseKey(raw string) (string, error) {
-	rest, found := strings.CutPrefix(raw, KeyPrefix)
-	if !found || len(rest) != KeyIDLength+1+keySecretLength || rest[KeyIDLength] != keySeparator {
-		return "", fault.New(ErrorCodeKeyMalformed, "api key has the wrong shape")
-	}
-	id, secret := rest[:KeyIDLength], rest[KeyIDLength+1:]
-	if !principal.IsHTTPKeyID(id) || !isKeyAlphabet(secret) {
-		return "", fault.New(ErrorCodeKeyMalformed, "api key has characters outside its alphabet")
+	id, err := principal.ParseKey(raw)
+	if err != nil {
+		if fault.HasCode(err, principal.ErrorCodeKeyMalformed) {
+			return "", fault.Wrap(ErrorCodeKeyMalformed, err.Error(), err)
+		}
+		return "", err
 	}
 	return id, nil
 }
 
-func isKeyAlphabet(text string) bool {
-	for i := range len(text) {
-		c := text[i]
-		if (c < 'a' || c > 'z') && (c < '2' || c > '7') {
-			return false
-		}
-	}
-	return true
-}
-
 func VerifyKey(plaintext, digest string) bool {
-	presented := KeyDigest(plaintext)
-	return subtle.ConstantTimeCompare([]byte(presented), []byte(digest)) == 1
+	return principal.VerifyKey(plaintext, digest)
 }

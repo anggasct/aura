@@ -51,7 +51,7 @@ func skillsCLIConfig(t *testing.T) string {
 func runSkillsCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmds := skills.Commands(skillsOpener(&globalFlags{configPath: cfg}))
+	cmds := skills.Commands(skillsOpener(&GlobalFlags{ConfigPath: cfg}))
 	cmd := cmds[0]
 	out := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}

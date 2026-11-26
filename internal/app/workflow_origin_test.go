@@ -65,7 +65,7 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 		if runID == "" {
 			t.Fatalf("start output = %q, want a run id", out)
 		}
-		run, err := mustWorkflowStore(t, openAccessDB(t, gf.configPath)).Run(t.Context(), runID)
+		run, err := mustWorkflowStore(t, openAccessDB(t, gf.ConfigPath)).Run(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -161,7 +161,7 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 				ID: workflow.NewProposalID(), SessionID: "ops/terminal:owner", AgentID: "ops", PrincipalID: principal.OwnerID,
 				Tainted: tc.tainted, Spec: spec, Digest: digest, CreatedAt: time.Now().UTC(),
 			}
-			db := openAccessDB(t, gf.configPath)
+			db := openAccessDB(t, gf.ConfigPath)
 			if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
 			}

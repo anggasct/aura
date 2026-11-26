@@ -435,7 +435,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		LiveEvents:     liveEvents,
 	})
 	if err != nil {
@@ -450,11 +450,27 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 
 func (h *httpChatHarness) mintKey(persona, class string) string {
 	h.t.Helper()
-	cmd := &cobra.Command{}
+	registry, err := buildAgentRegistry(h.cfg)
+	if err != nil {
+		h.t.Fatalf("buildAgentRegistry: %v", err)
+	}
+	opener := func(_ *cobra.Command, _ principal.CommandMode, fn func(context.Context, *principal.CommandEnv) error) error {
+		return fn(h.t.Context(), &principal.CommandEnv{
+			DB:       h.db,
+			Actions:  turnstore.NewOwnerActionRecorder(h.db),
+			Personas: registryPersonaChecker{registry: registry},
+		})
+	}
+	cmd := findSubcommand(principal.Commands(opener), "apikey")
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(io.Discard)
-	if err := createAPIKey(h.t.Context(), cmd, h.cfg, h.db, &apiKeyCreateFlags{persona: persona, class: class, label: "test"}); err != nil {
+	args := []string{"create", "--persona", persona, "--class", class, "--label", "test"}
+	if class == string(principal.ClassOwner) {
+		args = append(args, "--confirm-owner")
+	}
+	cmd.SetArgs(args)
+	if err := cmd.ExecuteContext(h.t.Context()); err != nil {
 		h.t.Fatalf("createAPIKey: %v", err)
 	}
 	return strings.TrimSpace(out.String())

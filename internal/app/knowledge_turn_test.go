@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -168,7 +169,7 @@ agents:
 		Dedupe:       turnstore.NewDedupeStore(db),
 		Executor:     executor,
 		Config:       engineLimits(2, 4),
-		Personas:     registryPersonas{registry: personaRegistry(t, path)},
+		Personas:     auraagent.RegistryPersonas{Registry: personaRegistry(t, path)},
 		PostTurnHook: memory.NewTurnHook(memoryService, nil, nil, nil).AfterTurn,
 		LiveEvents:   turn.NewEventBus(nil),
 	})

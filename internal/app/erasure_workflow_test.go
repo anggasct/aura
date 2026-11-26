@@ -28,10 +28,10 @@ func startRunAs(t *testing.T, app *App, principalID string) *workflow.RunSummary
 	return summary
 }
 
-func openCommandWorkflows(t *testing.T, gf *globalFlags) *App {
+func openCommandWorkflows(t *testing.T, gf *GlobalFlags) *App {
 	t.Helper()
 	restoreDefaultLogger(t)
-	app := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, gf.configPath), &syncBuffer{}, PartWorkflows))
+	app := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, gf.ConfigPath), &syncBuffer{}, PartWorkflows))
 	t.Cleanup(func() { _ = app.Close(context.Background()) })
 	return app
 }

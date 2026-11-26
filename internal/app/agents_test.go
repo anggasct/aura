@@ -39,7 +39,7 @@ models:
 	return path
 }
 
-func runAgentsCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func runAgentsCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	cmd := newAgentsCmd(gf)
 	out := &bytes.Buffer{}
@@ -51,7 +51,7 @@ func runAgentsCommand(t *testing.T, gf *globalFlags, args ...string) (string, er
 }
 
 func TestAgentsListPrintsRegisteredDefinitions(t *testing.T) {
-	gf := &globalFlags{configPath: writeAgentsConfig(t, "")}
+	gf := &GlobalFlags{ConfigPath: writeAgentsConfig(t, "")}
 	out, err := runAgentsCommand(t, gf, "list")
 	if err != nil {
 		t.Fatalf("agents list: %v", err)
@@ -67,7 +67,7 @@ func TestAgentsListPrintsRegisteredDefinitions(t *testing.T) {
 }
 
 func TestAgentsShowPrintsOneDefinition(t *testing.T) {
-	gf := &globalFlags{configPath: writeAgentsConfig(t, "")}
+	gf := &GlobalFlags{ConfigPath: writeAgentsConfig(t, "")}
 	out, err := runAgentsCommand(t, gf, "show", "engineer")
 	if err != nil {
 		t.Fatalf("agents show: %v", err)
@@ -80,7 +80,7 @@ func TestAgentsShowPrintsOneDefinition(t *testing.T) {
 }
 
 func TestAgentsShowUnknownIDFailsWithStableError(t *testing.T) {
-	gf := &globalFlags{configPath: writeAgentsConfig(t, "")}
+	gf := &GlobalFlags{ConfigPath: writeAgentsConfig(t, "")}
 	_, err := runAgentsCommand(t, gf, "show", "nonexistent")
 	if err == nil {
 		t.Fatal("agents show accepted an unknown id")
@@ -100,7 +100,7 @@ agents:
       capabilities: [repository.read]
       model_route: primary
 `
-	gf := &globalFlags{configPath: writeAgentsConfig(t, agents)}
+	gf := &GlobalFlags{ConfigPath: writeAgentsConfig(t, agents)}
 	out, err := runAgentsCommand(t, gf, "list")
 	if err != nil {
 		t.Fatalf("agents list: %v", err)
@@ -122,11 +122,11 @@ agents:
       instructions: x
       capabilities: [kernel.root]
 `
-	gf := &globalFlags{configPath: writeAgentsConfig(t, agents)}
+	gf := &GlobalFlags{ConfigPath: writeAgentsConfig(t, agents)}
 	if _, err := runAgentsCommand(t, gf, "list"); err == nil {
 		t.Fatal("agents list accepted an unknown capability")
 	}
-	if _, err := appconfig.Load(gf.configPath); err != nil {
+	if _, err := appconfig.Load(gf.ConfigPath); err != nil {
 		t.Logf("appconfig.Load: %v", err)
 	}
 }

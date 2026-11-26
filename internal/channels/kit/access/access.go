@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 const (
@@ -16,15 +16,12 @@ const (
 )
 
 const (
-	PairingOutcomeIssued  = "issued"
-	PairingOutcomePending = "pending"
-	PairingOutcomeLocked  = "locked"
+	PairingOutcomeIssued  = principal.PairingOutcomeIssued
+	PairingOutcomePending = principal.PairingOutcomePending
+	PairingOutcomeLocked  = principal.PairingOutcomeLocked
 )
 
-type PairingResult struct {
-	Outcome string
-	Code    string
-}
+type PairingResult = principal.PairingResult
 
 type PairingService interface {
 	Granted(ctx context.Context, principalID, account string) (bool, error)
@@ -32,8 +29,8 @@ type PairingService interface {
 }
 
 const (
-	BudgetRefusalRateLimited = auraagent.MessageRateLimited
-	BudgetRefusalExhausted   = auraagent.MessageBudgetExhausted
+	BudgetRefusalRateLimited = usage.BudgetRefusalRateLimited
+	BudgetRefusalExhausted   = usage.BudgetRefusalExhausted
 )
 
 type BudgetGate interface {

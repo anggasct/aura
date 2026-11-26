@@ -13,6 +13,8 @@ const (
 	ErrorCodeAPIKeyConflict  ErrorCode = "apikey_conflict"
 	ErrorCodeAPIKeyNotFound  ErrorCode = "apikey_not_found"
 	ErrorCodeAPIKeyInvalid   ErrorCode = "apikey_invalid"
+	ErrorCodeKeyMalformed    ErrorCode = "key_malformed"
+	ErrorCodeKeyGeneration   ErrorCode = "key_generation_failed"
 	ErrorCodeErasureBlocked  ErrorCode = "erasure_blocked_by_live_runs"
 )
 

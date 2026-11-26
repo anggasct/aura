@@ -4,6 +4,7 @@ import (
 	"slices"
 	"testing"
 
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -24,7 +25,7 @@ agents:
       instructions: Chat.
 `)
 	seedConfiguredStorage(t, path)
-	personas := registryPersonas{registry: personaRegistry(t, path)}
+	personas := auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}
 
 	tests := map[string]struct {
 		agent string

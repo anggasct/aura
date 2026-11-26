@@ -5,6 +5,7 @@ import "github.com/anggasct/aura/internal/platform/fault"
 type ErrorCode string
 
 const (
+	ErrorCodeInvalidArgument   ErrorCode = "invalid_argument"
 	ErrorCodeDefinitionInvalid ErrorCode = "agent_definition_invalid"
 	ErrorCodeDuplicateID       ErrorCode = "agent_duplicate_id"
 	ErrorCodeUnknownCapability ErrorCode = "agent_unknown_capability"

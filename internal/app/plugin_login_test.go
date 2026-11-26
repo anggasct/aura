@@ -77,7 +77,7 @@ func oauthManifestFor(as *authtest.Server) string {
 func runPluginCommandIn(t *testing.T, cfg string, in io.Reader, out *bytes.Buffer, args ...string) error {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := plugin.Commands(pluginOpener(&globalFlags{configPath: cfg}))[0]
+	cmd := plugin.Commands(pluginOpener(&GlobalFlags{ConfigPath: cfg}))[0]
 	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(errOut)

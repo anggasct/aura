@@ -15,7 +15,7 @@ import (
 
 func runGrantsCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newGrantsCmd(&globalFlags{configPath: cfg})
+	cmd := newGrantsCmd(&GlobalFlags{ConfigPath: cfg})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -140,7 +140,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "exec", ""); active {
 		t.Fatal("standing grant for a tool outside principal_tools still applied")
 	}
-	policy.now = func() time.Time { return now.Add(2 * time.Hour) }
+	policy.WithClock(func() time.Time { return now.Add(2 * time.Hour) })
 	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "write_file", ""); active {
 		t.Fatal("expired standing grant still applied")
 	}

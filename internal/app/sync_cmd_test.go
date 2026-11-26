@@ -48,7 +48,7 @@ func disabledSyncConfig(t *testing.T) string {
 
 func runSyncCommandWithPass(t *testing.T, cfg string, pass gitsync.RunPassFunc, args ...string) (string, error) {
 	t.Helper()
-	gf := &globalFlags{configPath: cfg}
+	gf := &GlobalFlags{ConfigPath: cfg}
 	baseOpen := syncOpener(gf)
 	open := baseOpen
 	if pass != nil {

@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/store/storetest"
@@ -104,8 +104,7 @@ func TestUsageStatusByPersona(t *testing.T) {
 	root.SetOut(&buf)
 	root.SetErr(&buf)
 	root.SetArgs([]string{"usage", "status", "--by", "model", "--config", cfg})
-	var ue *usageError
-	if err := root.Execute(); !errors.As(err, &ue) {
+	if err := root.Execute(); !clikit.IsUsageError(err) {
 		t.Fatalf("--by model error = %v, want a usage error", err)
 	}
 }
@@ -139,8 +138,7 @@ func TestUsageEntriesNegativeLimitRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a usage error for negative --limit")
 	}
-	var ue *usageError
-	if !errors.As(err, &ue) {
+	if !clikit.IsUsageError(err) {
 		t.Errorf("negative --limit must be a usage error (exit 2), got %T: %v", err, err)
 	}
 }
@@ -155,8 +153,7 @@ func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
 			if err == nil {
 				t.Fatalf("usage %s stray: expected an error, got nil (out: %q)", sub, out)
 			}
-			var ue *usageError
-			if !errors.As(err, &ue) {
+			if !clikit.IsUsageError(err) {
 				t.Errorf("usage %s stray: must be a usage error (exit 2), got %T: %v", sub, err, err)
 			}
 			if code := exitCodeOf(t, "usage", sub, "--config", cfg, "stray"); code != 2 {

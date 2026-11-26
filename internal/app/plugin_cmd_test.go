@@ -47,7 +47,7 @@ func writeCLIPluginBundle(t *testing.T, manifest string) string {
 func runPluginCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := plugin.Commands(pluginOpener(&globalFlags{configPath: cfg}))[0]
+	cmd := plugin.Commands(pluginOpener(&GlobalFlags{ConfigPath: cfg}))[0]
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)

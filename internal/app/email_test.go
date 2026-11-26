@@ -288,7 +288,7 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		Channels:       []runtimechannelhost.ChannelPort{adapter},
 	})
 	if err != nil {

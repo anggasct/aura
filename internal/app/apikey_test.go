@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"errors"
 	"io"
 	"log/slog"
 	"net"
@@ -19,6 +18,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/httpchat"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -30,7 +30,7 @@ var apiKeyShape = regexp.MustCompile(`^aura_sk_[a-z2-7]{12}_[a-z2-7]{52}$`)
 
 func runAPIKey(t *testing.T, cfg string, args ...string) (stdout, stderr string, err error) {
 	t.Helper()
-	cmd := newAPIKeyCmd(&globalFlags{configPath: cfg})
+	cmd := newAPIKeyCmd(&GlobalFlags{ConfigPath: cfg})
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
@@ -103,8 +103,7 @@ func TestAPIKeyCreateMintsDistinctKeys(t *testing.T) {
 func TestAPIKeyCreateOwnerNeedsConfirmation(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	_, _, err := runAPIKey(t, cfg, "create", "--persona", "main", "--class", "owner", "--label", "ops")
-	var usage *usageError
-	if !errors.As(err, &usage) {
+	if !clikit.IsUsageError(err) {
 		t.Fatalf("create owner without confirmation = %v, want a usage error", err)
 	}
 	if keys, listErr := principal.NewAPIKeyStore(openAccessDB(t, cfg)).List(t.Context()); listErr != nil || len(keys) != 0 {
@@ -140,8 +139,7 @@ func TestAPIKeyCreateUsageErrors(t *testing.T) {
 			if err == nil {
 				t.Fatal("create accepted invalid arguments")
 			}
-			var usage *usageError
-			if !errors.As(err, &usage) {
+			if !clikit.IsUsageError(err) {
 				t.Fatalf("error = %v, want a usage error", err)
 			}
 		})

@@ -11,6 +11,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -20,7 +21,7 @@ import (
 type kbSearchRig struct {
 	*knowledgeTurnRig
 	builtin  *runtimeadk.BrokerExecutor
-	personas registryPersonas
+	personas auraagent.RegistryPersonas
 }
 
 func newKBSearchRig(t *testing.T) *kbSearchRig {
@@ -48,7 +49,7 @@ func newKBSearchRig(t *testing.T) *kbSearchRig {
 	if err := builtin.Broker().RegisterProvider(knowledge.NewToolProvider(rig.retriever)); err != nil {
 		t.Fatalf("RegisterProvider: %v", err)
 	}
-	return &kbSearchRig{knowledgeTurnRig: rig, builtin: builtin, personas: registryPersonas{registry: registry}}
+	return &kbSearchRig{knowledgeTurnRig: rig, builtin: builtin, personas: auraagent.RegistryPersonas{Registry: registry}}
 }
 
 func (r *kbSearchRig) call(t *testing.T, agent string, class principal.Class, arguments string) (kbSearchResult, error) {
