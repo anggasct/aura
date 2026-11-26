@@ -1,4 +1,4 @@
-package store
+package storage
 
 import (
 	"context"
@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -150,15 +151,14 @@ func VerifyRestore(ctx context.Context, backupDir, artifactRoot string) (Restore
 	}
 	defer func() { _ = db.Close() }()
 
-	var report RestoreReport
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM session`).Scan(&report.Sessions); err != nil {
-		return RestoreReport{}, classify(fmt.Errorf("count sessions: %w", err))
+	counts, err := turnstore.CountRows(ctx, db)
+	if err != nil {
+		return RestoreReport{}, err
 	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM runtime_event`).Scan(&report.Events); err != nil {
-		return RestoreReport{}, classify(fmt.Errorf("count events: %w", err))
-	}
-	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM ingress_dedupe`).Scan(&report.DedupeKeys); err != nil {
-		return RestoreReport{}, classify(fmt.Errorf("count dedupe keys: %w", err))
+	report := RestoreReport{
+		Sessions:   counts.Sessions,
+		Events:     counts.Events,
+		DedupeKeys: counts.DedupeKeys,
 	}
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM artifact_ref`).Scan(&report.ArtifactRefs); err != nil {
 		return RestoreReport{}, classify(fmt.Errorf("count artifact refs: %w", err))

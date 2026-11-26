@@ -10,7 +10,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func writeTelegramAccessConfig(t *testing.T) string {
@@ -104,7 +103,11 @@ func TestPrincipalListIncludesTelegramPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if _, _, err := store.NewPairingStore(db).Approve(t.Context(), principal.ChannelTelegram, pairingCodeDigest(issued.Code), principal.OwnerID, time.Now().UTC()); err != nil {
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewPairingStore: %v", err)
+	}
+	if _, _, err := pairings.Approve(t.Context(), principal.ChannelTelegram, pairingCodeDigest(issued.Code), principal.OwnerID, time.Now().UTC()); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC()

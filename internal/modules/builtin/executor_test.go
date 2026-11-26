@@ -18,11 +18,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -255,7 +255,7 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	if envelope.ArtifactID == "" {
 		t.Fatalf("expected persisted output artifact, got %s", output)
 	}
-	artifact, _, err := store.NewArtifactStore(db, dataRoot, int64(testArtifactQuota)).Open(context.Background(), envelope.ArtifactID)
+	artifact, _, err := storage.NewArtifactStore(db, dataRoot, int64(testArtifactQuota)).Open(context.Background(), envelope.ArtifactID)
 	if err != nil {
 		t.Fatalf("open persisted output: %v", err)
 	}

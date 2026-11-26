@@ -22,12 +22,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type Executor struct {
@@ -38,7 +38,7 @@ type Executor struct {
 	workflows *workflowHolder
 	knowledge *knowledgeHolder
 	code      *codeHolder
-	artifacts store.ArtifactStore
+	artifacts storage.ArtifactStore
 	host      []string
 }
 
@@ -99,7 +99,7 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 		return nil, err
 	}
 	host := capabilities.Active()
-	artifacts := store.NewArtifactStore(db, artifactRoot, int64(artifactQuota))
+	artifacts := storage.NewArtifactStore(db, artifactRoot, int64(artifactQuota))
 	brokerOptions := &toolbroker.Options{
 		Adapters:             adapters,
 		Secrets:              ConfiguredToolSecrets(toolsCfg),

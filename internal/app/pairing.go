@@ -17,7 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -37,17 +37,24 @@ const (
 )
 
 type pairingService struct {
-	pairings store.PairingStore
-	grants   store.PrincipalGrantStore
+	pairings principal.PairingStore
+	grants   principal.PrincipalGrantStore
 	recorder *telemetry.AccessRecorder
 	now      func() time.Time
 	newCode  func() (string, error)
 }
 
 func newPairingService(db *sql.DB, recorder *telemetry.AccessRecorder) *pairingService {
+	if db == nil {
+		return nil
+	}
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		return nil
+	}
 	return &pairingService{
-		pairings: store.NewPairingStore(db),
-		grants:   store.NewPrincipalGrantStore(db),
+		pairings: pairings,
+		grants:   principal.NewPrincipalGrantStore(db),
 		recorder: recorder,
 		now:      time.Now,
 		newCode:  newPairingCode,
@@ -71,7 +78,7 @@ func (p *pairingService) Request(ctx context.Context, principalID, account strin
 	if err != nil {
 		return discord.PairingResult{}, err
 	}
-	outcome, err := p.pairings.Issue(ctx, &store.PairingIssue{
+	outcome, err := p.pairings.Issue(ctx, &principal.PairingIssue{
 		CodeSHA256:    pairingCodeDigest(code),
 		PrincipalID:   principalID,
 		Account:       account,
@@ -83,7 +90,7 @@ func (p *pairingService) Request(ctx context.Context, principalID, account strin
 	if err != nil {
 		return discord.PairingResult{}, err
 	}
-	if outcome != store.PairingIssued {
+	if outcome != principal.PairingIssued {
 		p.recorder.PairingRequest(ctx, discord.PairingOutcomePending)
 		return discord.PairingResult{Outcome: discord.PairingOutcomePending}, nil
 	}
@@ -124,7 +131,7 @@ func pairingCodeDigest(code string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func pairingLock(ctx context.Context, pairings store.PairingStore, channel string, now time.Time) (time.Time, bool, error) {
+func pairingLock(ctx context.Context, pairings principal.PairingStore, channel string, now time.Time) (time.Time, bool, error) {
 	failures, err := pairings.FailedApprovals(ctx, channel, now.Add(-pairingLockoutWindow-pairingLockoutDuration))
 	if err != nil {
 		return time.Time{}, false, err
@@ -159,7 +166,7 @@ func parsePrincipalArg(channel, raw string) (string, error) {
 	return principal.Namespaced(channel, externalID), nil
 }
 
-func openPairingStores(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.PairingStore, store.PrincipalGrantStore, error) {
+func openPairingStores(cmd *cobra.Command, gf *globalFlags) (*sql.DB, principal.PairingStore, principal.PrincipalGrantStore, error) {
 	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, nil, err
@@ -168,7 +175,12 @@ func openPairingStores(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.Pair
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	return db, store.NewPairingStore(db), store.NewPrincipalGrantStore(db), nil
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		_ = db.Close()
+		return nil, nil, nil, err
+	}
+	return db, pairings, principal.NewPrincipalGrantStore(db), nil
 }
 
 func newPairingCmd(gf *globalFlags) *cobra.Command {
@@ -234,7 +246,7 @@ func newPairingApproveCmd(gf *globalFlags) *cobra.Command {
 				return err
 			}
 			if !found {
-				if err := recordAccessAction(ctx, db, &accessAction{Action: store.AccessActionPairingInvalid, Channel: channel}, channel, now); err != nil {
+				if err := recordAccessAction(ctx, db, &accessAction{Action: principal.AccessActionPairingInvalid, Channel: channel}, channel, now); err != nil {
 					return err
 				}
 				return &exitCodeError{code: 1, err: errors.New("pairing_invalid: no pending pairing request has this code")}

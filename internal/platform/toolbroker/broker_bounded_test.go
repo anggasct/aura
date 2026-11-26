@@ -14,9 +14,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -178,7 +178,7 @@ func TestBrokerOversizedOutputSpillsToArtifact(t *testing.T) {
 	if err := sessions.Create(context.Background(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 1<<20)
+	artifacts := storage.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 1<<20)
 	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096, Artifacts: artifacts})
 	if err != nil {
 		t.Fatalf("New: %v", err)

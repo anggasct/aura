@@ -30,13 +30,13 @@ const (
 
 type accessPolicy struct {
 	registry *auraagent.Registry
-	grants   store.StandingGrantStore
+	grants   principal.StandingGrantStore
 	recorder *telemetry.AccessRecorder
 	now      func() time.Time
 }
 
 func newAccessPolicy(registry *auraagent.Registry, db *sql.DB, recorder *telemetry.AccessRecorder) *accessPolicy {
-	return &accessPolicy{registry: registry, grants: store.NewStandingGrantStore(db), recorder: recorder, now: time.Now}
+	return &accessPolicy{registry: registry, grants: principal.NewStandingGrantStore(db), recorder: recorder, now: time.Now}
 }
 
 func (p *accessPolicy) ToolCeiling(agentID string, class principal.Class) ([]string, bool) {
@@ -65,12 +65,12 @@ func (p *accessPolicy) StandingGrant(ctx context.Context, principalID, agentID, 
 
 type standingGrantRecorder struct {
 	db     *sql.DB
-	grants store.StandingGrantStore
+	grants principal.StandingGrantStore
 	now    func() time.Time
 }
 
 func newStandingGrantRecorder(db *sql.DB) *standingGrantRecorder {
-	return &standingGrantRecorder{db: db, grants: store.NewStandingGrantStore(db), now: time.Now}
+	return &standingGrantRecorder{db: db, grants: principal.NewStandingGrantStore(db), now: time.Now}
 }
 
 func (r *standingGrantRecorder) RecordStandingGrant(ctx context.Context, request *discord.StandingGrantRequest) error {
@@ -78,7 +78,7 @@ func (r *standingGrantRecorder) RecordStandingGrant(ctx context.Context, request
 		return errors.New("cli: standing grant request must not be nil")
 	}
 	at := r.now().UTC()
-	grant, err := r.grants.Grant(ctx, &store.StandingGrant{
+	grant, err := r.grants.Grant(ctx, &principal.StandingGrant{
 		PrincipalID: request.PrincipalID,
 		AgentID:     request.AgentID,
 		ToolName:    request.ToolName,
@@ -106,7 +106,7 @@ type accessAction struct {
 	At        string `json:"at"`
 }
 
-func recordAccessOwnerAction(ctx context.Context, db *sql.DB, action string, grant *store.StandingGrant, at time.Time) error {
+func recordAccessOwnerAction(ctx context.Context, db *sql.DB, action string, grant *principal.StandingGrant, at time.Time) error {
 	return recordAccessAction(ctx, db, &accessAction{
 		Action: action, GrantID: grant.ID, Principal: grant.PrincipalID, Persona: grant.AgentID, Tool: grant.ToolName,
 		ExpiresAt: grant.ExpiresAt.UTC().Format(time.RFC3339Nano),
@@ -129,7 +129,7 @@ func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, s
 		TurnID:        "owner-action",
 		InvocationID:  "owner-action",
 		Author:        principal.OwnerID,
-		Kind:          store.AccessOwnerActionEventKind,
+		Kind:          principal.AccessOwnerActionEventKind,
 		SchemaVersion: 1,
 		Payload:       payload,
 		CreatedAt:     at.UTC(),
@@ -140,9 +140,11 @@ func recordAccessAction(ctx context.Context, db *sql.DB, action *accessAction, s
 func discordAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemetry.AccessRecorder, runs *erasureRuns) discord.AccessSettings {
 	settings := discord.AccessSettings{
 		Grants:         newStandingGrantRecorder(db),
-		Pairing:        newPairingService(db, recorder),
 		Denied:         recorder.Denied,
 		ApprovalRouted: recorder.ApprovalRouted,
+	}
+	if db != nil {
+		settings.Pairing = newPairingService(db, recorder)
 	}
 	if cfg.Access != nil {
 		settings.ApprovalTimeout = time.Duration(cfg.Access.ApprovalTimeout)
@@ -181,7 +183,7 @@ func telegramAccessSettings(cfg *appconfig.Config, db *sql.DB, recorder *telemet
 	}
 }
 
-func openStandingGrants(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.StandingGrantStore, error) {
+func openStandingGrants(cmd *cobra.Command, gf *globalFlags) (*sql.DB, principal.StandingGrantStore, error) {
 	result, err := appconfig.Load(gf.configPath)
 	if err != nil {
 		return nil, nil, err
@@ -190,7 +192,7 @@ func openStandingGrants(cmd *cobra.Command, gf *globalFlags) (*sql.DB, store.Sta
 	if err != nil {
 		return nil, nil, err
 	}
-	return db, store.NewStandingGrantStore(db), nil
+	return db, principal.NewStandingGrantStore(db), nil
 }
 
 func newGrantsCmd(gf *globalFlags) *cobra.Command {
@@ -249,7 +251,7 @@ func newGrantsRevokeCmd(gf *globalFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			index := slices.IndexFunc(active, func(grant store.StandingGrant) bool { return grant.ID == args[0] })
+			index := slices.IndexFunc(active, func(grant principal.StandingGrant) bool { return grant.ID == args[0] })
 			if index < 0 {
 				return &exitCodeError{code: 1, err: errors.New("standing_grant_not_found: no active standing grant has this id")}
 			}

@@ -19,12 +19,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -106,7 +106,7 @@ type auditHarness struct {
 	spans     *tracetest.InMemoryExporter
 	journal   *effect.Journal
 	broker    *toolbroker.Broker
-	artifacts store.ArtifactStore
+	artifacts storage.ArtifactStore
 	quota     func() int64
 	sequence  uint64
 	observed  observations
@@ -158,7 +158,7 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: auditSessionID, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	harness.artifacts = store.NewArtifactStore(db, artifactRoot, artifactQuota)
+	harness.artifacts = storage.NewArtifactStore(db, artifactRoot, artifactQuota)
 	harness.quota = func() int64 {
 		var total int64
 		if err := db.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(size_bytes), 0) FROM blob").Scan(&total); err != nil {

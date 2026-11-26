@@ -13,28 +13,28 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/vision"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type fakeArtifactStore struct {
 	blobs map[string][]byte
 }
 
-func (f *fakeArtifactStore) Put(ctx context.Context, r io.Reader, meta *store.ArtifactMetadata) (store.ArtifactRef, error) {
-	return store.ArtifactRef{}, nil
+func (f *fakeArtifactStore) Put(ctx context.Context, r io.Reader, meta *storage.ArtifactMetadata) (storage.ArtifactRef, error) {
+	return storage.ArtifactRef{}, nil
 }
 
-func (f *fakeArtifactStore) Open(ctx context.Context, refID string) (io.ReadCloser, store.ArtifactMetadata, error) {
+func (f *fakeArtifactStore) Open(ctx context.Context, refID string) (io.ReadCloser, storage.ArtifactMetadata, error) {
 	data, ok := f.blobs[refID]
 	if !ok {
-		return nil, store.ArtifactMetadata{}, sql.ErrNoRows
+		return nil, storage.ArtifactMetadata{}, sql.ErrNoRows
 	}
-	return io.NopCloser(bytes.NewReader(data)), store.ArtifactMetadata{ID: refID}, nil
+	return io.NopCloser(bytes.NewReader(data)), storage.ArtifactMetadata{ID: refID}, nil
 }
 
-func (f *fakeArtifactStore) Link(ctx context.Context, link *store.ArtifactLink) error {
+func (f *fakeArtifactStore) Link(ctx context.Context, link *storage.ArtifactLink) error {
 	return nil
 }
 

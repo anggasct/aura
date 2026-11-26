@@ -1,4 +1,4 @@
-package store
+package storage
 
 import (
 	"context"
@@ -138,72 +138,61 @@ func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *Artifa
 		CreatedAt:  createdAt,
 	}
 
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return ArtifactRef{}, classify(fmt.Errorf("begin put artifact %s: %w", meta.ID, err))
-	}
-	defer func() { _ = tx.Rollback() }()
+	if err := sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		var existingMediaType string
+		err := q.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&existingMediaType)
+		switch {
+		case err == nil:
+			ref.MediaType = existingMediaType
+		case errors.Is(err, sql.ErrNoRows):
+			var total sql.NullInt64
+			if err := q.QueryRowContext(ctx, `SELECT SUM(size_bytes) FROM blob`).Scan(&total); err != nil {
+				return classify(fmt.Errorf("read blob storage total: %w", err))
+			}
+			if total.Valid && size > s.quotaBytes-total.Int64 {
+				_ = os.Remove(absPath)
+				return fault.New(
+					ErrorCodeArtifactQuotaExceeded,
+					fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
+				)
+			}
+			if _, err := q.ExecContext(ctx,
+				`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
+				 ON CONFLICT(digest) DO NOTHING`,
+				digest, size, meta.MediaType, relPath, sqlite.FormatTime(createdAt),
+			); err != nil {
+				return classify(fmt.Errorf("insert blob %s: %w", digest, err))
+			}
+			var mediaType string
+			if err := q.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
+				return classify(fmt.Errorf("read blob %s: %w", digest, err))
+			}
+			ref.MediaType = mediaType
+		default:
+			return classify(fmt.Errorf("read blob %s: %w", digest, err))
+		}
 
-	var existingMediaType string
-	err = tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&existingMediaType)
-	switch {
-	case err == nil:
-		ref.MediaType = existingMediaType
-	case errors.Is(err, sql.ErrNoRows):
-		var total sql.NullInt64
-		if err := tx.QueryRowContext(ctx, `SELECT SUM(size_bytes) FROM blob`).Scan(&total); err != nil {
-			return ArtifactRef{}, classify(fmt.Errorf("read blob storage total: %w", err))
-		}
-		if total.Valid && size > s.quotaBytes-total.Int64 {
-			_ = os.Remove(absPath)
-			return ArtifactRef{}, fault.New(
-				ErrorCodeArtifactQuotaExceeded,
-				fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
-			)
-		}
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
-			 ON CONFLICT(digest) DO NOTHING`,
-			digest, size, meta.MediaType, relPath, sqlite.FormatTime(createdAt),
+		if _, err := q.ExecContext(ctx,
+			`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO NOTHING`,
+			meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), sqlite.FormatTime(createdAt),
 		); err != nil {
-			return ArtifactRef{}, classify(fmt.Errorf("insert blob %s: %w", digest, err))
-		}
-		var mediaType string
-		if err := tx.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
-			return ArtifactRef{}, classify(fmt.Errorf("read blob %s: %w", digest, err))
-		}
-		ref.MediaType = mediaType
-	default:
-		return ArtifactRef{}, classify(fmt.Errorf("read blob %s: %w", digest, err))
-	}
-
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(id) DO NOTHING`,
-		meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), sqlite.FormatTime(createdAt),
-	); err != nil {
-		if isConstraintForeignKey(err) {
-			refs := []fkReference{
-				{what: "blob", key: digest, existsSQL: "SELECT 1 FROM blob WHERE digest = ?", code: ErrorCodeArtifactBlobMissing},
-				{what: "session", key: meta.SessionID, existsSQL: "SELECT 1 FROM session WHERE id = ?", code: ErrorCodeSessionNotFound},
+			if isConstraintForeignKey(err) {
+				if classified := classifyArtifactFK(ctx, q, digest, meta.SessionID, meta.EventID); classified != nil {
+					return classified
+				}
+				return fault.New(
+					ErrorCodeInvalidArgument,
+					fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
+				)
 			}
-			if meta.EventID != "" {
-				refs = append(refs, fkReference{what: "event", key: meta.EventID, existsSQL: "SELECT 1 FROM runtime_event WHERE id = ?", code: ErrorCodeEventNotFound})
-			}
-			if classified := classifyFKReference(ctx, tx, refs...); classified != nil {
-				return ArtifactRef{}, classified
-			}
-			return ArtifactRef{}, fault.New(
-				ErrorCodeInvalidArgument,
-				fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
-			)
+			return classify(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
 		}
-		return ArtifactRef{}, classify(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
-	}
-
-	if err := tx.Commit(); err != nil {
-		return ArtifactRef{}, classify(fmt.Errorf("commit put artifact %s: %w", meta.ID, err))
+		return nil
+	}); err != nil {
+		return ArtifactRef{}, err
 	}
 	return ref, nil
 }
@@ -213,7 +202,7 @@ func (s *sqliteArtifactStore) Open(ctx context.Context, refID string) (io.ReadCl
 	var digest, metadataJSON, mediaType, relPath string
 	var eventID sql.NullString
 
-	err := s.db.QueryRowContext(ctx, `
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx, `
 		SELECT ar.blob_digest, ar.session_id, ar.event_id, ar.filename, ar.metadata_json, b.media_type, b.relative_path
 		FROM artifact_ref ar
 		JOIN blob b ON b.digest = ar.blob_digest
@@ -250,7 +239,8 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 	if link == nil {
 		return errNilArgument("artifact link")
 	}
-	_, err := s.db.ExecContext(ctx,
+	q := sqlite.Conn(ctx, s.db)
+	_, err := q.ExecContext(ctx,
 		`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO NOTHING`,
@@ -258,14 +248,7 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 	)
 	if err != nil {
 		if isConstraintForeignKey(err) {
-			refs := []fkReference{
-				{what: "blob", key: link.BlobDigest, existsSQL: "SELECT 1 FROM blob WHERE digest = ?", code: ErrorCodeArtifactBlobMissing},
-				{what: "session", key: link.SessionID, existsSQL: "SELECT 1 FROM session WHERE id = ?", code: ErrorCodeSessionNotFound},
-			}
-			if link.EventID != "" {
-				refs = append(refs, fkReference{what: "event", key: link.EventID, existsSQL: "SELECT 1 FROM runtime_event WHERE id = ?", code: ErrorCodeEventNotFound})
-			}
-			if classified := classifyFKReference(ctx, s.db, refs...); classified != nil {
+			if classified := classifyArtifactFK(ctx, q, link.BlobDigest, link.SessionID, link.EventID); classified != nil {
 				return classified
 			}
 			return fault.New(
@@ -279,7 +262,7 @@ func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) erro
 }
 
 func (s *sqliteArtifactStore) Unlink(ctx context.Context, refID string) error {
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM artifact_ref WHERE id = ?`, refID); err != nil {
+	if _, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `DELETE FROM artifact_ref WHERE id = ?`, refID); err != nil {
 		return classify(fmt.Errorf("unlink artifact %s: %w", refID, err))
 	}
 	return nil

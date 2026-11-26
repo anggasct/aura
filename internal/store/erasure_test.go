@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 func countRows(t *testing.T, db *sql.DB, query string, args ...any) int {
@@ -41,11 +43,11 @@ func seedErasureFixture(t *testing.T, db *sql.DB, root string) {
 			t.Fatalf("UpsertDocument(%s): %v", id, err)
 		}
 	}
-	artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
-	if _, err := artifacts.Put(ctx, strings.NewReader("parcel photo"), &ArtifactMetadata{ID: "art-601", SessionID: "lobby/discord:owner/dm:601", Filename: "parcel.png", MediaType: "image/png"}); err != nil {
+	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
+	if _, err := artifacts.Put(ctx, strings.NewReader("parcel photo"), &storage.ArtifactMetadata{ID: "art-601", SessionID: "lobby/discord:owner/dm:601", Filename: "parcel.png", MediaType: "image/png"}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
-	if _, err := artifacts.Put(ctx, strings.NewReader("owner photo"), &ArtifactMetadata{ID: "art-owner", SessionID: "main/discord:owner/dm:777", Filename: "owner.png", MediaType: "image/png"}); err != nil {
+	if _, err := artifacts.Put(ctx, strings.NewReader("owner photo"), &storage.ArtifactMetadata{ID: "art-owner", SessionID: "main/discord:owner/dm:777", Filename: "owner.png", MediaType: "image/png"}); err != nil {
 		t.Fatalf("Put: %v", err)
 	}
 	now := "2026-11-02T09:00:00Z"
@@ -365,8 +367,8 @@ func TestErasureCountsRunSessionsApart(t *testing.T) {
 			t.Fatalf("seed approval: %v", err)
 		}
 		root := t.TempDir()
-		artifacts := NewArtifactStore(db, root, DefaultArtifactQuotaBytes)
-		if _, err := artifacts.Put(t.Context(), strings.NewReader("run output"), &ArtifactMetadata{ID: "art-run", SessionID: run, Filename: "out.txt", MediaType: "text/plain"}); err != nil {
+		artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
+		if _, err := artifacts.Put(t.Context(), strings.NewReader("run output"), &storage.ArtifactMetadata{ID: "art-run", SessionID: run, Filename: "out.txt", MediaType: "text/plain"}); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
 		applied, err := ErasePrincipal(t.Context(), db, "discord:601", true, ErasureOptions{ArtifactRoot: root})

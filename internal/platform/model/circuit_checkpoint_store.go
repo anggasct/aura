@@ -1,43 +1,28 @@
-package store
+package model
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
-	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
-type CircuitCheckpoint struct {
-	CircuitKey          string
-	ConfigDigest        string
-	State               string
-	ConsecutiveFailures int
-	OpenUntil           *time.Time
-	UpdatedAt           time.Time
-}
-
-type CircuitCheckpointStore interface {
-	Save(ctx context.Context, cp *CircuitCheckpoint) error
-	Load(ctx context.Context) ([]CircuitCheckpoint, error)
-	Delete(ctx context.Context, circuitKey string) error
-}
-
-type sqliteCircuitStore struct {
+type sqliteCircuitCheckpointStore struct {
 	db *sql.DB
 }
 
-func NewCircuitCheckpointStore(db *sql.DB) CircuitCheckpointStore {
-	return &sqliteCircuitStore{db: db}
+func NewSQLiteCircuitCheckpointStore(db *sql.DB) CircuitCheckpointStore {
+	return &sqliteCircuitCheckpointStore{db: db}
 }
 
-func (s *sqliteCircuitStore) Save(ctx context.Context, cp *CircuitCheckpoint) error {
+func (s *sqliteCircuitCheckpointStore) Save(ctx context.Context, cp *CircuitCheckpoint) error {
 	if s.db == nil || cp == nil {
 		return nil
 	}
 	if cp.CircuitKey == "" {
-		return Errorf(ErrorCodeInvalidArgument, "circuit_key must not be empty")
+		return fault.New(ErrorCodeInvalidArgument, "circuit_key must not be empty")
 	}
 
 	var openUntilRaw *string
@@ -58,21 +43,21 @@ ON CONFLICT(circuit_key) DO UPDATE SET
     open_until = excluded.open_until,
     updated_at = excluded.updated_at
 `
-	_, err := s.db.ExecContext(ctx, query,
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, query,
 		cp.CircuitKey,
 		cp.ConfigDigest,
-		cp.State,
+		string(cp.State),
 		cp.ConsecutiveFailures,
 		openUntilRaw,
 		updatedAtRaw,
 	)
 	if err != nil {
-		return classify(fmt.Errorf("save circuit checkpoint: %w", err))
+		return sqlite.Classify(fmt.Errorf("save circuit checkpoint: %w", err))
 	}
 	return nil
 }
 
-func (s *sqliteCircuitStore) Load(ctx context.Context) ([]CircuitCheckpoint, error) {
+func (s *sqliteCircuitCheckpointStore) Load(ctx context.Context) ([]CircuitCheckpoint, error) {
 	if s.db == nil {
 		return nil, nil
 	}
@@ -81,28 +66,30 @@ SELECT circuit_key, config_digest, state, consecutive_failures, open_until, upda
 FROM model_circuit_checkpoint
 ORDER BY circuit_key ASC
 `
-	rows, err := s.db.QueryContext(ctx, query)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query)
 	if err != nil {
-		return nil, classify(fmt.Errorf("load circuit checkpoints: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("load circuit checkpoints: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 
 	var results []CircuitCheckpoint
 	for rows.Next() {
 		var cp CircuitCheckpoint
+		var stateRaw string
 		var openUntilRaw sql.NullString
 		var updatedAtRaw string
 
 		if err := rows.Scan(
 			&cp.CircuitKey,
 			&cp.ConfigDigest,
-			&cp.State,
+			&stateRaw,
 			&cp.ConsecutiveFailures,
 			&openUntilRaw,
 			&updatedAtRaw,
 		); err != nil {
-			return nil, classify(fmt.Errorf("scan circuit checkpoint: %w", err))
+			return nil, sqlite.Classify(fmt.Errorf("scan circuit checkpoint: %w", err))
 		}
+		cp.State = CircuitState(stateRaw)
 
 		if openUntilRaw.Valid && openUntilRaw.String != "" {
 			t, err := sqlite.ParseTime(openUntilRaw.String)
@@ -116,19 +103,19 @@ ORDER BY circuit_key ASC
 		results = append(results, cp)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, classify(fmt.Errorf("iterate circuit checkpoints: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("iterate circuit checkpoints: %w", err))
 	}
 	return results, nil
 }
 
-func (s *sqliteCircuitStore) Delete(ctx context.Context, circuitKey string) error {
+func (s *sqliteCircuitCheckpointStore) Delete(ctx context.Context, circuitKey string) error {
 	if s.db == nil {
 		return nil
 	}
 	query := `DELETE FROM model_circuit_checkpoint WHERE circuit_key = ?`
-	_, err := s.db.ExecContext(ctx, query, circuitKey)
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, query, circuitKey)
 	if err != nil {
-		return classify(fmt.Errorf("delete circuit checkpoint: %w", err))
+		return sqlite.Classify(fmt.Errorf("delete circuit checkpoint: %w", err))
 	}
 	return nil
 }

@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/storage"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
@@ -37,7 +38,7 @@ func newTelegramAdapter(cfg *appconfig.Config, account *config.TelegramAccount, 
 	}
 	adapter.SetSessionResolver(&discordConversationResolver{pointers: turnstore.NewConversationSessionStore(db)})
 	adapter.SetSecretVault(buildSecretVault(cfg))
-	adapter.SetMediaStore(&channelMediaStore{store: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))})
+	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))})
 	adapter.SetUpdateLedger(turnstore.NewDedupeStore(db))
 	if svc := newVisionService(cfg, db, artifactRoot); svc != nil {
 		adapter.SetVisionService(svc)

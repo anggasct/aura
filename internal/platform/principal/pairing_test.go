@@ -1,38 +1,51 @@
-package store
+package principal_test
 
 import (
+	"database/sql"
 	"encoding/json"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/store/storetest"
 )
 
-func pairingIssue(code, principalID, account string, now time.Time) *PairingIssue {
-	return &PairingIssue{
+func newTestPairingStore(t *testing.T, db *sql.DB) principal.PairingStore {
+	t.Helper()
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewPairingStore: %v", err)
+	}
+	return pairings
+}
+
+func pairingIssue(code, principalID, account string, now time.Time) *principal.PairingIssue {
+	return &principal.PairingIssue{
 		CodeSHA256: code, PrincipalID: principalID, Account: account, Now: now,
 		TTL: time.Hour, Cooldown: 10 * time.Minute, MaxPerAccount: 2,
 	}
 }
 
 func TestPairingIssueEnforcesCooldownAndAccountCap(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	ctx := t.Context()
-	pairings := NewPairingStore(db)
+	pairings := newTestPairingStore(t, db)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	steps := []struct {
 		name  string
-		issue *PairingIssue
+		issue *principal.PairingIssue
 		want  string
 	}{
-		{"first request", pairingIssue("c1", "discord:1", "office", now), PairingIssued},
-		{"again inside the cooldown", pairingIssue("c1b", "discord:1", "office", now.Add(5*time.Minute)), PairingPending},
-		{"second principal", pairingIssue("c2", "discord:2", "office", now.Add(time.Minute)), PairingIssued},
-		{"cap reached", pairingIssue("c3", "discord:3", "office", now.Add(2*time.Minute)), PairingPending},
-		{"other account has room", pairingIssue("c4", "discord:3", "home", now.Add(2*time.Minute)), PairingIssued},
-		{"after the cooldown replaces the old code", pairingIssue("c1c", "discord:1", "office", now.Add(11*time.Minute)), PairingIssued},
-		{"expired codes free the cap", pairingIssue("c5", "discord:3", "office", now.Add(62*time.Minute)), PairingIssued},
+		{"first request", pairingIssue("c1", "discord:1", "office", now), principal.PairingIssued},
+		{"again inside the cooldown", pairingIssue("c1b", "discord:1", "office", now.Add(5*time.Minute)), principal.PairingPending},
+		{"second principal", pairingIssue("c2", "discord:2", "office", now.Add(time.Minute)), principal.PairingIssued},
+		{"cap reached", pairingIssue("c3", "discord:3", "office", now.Add(2*time.Minute)), principal.PairingPending},
+		{"other account has room", pairingIssue("c4", "discord:3", "home", now.Add(2*time.Minute)), principal.PairingIssued},
+		{"after the cooldown replaces the old code", pairingIssue("c1c", "discord:1", "office", now.Add(11*time.Minute)), principal.PairingIssued},
+		{"expired codes free the cap", pairingIssue("c5", "discord:3", "office", now.Add(62*time.Minute)), principal.PairingIssued},
 	}
 	for _, step := range steps {
 		got, err := pairings.Issue(ctx, step.issue)
@@ -55,16 +68,16 @@ func TestPairingIssueEnforcesCooldownAndAccountCap(t *testing.T) {
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM pairing_request WHERE principal_id = 'discord:1'`).Scan(&codes); err != nil || codes != 1 {
 		t.Fatalf("discord:1 rows = %d, %v; want the old code dropped", codes, err)
 	}
-	if _, err := pairings.Issue(ctx, &PairingIssue{PrincipalID: "discord:1"}); err == nil {
+	if _, err := pairings.Issue(ctx, &principal.PairingIssue{PrincipalID: "discord:1"}); err == nil {
 		t.Fatal("incomplete issue accepted")
 	}
 }
 
 func TestPairingApproveGrantsOnceAndReactivatesRevokedGrants(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	ctx := t.Context()
-	pairings := NewPairingStore(db)
-	grants := NewPrincipalGrantStore(db)
+	pairings := newTestPairingStore(t, db)
+	grants := principal.NewPrincipalGrantStore(db)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	if _, err := pairings.Issue(ctx, pairingIssue("code-a", "discord:1", "office", now)); err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -108,8 +121,8 @@ func TestPairingApproveGrantsOnceAndReactivatesRevokedGrants(t *testing.T) {
 }
 
 func TestPairingExpiredCodeIsNotApproved(t *testing.T) {
-	db := newTestDB(t)
-	pairings := NewPairingStore(db)
+	db := storetest.OpenMigrated(t)
+	pairings := newTestPairingStore(t, db)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	if _, err := pairings.Issue(t.Context(), pairingIssue("code-x", "discord:1", "office", now)); err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -123,20 +136,28 @@ func TestPairingExpiredCodeIsNotApproved(t *testing.T) {
 }
 
 func TestPairingFailedApprovalsReadOwnerActions(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	ctx := t.Context()
-	seedPersonaSession(t, db, "profile-local-owner", "local-owner", "main")
+	if _, err := principal.NewPairingStore(db, nil); !fault.HasCode(err, principal.ErrorCodeInvalidArgument) {
+		t.Fatalf("NewPairingStore(db, nil) error = %v, want %s", err, principal.ErrorCodeInvalidArgument)
+	}
+	now := time.Now().UTC()
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{
+		ID: "profile-local-owner", OwnerID: "local-owner", AgentID: "main", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create session: %v", err)
+	}
 	events := turnstore.NewEventStore(db)
 	base := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	for i, entry := range []struct {
 		action, channel string
 		at              time.Time
 	}{
-		{AccessActionPairingInvalid, "discord", base},
-		{AccessActionPairingInvalid, "discord", base.Add(time.Minute)},
-		{AccessActionPairingInvalid, "telegram", base.Add(2 * time.Minute)},
+		{principal.AccessActionPairingInvalid, "discord", base},
+		{principal.AccessActionPairingInvalid, "discord", base.Add(time.Minute)},
+		{principal.AccessActionPairingInvalid, "telegram", base.Add(2 * time.Minute)},
 		{"principal_grant", "discord", base.Add(3 * time.Minute)},
-		{AccessActionPairingInvalid, "discord", base.Add(-3 * time.Hour)},
+		{principal.AccessActionPairingInvalid, "discord", base.Add(-3 * time.Hour)},
 	} {
 		payload, err := json.Marshal(map[string]string{"action": entry.action, "channel": entry.channel})
 		if err != nil {
@@ -144,33 +165,22 @@ func TestPairingFailedApprovalsReadOwnerActions(t *testing.T) {
 		}
 		if _, _, err := events.UpsertEvent(ctx, &turn.Event{
 			ID: "ev-" + string(rune('a'+i)), SessionID: "profile-local-owner", TurnID: "owner-action", InvocationID: "owner-action",
-			Author: "local-owner", Kind: AccessOwnerActionEventKind, SchemaVersion: 1, Payload: payload, CreatedAt: entry.at,
+			Author: "local-owner", Kind: principal.AccessOwnerActionEventKind, SchemaVersion: 1, Payload: payload, CreatedAt: entry.at,
 		}); err != nil {
 			t.Fatalf("UpsertEvent: %v", err)
 		}
 	}
-	failures, err := NewPairingStore(db).FailedApprovals(ctx, "discord", base.Add(-time.Hour))
+	failures, err := newTestPairingStore(t, db).FailedApprovals(ctx, "discord", base.Add(-time.Hour))
 	if err != nil || len(failures) != 2 || !failures[0].Equal(base) || !failures[1].Equal(base.Add(time.Minute)) {
 		t.Fatalf("FailedApprovals() = %v, %v", failures, err)
 	}
 }
 
-func TestListPrincipalActivityAggregatesSessions(t *testing.T) {
-	db := newTestDB(t)
-	seedPersonaSession(t, db, "kantor/discord:office/dm:1", "discord:1", "kantor")
-	seedPersonaSession(t, db, "kantor/discord:office/channel:9", "discord:1", "kantor")
-	seedPersonaSession(t, db, "main/discord:office/dm:777", "local-owner", "main")
-	activity, err := ListPrincipalActivity(t.Context(), db)
-	if err != nil || len(activity) != 1 || activity[0].PrincipalID != "discord:1" || activity[0].Sessions != 2 || activity[0].LastActive.IsZero() {
-		t.Fatalf("ListPrincipalActivity() = %+v, %v", activity, err)
-	}
-}
-
 func TestPairingApproveNeverConsumesAnotherChannelsCode(t *testing.T) {
-	db := newTestDB(t)
+	db := storetest.OpenMigrated(t)
 	ctx := t.Context()
-	pairings := NewPairingStore(db)
-	grants := NewPrincipalGrantStore(db)
+	pairings := newTestPairingStore(t, db)
+	grants := principal.NewPrincipalGrantStore(db)
 	now := time.Date(2026, 11, 1, 9, 0, 0, 0, time.UTC)
 	if _, err := pairings.Issue(ctx, pairingIssue("code-t", "telegram:7", "pocket", now)); err != nil {
 		t.Fatalf("Issue: %v", err)
@@ -194,31 +204,5 @@ func TestPairingApproveNeverConsumesAnotherChannelsCode(t *testing.T) {
 	}
 	if _, _, err := pairings.Approve(ctx, "", "code-t", "local-owner", now); err == nil {
 		t.Fatal("approval without a channel accepted")
-	}
-}
-
-func TestRunSessionsAreNotPrincipalActivity(t *testing.T) {
-	db := newTestDB(t)
-	seedPersonaSession(t, db, "wf-run-only", "discord:2", "kantor")
-	activity, err := ListPrincipalActivity(t.Context(), db)
-	if err != nil || len(activity) != 0 {
-		t.Fatalf("ListPrincipalActivity() with only a run session = %+v, %v; want none", activity, err)
-	}
-	seedPersonaSession(t, db, "kantor/discord:office/dm:1", "discord:1", "kantor")
-	if _, err := db.ExecContext(t.Context(), `UPDATE session SET updated_at = '2026-11-01T09:00:00Z' WHERE id = 'kantor/discord:office/dm:1'`); err != nil {
-		t.Fatalf("age the chat session: %v", err)
-	}
-	seedPersonaSession(t, db, "wf-run-later", "discord:1", "kantor")
-	activity, err = ListPrincipalActivity(t.Context(), db)
-	if err != nil || len(activity) != 1 {
-		t.Fatalf("ListPrincipalActivity() = %+v, %v; want one principal", activity, err)
-	}
-	if activity[0].Sessions != 1 || activity[0].LastActive.Format("2006-01-02") != "2026-11-01" {
-		t.Fatalf("activity = %+v, want the chat session only, last active 2026-11-01", activity[0])
-	}
-	seedPersonaSession(t, db, "WF-chat", "discord:3", "kantor")
-	activity, err = ListPrincipalActivity(t.Context(), db)
-	if err != nil || len(activity) != 2 {
-		t.Fatalf("ListPrincipalActivity() with an upper-case WF- chat session = %+v, %v; want two principals", activity, err)
 	}
 }

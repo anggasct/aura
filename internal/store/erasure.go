@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 type ErasureOptions struct {
@@ -120,7 +122,7 @@ func ErasePrincipal(ctx context.Context, db *sql.DB, principalID string, apply b
 		return counts, classify(err)
 	}
 	if opts.ArtifactRoot != "" && (counts.Sessions > 0 || counts.RunSessions > 0 || counts.LegacyStepSessions > 0) {
-		report, err := Collect(ctx, db, opts.ArtifactRoot, time.Now().UTC().Add(time.Second))
+		report, err := storage.Collect(ctx, db, opts.ArtifactRoot, time.Now().UTC().Add(time.Second))
 		if err != nil {
 			return counts, fmt.Errorf("collect erased blobs: %w", err)
 		}

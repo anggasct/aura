@@ -1,4 +1,4 @@
-package store
+package storage
 
 import (
 	"context"
@@ -7,16 +7,18 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ReconcileReport struct {
-	MissingBlobs   []string // digests with a blob row but no file on disk
-	CorruptedBlobs []string // digests whose file content does not match the digest
-	OrphanFiles    []string // paths on disk with no matching blob row
+	MissingBlobs   []string
+	CorruptedBlobs []string
+	OrphanFiles    []string
 }
 
 func Reconcile(ctx context.Context, db *sql.DB, root string) (ReconcileReport, error) {
-	rows, err := db.QueryContext(ctx, `SELECT digest, relative_path FROM blob`)
+	rows, err := sqlite.Conn(ctx, db).QueryContext(ctx, `SELECT digest, relative_path FROM blob`)
 	if err != nil {
 		return ReconcileReport{}, classify(fmt.Errorf("list blobs: %w", err))
 	}

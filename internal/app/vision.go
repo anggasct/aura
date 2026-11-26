@@ -11,13 +11,13 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/vision"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type visionBlobReader struct {
-	blobs store.ArtifactStore
+	blobs storage.ArtifactStore
 }
 
 var _ model.VisionBlobReader = (*visionBlobReader)(nil)
@@ -63,12 +63,12 @@ func visionWiringForConfig(cfg *appconfig.Config, db *sql.DB, artifactRoot strin
 	}
 	return model.VisionWiring{
 		Policy: policy,
-		Blobs:  &visionBlobReader{blobs: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))},
+		Blobs:  &visionBlobReader{blobs: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))},
 	}
 }
 
 type visionStoreAdapter struct {
-	inner store.ArtifactStore
+	inner storage.ArtifactStore
 }
 
 func (a *visionStoreAdapter) Put(ctx context.Context, r io.Reader, meta *vision.ArtifactMetadata) (vision.ArtifactRef, error) {
@@ -81,7 +81,7 @@ func (a *visionStoreAdapter) Put(ctx context.Context, r io.Reader, meta *vision.
 	if meta == nil {
 		return vision.ArtifactRef{}, errors.New("vision store metadata must not be nil")
 	}
-	ref, err := a.inner.Put(ctx, r, &store.ArtifactMetadata{
+	ref, err := a.inner.Put(ctx, r, &storage.ArtifactMetadata{
 		ID:        meta.ID,
 		SessionID: meta.SessionID,
 		EventID:   meta.EventID,
@@ -90,7 +90,7 @@ func (a *visionStoreAdapter) Put(ctx context.Context, r io.Reader, meta *vision.
 		Metadata:  meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[storage.ErrorCode](err); ok && code == storage.ErrorCodeArtifactQuotaExceeded {
 			return vision.ArtifactRef{}, fmt.Errorf("%w: %w", vision.Errorf(vision.ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted"), err)
 		}
 		return vision.ArtifactRef{}, err
@@ -113,7 +113,7 @@ func newVisionService(cfg *appconfig.Config, db *sql.DB, artifactRoot string) *v
 		return nil
 	}
 	limits := vision.LimitsFromConfig(cfg.Vision)
-	stores := &visionStoreAdapter{inner: store.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))}
+	stores := &visionStoreAdapter{inner: storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))}
 	opts := []vision.Option{vision.WithStore(stores)}
 	if recorder, err := telemetry.NewVisionRecorder(nil); err == nil && recorder != nil {
 		opts = append(opts, vision.WithObserver(visionRecorderObserver(recorder)))

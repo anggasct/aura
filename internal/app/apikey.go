@@ -18,7 +18,6 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -79,10 +78,10 @@ func (f *apiKeyCreateFlags) validate() error {
 	if _, ok := apiKeyClass(f.class); !ok {
 		return &usageError{err: errors.New("apikey create requires --class trusted, public or owner")}
 	}
-	if f.class == store.APIKeyClassOwner && !f.confirmOwner {
+	if f.class == string(principal.ClassOwner) && !f.confirmOwner {
 		return &usageError{err: errors.New("apikey create --class owner requires --confirm-owner")}
 	}
-	if f.class != store.APIKeyClassOwner && f.confirmOwner {
+	if f.class != string(principal.ClassOwner) && f.confirmOwner {
 		return &usageError{err: errors.New("apikey create --confirm-owner only applies to --class owner")}
 	}
 	return nil
@@ -101,11 +100,11 @@ func createAPIKey(ctx context.Context, cmd *cobra.Command, cfg *appconfig.Config
 		return err
 	}
 	now := time.Now().UTC()
-	record := &store.APIKey{
+	record := &principal.APIKey{
 		ID: issued.ID, KeySHA256: issued.Digest, PersonaID: flags.persona, Class: flags.class,
 		Label: strings.TrimSpace(flags.label), CreatedAt: now,
 	}
-	if err := store.NewAPIKeyStore(db).Create(ctx, record); err != nil {
+	if err := principal.NewAPIKeyStore(db).Create(ctx, record); err != nil {
 		return err
 	}
 	if err := recordAccessAction(ctx, db, apiKeyAction(accessActionAPIKeyCreate, record), issued.ID, now); err != nil {
@@ -117,7 +116,7 @@ func createAPIKey(ctx context.Context, cmd *cobra.Command, cfg *appconfig.Config
 	return writeChildLines(cmd, []string{issued.Plaintext})
 }
 
-func apiKeyAction(action string, key *store.APIKey) *accessAction {
+func apiKeyAction(action string, key *principal.APIKey) *accessAction {
 	return &accessAction{
 		Action:    action,
 		Principal: principal.Namespaced(principal.ChannelHTTP, key.ID),
@@ -133,7 +132,7 @@ func newAPIKeyListCmd(gf *globalFlags) *cobra.Command {
 		Args:  noPositionalArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
-				keys, err := store.NewAPIKeyStore(db).List(ctx)
+				keys, err := principal.NewAPIKeyStore(db).List(ctx)
 				if err != nil {
 					return err
 				}
@@ -158,7 +157,7 @@ func newAPIKeyRevokeCmd(gf *globalFlags) *cobra.Command {
 		Args:  exactlyOneKeyID,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
-				keys := store.NewAPIKeyStore(db)
+				keys := principal.NewAPIKeyStore(db)
 				now := time.Now().UTC()
 				changed, err := keys.Revoke(ctx, args[0], now)
 				if err != nil {
@@ -189,11 +188,11 @@ func exactlyOneKeyID(cmd *cobra.Command, args []string) error {
 
 func apiKeyClass(raw string) (principal.Class, bool) {
 	switch raw {
-	case store.APIKeyClassOwner:
+	case string(principal.ClassOwner):
 		return principal.ClassOwner, true
-	case store.APIKeyClassTrusted:
+	case string(principal.ClassTrusted):
 		return principal.ClassTrusted, true
-	case store.APIKeyClassPublic:
+	case string(principal.ClassPublic):
 		return principal.ClassPublic, true
 	default:
 		return "", false

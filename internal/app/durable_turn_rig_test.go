@@ -380,7 +380,7 @@ func (g succeededGate) Observe(ctx context.Context, observation *effect.Observat
 
 func newGatedEffects(t *testing.T, db *sql.DB, ledger *turnLedger) *effect.Executor {
 	t.Helper()
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: succeededGate{ledger: ledger}})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: succeededGate{ledger: ledger}, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("effect.NewJournal: %v", err)
 	}

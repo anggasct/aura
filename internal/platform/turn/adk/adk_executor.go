@@ -58,6 +58,7 @@ type ADKExecutor struct {
 	profile           ProfileContextProvider
 	skills            SkillContextProvider
 	knowledge         KnowledgeContextProvider
+	providers         []turn.ContextProvider
 }
 
 type RecallProvider interface {
@@ -210,6 +211,16 @@ func WithSkillContext(provider SkillContextProvider) ExecutorOption {
 	}
 }
 
+func WithContextProvider(provider turn.ContextProvider) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		if provider == nil {
+			return invalidArgument("context provider must not be nil")
+		}
+		e.providers = append(e.providers, provider)
+		return nil
+	}
+}
+
 func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	return func(yield func(turn.Event, error) bool) {
 		definition, err := x.resolveDefinition(req)
@@ -251,25 +262,24 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 				recallAttached = true
 			}
 		}
-		knowledgeTurn, knowledgeRan := x.knowledgeContextFor(runCtx, req)
+		blocks, err := x.collectContextBlocks(runCtx, req)
+		if err != nil {
+			yield(turn.Event{}, err)
+			return
+		}
 		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{
-			profile:        x.profileContextFor(runCtx, req),
-			skills:         x.skillContextFor(runCtx, req),
-			knowledge:      knowledgeTurn.Block,
+			blocks:         blocks,
 			knowledgeScope: req.Knowledge,
 		})
 		if err != nil {
 			yield(turn.Event{}, err)
 			return
 		}
-		if knowledgeRan {
-			retrieved, eventErr := knowledgeRetrievedEvent(&knowledgeTurn)
-			if eventErr != nil {
-				yield(turn.Event{}, eventErr)
-				return
-			}
-			if !yield(retrieved, nil) {
-				return
+		for i := range blocks {
+			for j := range blocks[i].Events {
+				if !yield(blocks[i].Events[j], nil) {
+					return
+				}
 			}
 		}
 
@@ -345,10 +355,59 @@ func (x *ADKExecutor) profileContextFor(ctx context.Context, req *turn.TurnReque
 }
 
 type turnContext struct {
-	profile        string
-	skills         string
-	knowledge      string
+	blocks         []turn.ContextBlock
 	knowledgeScope []string
+}
+
+func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	var blocks []turn.ContextBlock
+	if profile := x.profileContextFor(ctx, req); profile != "" {
+		blocks = append(blocks, turn.ContextBlock{
+			Order:   turn.ContextOrderProfile,
+			Content: profile,
+		})
+	}
+	if skills := x.skillContextFor(ctx, req); skills != "" {
+		blocks = append(blocks, turn.ContextBlock{
+			Order:   turn.ContextOrderSkills,
+			Content: skills,
+		})
+	}
+	knowledgeTurn, knowledgeRan := x.knowledgeContextFor(ctx, req)
+	if len(req.Knowledge) > 0 || knowledgeTurn.Block != "" || knowledgeRan {
+		var knowledgeEvents []turn.Event
+		if knowledgeRan {
+			retrieved, err := knowledgeRetrievedEvent(&knowledgeTurn)
+			if err != nil {
+				return nil, err
+			}
+			knowledgeEvents = []turn.Event{retrieved}
+		}
+		block := turn.ContextBlock{
+			Order:   turn.ContextOrderKnowledge,
+			Content: knowledgeTurn.Block,
+			Events:  knowledgeEvents,
+		}
+		if len(req.Knowledge) > 0 {
+			block.Caveat = knowledgeCaveat
+		}
+		blocks = append(blocks, block)
+	}
+	for _, provider := range x.providers {
+		provided, err := provider.TurnContext(ctx, req)
+		if err != nil {
+			if provider.Required(req) {
+				return nil, codedError(turn.ErrorCodeStorageUnavailable, "required context provider is unavailable", err)
+			}
+			x.logger.WarnContext(ctx, "context provider unavailable", "component", "turn", "error", err, "turn_id", req.TurnID)
+			continue
+		}
+		blocks = append(blocks, provided...)
+	}
+	slices.SortStableFunc(blocks, func(a, b turn.ContextBlock) int {
+		return cmp.Compare(a.Order, b.Order)
+	})
+	return blocks, nil
 }
 
 func (x *ADKExecutor) skillContextFor(ctx context.Context, req *turn.TurnRequest) string {
@@ -674,20 +733,16 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
 	}
-	if len(extra.knowledgeScope) > 0 {
-		instruction = strings.TrimSpace(instruction) + "\n\n" + knowledgeCaveat
+	var beforeModel []llmagent.BeforeModelCallback
+	for i := range extra.blocks {
+		if caveat := strings.TrimSpace(extra.blocks[i].Caveat); caveat != "" {
+			instruction = strings.TrimSpace(instruction) + "\n\n" + caveat
+		}
+		if content := strings.TrimSpace(extra.blocks[i].Content); content != "" {
+			beforeModel = append(beforeModel, withUntrustedContextPart(content))
+		}
 	}
 	instruction = appendStatusProtocol(instruction)
-	var beforeModel []llmagent.BeforeModelCallback
-	if extra.profile != "" {
-		beforeModel = append(beforeModel, withUntrustedContextPart(extra.profile))
-	}
-	if extra.skills != "" {
-		beforeModel = append(beforeModel, withUntrustedContextPart(extra.skills))
-	}
-	if extra.knowledge != "" {
-		beforeModel = append(beforeModel, withUntrustedContextPart(extra.knowledge))
-	}
 	return llmagent.New(llmagent.Config{
 		Name:                 name,
 		Description:          definition.Description,

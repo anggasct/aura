@@ -22,9 +22,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type ToolRequest struct {
@@ -127,7 +127,7 @@ type Options struct {
 	Adapters             map[string]Adapter
 	Secrets              []string
 	MaxInlineResultBytes int64
-	Artifacts            store.ArtifactStore
+	Artifacts            storage.ArtifactStore
 	Effects              *effect.Executor
 	Observer             Observer
 	ApprovalDecider      ApprovalDecider
@@ -148,7 +148,7 @@ type Broker struct {
 	secretMu             sync.RWMutex
 	secrets              []string
 	maxInlineResultBytes int64
-	artifacts            store.ArtifactStore
+	artifacts            storage.ArtifactStore
 	effects              *effect.Executor
 	observer             Observer
 	decider              ApprovalDecider
@@ -592,7 +592,7 @@ func (b *Broker) boundOutput(ctx context.Context, canonical *ToolRequest, output
 		if err != nil {
 			return nil, errorf(ResultExecutionFailed, "generate artifact id: %v", err)
 		}
-		ref, err := b.artifacts.Put(ctx, strings.NewReader(string(output)), &store.ArtifactMetadata{
+		ref, err := b.artifacts.Put(ctx, strings.NewReader(string(output)), &storage.ArtifactMetadata{
 			ID:        artifactID,
 			SessionID: canonical.SessionID,
 			Filename:  canonical.ToolName + "-" + canonical.RequestID + ".json",

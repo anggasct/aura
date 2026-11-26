@@ -8,9 +8,9 @@ import (
 	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -54,7 +54,7 @@ func TestNewCodeRunnerRequiresItsOptions(t *testing.T) {
 		{"nil options", nil},
 		{"missing limits", &CodeOptions{RunRoot: "/run"}},
 		{"missing artifact store", &CodeOptions{RunRoot: "/run", Limits: &limits}},
-		{"missing store", &CodeOptions{RunRoot: "/run", Limits: &limits, Artifacts: store.NewArtifactStore(nil, "/artifacts", 1)}},
+		{"missing store", &CodeOptions{RunRoot: "/run", Limits: &limits, Artifacts: storage.NewArtifactStore(nil, "/artifacts", 1)}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -73,7 +73,7 @@ func TestCodeArtifactsMapStoreFailuresToCodes(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	sink := codeArtifacts{store: store.NewArtifactStore(db, t.TempDir(), 8)}
+	sink := codeArtifacts{store: storage.NewArtifactStore(db, t.TempDir(), 8)}
 	cases := []struct {
 		name     string
 		content  string

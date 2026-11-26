@@ -1,11 +1,10 @@
-package store
+package storage
 
 import (
 	"bytes"
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/history"
 )
 

@@ -11,7 +11,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/model"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func writeModelsConfig(t *testing.T, extraRoutes string) string {
@@ -105,17 +104,17 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	checkpointStore := store.NewCircuitCheckpointStore(db)
+	checkpointStore := model.NewSQLiteCircuitCheckpointStore(db)
 	openUntil := time.Now().Add(5 * time.Minute)
 	candDef := loadRes.Config.Models.Definitions["cand1"]
 	candResolved, err := loadRes.Config.Models.ResolveDefinition(&candDef)
 	if err != nil {
 		t.Fatalf("resolve cand1: %v", err)
 	}
-	err = checkpointStore.Save(ctx, &store.CircuitCheckpoint{
+	err = checkpointStore.Save(ctx, &model.CircuitCheckpoint{
 		CircuitKey:          "cand1",
 		ConfigDigest:        model.ComputeConfigDigest(&candDef, candResolved),
-		State:               string(model.CircuitStateOpen),
+		State:               model.CircuitStateOpen,
 		ConsecutiveFailures: 3,
 		OpenUntil:           &openUntil,
 		UpdatedAt:           time.Now(),

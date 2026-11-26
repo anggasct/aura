@@ -1,10 +1,11 @@
-package store
+package storage
 
 import (
 	"bytes"
 	"context"
 	"database/sql"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,6 +16,23 @@ import (
 func newArtifactStore(t *testing.T, db *sql.DB, quotaBytes int64) ArtifactStore {
 	t.Helper()
 	return NewArtifactStore(db, t.TempDir(), quotaBytes)
+}
+
+func TestArtifactPutMaxInt64Quota(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	artifacts := NewArtifactStore(db, t.TempDir(), math.MaxInt64)
+
+	ref, err := artifacts.Put(ctx, bytes.NewReader([]byte("content")), &ArtifactMetadata{
+		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
+	})
+	if err != nil {
+		t.Fatalf("Put with MaxInt64 quota: %v", err)
+	}
+	if ref.SizeBytes != int64(len("content")) {
+		t.Errorf("SizeBytes = %d, want %d", ref.SizeBytes, len("content"))
+	}
 }
 
 func TestArtifactPutAndOpen(t *testing.T) {
@@ -128,7 +146,7 @@ func TestArtifactPutQuotaExceeded(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)
 	mustCreateSession(t, db, "session-1")
-	artifacts := newArtifactStore(t, db, 4) // tiny quota
+	artifacts := newArtifactStore(t, db, 4)
 
 	_, err := artifacts.Put(ctx, bytes.NewReader([]byte("too big")), &ArtifactMetadata{
 		ID: "artifact-1", SessionID: "session-1", Filename: "f.bin", MediaType: "application/octet-stream",
