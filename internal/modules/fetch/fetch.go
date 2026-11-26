@@ -38,7 +38,7 @@ type result struct {
 	Truncated   bool   `json:"truncated"`
 }
 
-func New(options Options) (toolbroker.Adapter, error) {
+func NewAdapter(options Options) (toolbroker.Adapter, error) {
 	if options.Timeout <= 0 {
 		return nil, errors.New("fetch: timeout must be positive")
 	}

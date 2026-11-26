@@ -106,9 +106,9 @@ const (
 func optionsFor(provider string) *Options {
 	options := &Options{Provider: provider, Timeout: time.Second, MaxResults: 5, MaxBodyBytes: 1 << 20, Resolver: searchResolver()}
 	switch provider {
-	case providerBrave, providerTavily:
+	case ProviderBrave, ProviderTavily:
 		options.CredentialRef = secrettest.Ref("env://AURA_TEST_SEARCH_TOKEN")
-	case providerSearXNG:
+	case ProviderSearXNG:
 		options.Endpoint = searxngEndpoint
 	}
 	return options
@@ -116,7 +116,7 @@ func optionsFor(provider string) *Options {
 
 func newAdapter(t *testing.T, options *Options) toolbroker.Adapter {
 	t.Helper()
-	adapter, err := New(options)
+	adapter, err := NewAdapter(options)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -177,13 +177,13 @@ func TestEveryProviderProducesTheSameResultShapeCutToTheLimit(t *testing.T) {
 		fixture string
 		want    []searchResult
 	}{
-		providerDuckDuckGo: {fixture: duckDuckGoFixture, want: []searchResult{
+		ProviderDuckDuckGo: {fixture: duckDuckGoFixture, want: []searchResult{
 			{Title: "Go Programming Language", URL: "https://go.dev/", Snippet: "The Go language builds simple software."},
 			{Title: "context package", URL: "https://pkg.go.dev/context"},
 		}},
-		providerBrave:   {fixture: braveFixture, want: jsonWant},
-		providerTavily:  {fixture: tavilyFixture, want: jsonWant},
-		providerSearXNG: {fixture: searxngFixture, want: jsonWant},
+		ProviderBrave:   {fixture: braveFixture, want: jsonWant},
+		ProviderTavily:  {fixture: tavilyFixture, want: jsonWant},
+		ProviderSearXNG: {fixture: searxngFixture, want: jsonWant},
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -220,7 +220,7 @@ func TestEveryProviderSendsItsExactRequest(t *testing.T) {
 		fixture string
 		check   func(t *testing.T, got *capturedRequest)
 	}{
-		providerDuckDuckGo: {fixture: duckDuckGoFixture, check: func(t *testing.T, got *capturedRequest) {
+		ProviderDuckDuckGo: {fixture: duckDuckGoFixture, check: func(t *testing.T, got *capturedRequest) {
 			requireRequest(t, got, http.MethodGet, "html.duckduckgo.com", "/html/")
 			requireQuery(t, got, url.Values{"q": {query}})
 			requireNoHeader(t, got, "Authorization", "X-Subscription-Token", "Content-Type")
@@ -228,7 +228,7 @@ func TestEveryProviderSendsItsExactRequest(t *testing.T) {
 				t.Fatalf("Accept = %q", got.header.Get("Accept"))
 			}
 		}},
-		providerBrave: {fixture: braveFixture, check: func(t *testing.T, got *capturedRequest) {
+		ProviderBrave: {fixture: braveFixture, check: func(t *testing.T, got *capturedRequest) {
 			requireRequest(t, got, http.MethodGet, "api.search.brave.com", "/res/v1/web/search")
 			requireQuery(t, got, url.Values{"q": {query}, "count": {"3"}})
 			requireNoHeader(t, got, "Authorization", "Content-Type")
@@ -236,7 +236,7 @@ func TestEveryProviderSendsItsExactRequest(t *testing.T) {
 				t.Fatalf("headers = %v", got.header)
 			}
 		}},
-		providerTavily: {fixture: tavilyFixture, check: func(t *testing.T, got *capturedRequest) {
+		ProviderTavily: {fixture: tavilyFixture, check: func(t *testing.T, got *capturedRequest) {
 			requireRequest(t, got, http.MethodPost, "api.tavily.com", "/search")
 			requireQuery(t, got, url.Values{})
 			requireNoHeader(t, got, "X-Subscription-Token")
@@ -251,7 +251,7 @@ func TestEveryProviderSendsItsExactRequest(t *testing.T) {
 				t.Fatalf("body = %v", body)
 			}
 		}},
-		providerSearXNG: {fixture: searxngFixture, check: func(t *testing.T, got *capturedRequest) {
+		ProviderSearXNG: {fixture: searxngFixture, check: func(t *testing.T, got *capturedRequest) {
 			requireRequest(t, got, http.MethodGet, "search.example", "/search")
 			requireQuery(t, got, url.Values{"q": {query}, "format": {"json"}})
 			requireNoHeader(t, got, "Authorization", "X-Subscription-Token", "Content-Type")
@@ -316,7 +316,7 @@ func TestSearXNGSendsBearerOnlyWhenACredentialIsConfigured(t *testing.T) {
 	for name, ref := range map[string]string{"without credential": "", "with credential": "env://AURA_TEST_SEARCH_TOKEN"} {
 		t.Run(name, func(t *testing.T) {
 			var captured capturedRequest
-			options := optionsFor(providerSearXNG)
+			options := optionsFor(ProviderSearXNG)
 			options.CredentialRef = secrettest.Ref(ref)
 			options.client = cannedClient(http.StatusOK, searxngFixture, &captured)
 			if _, err := callSearch(newAdapter(t, options), `{"query":"go"}`); err != nil {
@@ -341,9 +341,9 @@ func TestCredentialedProvidersNeedAResolvableCredential(t *testing.T) {
 		"empty variable value": "env://AURA_TEST_EMPTY_TOKEN",
 		"missing file":         "file:///nonexistent/aura-search-token",
 	}
-	for _, provider := range []string{providerBrave, providerTavily, providerSearXNG} {
+	for _, provider := range []string{ProviderBrave, ProviderTavily, ProviderSearXNG} {
 		for name, ref := range refs {
-			if provider == providerSearXNG && ref == "" {
+			if provider == ProviderSearXNG && ref == "" {
 				continue
 			}
 			t.Run(provider+"/"+name, func(t *testing.T) {
@@ -362,7 +362,7 @@ func TestCredentialedProvidersNeedAResolvableCredential(t *testing.T) {
 
 func TestDuckDuckGoNeverResolvesACredential(t *testing.T) {
 	var captured capturedRequest
-	options := optionsFor(providerDuckDuckGo)
+	options := optionsFor(ProviderDuckDuckGo)
 	options.client = cannedClient(http.StatusOK, duckDuckGoFixture, &captured)
 	if _, err := callSearch(newAdapter(t, options), `{"query":"go"}`); err != nil {
 		t.Fatalf("search: %v", err)
@@ -391,7 +391,7 @@ func TestStatusMappingNamesTheClassAndNeverEchoesTheProviderBody(t *testing.T) {
 		http.StatusMovedPermanently:    {toolbroker.ResultExecutionFailed, "search provider returned status 301"},
 	}
 	for status, test := range tests {
-		for _, provider := range []string{providerDuckDuckGo, providerBrave, providerTavily, providerSearXNG} {
+		for _, provider := range []string{ProviderDuckDuckGo, ProviderBrave, ProviderTavily, ProviderSearXNG} {
 			t.Run(provider+"/"+http.StatusText(status), func(t *testing.T) {
 				options := optionsFor(provider)
 				options.client = cannedClient(status, marker, nil)
@@ -420,7 +420,7 @@ func TestSearXNGSignalsFailedEnginesInsteadOfAnEmptyList(t *testing.T) {
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			options := optionsFor(providerSearXNG)
+			options := optionsFor(ProviderSearXNG)
 			options.client = cannedClient(http.StatusOK, test.body, nil)
 			got, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
 			if test.failed {
@@ -438,7 +438,7 @@ func TestSearXNGSignalsFailedEnginesInsteadOfAnEmptyList(t *testing.T) {
 
 func TestJSONProvidersReturnAnEmptyListWhenNothingMatched(t *testing.T) {
 	t.Setenv("AURA_TEST_SEARCH_TOKEN", testCredential)
-	for provider, body := range map[string]string{providerBrave: `{"web":{"results":[]}}`, providerTavily: `{"results":[]}`, providerSearXNG: `{"results":[]}`} {
+	for provider, body := range map[string]string{ProviderBrave: `{"web":{"results":[]}}`, ProviderTavily: `{"results":[]}`, ProviderSearXNG: `{"results":[]}`} {
 		t.Run(provider, func(t *testing.T) {
 			options := optionsFor(provider)
 			options.client = cannedClient(http.StatusOK, body, nil)
@@ -452,7 +452,7 @@ func TestJSONProvidersReturnAnEmptyListWhenNothingMatched(t *testing.T) {
 
 func TestMalformedProviderResponsesAreExecutionFailures(t *testing.T) {
 	t.Setenv("AURA_TEST_SEARCH_TOKEN", testCredential)
-	for _, provider := range []string{providerBrave, providerTavily, providerSearXNG} {
+	for _, provider := range []string{ProviderBrave, ProviderTavily, ProviderSearXNG} {
 		t.Run(provider, func(t *testing.T) {
 			options := optionsFor(provider)
 			options.client = cannedClient(http.StatusOK, "<html>marker-not-json</html>", nil)
@@ -465,7 +465,7 @@ func TestMalformedProviderResponsesAreExecutionFailures(t *testing.T) {
 }
 
 func TestOversizedProviderResponseIsRejected(t *testing.T) {
-	options := optionsFor(providerSearXNG)
+	options := optionsFor(ProviderSearXNG)
 	options.MaxBodyBytes = 16
 	options.client = cannedClient(http.StatusOK, searxngFixture, nil)
 	_, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
@@ -477,9 +477,9 @@ func TestOversizedProviderResponseIsRejected(t *testing.T) {
 func TestCredentialValuesAreRedactedFromResultsForEveryCredentialedProvider(t *testing.T) {
 	t.Setenv("AURA_TEST_SEARCH_TOKEN", testCredential)
 	leaking := map[string]string{
-		providerBrave:   `{"web":{"results":[{"title":"t search-secret","url":"https://example.com/?k=search-secret","description":"d search-secret"}]}}`,
-		providerTavily:  `{"results":[{"title":"t search-secret","url":"https://example.com/?k=search-secret","content":"d search-secret"}]}`,
-		providerSearXNG: `{"results":[{"title":"t search-secret","url":"https://example.com/?k=search-secret","content":"d search-secret"}]}`,
+		ProviderBrave:   `{"web":{"results":[{"title":"t search-secret","url":"https://example.com/?k=search-secret","description":"d search-secret"}]}}`,
+		ProviderTavily:  `{"results":[{"title":"t search-secret","url":"https://example.com/?k=search-secret","content":"d search-secret"}]}`,
+		ProviderSearXNG: `{"results":[{"title":"t search-secret","url":"https://example.com/?k=search-secret","content":"d search-secret"}]}`,
 	}
 	for provider, body := range leaking {
 		t.Run(provider, func(t *testing.T) {
@@ -502,7 +502,7 @@ func TestCredentialValuesAreRedactedFromResultsForEveryCredentialedProvider(t *t
 }
 
 func TestArgumentsAreValidated(t *testing.T) {
-	options := optionsFor(providerDuckDuckGo)
+	options := optionsFor(ProviderDuckDuckGo)
 	options.client = cannedClient(http.StatusOK, duckDuckGoFixture, nil)
 	adapter := newAdapter(t, options)
 	for _, arguments := range []string{`{}`, `{"query":"  "}`, `not json`, `{"query":3}`} {
@@ -516,7 +516,7 @@ func TestArgumentsAreValidated(t *testing.T) {
 }
 
 func TestMaxResultsArgumentOnlyNarrowsTheConfiguredLimit(t *testing.T) {
-	options := optionsFor(providerSearXNG)
+	options := optionsFor(ProviderSearXNG)
 	options.MaxResults = 1
 	options.client = cannedClient(http.StatusOK, searxngFixture, nil)
 	got, err := callSearch(newAdapter(t, options), `{"query":"go","max_results":10}`)
@@ -531,14 +531,14 @@ func TestNewRejectsOptionsThatFallThroughToADefaultOrRedirectAKey(t *testing.T) 
 		"unknown provider":    func(o *Options) { o.Provider = "bing" },
 		"upper case provider": func(o *Options) { o.Provider = "Brave" },
 		"duckduckgo endpoint": func(o *Options) {
-			o.Provider = providerDuckDuckGo
+			o.Provider = ProviderDuckDuckGo
 			o.CredentialRef = secret.Ref{}
 			o.Endpoint = searxngEndpoint
 		},
-		"brave endpoint":              func(o *Options) { o.Provider = providerBrave; o.Endpoint = searxngEndpoint },
-		"tavily endpoint":             func(o *Options) { o.Provider = providerTavily; o.Endpoint = searxngEndpoint },
-		"brave loopback authority":    func(o *Options) { o.Provider = providerBrave; o.LoopbackAuthority = "127.0.0.1:8888" },
-		"duckduckgo credential":       func(o *Options) { o.Provider = providerDuckDuckGo; o.CredentialRef = secrettest.Ref("env://X") },
+		"brave endpoint":              func(o *Options) { o.Provider = ProviderBrave; o.Endpoint = searxngEndpoint },
+		"tavily endpoint":             func(o *Options) { o.Provider = ProviderTavily; o.Endpoint = searxngEndpoint },
+		"brave loopback authority":    func(o *Options) { o.Provider = ProviderBrave; o.LoopbackAuthority = "127.0.0.1:8888" },
+		"duckduckgo credential":       func(o *Options) { o.Provider = ProviderDuckDuckGo; o.CredentialRef = secrettest.Ref("env://X") },
 		"searxng without endpoint":    func(o *Options) { o.Endpoint = "" },
 		"searxng plain http":          func(o *Options) { o.Endpoint = "http://search.example/search" },
 		"searxng credentials in url":  func(o *Options) { o.Endpoint = "https://user:pw@search.example/search" },
@@ -558,15 +558,15 @@ func TestNewRejectsOptionsThatFallThroughToADefaultOrRedirectAKey(t *testing.T) 
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
-			options := optionsFor(providerSearXNG)
+			options := optionsFor(ProviderSearXNG)
 			mutate(options)
-			if _, err := New(options); err == nil {
-				t.Fatalf("New accepted %+v", options)
+			if _, err := NewAdapter(options); err == nil {
+				t.Fatalf("NewAdapter accepted %+v", options)
 			}
 		})
 	}
-	if _, err := New(nil); err == nil {
-		t.Fatal("New accepted nil options")
+	if _, err := NewAdapter(nil); err == nil {
+		t.Fatal("NewAdapter accepted nil options")
 	}
 }
 
@@ -575,7 +575,7 @@ func TestMediatedClientDeniesPrivateEndpointsBeforeDialingAndKeepsTheQueryOutOfT
 	for _, host := range []string{"127.0.0.1", "10.0.0.5", "internal.example", "169.254.169.254"} {
 		t.Run(host, func(t *testing.T) {
 			resolver := &recordingResolver{staticResolver: searchResolver()}
-			options := optionsFor(providerSearXNG)
+			options := optionsFor(ProviderSearXNG)
 			options.Endpoint = "https://" + host + "/search"
 			options.Resolver = resolver
 			_, err := callSearch(newAdapter(t, options), `{"query":"`+query+`"}`)
@@ -591,7 +591,7 @@ func TestMediatedClientDeniesPrivateEndpointsBeforeDialingAndKeepsTheQueryOutOfT
 
 func TestRemoteClientNeverFollowsRedirects(t *testing.T) {
 	resolver := &recordingResolver{staticResolver: searchResolver()}
-	options := optionsFor(providerSearXNG)
+	options := optionsFor(ProviderSearXNG)
 	options.Resolver = resolver
 	client, err := buildClient(options)
 	if err != nil {
@@ -619,7 +619,7 @@ func TestRemoteClientNeverFollowsRedirects(t *testing.T) {
 func TestTransportFailuresCarryNeitherTheQueryNorProviderText(t *testing.T) {
 	const query = "needle-query-77d0"
 	leak := errors.New("dial failed for https://search.example/search?q=" + query + " location provider-text-marker")
-	options := optionsFor(providerSearXNG)
+	options := optionsFor(ProviderSearXNG)
 	options.client = failingClient(leak)
 	_, err := callSearch(newAdapter(t, options), `{"query":"`+query+`"}`)
 	if classOf(err) != toolbroker.ResultExecutionFailed || detailOf(err) != "search provider request failed" {
@@ -633,7 +633,7 @@ func TestTransportFailuresCarryNeitherTheQueryNorProviderText(t *testing.T) {
 func TestDeadlineAndCancellationKeepTheirIdentity(t *testing.T) {
 	for name, cause := range map[string]error{"deadline": context.DeadlineExceeded, "cancellation": context.Canceled} {
 		t.Run(name, func(t *testing.T) {
-			options := optionsFor(providerSearXNG)
+			options := optionsFor(ProviderSearXNG)
 			options.client = failingClient(cause)
 			_, err := callSearch(newAdapter(t, options), `{"query":"go"}`)
 			if !errors.Is(err, cause) {
@@ -663,7 +663,7 @@ func TestSlowProviderEndsWithTheContextDeadline(t *testing.T) {
 }
 
 func loopbackOptions(server *httptest.Server) *Options {
-	options := optionsFor(providerSearXNG)
+	options := optionsFor(ProviderSearXNG)
 	options.Endpoint = server.URL + "/search"
 	options.LoopbackAuthority = strings.TrimPrefix(server.URL, "http://")
 	return options
