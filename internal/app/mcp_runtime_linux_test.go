@@ -16,7 +16,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -191,12 +190,12 @@ type mcpHarness struct {
 	mu       sync.Mutex
 }
 
-func newMCPHarness(t *testing.T, servers []config.MCPServer) *mcpHarness {
+func newMCPHarness(t *testing.T, servers []mcp.ServerConfig) *mcpHarness {
 	t.Helper()
 	return newMCPHarnessWithAccess(t, servers, nil)
 }
 
-func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access func(db *sql.DB) toolbroker.AccessPolicy) *mcpHarness {
+func newMCPHarnessWithAccess(t *testing.T, servers []mcp.ServerConfig, access func(db *sql.DB) toolbroker.AccessPolicy) *mcpHarness {
 	t.Helper()
 	ctx := t.Context()
 	dataRoot := t.TempDir()
@@ -213,7 +212,7 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	harness := &mcpHarness{cfg: appconfig.Default(), db: db, report: capabilitytest.All(t), approve: true}
 	harness.cfg.Tools.Workspace = t.TempDir()
 	harness.cfg.Storage.Path = dataRoot
-	harness.cfg.MCP = &config.MCP{Servers: servers}
+	harness.cfg.MCP = &mcp.Config{Servers: servers}
 	var policy toolbroker.AccessPolicy
 	if access != nil {
 		policy = access(db)
@@ -232,22 +231,32 @@ func newMCPHarnessWithAccess(t *testing.T, servers []config.MCPServer, access fu
 	return harness
 }
 
-func (h *mcpHarness) start(t *testing.T, starter mcp.SessionStarter) *mcpRuntime {
+func mcpHealthCheck(t *testing.T, mod *mcp.Module) health.RegisteredCheck {
+	t.Helper()
+	checks := mod.HealthChecks()
+	if len(checks) != 1 {
+		t.Fatalf("HealthChecks = %+v, want 1", checks)
+	}
+	return checks[0]
+}
+
+func (h *mcpHarness) start(t *testing.T, starter mcp.SessionStarter) *mcp.Module {
 	t.Helper()
 	trustPath, err := mcpTrustRegistryPath(&h.cfg)
 	if err != nil {
 		t.Fatalf("mcpTrustRegistryPath: %v", err)
 	}
-	started, err := startMCPRuntime(t.Context(), &mcpRuntimeOptions{
-		Config:         &h.cfg,
+	started, err := mcp.New(t.Context(), &mcp.ModuleDeps{
+		Config:         h.cfg.MCP,
 		Broker:         h.executor.Broker(),
 		Logger:         slog.New(slog.DiscardHandler),
 		Capabilities:   h.report,
 		SessionStarter: starter,
 		TrustPath:      trustPath,
+		CheckTimeout:   time.Duration(h.cfg.Health.CheckTimeout),
 	})
 	if err != nil {
-		t.Fatalf("startMCPRuntime: %v", err)
+		t.Fatalf("mcp.New: %v", err)
 	}
 	if started == nil {
 		t.Fatal("no runtime for a configured server")
@@ -266,8 +275,15 @@ func (h *mcpHarness) approveServer(t *testing.T, name string) {
 	if err != nil {
 		t.Fatalf("NewFileTrustRegistry: %v", err)
 	}
-	server, ok := findMCPServer(&h.cfg, name)
-	if !ok {
+	servers := configuredMCPServers(&h.cfg)
+	var server *mcp.ServerConfig
+	for i := range servers {
+		if servers[i].Name == name {
+			server = &servers[i]
+			break
+		}
+	}
+	if server == nil {
 		t.Fatalf("server %s not configured", name)
 	}
 	if _, err := mcp.ApproveServer(t.Context(), registry, server); err != nil {
@@ -310,10 +326,10 @@ func (h *mcpHarness) callToolAs(ctx context.Context, name, id string, class prin
 	return err
 }
 
-func mcpTestServer(name string) config.MCPServer {
-	return config.MCPServer{
+func mcpTestServer(name string) mcp.ServerConfig {
+	return mcp.ServerConfig{
 		Name:           name,
-		Transport:      config.MCPTransportStdio,
+		Transport:      mcp.TransportStdio,
 		Command:        "/opt/mcp/" + name,
 		Args:           []string{"--stdio"},
 		Environment:    map[string]string{"MODE": "test"},
@@ -342,7 +358,7 @@ func countIntents(t *testing.T, db *sql.DB) int {
 }
 
 func TestMCPRuntimeStartsApprovedServerAndRoutesCallsThroughTheBroker(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	harness.approveServer(t, "docs")
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	started := harness.start(t, starter)
@@ -386,17 +402,18 @@ func TestMCPRuntimeStartsApprovedServerAndRoutesCallsThroughTheBroker(t *testing
 		t.Errorf("tool calls after a rejected approval = %d, want 1", calls)
 	}
 
-	findings := started.check.Checker.Check(t.Context())
+	check := mcpHealthCheck(t, started)
+	findings := check.Checker.Check(t.Context())
 	if len(findings) != 1 || findings[0].Code != "ok" {
 		t.Errorf("health findings = %+v, want a single ok", findings)
 	}
-	if started.check.ID != "mcp" || started.check.Remediation != "review-mcp-server" {
-		t.Errorf("check = %q remediation %q", started.check.ID, started.check.Remediation)
+	if check.ID != "mcp" || check.Remediation != "review-mcp-server" {
+		t.Errorf("check = %q remediation %q", check.ID, check.Remediation)
 	}
 }
 
 func TestMCPToolsAreDeniedToNonOwnersAtTheBroker(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	harness.approveServer(t, "docs")
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	harness.start(t, starter)
@@ -421,7 +438,7 @@ func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *t
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)
 	}
-	harness := newMCPHarnessWithAccess(t, []config.MCPServer{mcpTestServer("docs")}, func(db *sql.DB) toolbroker.AccessPolicy {
+	harness := newMCPHarnessWithAccess(t, []mcp.ServerConfig{mcpTestServer("docs")}, func(db *sql.DB) toolbroker.AccessPolicy {
 		return newAccessPolicy(registry, db, nil)
 	})
 	harness.approveServer(t, "docs")
@@ -474,7 +491,7 @@ func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *t
 }
 
 func TestMCPRuntimeNeverStartsUnapprovedOrChangedServers(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	started := harness.start(t, starter)
 
@@ -484,7 +501,7 @@ func TestMCPRuntimeNeverStartsUnapprovedOrChangedServers(t *testing.T) {
 	if slices.Contains(harness.toolNames(), "mcp_docs_ping") {
 		t.Error("tools of an unapproved server are registered")
 	}
-	if got := findingCodes(started.check.Checker.Check(t.Context())); got["docs"] != "mcp_trust_required" {
+	if got := findingCodes(mcpHealthCheck(t, started).Checker.Check(t.Context())); got["docs"] != "mcp_trust_required" {
 		t.Fatalf("findings = %v, want mcp_trust_required for docs", got)
 	}
 	_ = started.Close(t.Context())
@@ -495,7 +512,7 @@ func TestMCPRuntimeNeverStartsUnapprovedOrChangedServers(t *testing.T) {
 	if starter.started("docs") != 0 {
 		t.Fatal("a server whose configuration changed after approval was started")
 	}
-	if got := findingCodes(changed.check.Checker.Check(t.Context())); got["docs"] != "mcp_trust_required" {
+	if got := findingCodes(mcpHealthCheck(t, changed).Checker.Check(t.Context())); got["docs"] != "mcp_trust_required" {
 		t.Fatalf("findings after change = %v", got)
 	}
 	_ = changed.Close(t.Context())
@@ -505,13 +522,13 @@ func TestMCPRuntimeNeverStartsUnapprovedOrChangedServers(t *testing.T) {
 	if starter.started("docs") != 1 {
 		t.Fatalf("an approved server was started %d times, want 1", starter.started("docs"))
 	}
-	if got := approved.check.Checker.Check(t.Context()); len(got) != 1 || got[0].Code != "ok" {
+	if got := mcpHealthCheck(t, approved).Checker.Check(t.Context()); len(got) != 1 || got[0].Code != "ok" {
 		t.Fatalf("findings after approval = %+v", got)
 	}
 }
 
 func TestMCPRuntimeIsolatesFailingServers(t *testing.T) {
-	servers := []config.MCPServer{mcpTestServer("crashy"), mcpTestServer("steady"), mcpTestServer("stranger")}
+	servers := []mcp.ServerConfig{mcpTestServer("crashy"), mcpTestServer("steady"), mcpTestServer("stranger")}
 	harness := newMCPHarness(t, servers)
 	harness.approveServer(t, "crashy")
 	harness.approveServer(t, "steady")
@@ -519,7 +536,7 @@ func TestMCPRuntimeIsolatesFailingServers(t *testing.T) {
 	starter.failing["crashy"] = true
 	started := harness.start(t, starter)
 
-	got := findingCodes(started.check.Checker.Check(t.Context()))
+	got := findingCodes(mcpHealthCheck(t, started).Checker.Check(t.Context()))
 	want := map[string]string{"crashy": "mcp_server_unavailable", "stranger": "mcp_trust_required"}
 	if len(got) != len(want) || got["crashy"] != want["crashy"] || got["stranger"] != want["stranger"] {
 		t.Fatalf("findings = %v, want %v", got, want)
@@ -535,7 +552,7 @@ func TestMCPRuntimeIsolatesFailingServers(t *testing.T) {
 	if err := harness.callTool(t.Context(), "mcp_steady_ping", "iso-2", principal.ClassOwner); err == nil {
 		t.Fatal("call to a crashed server succeeded")
 	}
-	got = findingCodes(started.check.Checker.Check(t.Context()))
+	got = findingCodes(mcpHealthCheck(t, started).Checker.Check(t.Context()))
 	if got["steady"] != "mcp_server_unavailable" {
 		t.Fatalf("findings after crash = %v, want mcp_server_unavailable for steady", got)
 	}
@@ -545,7 +562,7 @@ func TestMCPRuntimeIsolatesFailingServers(t *testing.T) {
 }
 
 func TestMCPRuntimeCloseLeavesNoSessionOrGoroutine(t *testing.T) {
-	servers := []config.MCPServer{mcpTestServer("one"), mcpTestServer("two")}
+	servers := []mcp.ServerConfig{mcpTestServer("one"), mcpTestServer("two")}
 	harness := newMCPHarness(t, servers)
 	harness.approveServer(t, "one")
 	harness.approveServer(t, "two")
@@ -573,17 +590,17 @@ func TestMCPRuntimeCloseLeavesNoSessionOrGoroutine(t *testing.T) {
 	if got := runtime.NumGoroutine(); got > baseline+2 {
 		t.Errorf("goroutines after Close = %d, baseline %d", got, baseline)
 	}
-	var nilRuntime *mcpRuntime
+	var nilRuntime *mcp.Module
 	if err := nilRuntime.Close(t.Context()); err != nil {
 		t.Errorf("nil runtime Close: %v", err)
 	}
 }
 
 func TestMCPRuntimeRequiresInputs(t *testing.T) {
-	if _, err := startMCPRuntime(t.Context(), nil); err == nil {
+	if _, err := mcp.New(t.Context(), nil); err == nil {
 		t.Error("nil options accepted")
 	}
-	if _, err := startMCPRuntime(t.Context(), &mcpRuntimeOptions{}); err == nil {
+	if _, err := mcp.New(t.Context(), &mcp.ModuleDeps{}); err == nil {
 		t.Error("empty options accepted")
 	}
 }
@@ -591,7 +608,7 @@ func TestMCPRuntimeRequiresInputs(t *testing.T) {
 func TestMCPServerDeclaringACapabilityOutsideTheRegistryRegistersNoTools(t *testing.T) {
 	server := mcpTestServer("docs")
 	server.Capabilities = []string{"fs.read"}
-	harness := newMCPHarness(t, []config.MCPServer{server})
+	harness := newMCPHarness(t, []mcp.ServerConfig{server})
 	harness.approveServer(t, "docs")
 	starter := newFixtureStarter(map[string][]string{"docs": {"ping"}})
 	started := harness.start(t, starter)
@@ -602,7 +619,7 @@ func TestMCPServerDeclaringACapabilityOutsideTheRegistryRegistersNoTools(t *test
 	if slices.Contains(harness.toolNames(), "mcp_docs_ping") {
 		t.Fatalf("broker tools = %v, want no tool from a server with an unregistered capability", harness.toolNames())
 	}
-	statuses := started.manager.Statuses()
+	statuses := started.Manager().Statuses()
 	if len(statuses) != 1 || statuses[0].Code != mcp.ErrCapabilityUnavailable {
 		t.Fatalf("statuses = %+v, want the server marked capability_unavailable", statuses)
 	}
@@ -721,14 +738,29 @@ func TestMCPEntriesInPrincipalToolsNeedToolsCoverageAtBoot(t *testing.T) {
 }
 
 func TestMCPWarnsAboutListedToolsAServerDoesNotExpose(t *testing.T) {
-	harness := newMCPHarness(t, []config.MCPServer{mcpTestServer("docs")})
+	harness := newMCPHarness(t, []mcp.ServerConfig{mcpTestServer("docs")})
 	harness.approveServer(t, "docs")
-	started := harness.start(t, newFixtureStarter(map[string][]string{"docs": {"ping"}}))
+	trustPath, err := mcpTrustRegistryPath(&harness.cfg)
+	if err != nil {
+		t.Fatalf("mcpTrustRegistryPath: %v", err)
+	}
 	var records []string
 	logger := slog.New(&recordingHandler{records: &records})
-	started.warnUnexposedPersonaTools(t.Context(), logger, []auraagent.Definition{
-		{ID: "ops", Tools: []string{"read_file", "mcp_docs", "mcp_docs_ping", "mcp_docs_missing"}},
+	started, err := mcp.New(t.Context(), &mcp.ModuleDeps{
+		Config:         harness.cfg.MCP,
+		Broker:         harness.executor.Broker(),
+		TrustPath:      trustPath,
+		SessionStarter: newFixtureStarter(map[string][]string{"docs": {"ping"}}),
+		Capabilities:   harness.report,
+		Personas: []auraagent.Definition{
+			{ID: "ops", Tools: []string{"read_file", "mcp_docs", "mcp_docs_ping", "mcp_docs_missing"}},
+		},
+		Logger: logger,
 	})
+	if err != nil {
+		t.Fatalf("mcp.New: %v", err)
+	}
+	t.Cleanup(func() { _ = started.Close(context.WithoutCancel(t.Context())) })
 	if len(records) != 1 || !strings.Contains(records[0], "persona=ops") || !strings.Contains(records[0], "tool=mcp_docs_missing") {
 		t.Fatalf("warnings = %v, want one for mcp_docs_missing", records)
 	}
@@ -790,7 +822,7 @@ func TestConfigsWithoutMCPServersAreUnchanged(t *testing.T) {
 
 			harness := newMCPHarness(t, nil)
 			harness.cfg.MCP = cfg.MCP
-			if mcpServersConfigured(&harness.cfg) {
+			if len(configuredMCPServers(&harness.cfg)) > 0 {
 				t.Fatal("a config without enabled servers reports mcp servers")
 			}
 			wantTools := []string{"code_execute", "email_send", "exec", "handoff_to_owner", "kb_search", "list_dir", "read_file", "web_fetch", "web_search", "workflow_cancel", "workflow_list", "workflow_propose", "workflow_save_routine", "workflow_start", "workflow_status", "write_file"}

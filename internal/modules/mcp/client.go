@@ -8,20 +8,18 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
 
-	"github.com/anggasct/aura/internal/config"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type Client struct {
-	cfg              *config.MCPServer
+	cfg              *ServerConfig
 	logger           *slog.Logger
 	session          *sdk.ClientSession
 	transport        sdk.Transport
@@ -42,9 +40,24 @@ type Client struct {
 	closed           bool
 }
 
-func NewClient(cfg *config.MCPServer, logger *slog.Logger, opts ...ClientOption) (*Client, error) {
+func NewClient(cfg *ServerConfig, logger *slog.Logger, opts ...ClientOption) (*Client, error) {
 	if cfg == nil {
 		return nil, Errorf(ErrConfigInvalid, "server configuration is required")
+	}
+	if cfg.StartupTimeout <= 0 {
+		return nil, Errorf(ErrConfigInvalid, "server %q startup_timeout must be positive", cfg.Name)
+	}
+	if cfg.RequestTimeout <= 0 {
+		return nil, Errorf(ErrConfigInvalid, "server %q request_timeout must be positive", cfg.Name)
+	}
+	if cfg.MaxMessageSize <= 0 {
+		return nil, Errorf(ErrConfigInvalid, "server %q max_message_size must be positive", cfg.Name)
+	}
+	if cfg.ConnectTimeout != nil && *cfg.ConnectTimeout <= 0 {
+		return nil, Errorf(ErrConfigInvalid, "server %q connect_timeout must be positive", cfg.Name)
+	}
+	if cfg.Transport == TransportStreamableHTTP && cfg.EffectiveConnectTimeout() <= 0 {
+		return nil, Errorf(ErrConfigInvalid, "server %q connect_timeout must be positive", cfg.Name)
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -80,21 +93,21 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	transport := customTransport
 	if transport == nil {
 		switch c.cfg.Transport {
-		case config.MCPTransportStdio:
+		case TransportStdio:
 			contained, err := c.containedTransport(ctx)
 			if err != nil {
 				c.observeFailure(ctx, start, c.protocolVersion, "", err)
 				return err
 			}
 			transport = contained
-		case config.MCPTransportStreamableHTTP:
+		case TransportStreamableHTTP:
 			streamable, err := c.streamableTransport(ctx)
 			if err != nil {
 				c.observeFailure(ctx, start, c.protocolVersion, "", err)
 				return err
 			}
 			transport = streamable
-		case config.MCPTransportLegacySSE:
+		case TransportLegacySSE:
 			legacy, err := c.legacySSETransport(ctx)
 			if err != nil {
 				c.observeFailure(ctx, start, c.protocolVersion, "", err)
@@ -116,8 +129,10 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	})
 
 	connectTimeout := c.cfg.StartupTimeout
-	if c.cfg.Transport == config.MCPTransportStreamableHTTP && c.cfg.ConnectTimeout > 0 {
-		connectTimeout = c.cfg.ConnectTimeout
+	if c.cfg.Transport == TransportStreamableHTTP {
+		connectTimeout = c.cfg.EffectiveConnectTimeout()
+	} else if c.cfg.Transport == TransportLegacySSE && c.cfg.ConnectTimeout != nil {
+		connectTimeout = *c.cfg.ConnectTimeout
 	}
 
 	c.logger.InfoContext(ctx, "connecting to server",
@@ -188,11 +203,8 @@ func (c *Client) connectLocked(ctx context.Context, customTransport sdk.Transpor
 	return nil
 }
 
-func maxMessageBytes(cfg *config.MCPServer) int64 {
-	if cfg != nil && cfg.MaxMessageSize > 0 {
-		return int64(cfg.MaxMessageSize)
-	}
-	return 1 << 20
+func maxMessageBytes(cfg *ServerConfig) int64 {
+	return int64(cfg.MaxMessageSize)
 }
 
 func (c *Client) streamRetries() int {
@@ -236,13 +248,14 @@ func (c *Client) legacySSETransport(ctx context.Context) (sdk.Transport, error) 
 		if c.secretResolver == nil {
 			return nil, Errorf(ErrAuthRequired, "server %q has no credential resolver", c.cfg.Name)
 		}
-		if _, err := c.secretResolver.ResolveSecret(ctx, c.cfg.Auth.Static.CredentialRef); err != nil {
+		ref := c.cfg.Auth.Static.CredentialRef.String()
+		if _, err := c.secretResolver.ResolveSecret(ctx, ref); err != nil {
 			return nil, Errorf(ErrAuthRequired, "server %q credential is unavailable", c.cfg.Name)
 		}
 		roundTripper = &staticAuthTransport{
 			next:       roundTripper,
 			header:     c.cfg.Auth.Static.Header,
-			ref:        c.cfg.Auth.Static.CredentialRef,
+			ref:        ref,
 			serverName: c.cfg.Name,
 			resolver:   c.secretResolver,
 		}
@@ -294,13 +307,14 @@ func (c *Client) streamableTransport(ctx context.Context) (sdk.Transport, error)
 			if c.secretResolver == nil {
 				return nil, Errorf(ErrAuthRequired, "server %q has no credential resolver", c.cfg.Name)
 			}
-			if _, err := c.secretResolver.ResolveSecret(ctx, c.cfg.Auth.Static.CredentialRef); err != nil {
+			ref := c.cfg.Auth.Static.CredentialRef.String()
+			if _, err := c.secretResolver.ResolveSecret(ctx, ref); err != nil {
 				return nil, Errorf(ErrAuthRequired, "server %q credential is unavailable", c.cfg.Name)
 			}
 			capped.next = &staticAuthTransport{
 				next:       roundTripper,
 				header:     c.cfg.Auth.Static.Header,
-				ref:        c.cfg.Auth.Static.CredentialRef,
+				ref:        ref,
 				serverName: c.cfg.Name,
 				resolver:   c.secretResolver,
 			}
@@ -312,7 +326,7 @@ func (c *Client) streamableTransport(ctx context.Context) (sdk.Transport, error)
 					return checkRedirectPolicy(req, via, false, baseCheck)
 				},
 			}
-			provider, err := c.oauthProvider(oauthClient)
+			provider, err := c.oauthProvider(ctx, oauthClient)
 			if err != nil {
 				return nil, err
 			}
@@ -334,10 +348,24 @@ func (c *Client) streamableTransport(ctx context.Context) (sdk.Transport, error)
 	return transport, nil
 }
 
-func (c *Client) oauthProvider(oauthClient *http.Client) (*OAuthProvider, error) {
+func (c *Client) oauthProvider(ctx context.Context, oauthClient *http.Client) (*OAuthProvider, error) {
 	oauth := c.cfg.Auth.OAuth
-	clientID := strings.TrimSpace(os.Getenv(oauth.ClientIDEnv))
-	clientSecret := strings.TrimSpace(os.Getenv(oauth.ClientSecretEnv))
+	if c.secretResolver == nil {
+		return nil, Errorf(ErrAuthRequired, "server %q has no credential resolver", c.cfg.Name)
+	}
+	if oauth.ClientIDRef.IsZero() || oauth.ClientSecretRef.IsZero() {
+		return nil, Errorf(ErrAuthRequired, "server %q oauth client credentials are not configured", c.cfg.Name)
+	}
+	clientID, err := c.secretResolver.ResolveSecret(ctx, oauth.ClientIDRef.String())
+	if err != nil {
+		return nil, Errorf(ErrAuthRequired, "server %q oauth client credentials are not configured", c.cfg.Name)
+	}
+	clientSecret, err := c.secretResolver.ResolveSecret(ctx, oauth.ClientSecretRef.String())
+	if err != nil {
+		return nil, Errorf(ErrAuthRequired, "server %q oauth client credentials are not configured", c.cfg.Name)
+	}
+	clientID = strings.TrimSpace(clientID)
+	clientSecret = strings.TrimSpace(clientSecret)
 	if clientID == "" || clientSecret == "" {
 		return nil, Errorf(ErrAuthRequired, "server %q oauth client credentials are not configured", c.cfg.Name)
 	}
@@ -378,12 +406,8 @@ func (c *Client) DiscoverTools(ctx context.Context) ([]DiscoveredTool, error) {
 		return nil, err
 	}
 
-	listCtx := ctx
-	var cancel context.CancelFunc
-	if c.cfg.RequestTimeout > 0 {
-		listCtx, cancel = context.WithTimeout(ctx, time.Duration(c.cfg.RequestTimeout))
-		defer cancel()
-	}
+	listCtx, cancel := context.WithTimeout(ctx, time.Duration(c.cfg.RequestTimeout))
+	defer cancel()
 
 	toolsResult, err := session.ListTools(listCtx, nil)
 	if err != nil {
@@ -505,12 +529,8 @@ func (c *Client) CallTool(ctx context.Context, toolName string, arguments json.R
 		Arguments: args,
 	}
 
-	callCtx := ctx
-	var cancel context.CancelFunc
-	if c.cfg.RequestTimeout > 0 {
-		callCtx, cancel = context.WithTimeout(ctx, time.Duration(c.cfg.RequestTimeout))
-		defer cancel()
-	}
+	callCtx, cancel := context.WithTimeout(ctx, time.Duration(c.cfg.RequestTimeout))
+	defer cancel()
 
 	res, err := session.CallTool(callCtx, params)
 	if err != nil {

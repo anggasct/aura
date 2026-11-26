@@ -7,12 +7,69 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
+func TestComputeTrustDigestPreservesStdioDigest(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  *ServerConfig
+		want string
+	}{
+		{
+			name: "stdio omitted defaults",
+			cfg: &ServerConfig{
+				Name:           "docs",
+				Transport:      TransportStdio,
+				Command:        "/usr/local/bin/docs-mcp",
+				StartupTimeout: DefaultStartupTimeout,
+				RequestTimeout: DefaultRequestTimeout,
+				MaxMessageSize: DefaultMaxMessageSize,
+			},
+			want: "f89875ed09aaf9274b1f0f623eb27264498b1a09a095a8a3c385585fb4eb7be1",
+		},
+		{
+			name: "streamable_http omitted connect_timeout hashes effective 10s",
+			cfg: &ServerConfig{
+				Name:           "remote",
+				Transport:      TransportStreamableHTTP,
+				URL:            "https://mcp.example.com/mcp",
+				StartupTimeout: DefaultStartupTimeout,
+				RequestTimeout: DefaultRequestTimeout,
+				MaxMessageSize: DefaultMaxMessageSize,
+			},
+			want: "a3f1c38172312c1dd3d0198a470facbdca4b89c69cb16363d636b6e76675604f",
+		},
+		{
+			name: "legacy_sse omitted connect_timeout hashes 0",
+			cfg: &ServerConfig{
+				Name:             "legacy",
+				Transport:        TransportLegacySSE,
+				URL:              "https://legacy.example.com/sse",
+				CompatibilityAck: true,
+				StartupTimeout:   DefaultStartupTimeout,
+				RequestTimeout:   DefaultRequestTimeout,
+				MaxMessageSize:   DefaultMaxMessageSize,
+			},
+			want: "3a921b0d48e00228f414297f86a8db189febfbaecb725659fe428ac05e727c58",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := ComputeTrustDigest(tc.cfg, nil)
+			if err != nil {
+				t.Fatalf("ComputeTrustDigest: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("digest = %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestComputeTrustDigest(t *testing.T) {
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:         "test-server",
 		Transport:    "stdio",
 		Command:      "/usr/bin/tool",
@@ -98,7 +155,7 @@ func TestComputeTrustDigest(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected error for nil config")
 		}
-		if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 			t.Fatalf("expected %s, got %s", ErrConfigInvalid, code)
 		}
 	})
@@ -349,7 +406,7 @@ func TestTrustRegistryRejectsEmptyInputs(t *testing.T) {
 }
 
 func TestComputeConfigDigest(t *testing.T) {
-	serverCfg := &config.MCPServer{
+	serverCfg := &ServerConfig{
 		Name:         "cfg-server",
 		Transport:    "stdio",
 		Command:      "/usr/bin/tool",
@@ -361,13 +418,13 @@ func TestComputeConfigDigest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ComputeConfigDigest(): %v", err)
 	}
-	mutations := map[string]func(c *config.MCPServer){
-		"command":      func(c *config.MCPServer) { c.Command = "/usr/bin/other" },
-		"args":         func(c *config.MCPServer) { c.Args = []string{"--flag", "changed"} },
-		"environment":  func(c *config.MCPServer) { c.Environment = map[string]string{"ENV_A": "2"} },
-		"capabilities": func(c *config.MCPServer) { c.Capabilities = []string{"fs.write"} },
-		"timeout":      func(c *config.MCPServer) { c.RequestTimeout = configkit.Duration(time.Second) },
-		"url":          func(c *config.MCPServer) { c.URL = "https://example.com/mcp" },
+	mutations := map[string]func(c *ServerConfig){
+		"command":      func(c *ServerConfig) { c.Command = "/usr/bin/other" },
+		"args":         func(c *ServerConfig) { c.Args = []string{"--flag", "changed"} },
+		"environment":  func(c *ServerConfig) { c.Environment = map[string]string{"ENV_A": "2"} },
+		"capabilities": func(c *ServerConfig) { c.Capabilities = []string{"fs.write"} },
+		"timeout":      func(c *ServerConfig) { c.RequestTimeout = configkit.Duration(time.Second) },
+		"url":          func(c *ServerConfig) { c.URL = "https://example.com/mcp" },
 	}
 	for name, mutate := range mutations {
 		t.Run(name, func(t *testing.T) {
@@ -384,7 +441,7 @@ func TestComputeConfigDigest(t *testing.T) {
 	}
 	t.Run("nil config fails", func(t *testing.T) {
 		_, err := ComputeConfigDigest(nil)
-		if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+		if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 			t.Fatalf("code = %v, %v", code, ok)
 		}
 	})

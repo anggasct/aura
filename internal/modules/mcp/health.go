@@ -5,7 +5,6 @@ import (
 	"slices"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -15,11 +14,11 @@ const (
 )
 
 type LegacySSEChecker struct {
-	servers []config.MCPServer
+	servers []ServerConfig
 	now     func() time.Time
 }
 
-func NewLegacySSEChecker(servers []config.MCPServer) *LegacySSEChecker {
+func NewLegacySSEChecker(servers []ServerConfig) *LegacySSEChecker {
 	return &LegacySSEChecker{servers: servers}
 }
 
@@ -33,7 +32,7 @@ func (c *LegacySSEChecker) Check(ctx context.Context) []health.Finding {
 	}
 	var findings []health.Finding
 	for i := range c.servers {
-		if c.servers[i].Transport != config.MCPTransportLegacySSE {
+		if c.servers[i].Transport != TransportLegacySSE {
 			continue
 		}
 		findings = append(findings, health.Finding{
@@ -59,11 +58,11 @@ const (
 
 type ServerChecker struct {
 	source  func() []ServerStatus
-	servers []config.MCPServer
+	servers []ServerConfig
 	now     func() time.Time
 }
 
-func NewServerChecker(servers []config.MCPServer, source func() []ServerStatus) *ServerChecker {
+func NewServerChecker(servers []ServerConfig, source func() []ServerStatus) *ServerChecker {
 	return &ServerChecker{source: source, servers: slices.Clone(servers)}
 }
 

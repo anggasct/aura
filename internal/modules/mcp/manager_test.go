@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -63,7 +62,7 @@ func withEffectIdentity(request *toolbroker.ToolRequest, key string) *toolbroker
 	return request
 }
 
-func approveConfigDigest(ctx context.Context, t *testing.T, registry TrustRegistry, serverCfg *config.MCPServer) {
+func approveConfigDigest(ctx context.Context, t *testing.T, registry TrustRegistry, serverCfg *ServerConfig) {
 	t.Helper()
 	digest, err := ComputeConfigDigest(serverCfg)
 	if err != nil {
@@ -97,11 +96,11 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 	broker := newEffectBroker(t)
 
 	serverName := "echo-server"
-	mcpCfg := &config.MCP{
-		Servers: []config.MCPServer{
+	mcpCfg := &Config{
+		Servers: []ServerConfig{
 			{
 				Name:           serverName,
-				Transport:      config.MCPTransportStdio,
+				Transport:      TransportStdio,
 				Capabilities:   []string{"workspace-read"},
 				RequestTimeout: configkit.Duration(5 * time.Second),
 				StartupTimeout: configkit.Duration(5 * time.Second),
@@ -126,7 +125,7 @@ func TestManagerLifecycleAndToolBrokerIntegration(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Start to fail due to trust required")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrTrustRequired, code, err)
 	}
 
@@ -219,9 +218,9 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	broker := newEffectBroker(t)
 
 	serverName := "stdio-e2e"
-	serverCfg := config.MCPServer{
+	serverCfg := ServerConfig{
 		Name:           serverName,
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        "/bin/stdio-e2e",
 		Environment:    map[string]string{"SERVER_MODE": "test"},
 		StartupTimeout: configkit.Duration(10 * time.Second),
@@ -229,8 +228,8 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 		MaxMessageSize: 1024 * 1024,
 	}
 
-	mcpCfg := &config.MCP{
-		Servers: []config.MCPServer{serverCfg},
+	mcpCfg := &Config{
+		Servers: []ServerConfig{serverCfg},
 	}
 
 	trustRegistry := NewMemoryTrustRegistry()
@@ -251,7 +250,7 @@ func TestManagerStdioEndToEnd(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected ErrTrustRequired on first start without approval")
 	}
-	if code, _ := CodeOf(err); code != ErrTrustRequired {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrTrustRequired {
 		t.Fatalf("expected ErrTrustRequired, got %s", code)
 	}
 	if starter.starts() != 0 {
@@ -311,13 +310,13 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverCfg := config.MCPServer{
+	serverCfg := ServerConfig{
 		Name:      "unapproved-cmd",
-		Transport: config.MCPTransportStdio,
+		Transport: TransportStdio,
 		Command:   scriptPath,
 		Args:      []string{absMarker},
 	}
-	mcpCfg := &config.MCP{Servers: []config.MCPServer{serverCfg}}
+	mcpCfg := &Config{Servers: []ServerConfig{serverCfg}}
 
 	trustRegistry := NewMemoryTrustRegistry()
 	mgr, err := NewManager(&ManagerOptions{
@@ -331,7 +330,7 @@ func TestManagerRejectsUnapprovedStdioCommandBeforeSpawn(t *testing.T) {
 	defer func() { _ = mgr.Close(t.Context()) }()
 
 	err = mgr.Start(ctx)
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("expected %s, got %v", ErrTrustRequired, err)
 	}
 
@@ -359,18 +358,19 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 		}
 	}
 
-	serverCfg := config.MCPServer{
+	serverCfg := ServerConfig{
 		Name:           "digest-change",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        cmdA,
 		StartupTimeout: configkit.Duration(3 * time.Second),
 		RequestTimeout: configkit.Duration(3 * time.Second),
+		MaxMessageSize: DefaultMaxMessageSize,
 	}
 
 	trustRegistry := NewMemoryTrustRegistry()
 	starter := &stubSessionStarter{session: &failingSession{err: errors.New("child exited")}}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{serverCfg}},
+		Config:         &Config{Servers: []ServerConfig{serverCfg}},
 		Broker:         broker,
 		TrustRegistry:  trustRegistry,
 		SessionStarter: starter,
@@ -386,7 +386,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	approveConfigDigest(t.Context(), t, trustRegistry, &serverCfg)
 
 	err = mgr.Start(ctx)
-	if code, _ := CodeOf(err); code != ErrServerUnavailable {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrServerUnavailable {
 		t.Fatalf("expected past the trust gate (server unavailable for dead helper), got %v", err)
 	}
 	startsBeforeChange := starter.starts()
@@ -397,7 +397,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	mutated := serverCfg
 	mutated.Command = cmdB
 	mgr2, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{mutated}},
+		Config:         &Config{Servers: []ServerConfig{mutated}},
 		Broker:         broker,
 		TrustRegistry:  trustRegistry,
 		SessionStarter: starter,
@@ -408,7 +408,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	defer func() { _ = mgr2.Close(t.Context()) }()
 
 	err = mgr2.Start(ctx)
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("expected %s after command change, got %v", ErrTrustRequired, err)
 	}
 	if starter.starts() != startsBeforeChange {
@@ -416,7 +416,7 @@ func TestManagerDigestChangeForcesReapproval(t *testing.T) {
 	}
 	approveConfigDigest(t.Context(), t, trustRegistry, &mutated)
 	err = mgr2.Start(ctx)
-	if code, _ := CodeOf(err); code != ErrServerUnavailable {
+	if code, _ := fault.CodeOf[ErrorCode](err); code != ErrServerUnavailable {
 		t.Fatalf("expected past the trust gate after re-approval, got %v", err)
 	}
 }
@@ -428,14 +428,14 @@ func TestManagerCapabilityCheckFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	serverCfg := config.MCPServer{
+	serverCfg := ServerConfig{
 		Name:         "unsupported-cap-server",
-		Transport:    config.MCPTransportStdio,
+		Transport:    TransportStdio,
 		Capabilities: []string{"restricted-exec"},
 	}
 
-	mcpCfg := &config.MCP{
-		Servers: []config.MCPServer{serverCfg},
+	mcpCfg := &Config{
+		Servers: []ServerConfig{serverCfg},
 	}
 
 	mgr, err := NewManager(&ManagerOptions{
@@ -453,7 +453,7 @@ func TestManagerCapabilityCheckFailure(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Start to fail when required capability is rejected")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrCapabilityUnavailable {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrCapabilityUnavailable {
 		t.Fatalf("expected %s, got %s (err: %v)", ErrCapabilityUnavailable, code, err)
 	}
 }
@@ -482,10 +482,10 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 
 	broker := newEffectBroker(t)
 	serverName := "slow-server"
-	mcpCfg := &config.MCP{
-		Servers: []config.MCPServer{{
+	mcpCfg := &Config{
+		Servers: []ServerConfig{{
 			Name:           serverName,
-			Transport:      config.MCPTransportStdio,
+			Transport:      TransportStdio,
 			RequestTimeout: configkit.Duration(5 * time.Second),
 			StartupTimeout: configkit.Duration(5 * time.Second),
 		}},
@@ -518,9 +518,9 @@ func TestManagerCloseDoesNotBlockOnSlowServer(t *testing.T) {
 
 func TestManagerFailedConnectClosesClient(t *testing.T) {
 	ctx := t.Context()
-	serverCfg := config.MCPServer{
+	serverCfg := ServerConfig{
 		Name:           "leaky-connect",
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        "/bin/leaky-server",
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		RequestTimeout: configkit.Duration(10 * time.Second),
@@ -534,7 +534,7 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 	starter := &stubSessionStarter{session: failing}
 	trustRegistry := NewMemoryTrustRegistry()
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{serverCfg}},
+		Config:         &Config{Servers: []ServerConfig{serverCfg}},
 		Broker:         broker,
 		TrustRegistry:  trustRegistry,
 		SessionStarter: starter,
@@ -549,7 +549,7 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected Start to fail when the session breaks during connect")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrServerUnavailable {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrServerUnavailable {
 		t.Fatalf("expected %s, got %s (%v)", ErrServerUnavailable, code, err)
 	}
 	starter.mu.Lock()
@@ -559,10 +559,10 @@ func TestManagerFailedConnectClosesClient(t *testing.T) {
 	}
 }
 
-func startableStdioConfig(name string) config.MCPServer {
-	return config.MCPServer{
+func startableStdioConfig(name string) ServerConfig {
+	return ServerConfig{
 		Name:           name,
-		Transport:      config.MCPTransportStdio,
+		Transport:      TransportStdio,
 		Command:        "/bin/" + name,
 		StartupTimeout: configkit.Duration(5 * time.Second),
 		RequestTimeout: configkit.Duration(5 * time.Second),
@@ -595,7 +595,7 @@ func TestManagerFailingServerDoesNotStopOthers(t *testing.T) {
 		"broken":  &failingSession{err: errors.New("child failed")},
 	}}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{broken, untrusted, healthy}},
+		Config:         &Config{Servers: []ServerConfig{broken, untrusted, healthy}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: starter,
@@ -657,7 +657,7 @@ func TestManagerPinsToolSurfaceOnFirstStartAndRequiresReapprovalOnDrift(t *testi
 	approveConfigDigest(t.Context(), t, registry, &cfg)
 
 	first, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{cfg}},
+		Config:         &Config{Servers: []ServerConfig{cfg}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: &stubSessionStarter{session: &scriptedSession{toolNames: []string{"a"}}},
@@ -677,7 +677,7 @@ func TestManagerPinsToolSurfaceOnFirstStartAndRequiresReapprovalOnDrift(t *testi
 	}
 
 	second, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{cfg}},
+		Config:         &Config{Servers: []ServerConfig{cfg}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: &stubSessionStarter{session: &scriptedSession{toolNames: []string{"a", "b"}}},
@@ -687,7 +687,7 @@ func TestManagerPinsToolSurfaceOnFirstStartAndRequiresReapprovalOnDrift(t *testi
 	}
 	defer func() { _ = second.Close(t.Context()) }()
 	err = second.Start(ctx)
-	if code, ok := CodeOf(err); !ok || code != ErrTrustRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrTrustRequired {
 		t.Fatalf("drifted tool surface started: %v", err)
 	}
 	if brokerHasTool(broker, FormatToolName("drift", "a")) || brokerHasTool(broker, FormatToolName("drift", "b")) {
@@ -717,7 +717,7 @@ func TestManagerRegistersToolsAsEffectfulWithApproval(t *testing.T) {
 	registry := NewMemoryTrustRegistry()
 	approveConfigDigest(t.Context(), t, registry, &cfg)
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{cfg}},
+		Config:         &Config{Servers: []ServerConfig{cfg}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: &stubSessionStarter{session: &scriptedSession{toolNames: []string{"ping"}}},
@@ -769,7 +769,7 @@ func TestManagerSkipsToolNamesProvidedByAnotherServer(t *testing.T) {
 		"a_b": &scriptedSession{toolNames: []string{"c", "other"}},
 	}}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{first, second}},
+		Config:         &Config{Servers: []ServerConfig{first, second}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: starter,
@@ -806,7 +806,7 @@ func TestManagerSkipsToolsWhoseExposedNameIsTooLong(t *testing.T) {
 	approveConfigDigest(t.Context(), t, registry, &cfg)
 	long := strings.Repeat("x", 60)
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{cfg}},
+		Config:         &Config{Servers: []ServerConfig{cfg}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: &stubSessionStarter{session: &scriptedSession{toolNames: []string{"ok", long}}},
@@ -834,7 +834,7 @@ func TestManagerUnexposedEntries(t *testing.T) {
 	registry := NewMemoryTrustRegistry()
 	approveConfigDigest(t.Context(), t, registry, &up)
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{up, down}},
+		Config:         &Config{Servers: []ServerConfig{up, down}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: &perServerStarter{sessions: map[string]ContainedSession{"up": &scriptedSession{toolNames: []string{"ping"}}}},
@@ -858,7 +858,7 @@ func TestManagerCloseLeavesNoSessionsOpen(t *testing.T) {
 	approveConfigDigest(t.Context(), t, registry, &cfg)
 	session := &scriptedSession{toolNames: []string{"ping"}}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:         &config.MCP{Servers: []config.MCPServer{cfg}},
+		Config:         &Config{Servers: []ServerConfig{cfg}},
 		Broker:         broker,
 		TrustRegistry:  registry,
 		SessionStarter: &stubSessionStarter{session: session},
@@ -918,7 +918,7 @@ func TestManagerStartIsBoundedByStartupTimeout(t *testing.T) {
 	approveConfigDigest(t.Context(), t, registry, &fast)
 	stuck := &unresponsiveSession{}
 	mgr, err := NewManager(&ManagerOptions{
-		Config:        &config.MCP{Servers: []config.MCPServer{slow, fast}},
+		Config:        &Config{Servers: []ServerConfig{slow, fast}},
 		Broker:        broker,
 		TrustRegistry: registry,
 		SessionStarter: &perServerStarter{sessions: map[string]ContainedSession{

@@ -3,14 +3,12 @@ package mcp
 import (
 	"slices"
 	"testing"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
-func reviewFixture() *config.MCPServer {
-	return &config.MCPServer{
+func reviewFixture() *ServerConfig {
+	return &ServerConfig{
 		Name:        "docs",
-		Transport:   config.MCPTransportStdio,
+		Transport:   TransportStdio,
 		Command:     "/usr/bin/docs-server",
 		Args:        []string{"--secret-flag=hunter2"},
 		Environment: map[string]string{"API_KEY": "hunter2"},

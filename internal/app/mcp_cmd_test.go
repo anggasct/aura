@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -303,7 +304,7 @@ func TestMCPTrustUnknownServersFailWithStableCode(t *testing.T) {
 		{"mcp", "trust", "revoke", "ghost", "--config", cfg},
 	} {
 		_, err := execute(t, args...)
-		if code, ok := mcp.CodeOf(err); !ok || code != mcp.ErrConfigInvalid {
+		if code, ok := fault.CodeOf[mcp.ErrorCode](err); !ok || code != mcp.ErrConfigInvalid {
 			t.Errorf("%v error = %v (code %q, %v), want mcp_config_invalid", args[2:4], err, code, ok)
 		}
 	}
