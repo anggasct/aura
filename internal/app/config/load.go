@@ -135,7 +135,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		configkit.Under("runtime", cfg.Runtime.Validate()),
 		configkit.Under("server", cfg.Server.Validate()),
 		configkit.Under("logging", cfg.Logging.Validate()),
-		legacyconfig.ValidateStorage(cfg.Storage),
+		configkit.Under("storage", cfg.Storage.Validate()),
 		configkit.Under("telemetry", cfg.Telemetry.Validate()),
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),

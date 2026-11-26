@@ -9,6 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/usage"
@@ -28,7 +29,7 @@ type Config struct {
 	Logging      logging.Config              `json:"logging"`
 	Models       model.Config                `json:"models"`
 	ModelRoutes  map[string]model.ModelRoute `json:"model_routes,omitempty"`
-	Storage      legacyconfig.Storage        `json:"storage"`
+	Storage      storage.Config              `json:"storage"`
 	Telemetry    telemetry.Config            `json:"telemetry"`
 	Usage        usage.Config                `json:"usage"`
 	Health       health.Config               `json:"health"`
@@ -65,7 +66,7 @@ func Default() Config {
 		Server:       server.Default(),
 		Logging:      logging.Default(),
 		Models:       model.Default(),
-		Storage:      legacyconfig.DefaultStorage(),
+		Storage:      storage.Default(),
 		Telemetry:    telemetry.Default(),
 		Usage:        usage.Default(),
 		Health:       health.Default(),
