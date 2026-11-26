@@ -65,6 +65,14 @@ func newOwnerWhoamiCmd(gf *globalFlags) *cobra.Command {
 	}
 }
 
+func rekeyParticipants(db *sql.DB) []principal.Rekeyer {
+	return []principal.Rekeyer{
+		turnstore.NewSessionRekeyer(db),
+		store.NewMemoryRekeyer(db),
+		store.NewProfileRekeyer(db),
+	}
+}
+
 func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 	var apply bool
 	cmd := &cobra.Command{
@@ -82,7 +90,7 @@ func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 				if err != nil {
 					return err
 				}
-				report, err := store.RekeyOwners(ctx, db, moves, apply)
+				report, err := principal.Rekey(ctx, db, moves, apply, rekeyParticipants(db))
 				if err != nil {
 					return err
 				}
@@ -93,10 +101,10 @@ func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 					}
 					logger.InfoContext(ctx, "owner rekey applied",
 						"component", "owner",
-						"sessions", report.Sessions,
-						"memory_documents", report.MemoryDocuments,
-						"profile_facts", report.ProfileFacts,
-						"profile_fact_conflicts", report.ProfileFactConflicts,
+						"sessions", report.Count(principal.RekeyLineSessions),
+						"memory_documents", report.Count(principal.RekeyLineMemoryDocuments),
+						"profile_facts", report.Count(principal.RekeyLineProfileFacts),
+						"profile_fact_conflicts", report.Count(principal.RekeyLineProfileFactConflicts),
 					)
 				}
 				return writeProfileLines(cmd, lines)
@@ -107,19 +115,19 @@ func newOwnerRekeyCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func ownerRekeyMoves(cfg *appconfig.Config, osUser string) ([]store.OwnerMove, error) {
+func ownerRekeyMoves(cfg *appconfig.Config, osUser string) ([]principal.OwnerMove, error) {
 	owners, err := ownerResolver(cfg)
 	if err != nil {
 		return nil, err
 	}
-	var moves []store.OwnerMove
+	var moves []principal.OwnerMove
 	seen := map[string]bool{principal.OwnerID: true}
 	add := func(from, to string) {
 		if from == "" || seen[from] {
 			return
 		}
 		seen[from] = true
-		moves = append(moves, store.OwnerMove{From: from, To: to})
+		moves = append(moves, principal.OwnerMove{From: from, To: to})
 	}
 	add(strings.TrimSpace(osUser), principal.OwnerID)
 	add(legacyCronPrincipal, principal.OwnerID)
@@ -149,24 +157,24 @@ func discordAllowedUserIDs(discord *config.Discord) []string {
 	return slices.Compact(ids)
 }
 
-func ownerRekeyLines(report store.OwnerRekeyReport, apply bool) []string {
+func ownerRekeyLines(report principal.RekeyReport, apply bool) []string {
 	header := "dry-run: nothing written; rerun with --apply to move"
 	if apply {
 		header = "applied"
 	}
 	lines := []string{
 		header,
-		fmt.Sprintf("session: %d", report.Sessions),
-		fmt.Sprintf("memory_document: %d", report.MemoryDocuments),
-		fmt.Sprintf("profile_fact: %d", report.ProfileFacts),
+		fmt.Sprintf("session: %d", report.Count(principal.RekeyLineSessions)),
+		fmt.Sprintf("memory_document: %d", report.Count(principal.RekeyLineMemoryDocuments)),
+		fmt.Sprintf("profile_fact: %d", report.Count(principal.RekeyLineProfileFacts)),
 	}
-	if report.ProfileFactConflicts > 0 {
-		lines = append(lines, fmt.Sprintf("profile_fact conflicts left in place: %d (review with aura profile list)", report.ProfileFactConflicts))
+	if conflicts := report.Count(principal.RekeyLineProfileFactConflicts); conflicts > 0 {
+		lines = append(lines, fmt.Sprintf("profile_fact conflicts left in place: %d (review with aura profile list)", conflicts))
 	}
 	return lines
 }
 
-func recordOwnerRekey(ctx context.Context, db *sql.DB, report store.OwnerRekeyReport, at time.Time) error {
+func recordOwnerRekey(ctx context.Context, db *sql.DB, report principal.RekeyReport, at time.Time) error {
 	sessionID, err := ensureOwnerActionSession(ctx, db, principal.OwnerID)
 	if err != nil {
 		return err
@@ -178,10 +186,10 @@ func recordOwnerRekey(ctx context.Context, db *sql.DB, report store.OwnerRekeyRe
 		ProfileFactConflicts int64  `json:"profile_fact_conflicts"`
 		At                   string `json:"at"`
 	}{
-		Sessions:             report.Sessions,
-		MemoryDocuments:      report.MemoryDocuments,
-		ProfileFacts:         report.ProfileFacts,
-		ProfileFactConflicts: report.ProfileFactConflicts,
+		Sessions:             report.Count(principal.RekeyLineSessions),
+		MemoryDocuments:      report.Count(principal.RekeyLineMemoryDocuments),
+		ProfileFacts:         report.Count(principal.RekeyLineProfileFacts),
+		ProfileFactConflicts: report.Count(principal.RekeyLineProfileFactConflicts),
 		At:                   at.Format(time.RFC3339Nano),
 	})
 	if err != nil {

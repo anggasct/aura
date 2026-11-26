@@ -48,6 +48,15 @@ func testMemoryDocument(id, session, kind string) *store.MemoryDocument {
 	}
 }
 
+func testProfileFact(id string) *store.ProfileFact {
+	now := time.Now().UTC().Truncate(time.Second)
+	return &store.ProfileFact{
+		ID: id, OwnerID: "owner-1", Category: "language", Key: "backend",
+		Value: "Go", ValueDigest: "digest-go", Status: "candidate", Origin: "derived",
+		Confidence: 0.5, ConfidencePolicy: "conf-v1", CreatedAt: now, UpdatedAt: now,
+	}
+}
+
 func seedErasureFixture(t *testing.T, db *sql.DB, root string) {
 	t.Helper()
 	ctx := t.Context()
