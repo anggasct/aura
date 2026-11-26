@@ -15,7 +15,8 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/fault"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
 
@@ -91,6 +92,39 @@ func newTestStore(t *testing.T) *Store {
 	return mustNewStore(t, newTestDB(t))
 }
 
+func mustNewInterpreter(t *testing.T, store *Store, runtime durable.Runtime, options *Options) *Interpreter {
+	t.Helper()
+	interpreter, err := NewInterpreter(store, runtime, options)
+	if err != nil {
+		t.Fatalf("NewInterpreter: %v", err)
+	}
+	return interpreter
+}
+
+func TestNewInterpreterRejectsNilDependencies(t *testing.T) {
+	disk := newTestStore(t)
+	fake := durabletest.NewFake()
+	cases := []struct {
+		name    string
+		store   *Store
+		runtime durable.Runtime
+	}{
+		{name: "nil store", runtime: fake},
+		{name: "nil runtime", store: disk},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			interpreter, err := NewInterpreter(tc.store, tc.runtime, nil)
+			if interpreter != nil {
+				t.Fatal("NewInterpreter returned an interpreter for invalid arguments")
+			}
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
+				t.Fatalf("NewInterpreter err = %v, want %s", err, ErrorCodeInvalidArgument)
+			}
+		})
+	}
+}
+
 func TestNewStoreRequiresASessionCreator(t *testing.T) {
 	db := newTestDB(t)
 	cases := []struct {
@@ -107,7 +141,7 @@ func TestNewStoreRequiresASessionCreator(t *testing.T) {
 			if disk != nil {
 				t.Fatal("NewStore returned a store for invalid arguments")
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("NewStore err = %v, want %s", err, ErrorCodeInvalidArgument)
 			}
 		})
@@ -128,7 +162,7 @@ func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
 	tools := &fakeToolRunner{output: func(toolID string) json.RawMessage {
 		return json.RawMessage(`{"pr":123}`)
 	}}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -207,7 +241,7 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{output: json.RawMessage(`{"decision":"reject"}`)}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -263,7 +297,7 @@ func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	disk := newTestStore(t)
 	block := make(chan struct{})
 	agents := &fakeAgentRunner{inFlight: block}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
@@ -319,7 +353,7 @@ func TestInterpreterBoundsConcurrentSteps(t *testing.T) {
 			inFlight.Add(-1)
 		},
 	}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -351,7 +385,7 @@ func TestInterpreterWaitSuspendsAndResumes(t *testing.T) {
 	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -397,7 +431,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := blockingRunner{}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
@@ -427,7 +461,7 @@ func TestLoadRejectsInvalidSpecWithoutPersisting(t *testing.T) {
 	ctx := context.Background()
 	disk := newTestStore(t)
 	fake := durabletest.NewFake()
-	interpreter := NewInterpreter(disk, fake, &Options{})
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{})
 	spec := validTestSpec()
 	spec.Steps[0].Executor.AgentID = nil
 	deps := testValidationDeps()
@@ -442,10 +476,10 @@ func TestLoadRejectsInvalidSpecWithoutPersisting(t *testing.T) {
 func TestStartUnknownDefinitionFailsClosed(t *testing.T) {
 	ctx := context.Background()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{})
+	interpreter := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{})
 	if _, err := interpreter.Start(ctx, "ghost", nil, ownerOrigin()); err == nil {
 		t.Fatal("Start accepted an unknown definition")
-	} else if code, _ := CodeOf(err); code != ErrorCodeDefinitionNotFound {
+	} else if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodeDefinitionNotFound {
 		t.Fatalf("code = %s, want workflow_definition_not_found", code)
 	}
 }
@@ -540,7 +574,7 @@ func TestApprovalRejectionRoutesRunToFailure(t *testing.T) {
 	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
 	spec := &Spec{
 		ID: "rejectflow", Goal: "Reject", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
@@ -594,7 +628,7 @@ func TestInterpreterSignalStepTimeoutRetryConvergesOnSignal(t *testing.T) {
 				clock := durabletest.NewManualClock(time.Date(2026, 9, 3, 9, 0, 0, 0, time.UTC))
 				fake := durabletest.NewFake().WithClock(clock)
 				disk := newTestStore(t)
-				interpreter := NewInterpreter(disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
+				interpreter := mustNewInterpreter(t, disk, fake, &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 1, AgentResolver: registry})
 				step := StepSpec{ID: "gate", Executor: ExecutorSpec{Kind: tc.kind}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 1, Backoff: time.Minute}}
 				if tc.kind == KindWait {
 					step.Executor.Event = ptr("ci.completed")
@@ -644,7 +678,7 @@ func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	fake := durabletest.NewFake().WithClock(clock)
 	disk := newTestStore(t)
 	tracker := &attemptTracker{events: map[int]string{}}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
@@ -753,7 +787,7 @@ func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
 	disk := newTestStore(t)
 	sink := &fakeArtifactSink{digest: "sha256-abc123"}
 	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -803,7 +837,7 @@ func TestInterpreterWaitPayloadOverInlineLimitIsSunk(t *testing.T) {
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	sink := &fakeArtifactSink{digest: "sha256-wait"}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -849,7 +883,7 @@ func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{output: oversizedOutput(70000)}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -889,7 +923,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 	disk := mustNewStore(t, db)
 	block := make(chan struct{})
 	agents := &fakeAgentRunner{inFlight: block}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
@@ -925,7 +959,7 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	agents := &fakeAgentRunner{}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
 		AgentResolver:      registry,
@@ -974,7 +1008,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 	disk := newTestStore(t)
 	started := make(chan struct{}, 1)
 	agents := &countingRunner{onStart: func() { started <- struct{}{} }}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 1,
 		AgentResolver:      registry,
@@ -1109,7 +1143,7 @@ func TestSaveDefinitionConcurrentConflict(t *testing.T) {
 			successCount++
 			continue
 		}
-		code, ok := CodeOf(err)
+		code, ok := fault.CodeOf[ErrorCode](err)
 		if !ok || code != ErrorCodeSpecInvalid {
 			t.Fatalf("concurrent save error = %v (code %v, ok %v), want %s", err, code, ok, ErrorCodeSpecInvalid)
 		}
@@ -1153,7 +1187,7 @@ func TestApprovalRequesterPortFailsStepAndRun(t *testing.T) {
 	disk := newTestStore(t)
 	fake := durabletest.NewFake()
 	requester := &testApprovalRequester{err: errors.New("approval backend unavailable")}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:        DriverConcurrent,
 		Approvals:     requester,
 		AgentResolver: registry,
@@ -1199,7 +1233,7 @@ func TestApprovalRequesterPortSucceedsOnSignal(t *testing.T) {
 	disk := newTestStore(t)
 	fake := durabletest.NewFake()
 	requester := &testApprovalRequester{}
-	interpreter := NewInterpreter(disk, fake, &Options{
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:        DriverConcurrent,
 		Approvals:     requester,
 		AgentResolver: registry,

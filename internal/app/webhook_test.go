@@ -393,7 +393,7 @@ func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durabletest.
 			{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
 		},
 	}
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{backend}, nil)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{backend}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("Install: %v", err)
 	}

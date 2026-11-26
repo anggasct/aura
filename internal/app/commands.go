@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
@@ -25,6 +26,7 @@ func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
 	root.AddCommand(skills.Commands(skillsOpener(gf))...)
+	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
 }
 
 func skillsOpener(gf *globalFlags) skills.Opener {

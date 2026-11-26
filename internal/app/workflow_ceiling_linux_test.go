@@ -3,6 +3,7 @@
 package app
 
 import (
+	"github.com/anggasct/aura/internal/platform/fault"
 	"os"
 	"path/filepath"
 	"testing"
@@ -61,7 +62,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		call := callAs("run-ceiling")
 		call.StepID = "step-2"
 		_, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("after"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
 			t.Fatalf("Invoke = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
 		}
 		if got := len(probe.seen()); got != 0 {
@@ -74,7 +75,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		call := callAs("run-ceiling")
 		call.StepID = "step-3"
 		_, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("gone"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodePersonaMissing {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodePersonaMissing {
 			t.Fatalf("Invoke = %v, want %s", err, workflow.ErrorCodePersonaMissing)
 		}
 		if got := len(probe.seen()); got != 0 {

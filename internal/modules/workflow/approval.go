@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type ApprovalKind string
@@ -30,12 +32,7 @@ type Approval struct {
 	ApprovedAt              time.Time
 }
 
-type approvalExecer interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
-}
-
-func insertApproval(ctx context.Context, db approvalExecer, approval *Approval) error {
+func insertApproval(ctx context.Context, db sqlite.Querier, approval *Approval) error {
 	var stored string
 	err := db.QueryRowContext(ctx,
 		`SELECT spec_sha256 FROM workflow_approval WHERE definition_id = ? AND definition_version = ?`,
@@ -48,7 +45,7 @@ func insertApproval(ctx context.Context, db approvalExecer, approval *Approval) 
 		}
 		return nil
 	case !errors.Is(err, sql.ErrNoRows):
-		return fmt.Errorf("read approval: %w", err)
+		return sqlite.Classify(fmt.Errorf("read approval: %w", err))
 	}
 	var sourceVersion any
 	if approval.SourceDefinitionID != "" {
@@ -60,7 +57,7 @@ func insertApproval(ctx context.Context, db approvalExecer, approval *Approval) 
 		nullable(approval.ProposalID), nullable(approval.SourceDefinitionID), sourceVersion, approval.Tainted,
 		approval.ApprovedAt.UTC().Format(time.RFC3339Nano),
 	); err != nil {
-		return fmt.Errorf("insert approval: %w", err)
+		return sqlite.Classify(fmt.Errorf("insert approval: %w", err))
 	}
 	return nil
 }
@@ -69,7 +66,7 @@ func (s *Store) Approval(ctx context.Context, id string, version int) (*Approval
 	var approval Approval
 	var kind, approvedAt string
 	var sourceVersion sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT definition_id, definition_version, spec_sha256, kind, COALESCE(agent_id, ''), approver_id, COALESCE(proposal_id, ''),
 			COALESCE(source_definition_id, ''), source_definition_version, tainted, approved_at
 		FROM workflow_approval WHERE definition_id = ? AND definition_version = ?`,
@@ -80,7 +77,7 @@ func (s *Store) Approval(ctx context.Context, id string, version int) (*Approval
 		return nil, codedError(ErrorCodeApprovalMissing, fmt.Sprintf("definition %s version %d has no approval record", id, version))
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read approval: %w", err)
+		return nil, sqlite.Classify(fmt.Errorf("read approval: %w", err))
 	}
 	approval.Kind = ApprovalKind(kind)
 	approval.SourceDefinitionVersion = int(sourceVersion.Int64)
@@ -89,32 +86,30 @@ func (s *Store) Approval(ctx context.Context, id string, version int) (*Approval
 }
 
 func (s *Store) ApproveProposal(ctx context.Context, proposalID string, approval *Approval) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("begin proposal approval: %w", err)
+	if approval == nil {
+		return codedError(ErrorCodeInvalidArgument, "proposal approval must not be nil")
 	}
-	defer func() { _ = tx.Rollback() }()
 	record := *approval
 	record.Kind = ApprovalProposal
 	record.ProposalID = proposalID
 	if record.ApprovedAt.IsZero() {
 		record.ApprovedAt = time.Now().UTC()
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE workflow_proposal SET status = ?, decided_at = ? WHERE id = ? AND status = ?`,
-		ProposalApproved, record.ApprovedAt.UTC().Format(time.RFC3339Nano), proposalID, ProposalProposed)
-	if err != nil {
-		return fmt.Errorf("approve proposal: %w", err)
-	}
-	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
-		return codedError(ErrorCodeProposalDecided, "proposal "+proposalID+" is not awaiting a decision")
-	}
-	if err := insertApproval(ctx, tx, &record); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit proposal approval: %w", err)
-	}
-	return nil
+	return sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		result, err := q.ExecContext(ctx, `UPDATE workflow_proposal SET status = ?, decided_at = ? WHERE id = ? AND status = ?`,
+			ProposalApproved, record.ApprovedAt.UTC().Format(time.RFC3339Nano), proposalID, ProposalProposed)
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("approve proposal: %w", err))
+		}
+		if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+			if err != nil {
+				return sqlite.Classify(fmt.Errorf("approve proposal: %w", err))
+			}
+			return codedError(ErrorCodeProposalDecided, "proposal "+proposalID+" is not awaiting a decision")
+		}
+		return insertApproval(ctx, q, &record)
+	})
 }
 
 func (i *Interpreter) requireApproval(ctx context.Context, id string, version int, digest string) (*Approval, error) {
@@ -163,12 +158,12 @@ func proposalClaimFor(approval *Approval, explicit string) (string, error) {
 func (s *Store) proposalApproval(ctx context.Context, proposalID string) (*Approval, error) {
 	var id string
 	var version int
-	err := s.db.QueryRowContext(ctx, `SELECT definition_id, definition_version FROM workflow_approval WHERE proposal_id = ?`, proposalID).Scan(&id, &version)
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT definition_id, definition_version FROM workflow_approval WHERE proposal_id = ?`, proposalID).Scan(&id, &version)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, codedError(ErrorCodeApprovalMissing, "proposal "+proposalID+" has no approval record")
 	}
 	if err != nil {
-		return nil, fmt.Errorf("read proposal approval: %w", err)
+		return nil, sqlite.Classify(fmt.Errorf("read proposal approval: %w", err))
 	}
 	return s.Approval(ctx, id, version)
 }

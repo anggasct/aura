@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"testing"
 	"time"
 )
@@ -32,7 +33,7 @@ func TestBindCorrelationRoundTrip(t *testing.T) {
 	}
 	if err := disk.BindCorrelation(ctx, &binding); err == nil {
 		t.Fatal("expected duplicate binding to conflict, got nil")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCorrelationConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeCorrelationConflict {
 		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeCorrelationConflict)
 	}
 	delivery := binding
@@ -42,7 +43,7 @@ func TestBindCorrelationRoundTrip(t *testing.T) {
 	}
 	if err := disk.BindCorrelation(ctx, &delivery); err == nil {
 		t.Fatal("expected duplicate delivery to conflict, got nil")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCorrelationConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeCorrelationConflict {
 		t.Fatalf("delivery conflict code = %v (ok=%v), want %s", code, ok, ErrorCodeCorrelationConflict)
 	}
 	resolved, err := disk.ResolveCorrelation(ctx, "github", "check_suite.completed", "org/repo#42", "")
@@ -54,7 +55,7 @@ func TestBindCorrelationRoundTrip(t *testing.T) {
 	}
 	if _, err := disk.ResolveCorrelation(ctx, "github", "check_suite.completed", "org/other#9", ""); err == nil {
 		t.Fatal("expected unmatched event to fail, got nil")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeCorrelationUnmatched {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeCorrelationUnmatched {
 		t.Fatalf("unmatched code = %v (ok=%v), want %s", code, ok, ErrorCodeCorrelationUnmatched)
 	}
 	listed, err := disk.ListCorrelationsByRun(ctx, summary.ID)

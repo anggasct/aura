@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 	"testing"
 	"time"
@@ -338,13 +339,13 @@ func TestTheCeilingChecksFailClosedWithoutTheirDependencies(t *testing.T) {
 	registry := ceilingTestRegistry(t)
 	t.Run("a tool step without a ceiling predicate is refused", func(t *testing.T) {
 		err := CheckCeiling(ceilingSpec("read_file"), "open", principal.ClassOwner, &ValidationDeps{Agents: registry})
-		if code, _ := CodeOf(err); code != ErrorCodeCapabilityExceeded {
+		if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodeCapabilityExceeded {
 			t.Fatalf("CheckCeiling() = %v, want %s", err, ErrorCodeCapabilityExceeded)
 		}
 	})
 	t.Run("a start without a persona registry is refused", func(t *testing.T) {
 		err := checkPersona(&ValidationDeps{StepAllowed: registryStepAllowed(registry)}, "open", principal.ClassOwner)
-		if code, _ := CodeOf(err); code != ErrorCodePersonaMissing {
+		if code, _ := fault.CodeOf[ErrorCode](err); code != ErrorCodePersonaMissing {
 			t.Fatalf("checkPersona() = %v, want %s", err, ErrorCodePersonaMissing)
 		}
 	})

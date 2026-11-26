@@ -76,7 +76,7 @@ func (r *gatedToolRunner) Invoke(ctx context.Context, toolID string, args json.R
 	return output, err
 }
 
-func gateAfterTheEffect(_ *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner {
+func gateAfterTheEffect(_ *testing.T, life *runLife, runner *workflow.ToolStepRunner) workflow.ToolRunner {
 	return &gatedToolRunner{inner: runner, ledger: life.ledger, gate: effectReturnedGate}
 }
 

@@ -79,13 +79,23 @@ steps:
     timeout: 1m
 `
 
+func mustWorkflowInterpreter(t *testing.T, store *workflow.Store, durableRuntime durable.Runtime, options *workflow.Options) *workflow.Interpreter {
+	t.Helper()
+	interpreter, err := workflow.NewInterpreter(store, durableRuntime, options)
+	if err != nil {
+		t.Fatalf("workflow.NewInterpreter: %v", err)
+	}
+	return interpreter
+}
+
 func runWorkflowCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := newWorkflowCmd(gf)
+	cmd := workflow.Commands(workflowOpener(gf))[0]
 	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errOut)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -116,7 +126,7 @@ func TestWorkflowValidateRejectsInvalidFile(t *testing.T) {
 	gf := writeWorkflowFixtures(t, "")
 	if _, err := runWorkflowCommand(t, gf, "validate", file); err == nil {
 		t.Fatal("validate accepted an invalid executor kind")
-	} else if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+	} else if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 		t.Fatalf("error = %v, want workflow_executor_invalid", err)
 	}
 }
@@ -127,7 +137,7 @@ func TestWorkflowStartUnknownDefinitionFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("start accepted an unknown definition")
 	}
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeDefinitionNotFound {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeDefinitionNotFound {
 		t.Fatalf("error = %v, want workflow_definition_not_found", err)
 	}
 }
@@ -136,7 +146,7 @@ func TestWorkflowRunsAndInspectUnknownRunFails(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	if _, err := runWorkflowCommand(t, gf, "inspect", "run-missing"); err == nil {
 		t.Fatal("inspect accepted an unknown run")
-	} else if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeRunNotFound {
+	} else if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeRunNotFound {
 		t.Fatalf("inspect error = %v, want workflow_run_not_found", err)
 	}
 	if _, err := runWorkflowCommand(t, gf, "cancel", "run-missing"); err == nil {
@@ -247,7 +257,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := mustWorkflowStore(t, db)
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
@@ -313,7 +323,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 		t.Fatalf("open storage: %v", err)
 	}
 	disk := mustWorkflowStore(t, db)
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
@@ -469,7 +479,7 @@ func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
 		if err == nil {
 			t.Fatalf("Invoke accepted empty arguments %s", args)
 		}
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeStepFailed {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeStepFailed {
 			t.Fatalf("error = %v, want the stable workflow_step_failed code", err)
 		}
 	}
@@ -487,7 +497,7 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 	toolPtr := func(s string) *string { return &s }
 	fake := durabletest.NewFake()
 	disk := mustWorkflowStore(t, db)
-	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{
+	interpreter := mustWorkflowInterpreter(t, disk, fake, &workflow.Options{
 		Tools:  runner,
 		Logger: slog.Default(),
 	})
@@ -701,7 +711,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
 	}
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}

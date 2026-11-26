@@ -117,7 +117,7 @@ func TestInterpreterResolvesStoredDefinitionsItDidNotLoad(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	driver := NewInterpreter(disk, durabletest.NewFake(), &Options{MaxConcurrentSteps: 2, Tools: tools})
+	driver := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{MaxConcurrentSteps: 2, Tools: tools})
 	if err := driver.LoadAll(context.Background(), []*Spec{toolSpec("leaf")}, testValidationDeps()); err != nil {
 		t.Fatal(err)
 	}
