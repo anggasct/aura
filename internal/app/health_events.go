@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -51,7 +52,7 @@ func (l *healthEventLog) sink(ctx context.Context, t *health.Transition) error {
 	if err != nil {
 		return err
 	}
-	event := store.RuntimeEvent{
+	event := turn.Event{
 		ID:            eventID,
 		SessionID:     healthSessionID,
 		Sequence:      sequence + 1,
@@ -75,7 +76,7 @@ func (l *healthEventLog) ensureSession(ctx context.Context) error {
 	if !errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("health event: %w", err)
 	}
-	if err := l.sessions.Create(ctx, &store.Session{ID: healthSessionID, OwnerID: "system"}); err != nil {
+	if err := l.sessions.Create(ctx, &turn.Session{ID: healthSessionID, OwnerID: "system"}); err != nil {
 		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
 			return nil
 		}

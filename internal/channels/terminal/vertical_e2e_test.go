@@ -291,24 +291,24 @@ type blockingExecutor struct {
 	failText string
 }
 
-func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		b.once.Do(func() { close(b.started) })
 		select {
 		case <-b.release:
 		case <-ctx.Done():
-			yield(store.RuntimeEvent{}, ctx.Err())
+			yield(turn.Event{}, ctx.Err())
 			return
 		}
 		payload, err := json.Marshal(map[string]any{"text": b.failText})
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
-		if !yield(store.RuntimeEvent{Kind: store.EventKindADK, Payload: payload}, nil) {
+		if !yield(turn.Event{Kind: store.EventKindADK, Payload: payload}, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{Kind: turn.EventKindTurnCompleted}, nil)
+		yield(turn.Event{Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 
@@ -318,7 +318,7 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 	events := store.NewEventStore(db)
 	now := time.Now().UTC()
 	for _, id := range []string{"seed-a", "seed-b"} {
-		if err := sessions.Create(context.Background(), &store.Session{ID: id, OwnerID: "e2e-owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := sessions.Create(context.Background(), &turn.Session{ID: id, OwnerID: "e2e-owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatalf("seed session %s: %v", id, err)
 		}
 	}

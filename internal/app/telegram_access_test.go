@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -106,7 +107,7 @@ func TestPrincipalListIncludesTelegramPrincipals(t *testing.T) {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: "main/telegram:pocket/chat:9", OwnerID: "telegram:9", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "main/telegram:pocket/chat:9", OwnerID: "telegram:9", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	out, err := runAccessCommand(t, newPrincipalCmd, cfg, "list")

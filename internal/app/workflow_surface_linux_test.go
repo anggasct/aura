@@ -37,6 +37,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -172,7 +173,7 @@ func (r *surfaceRig) seedProposal(t *testing.T, call *workflow.StepCall, claimed
 	t.Helper()
 	now := time.Now().UTC()
 	session := "proposal-session-" + call.RunID
-	if err := store.NewSessionService(r.db).Create(t.Context(), &store.Session{ID: session, OwnerID: principal.OwnerID, AgentID: opsPersona, CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.NewSessionService(r.db).Create(t.Context(), &turn.Session{ID: session, OwnerID: principal.OwnerID, AgentID: opsPersona, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create proposal session: %v", err)
 	}
 	tool := "write_file"

@@ -9,7 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type Origin string
@@ -158,7 +157,7 @@ const (
 )
 
 type AgentRuntime interface {
-	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Run(ctx context.Context, req *TurnRequest) iter.Seq2[Event, error]
 }
 
 type ToolBroker interface {

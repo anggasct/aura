@@ -13,6 +13,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -68,7 +69,7 @@ type contextEventPayload struct {
 	ApprovalID     string `json:"approval_id"`
 }
 
-func mapContextEvent(row *store.RuntimeEvent) compaction.Event {
+func mapContextEvent(row *turn.Event) compaction.Event {
 	if row == nil {
 		return compaction.Event{}
 	}
@@ -194,7 +195,7 @@ func (s *contextSummaryStore) UpsertSummary(ctx context.Context, record *compact
 	if created.IsZero() {
 		created = time.Now().UTC()
 	}
-	_, _, err := s.events.UpsertEvent(ctx, &store.RuntimeEvent{
+	_, _, err := s.events.UpsertEvent(ctx, &turn.Event{
 		ID:            record.ID,
 		SessionID:     record.SessionID,
 		TurnID:        record.TurnID,

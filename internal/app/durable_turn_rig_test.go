@@ -537,7 +537,7 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 		t.Fatalf("open the database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
 		t.Fatalf("create %s: %v", suiteSession, err)
 	}
 	return plan, db
@@ -752,7 +752,7 @@ func (s *killedSuite) requireRequestsAfterKill(t *testing.T, texts []string) {
 	}
 }
 
-func turnEvents(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func turnEvents(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
 	var sessionID string
 	err := db.QueryRowContext(t.Context(), `SELECT session_id FROM runtime_event WHERE turn_id = ? AND kind = ?`, turnID, turn.EventKindTurnAccepted).Scan(&sessionID)
@@ -777,9 +777,9 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-func waitTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func waitTerminal(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	waitUntil(t, turnID+" has a terminal event", func() bool {
 		events = turnEvents(t, db, turnID)
 		for i := range events {
@@ -792,7 +792,7 @@ func waitTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent 
 	return events
 }
 
-func countKind(events []store.RuntimeEvent, kind string) int {
+func countKind(events []turn.Event, kind string) int {
 	n := 0
 	for i := range events {
 		if events[i].Kind == kind {
@@ -802,8 +802,8 @@ func countKind(events []store.RuntimeEvent, kind string) int {
 	return n
 }
 
-func terminalEvents(events []store.RuntimeEvent) []store.RuntimeEvent {
-	var terminals []store.RuntimeEvent
+func terminalEvents(events []turn.Event) []turn.Event {
+	var terminals []turn.Event
 	for i := range events {
 		if isTerminalKind(events[i].Kind) {
 			terminals = append(terminals, events[i])
@@ -812,7 +812,7 @@ func terminalEvents(events []store.RuntimeEvent) []store.RuntimeEvent {
 	return terminals
 }
 
-func requireCompletedOnce(t *testing.T, events []store.RuntimeEvent) {
+func requireCompletedOnce(t *testing.T, events []turn.Event) {
 	t.Helper()
 	if len(events) == 0 {
 		t.Fatal("the turn has no events")
@@ -828,7 +828,7 @@ func requireCompletedOnce(t *testing.T, events []store.RuntimeEvent) {
 	}
 }
 
-func storedUserText(t *testing.T, events []store.RuntimeEvent, text string) int {
+func storedUserText(t *testing.T, events []turn.Event, text string) int {
 	t.Helper()
 	n := 0
 	for i := range events {

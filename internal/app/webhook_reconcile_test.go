@@ -54,14 +54,14 @@ func seedWebhookTurn(t *testing.T, db *sql.DB, seed *webhookTurnSeed) *store.Web
 	if !seed.withSession && len(seed.events) == 0 {
 		return execution
 	}
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: execution.SessionID, OwnerID: "webhook:primary", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create session %s: %v", execution.SessionID, err)
 	}
 	events := store.NewEventStore(db)
 	for i, event := range seed.events {
-		stored := &store.RuntimeEvent{
+		stored := &turn.Event{
 			ID: seed.id + "-" + event.id, SessionID: execution.SessionID, Sequence: uint64(i + 1),
 			TurnID: firstNonEmpty(event.turnID, execution.TurnID), InvocationID: "inv-" + seed.id, Author: "webhook:primary",
 			Kind: event.kind, SchemaVersion: 1, Payload: json.RawMessage(firstNonEmpty(event.payload, `{}`)), CreatedAt: now,
@@ -197,7 +197,7 @@ func turnEmitting(kinds ...string) func(turnID string) []turnOutcome {
 	return func(turnID string) []turnOutcome {
 		outcomes := make([]turnOutcome, 0, len(kinds))
 		for _, kind := range kinds {
-			outcomes = append(outcomes, turnOutcome{event: store.RuntimeEvent{ID: kind + "-" + turnID, Kind: kind}})
+			outcomes = append(outcomes, turnOutcome{event: turn.Event{ID: kind + "-" + turnID, Kind: kind}})
 		}
 		return outcomes
 	}
@@ -206,7 +206,7 @@ func turnEmitting(kinds ...string) func(turnID string) []turnOutcome {
 func appendTurnCompleted(t *testing.T, db *sql.DB, execution *store.WebhookExecution) {
 	t.Helper()
 	next := uint64(countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ?`, execution.SessionID)) + 1
-	if err := store.NewEventStore(db).Append(t.Context(), &store.RuntimeEvent{
+	if err := store.NewEventStore(db).Append(t.Context(), &turn.Event{
 		ID: "done-" + execution.TurnID, SessionID: execution.SessionID, Sequence: next, TurnID: execution.TurnID,
 		InvocationID: "inv-" + execution.TurnID, Author: "webhook:primary", Kind: turn.EventKindTurnCompleted,
 		SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(),
@@ -558,7 +558,7 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		db := storetest.OpenMigrated(t)
 		backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
 			return []turnOutcome{
-				{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, Kind: turn.EventKindTurnAccepted}},
+				{event: turn.Event{ID: "evt_accepted_" + turnID, Kind: turn.EventKindTurnAccepted}},
 				{err: errors.New("stream broke")},
 			}
 		}}
@@ -580,12 +580,12 @@ func TestWebhookDispatcher_ReplayAnswersItsReferenceWhenTheReconcileFails(t *tes
 		execution := seedWebhookTurn(t, db, &webhookTurnSeed{id: "whex_unstored", events: []storedTurnEvent{{id: "a", kind: turn.EventKindTurnAccepted}}})
 		dispatcher, _ := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: &fakeTurnRuntime{events: acceptedTurnEvents}})
 		yielded := false
-		dispatcher.startDrain(t.Context(), execution.ID, func() (store.RuntimeEvent, error, bool) {
+		dispatcher.startDrain(t.Context(), execution.ID, func() (turn.Event, error, bool) {
 			if yielded {
-				return store.RuntimeEvent{}, nil, false
+				return turn.Event{}, nil, false
 			}
 			yielded = true
-			return store.RuntimeEvent{Kind: turn.EventKindTurnFailed, TurnID: execution.TurnID, Payload: json.RawMessage(`{"code":"storage_unavailable"}`)}, nil, true
+			return turn.Event{Kind: turn.EventKindTurnFailed, TurnID: execution.TurnID, Payload: json.RawMessage(`{"code":"storage_unavailable"}`)}, nil, true
 		}, func() {})
 		if err := dispatcher.Wait(t.Context()); err != nil {
 			t.Fatalf("Wait: %v", err)

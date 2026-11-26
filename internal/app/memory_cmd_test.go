@@ -10,6 +10,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -65,7 +66,7 @@ func seedMemoryDoc(t *testing.T, cfgPath, id, owner, session, content string, se
 	defer func() { _ = db.Close() }()
 	sessions := store.NewSessionService(db)
 	now := time.Now().UTC()
-	_ = sessions.Create(t.Context(), &store.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
+	_ = sessions.Create(t.Context(), &turn.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
 	memoryStore := store.NewMemoryStore(db)
 	document := &store.MemoryDocument{
 		ID: id, OwnerID: owner, SessionID: session, Kind: store.MemoryKindEventText,
@@ -90,7 +91,7 @@ func seedMemorySummary(t *testing.T, cfgPath, id, owner, session string, expires
 	defer func() { _ = db.Close() }()
 	sessions := store.NewSessionService(db)
 	now := time.Now().UTC()
-	_ = sessions.Create(t.Context(), &store.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
+	_ = sessions.Create(t.Context(), &turn.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
 	memoryStore := store.NewMemoryStore(db)
 	document := &store.MemoryDocument{
 		ID: id, OwnerID: owner, SessionID: session, Kind: store.MemoryKindSummary,

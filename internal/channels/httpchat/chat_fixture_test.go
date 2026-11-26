@@ -18,7 +18,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -41,17 +40,17 @@ type scriptedRuntime struct {
 	cancelCtx context.CancelFunc
 }
 
-func (s *scriptedRuntime) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (s *scriptedRuntime) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	s.mu.Lock()
 	s.turns = append(s.turns, *req)
 	reply, failure, terminal, runErr, noUsage, cancel := s.reply, s.failure, s.terminal, s.runErr, s.noUsage, s.cancelCtx
 	s.mu.Unlock()
-	return func(yield func(store.RuntimeEvent, error) bool) {
+	return func(yield func(turn.Event, error) bool) {
 		if runErr != nil {
-			yield(store.RuntimeEvent{}, runErr)
+			yield(turn.Event{}, runErr)
 			return
 		}
-		if !yield(store.RuntimeEvent{TurnID: testTurnID, Kind: turn.EventKindTurnAccepted}, nil) {
+		if !yield(turn.Event{TurnID: testTurnID, Kind: turn.EventKindTurnAccepted}, nil) {
 			return
 		}
 		if cancel != nil {
@@ -60,13 +59,13 @@ func (s *scriptedRuntime) Run(_ context.Context, req *turn.TurnRequest) iter.Seq
 		switch {
 		case failure != "":
 			payload := `{"code":"` + failure + `","detail":"internal detail with the prompt and secret model output"}`
-			yield(store.RuntimeEvent{TurnID: testTurnID, Kind: turn.EventKindTurnFailed, Payload: json.RawMessage(payload)}, nil)
+			yield(turn.Event{TurnID: testTurnID, Kind: turn.EventKindTurnFailed, Payload: json.RawMessage(payload)}, nil)
 			return
 		case terminal != "":
-			yield(store.RuntimeEvent{TurnID: testTurnID, Kind: terminal}, nil)
+			yield(turn.Event{TurnID: testTurnID, Kind: terminal}, nil)
 			return
 		}
-		answer := store.RuntimeEvent{TurnID: testTurnID, Kind: turn.EventKindMessageCompleted}
+		answer := turn.Event{TurnID: testTurnID, Kind: turn.EventKindMessageCompleted}
 		answer.Payload, _ = json.Marshal(map[string]string{"text": reply})
 		if !noUsage {
 			answer.ProviderUsage = json.RawMessage(testUsageJSON)
@@ -74,7 +73,7 @@ func (s *scriptedRuntime) Run(_ context.Context, req *turn.TurnRequest) iter.Seq
 		if !yield(answer, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{TurnID: testTurnID, Kind: turn.EventKindTurnCompleted}, nil)
+		yield(turn.Event{TurnID: testTurnID, Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 
@@ -84,7 +83,7 @@ func (s *scriptedRuntime) requests() []turn.TurnRequest {
 	return append([]turn.TurnRequest(nil), s.turns...)
 }
 
-func testAnswerTexts(events []store.RuntimeEvent) []string {
+func testAnswerTexts(events []turn.Event) []string {
 	var texts []string
 	for i := range events {
 		if events[i].Kind != turn.EventKindMessageCompleted {
@@ -233,7 +232,7 @@ type chatFixtureOptions struct {
 	audience    string
 	backend     turn.AgentRuntime
 	approvals   *approval.OwnerRoute
-	answers     func(events []store.RuntimeEvent) []string
+	answers     func(events []turn.Event) []string
 }
 
 func newChatFixture(t *testing.T, opts chatFixtureOptions) *chatFixture {
@@ -388,7 +387,7 @@ type contextProbe struct {
 	err    error
 }
 
-func (p *contextProbe) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (p *contextProbe) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	p.mu.Lock()
 	p.marker, p.err = ctx.Value(probeKey{}), ctx.Err()
 	p.mu.Unlock()

@@ -294,7 +294,7 @@ func TestEmptyTextSkipsDelivery(t *testing.T) {
 			SessionID:    "channel:333",
 			Origin:       turn.Origin("discord:test"),
 			ReplyContext: json.RawMessage(`{"channel_id":"333","message_id":"999"}`),
-		}, []store.RuntimeEvent{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
+		}, []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
 		code, ok := fault.CodeOf[turn.ErrorCode](skipErr)
 		if !ok || code != turn.ErrorCodeDeliverySkipped {
 			t.Fatalf("skip code = %q (ok=%v), want delivery_skipped", code, ok)
@@ -378,7 +378,7 @@ func TestDeliveryRetryAfterFailure(t *testing.T) {
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-retry-failure")
-		events := []store.RuntimeEvent{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"needs reply"}`)}}
+		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"needs reply"}`)}}
 
 		firstErr := engine.deliverCompletedTurn(context.Background(), req, events)
 		if code, ok := fault.CodeOf[turn.ErrorCode](firstErr); !ok || code != turn.ErrorCodeDeliveryFailed {
@@ -411,7 +411,7 @@ func TestMissingAdapterFailureIsRetryable(t *testing.T) {
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-no-adapter-retry")
-		events := []store.RuntimeEvent{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
+		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
 		if err := engine.deliverCompletedTurn(context.Background(), req, events); err == nil {
 			t.Fatal("missing adapter must return delivery_failed, got nil")
 		} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeDeliveryFailed {
@@ -436,7 +436,7 @@ func TestDeliveredEntriesExpireAfterDedupeWindow(t *testing.T) {
 		mustCreateSession(t, db, "channel:333")
 
 		req := channelTurnRequest("channel:333", "turn-expire")
-		events := []store.RuntimeEvent{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
+		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
 		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
 			t.Fatalf("first deliver: %v", err)
 		}
@@ -480,7 +480,7 @@ func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
 		kuma := &namedCapturingAdapter{capturingAdapter: &capturingAdapter{}, name: "discord:kuma"}
 		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{home, kuma}}, executor)
 		mustCreateSession(t, db, "channel:333")
-		events := []store.RuntimeEvent{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hi from kuma"}`)}}
+		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hi from kuma"}`)}}
 
 		req := channelTurnRequest("channel:333", "turn-account-kuma")
 		req.Origin = turn.Origin("discord:kuma")

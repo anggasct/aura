@@ -96,7 +96,7 @@ func (s *terminalSessions) Create(ctx context.Context, owner, agentID string) (t
 	if agentID == "" {
 		agentID = s.agentID
 	}
-	internal := &store.Session{
+	internal := &turn.Session{
 		ID:        id,
 		OwnerID:   owner,
 		AgentID:   agentID,

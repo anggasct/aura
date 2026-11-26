@@ -76,9 +76,9 @@ func streamTurn(turnID string, streamPartial bool, budget int64) *turn.TurnReque
 	}
 }
 
-func runStreamTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) ([]store.RuntimeEvent, error) {
+func runStreamTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) ([]turn.Event, error) {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			return events, err
@@ -88,7 +88,7 @@ func runStreamTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) (
 	return events, nil
 }
 
-func partialTexts(t *testing.T, events []store.RuntimeEvent) (partials []string, finals int) {
+func partialTexts(t *testing.T, events []turn.Event) (partials []string, finals int) {
 	t.Helper()
 	for i := range events {
 		if events[i].Kind != store.EventKindADK {

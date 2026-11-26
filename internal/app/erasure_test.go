@@ -8,12 +8,13 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
 func seedIdleSession(t *testing.T, sessions store.SessionService, id, owner string, at time.Time) {
 	t.Helper()
-	if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: owner, CreatedAt: at, UpdatedAt: at, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, CreatedAt: at, UpdatedAt: at, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session %s: %v", id, err)
 	}
 }

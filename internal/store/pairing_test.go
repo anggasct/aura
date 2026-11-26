@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func pairingIssue(code, principalID, account string, now time.Time) *PairingIssue {
@@ -139,7 +141,7 @@ func TestPairingFailedApprovalsReadOwnerActions(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marshal: %v", err)
 		}
-		if _, _, err := events.UpsertEvent(ctx, &RuntimeEvent{
+		if _, _, err := events.UpsertEvent(ctx, &turn.Event{
 			ID: "ev-" + string(rune('a'+i)), SessionID: "profile-local-owner", TurnID: "owner-action", InvocationID: "owner-action",
 			Author: "local-owner", Kind: AccessOwnerActionEventKind, SchemaVersion: 1, Payload: payload, CreatedAt: entry.at,
 		}); err != nil {

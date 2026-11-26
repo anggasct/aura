@@ -24,21 +24,21 @@ type refusingEventStore struct {
 	kind string
 }
 
-func (s *refusingEventStore) Append(ctx context.Context, ev *store.RuntimeEvent) error {
+func (s *refusingEventStore) Append(ctx context.Context, ev *turn.Event) error {
 	if ev.Kind == s.kind {
 		return errEventWriteRefused
 	}
 	return s.EventStore.Append(ctx, ev)
 }
 
-func (s *refusingEventStore) AppendSequenced(ctx context.Context, sessionID string, ev *store.RuntimeEvent) (uint64, error) {
+func (s *refusingEventStore) AppendSequenced(ctx context.Context, sessionID string, ev *turn.Event) (uint64, error) {
 	if ev.Kind == s.kind {
 		return 0, errEventWriteRefused
 	}
 	return s.EventStore.AppendSequenced(ctx, sessionID, ev)
 }
 
-func (s *refusingEventStore) UpsertEvent(ctx context.Context, ev *store.RuntimeEvent) (sequence uint64, inserted bool, err error) {
+func (s *refusingEventStore) UpsertEvent(ctx context.Context, ev *turn.Event) (sequence uint64, inserted bool, err error) {
 	if ev.Kind == s.kind {
 		return 0, false, errEventWriteRefused
 	}
@@ -49,8 +49,8 @@ type unsequencedExecutor struct {
 	inner TurnExecutor
 }
 
-func (x unsequencedExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x unsequencedExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		for ev, err := range x.inner.Execute(ctx, req) {
 			ev.Sequence = 0
 			if !yield(ev, err) {
@@ -106,7 +106,7 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 				t.Fatalf("list turn events: %v", err)
 			}
 
-			for _, events := range [][]store.RuntimeEvent{streamed, stored} {
+			for _, events := range [][]turn.Event{streamed, stored} {
 				for _, ev := range events {
 					if ev.Kind == turn.EventKindMessageCompleted {
 						t.Fatalf("event %s with a refused write reached the turn: %+v", ev.Kind, ev)

@@ -14,7 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestStreamWritesRoleContentFinishAndDone(t *testing.T) {
@@ -96,7 +95,7 @@ func TestStreamUsageChunkFollowsOnlyWhenRequested(t *testing.T) {
 }
 
 func TestStreamedTextEqualsTheNonStreamingText(t *testing.T) {
-	partials := func(events []store.RuntimeEvent) []string {
+	partials := func(events []turn.Event) []string {
 		if texts := testAnswerTexts(events); len(texts) > 0 {
 			return texts
 		}
@@ -110,7 +109,7 @@ func TestStreamedTextEqualsTheNonStreamingText(t *testing.T) {
 	}
 	cases := map[string]struct {
 		script  scriptRuntime
-		answers func(events []store.RuntimeEvent) []string
+		answers func(events []turn.Event) []string
 		want    string
 	}{
 		"single message": {
@@ -137,8 +136,8 @@ func TestStreamedTextEqualsTheNonStreamingText(t *testing.T) {
 		"fallback to unfinished text": {
 			script: fixedTurn(
 				turnEvent(turn.EventKindTurnAccepted),
-				store.RuntimeEvent{TurnID: testTurnID, Kind: "model.partial", Payload: []byte("par")},
-				store.RuntimeEvent{TurnID: testTurnID, Kind: "model.partial", Payload: []byte("tial")},
+				turn.Event{TurnID: testTurnID, Kind: "model.partial", Payload: []byte("par")},
+				turn.Event{TurnID: testTurnID, Kind: "model.partial", Payload: []byte("tial")},
 				turnEvent(turn.EventKindTurnCompleted)),
 			answers: partials,
 			want:    "par\n\ntial",
@@ -321,7 +320,7 @@ func TestStreamFailureAfterTheStreamStartedEmitsOneErrorEvent(t *testing.T) {
 }
 
 func TestStreamTurnWithoutAResultEmitsAnInternalErrorEvent(t *testing.T) {
-	diverging := func(events []store.RuntimeEvent) []string {
+	diverging := func(events []turn.Event) []string {
 		if len(events) == 1 {
 			if events[0].Kind == turn.EventKindMessageCompleted {
 				return []string{"streamed"}
@@ -332,7 +331,7 @@ func TestStreamTurnWithoutAResultEmitsAnInternalErrorEvent(t *testing.T) {
 	}
 	cases := map[string]struct {
 		script  scriptRuntime
-		answers func(events []store.RuntimeEvent) []string
+		answers func(events []turn.Event) []string
 		frames  int
 	}{
 		"cancelled turn": {
@@ -344,9 +343,9 @@ func TestStreamTurnWithoutAResultEmitsAnInternalErrorEvent(t *testing.T) {
 			frames: 2,
 		},
 		"iterator error after events": {
-			script: func(_ context.Context, yield func(store.RuntimeEvent, error) bool) {
+			script: func(_ context.Context, yield func(turn.Event, error) bool) {
 				if emit(yield, turnEvent(turn.EventKindTurnAccepted)) {
-					yield(store.RuntimeEvent{}, errors.New("boom with prompt text"))
+					yield(turn.Event{}, errors.New("boom with prompt text"))
 				}
 			},
 			frames: 1,
@@ -382,7 +381,7 @@ func TestStreamTurnWithoutAResultEmitsAnInternalErrorEvent(t *testing.T) {
 func TestStreamKeepaliveFlowsWhileATurnIsQuiet(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		release := make(chan struct{})
-		script := scriptRuntime(func(ctx context.Context, yield func(store.RuntimeEvent, error) bool) {
+		script := scriptRuntime(func(ctx context.Context, yield func(turn.Event, error) bool) {
 			if !emit(yield, turnEvent(turn.EventKindTurnAccepted), turnEvent(turn.EventKindToolStarted)) {
 				return
 			}
@@ -439,7 +438,7 @@ func TestStreamKeepaliveWaitsForAQuietInterval(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		step := make(chan struct{})
 		release := make(chan struct{})
-		script := scriptRuntime(func(ctx context.Context, yield func(store.RuntimeEvent, error) bool) {
+		script := scriptRuntime(func(ctx context.Context, yield func(turn.Event, error) bool) {
 			if !emit(yield, turnEvent(turn.EventKindTurnAccepted)) {
 				return
 			}
@@ -487,7 +486,7 @@ func TestStreamKeepaliveWaitsForAQuietInterval(t *testing.T) {
 func TestStreamClientDisconnectCancelsTheTurnAndWritesNothingMore(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		observed := make(chan error, 1)
-		script := scriptRuntime(func(ctx context.Context, yield func(store.RuntimeEvent, error) bool) {
+		script := scriptRuntime(func(ctx context.Context, yield func(turn.Event, error) bool) {
 			if !emit(yield, turnEvent(turn.EventKindTurnAccepted), answerEvent("first")) {
 				return
 			}
@@ -531,7 +530,7 @@ func TestStreamClientDisconnectCancelsTheTurnAndWritesNothingMore(t *testing.T) 
 func TestStreamWriteFailureCancelsTheTurn(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		observed := make(chan error, 1)
-		script := scriptRuntime(func(ctx context.Context, yield func(store.RuntimeEvent, error) bool) {
+		script := scriptRuntime(func(ctx context.Context, yield func(turn.Event, error) bool) {
 			if !emit(yield, turnEvent(turn.EventKindTurnAccepted), answerEvent("first")) {
 				return
 			}

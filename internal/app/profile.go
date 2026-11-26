@@ -17,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -425,7 +426,7 @@ func (s *profileActionSink) RecordOwnerAction(ctx context.Context, action *profi
 		return fmt.Errorf("cli: marshal owner action: %w", err)
 	}
 	events := store.NewEventStore(s.db)
-	_, _, err = events.UpsertEvent(ctx, &store.RuntimeEvent{
+	_, _, err = events.UpsertEvent(ctx, &turn.Event{
 		ID:            "profile-owner-action-" + action.Action + "-" + action.FactID + "-" + action.At.UTC().Format(time.RFC3339Nano),
 		SessionID:     sessionID,
 		TurnID:        "owner-action",
@@ -447,7 +448,7 @@ func ensureOwnerActionSession(ctx context.Context, db *sql.DB, ownerID string) (
 			return "", err
 		}
 		now := time.Now().UTC()
-		if err := sessions.Create(ctx, &store.Session{
+		if err := sessions.Create(ctx, &turn.Session{
 			ID: sessionID, OwnerID: ownerID, CreatedAt: now, UpdatedAt: now, Metadata: json.RawMessage(`{}`),
 		}); err != nil {
 			if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionIDConflict {

@@ -191,7 +191,7 @@ func (d *webhookDispatcher) reconcileReplayed(ctx context.Context, previous *sto
 }
 
 func (d *webhookDispatcher) createSession(ctx context.Context, sessionID, keyID string, now time.Time) error {
-	err := d.sessions.Create(ctx, &store.Session{
+	err := d.sessions.Create(ctx, &turn.Session{
 		ID:        sessionID,
 		OwnerID:   "webhook:" + keyID,
 		Metadata:  json.RawMessage(`{}`),
@@ -254,7 +254,7 @@ func (d *webhookDispatcher) transition(ctx context.Context, executionID string, 
 	}
 }
 
-type turnStep func() (store.RuntimeEvent, error, bool)
+type turnStep func() (turn.Event, error, bool)
 
 func startTurn(ctx context.Context, backend turn.AgentRuntime, turnRequest *turn.TurnRequest) (next turnStep, stop func(), err error) {
 	pull, release := iter.Pull2(backend.Run(ctx, turnRequest))
@@ -268,7 +268,7 @@ func startTurn(ctx context.Context, backend turn.AgentRuntime, turnRequest *turn
 		return nil, nil, pullErr
 	}
 	resumed := false
-	next = func() (store.RuntimeEvent, error, bool) {
+	next = func() (turn.Event, error, bool) {
 		if !resumed {
 			resumed = true
 			return event, nil, true

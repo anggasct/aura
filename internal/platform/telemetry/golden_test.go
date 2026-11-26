@@ -11,7 +11,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestSemconvVersionPinned(t *testing.T) {
@@ -116,7 +115,7 @@ func TestMetricUnitsPinned(t *testing.T) {
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
 	reader := newTestManualReader()
 	mp := newTestMeterProvider(reader)
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, mp, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -261,7 +260,7 @@ func TestUnknownSpanHasNoAllowedAttrs(t *testing.T) {
 func TestSpanParentageUnderTurn(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inner := &contextCapturingRuntime{inner: fr, ch: make(chan context.Context, 1)}
 	inst, err := InstrumentRuntime(inner, tp, nil, nil)
 	if err != nil {
@@ -319,7 +318,7 @@ type contextCapturingRuntime struct {
 	ch    chan context.Context
 }
 
-func (c *contextCapturingRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (c *contextCapturingRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	c.ch <- ctx
 	return c.inner.Run(ctx, req)
 }

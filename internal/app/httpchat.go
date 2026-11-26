@@ -64,7 +64,7 @@ func (s *httpSessionStore) Get(ctx context.Context, id string) (httpchat.Session
 
 func (s *httpSessionStore) Create(ctx context.Context, session *httpchat.Session) error {
 	now := time.Now().UTC()
-	return s.sessions.Create(ctx, &store.Session{
+	return s.sessions.Create(ctx, &turn.Session{
 		ID: session.ID, OwnerID: session.OwnerID, AgentID: session.PersonaID,
 		Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	})

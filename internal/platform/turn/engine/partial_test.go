@@ -27,7 +27,7 @@ func adkFinalStep(text string) turntest.FakeStep {
 	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
 }
 
-func kindsOf(events []store.RuntimeEvent) []string {
+func kindsOf(events []turn.Event) []string {
 	kinds := make([]string, 0, len(events))
 	for i := range events {
 		kinds = append(kinds, events[i].Kind)
@@ -35,7 +35,7 @@ func kindsOf(events []store.RuntimeEvent) []string {
 	return kinds
 }
 
-func decodeDeltas(t *testing.T, events []store.RuntimeEvent) []turn.ModelDelta {
+func decodeDeltas(t *testing.T, events []turn.Event) []turn.ModelDelta {
 	t.Helper()
 	var deltas []turn.ModelDelta
 	for i := range events {
@@ -157,7 +157,7 @@ func TestSlowSubscriberLosesDeltasButKeepsLifecycleEvents(t *testing.T) {
 		}
 		waitForTerminalDurable(t, db, "turn-slow")
 
-		var rest []store.RuntimeEvent
+		var rest []turn.Event
 		for {
 			ev, err, more := next()
 			if !more {
@@ -192,11 +192,11 @@ type streamPartialExecutor struct {
 	seen []bool
 }
 
-func (e *streamPartialExecutor) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (e *streamPartialExecutor) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	e.mu.Lock()
 	e.seen = append(e.seen, req.StreamPartial)
 	e.mu.Unlock()
-	return func(func(store.RuntimeEvent, error) bool) {}
+	return func(func(turn.Event, error) bool) {}
 }
 
 func TestStreamPartialReachesTheExecutor(t *testing.T) {
@@ -275,7 +275,7 @@ type gatedPartialExecutor struct {
 	final    turntest.FakeStep
 }
 
-func (e *gatedPartialExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (e *gatedPartialExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	script := []turntest.FakeStep{e.final}
 	if req.StreamPartial {
 		script = append(slices.Clone(e.partials), e.final)

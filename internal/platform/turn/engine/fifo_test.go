@@ -19,7 +19,7 @@ type acceptedEvents struct {
 	onAccepted func(turnID string)
 }
 
-func (s *acceptedEvents) Append(ctx context.Context, ev *store.RuntimeEvent) error {
+func (s *acceptedEvents) Append(ctx context.Context, ev *turn.Event) error {
 	if err := s.EventStore.Append(ctx, ev); err != nil {
 		return err
 	}
@@ -34,7 +34,7 @@ type acceptedDedupe struct {
 	onAccepted func(turnID string)
 }
 
-func (s *acceptedDedupe) Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *store.RuntimeEvent) (originalTurnID string, created bool, err error) {
+func (s *acceptedDedupe) Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *turn.Event) (originalTurnID string, created bool, err error) {
 	originalTurnID, created, err = s.DedupeStore.Accept(ctx, source, externalID, expiresAt, accepted)
 	if err == nil && created {
 		s.onAccepted(accepted.TurnID)

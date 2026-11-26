@@ -12,7 +12,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type twoInvocationExecutor struct {
@@ -25,8 +24,8 @@ func newTwoInvocationExecutor() *twoInvocationExecutor {
 	return &twoInvocationExecutor{blocked: make(chan struct{})}
 }
 
-func (x *twoInvocationExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x *twoInvocationExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		deadline, _ := ctx.Deadline()
 		x.mu.Lock()
 		x.deadlines = append(x.deadlines, deadline)
@@ -35,10 +34,10 @@ func (x *twoInvocationExecutor) Execute(ctx context.Context, req *turn.TurnReque
 		if first {
 			close(x.blocked)
 			<-ctx.Done()
-			yield(store.RuntimeEvent{}, ctx.Err())
+			yield(turn.Event{}, ctx.Err())
 			return
 		}
-		yield(store.RuntimeEvent{ID: req.TurnID + "-done", Kind: turn.EventKindMessageCompleted, Payload: []byte(`{"text":"ok"}`), CreatedAt: time.Now().UTC()}, nil)
+		yield(turn.Event{ID: req.TurnID + "-done", Kind: turn.EventKindMessageCompleted, Payload: []byte(`{"text":"ok"}`), CreatedAt: time.Now().UTC()}, nil)
 	}
 }
 
@@ -84,10 +83,10 @@ func turnStartRows(t *testing.T, rig *durableHostRig, turnID string) int {
 	return rows
 }
 
-func runInBubble(engine *Engine, req *turn.TurnRequest) <-chan []store.RuntimeEvent {
-	out := make(chan []store.RuntimeEvent, 1)
+func runInBubble(engine *Engine, req *turn.TurnRequest) <-chan []turn.Event {
+	out := make(chan []turn.Event, 1)
 	go func() {
-		var events []store.RuntimeEvent
+		var events []turn.Event
 		for ev, err := range engine.Run(context.Background(), req) {
 			if err != nil {
 				break
@@ -119,7 +118,7 @@ func TestDurableTurnTimeoutCountsFromItsFirstStart(t *testing.T) {
 			})
 			engine, _, db := newDurableLiveTestRuntime(t, Deps{Config: testLimits(4, 16).withTurnTimeout(time.Minute)}, executor)
 			mustCreateSession(t, db, "session-a")
-			var streams []<-chan []store.RuntimeEvent
+			var streams []<-chan []turn.Event
 			for i := range 2 {
 				streams = append(streams, runInBubble(engine, sampleRequest("session-a", turnID(i))))
 				synctest.Wait()

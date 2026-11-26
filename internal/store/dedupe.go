@@ -8,20 +8,13 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type DedupeStore interface {
-	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *RuntimeEvent) (originalTurnID string, created bool, err error)
+	Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *turn.Event) (originalTurnID string, created bool, err error)
 	Claimed(ctx context.Context, source, externalID string) (bool, error)
-	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]RuntimeEvent, error)
-}
-
-type DedupeClaim struct {
-	Source     string
-	ExternalID string
-	TurnID     string
-	Now        time.Time
-	ExpiresAt  time.Time
+	ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]turn.Event, error)
 }
 
 type sqliteDedupeStore struct {
@@ -32,7 +25,7 @@ func NewDedupeStore(db *sql.DB) DedupeStore {
 	return &sqliteDedupeStore{db: db}
 }
 
-func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *DedupeClaim) (originalTurnID string, created bool, err error) {
+func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *turn.DedupeClaim) (originalTurnID string, created bool, err error) {
 	if tx == nil {
 		return "", false, errNilArgument("tx")
 	}
@@ -78,7 +71,7 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *DedupeClaim) (origina
 	return claim.TurnID, true, nil
 }
 
-func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *RuntimeEvent) (originalTurnID string, created bool, err error) {
+func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *turn.Event) (originalTurnID string, created bool, err error) {
 	if accepted == nil {
 		return "", false, errNilArgument("accepted")
 	}
@@ -91,7 +84,7 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	originalTurnID, created, err = ClaimDedupeTx(ctx, tx, &DedupeClaim{
+	originalTurnID, created, err = ClaimDedupeTx(ctx, tx, &turn.DedupeClaim{
 		Source:     source,
 		ExternalID: externalID,
 		TurnID:     accepted.TurnID,
@@ -136,7 +129,7 @@ func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID stri
 	return expiresAtRaw >= sqlite.FormatTime(time.Now().UTC()), nil
 }
 
-func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]RuntimeEvent, error) {
+func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnID string) ([]turn.Event, error) {
 	if sessionID == "" || turnID == "" {
 		return nil, Errorf(ErrorCodeInvalidArgument, "turn events read must name a session and a turn")
 	}
@@ -152,7 +145,7 @@ func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnI
 	}
 	defer func() { _ = rows.Close() }()
 
-	var events []RuntimeEvent
+	var events []turn.Event
 	for rows.Next() {
 		e, err := scanRuntimeEvent(rows)
 		if err != nil {

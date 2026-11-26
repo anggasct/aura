@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -195,7 +196,7 @@ func (s *Store) createRun(ctx context.Context, create *runCreate) (*RunSummary, 
 		return nil, fmt.Errorf("begin run create: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := store.CreateSessionTx(ctx, tx, &store.Session{
+	if err := store.CreateSessionTx(ctx, tx, &turn.Session{
 		ID: RunSessionID(summary.ID), OwnerID: origin.PrincipalID, AgentID: origin.AgentID,
 		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {

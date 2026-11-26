@@ -26,7 +26,7 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 		return "main/discord:owner/channel:333/principal:" + principalID
 	}
 	for id, owner := range map[string]string{channelSession(alice): alice, channelSession(bob): bob, thread: alice} {
-		if err := sessions.Create(ctx, &store.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		if err := sessions.Create(ctx, &turn.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}
@@ -38,7 +38,7 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 	project := func(sessionID, principalID, eventID, text string) {
 		t.Helper()
 		turnRequest := &turn.TurnRequest{TurnID: "turn-" + eventID, SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main"}
-		if err := hook(ctx, turnRequest, []store.RuntimeEvent{{
+		if err := hook(ctx, turnRequest, []turn.Event{{
 			ID: eventID, SessionID: sessionID, Sequence: 1, TurnID: turnRequest.TurnID, Author: "user",
 			Kind: store.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
 		}}); err != nil {

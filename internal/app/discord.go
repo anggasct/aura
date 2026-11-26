@@ -23,6 +23,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -102,7 +103,7 @@ func (s *discordSessionEnsurer) EnsureSession(ctx context.Context, sessionID, ow
 		}
 	}
 	now := time.Now().UTC()
-	err := s.sessions.Create(ctx, &store.Session{
+	err := s.sessions.Create(ctx, &turn.Session{
 		ID:        sessionID,
 		OwnerID:   ownerID,
 		AgentID:   agentID,

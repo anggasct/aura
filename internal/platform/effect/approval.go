@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -341,7 +342,7 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 	if err != nil {
 		return nil, err
 	}
-	if err := store.AppendEventTx(ctx, tx, &store.RuntimeEvent{
+	if err := store.AppendEventTx(ctx, tx, &turn.Event{
 		ID:            eventID,
 		SessionID:     intent.SessionID,
 		Sequence:      uint64(sequence),

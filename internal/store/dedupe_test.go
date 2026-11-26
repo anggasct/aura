@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func TestDedupeAcceptClaimsAndReplays(t *testing.T) {
@@ -144,7 +145,7 @@ func TestDedupeClaimedReportsLiveKeysOnly(t *testing.T) {
 	}
 }
 
-func claimInTx(t *testing.T, db *sql.DB, claim *DedupeClaim) (string, bool) {
+func claimInTx(t *testing.T, db *sql.DB, claim *turn.DedupeClaim) (string, bool) {
 	t.Helper()
 	tx, err := db.BeginTx(t.Context(), nil)
 	if err != nil {
@@ -164,15 +165,15 @@ func claimInTx(t *testing.T, db *sql.DB, claim *DedupeClaim) (string, bool) {
 func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 	db := newTestDB(t)
 	start := time.Date(2030, 1, 2, 3, 4, 0, 0, time.UTC)
-	window := &DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-1", Now: start, ExpiresAt: start.Add(time.Hour)}
+	window := &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-1", Now: start, ExpiresAt: start.Add(time.Hour)}
 	if turnID, created := claimInTx(t, db, window); !created || turnID != "turn-1" {
 		t.Fatalf("first claim = (%q, %v), want (turn-1, true)", turnID, created)
 	}
-	if turnID, created := claimInTx(t, db, &DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-2", Now: start.Add(time.Minute), ExpiresAt: start.Add(2 * time.Hour)}); created || turnID != "turn-1" {
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-2", Now: start.Add(time.Minute), ExpiresAt: start.Add(2 * time.Hour)}); created || turnID != "turn-1" {
 		t.Fatalf("second claim = (%q, %v), want (turn-1, false)", turnID, created)
 	}
 	later := start.Add(2 * time.Hour)
-	if turnID, created := claimInTx(t, db, &DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-3", Now: later, ExpiresAt: later.Add(time.Hour)}); !created || turnID != "turn-3" {
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-3", Now: later, ExpiresAt: later.Add(time.Hour)}); !created || turnID != "turn-3" {
 		t.Fatalf("claim after expiry = (%q, %v), want (turn-3, true)", turnID, created)
 	}
 	var storedTurn, acceptedAt string
@@ -184,11 +185,11 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 	}
 
 	second := time.Date(2030, 1, 2, 5, 0, 0, 0, time.UTC)
-	claimInTx(t, db, &DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-a", Now: second.Add(-time.Hour), ExpiresAt: second.Add(100 * time.Millisecond)})
-	if turnID, created := claimInTx(t, db, &DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-b", Now: second, ExpiresAt: second.Add(time.Hour)}); created || turnID != "turn-a" {
+	claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-a", Now: second.Add(-time.Hour), ExpiresAt: second.Add(100 * time.Millisecond)})
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-b", Now: second, ExpiresAt: second.Add(time.Hour)}); created || turnID != "turn-a" {
 		t.Fatalf("claim at the whole second before a fractional expiry = (%q, %v), want (turn-a, false)", turnID, created)
 	}
-	if turnID, created := claimInTx(t, db, &DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-c", Now: second.Add(200 * time.Millisecond), ExpiresAt: second.Add(time.Hour)}); !created || turnID != "turn-c" {
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-c", Now: second.Add(200 * time.Millisecond), ExpiresAt: second.Add(time.Hour)}); !created || turnID != "turn-c" {
 		t.Fatalf("claim after a fractional expiry = (%q, %v), want (turn-c, true)", turnID, created)
 	}
 
@@ -196,7 +197,7 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if _, created, err := ClaimDedupeTx(t.Context(), tx, &DedupeClaim{Source: "telegram", ExternalID: "ext-3", TurnID: "turn-x", Now: start, ExpiresAt: later}); err != nil || !created {
+	if _, created, err := ClaimDedupeTx(t.Context(), tx, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-3", TurnID: "turn-x", Now: start, ExpiresAt: later}); err != nil || !created {
 		t.Fatalf("claim in a rolled back transaction = (%v, %v)", created, err)
 	}
 	if err := tx.Rollback(); err != nil {
@@ -207,17 +208,17 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 		t.Fatalf("rows after rollback = %d (%v), want 0", kept, err)
 	}
 
-	valid := DedupeClaim{Source: "telegram", ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}
+	valid := turn.DedupeClaim{Source: "telegram", ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}
 	invalid := []struct {
 		name  string
 		nilTx bool
-		claim *DedupeClaim
+		claim *turn.DedupeClaim
 	}{
 		{name: "nil transaction", nilTx: true, claim: &valid},
 		{name: "nil claim"},
-		{name: "empty source", claim: &DedupeClaim{ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}},
-		{name: "empty external id", claim: &DedupeClaim{Source: "telegram", TurnID: "turn-4", Now: start, ExpiresAt: later}},
-		{name: "zero now", claim: &DedupeClaim{Source: "telegram", ExternalID: "ext-4", TurnID: "turn-4", ExpiresAt: later}},
+		{name: "empty source", claim: &turn.DedupeClaim{ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}},
+		{name: "empty external id", claim: &turn.DedupeClaim{Source: "telegram", TurnID: "turn-4", Now: start, ExpiresAt: later}},
+		{name: "zero now", claim: &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-4", TurnID: "turn-4", ExpiresAt: later}},
 	}
 	for _, tc := range invalid {
 		t.Run(tc.name, func(t *testing.T) {

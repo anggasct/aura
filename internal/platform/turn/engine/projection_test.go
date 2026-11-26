@@ -11,7 +11,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type recordingHook struct {
@@ -23,7 +22,7 @@ type recordingHook struct {
 	err      error
 }
 
-func (h *recordingHook) fn(_ context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+func (h *recordingHook) fn(_ context.Context, req *turn.TurnRequest, events []turn.Event) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.calls++

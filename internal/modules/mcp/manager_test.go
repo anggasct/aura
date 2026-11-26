@@ -20,6 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
@@ -29,7 +30,7 @@ func newEffectBroker(t *testing.T) *toolbroker.Broker {
 	t.Helper()
 	ctx := t.Context()
 	db := storetest.OpenMigrated(t)
-	session := store.Session{ID: "session-1", OwnerID: "principal-1"}
+	session := turn.Session{ID: "session-1", OwnerID: "principal-1"}
 	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
 		t.Fatalf("Create(): %v", err)
 	}

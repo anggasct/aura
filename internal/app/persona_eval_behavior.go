@@ -60,7 +60,7 @@ func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Defi
 				TurnID: fmt.Sprintf("persona-eval-behavior-%d", i+1), SessionID: personaeval.SessionID, PrincipalID: "discord:eval", PrincipalClass: class,
 				Origin: "discord", AgentID: definition.ID, Parts: []runtimeingress.InputPart{{Text: text}},
 			}
-			var produced []store.RuntimeEvent
+			var produced []turn.Event
 			for event, err := range executor.Execute(ctx, req) {
 				if err != nil {
 					return nil, fmt.Errorf("persona turn %d: %w", i+1, err)
@@ -76,7 +76,7 @@ func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Defi
 	})
 }
 
-func persistEvalEvent(ctx context.Context, events store.EventStore, req *turn.TurnRequest, event *store.RuntimeEvent) error {
+func persistEvalEvent(ctx context.Context, events store.EventStore, req *turn.TurnRequest, event *turn.Event) error {
 	if event.ID == "" {
 		event.ID = runtimeengine.NewTurnID()
 	}

@@ -9,7 +9,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestTurnEventsCarryAgentID(t *testing.T) {
@@ -65,7 +64,7 @@ func terminalPayload(t *testing.T, db *sql.DB, turnID string) []byte {
 	return payload
 }
 
-func eventByKind(t *testing.T, events []store.RuntimeEvent, kind string) store.RuntimeEvent {
+func eventByKind(t *testing.T, events []turn.Event, kind string) turn.Event {
 	t.Helper()
 	for i := range events {
 		if events[i].Kind == kind {
@@ -73,7 +72,7 @@ func eventByKind(t *testing.T, events []store.RuntimeEvent, kind string) store.R
 		}
 	}
 	t.Fatalf("no %s event among %d events", kind, len(events))
-	return store.RuntimeEvent{}
+	return turn.Event{}
 }
 
 func jsonStringField(t *testing.T, payload []byte, key string) string {

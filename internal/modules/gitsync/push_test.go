@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -76,7 +77,7 @@ func openPushJournal(t *testing.T) *effect.Journal {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
 	svc := store.NewSessionService(db)
-	if err := svc.Create(t.Context(), &store.Session{ID: "session-1", OwnerID: "owner-1"}); err != nil {
+	if err := svc.Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1"}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	journal, err := effect.NewJournal(db, effect.Options{})

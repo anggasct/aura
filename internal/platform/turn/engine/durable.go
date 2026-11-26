@@ -18,7 +18,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type SessionStore interface {
@@ -140,9 +139,9 @@ func (e *Engine) serveTurn(ctx context.Context, inv durable.Invocation) error {
 	return e.DriveTurn(ctx, inv, &desc)
 }
 
-func (e *Engine) claimDurable(ctx context.Context, req *turn.TurnRequest) (accepted store.RuntimeEvent, originalTurnID string, replay, granted bool, err error) {
+func (e *Engine) claimDurable(ctx context.Context, req *turn.TurnRequest) (accepted turn.Event, originalTurnID string, replay, granted bool, err error) {
 	if e.sessionStore == nil {
-		return store.RuntimeEvent{}, "", false, false, invalidArgument("durable session store is not configured")
+		return turn.Event{}, "", false, false, invalidArgument("durable session store is not configured")
 	}
 	descriptor := turnDescriptorFromRequest(req)
 	eventID := NewTurnID()
@@ -169,27 +168,27 @@ func (e *Engine) claimDurable(ctx context.Context, req *turn.TurnRequest) (accep
 	if err != nil {
 		e.releasePending()
 		if _, refused := fault.CodeOf[turn.ErrorCode](err); refused {
-			return store.RuntimeEvent{}, "", false, false, err
+			return turn.Event{}, "", false, false, err
 		}
-		return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "durable admit failed", err)
+		return turn.Event{}, "", false, false, codedError(turn.ErrorCodeStorageUnavailable, "durable admit failed", err)
 	}
 	if result.Overloaded {
 		e.releasePending()
-		return store.RuntimeEvent{}, "", false, false, codedError(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
+		return turn.Event{}, "", false, false, codedError(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full", nil)
 	}
 	if result.Replayed {
-		return store.RuntimeEvent{}, result.OriginalTurnID, true, false, nil
+		return turn.Event{}, result.OriginalTurnID, true, false, nil
 	}
 	if result.ToStart != nil && result.ToStart.Descriptor.TurnID != req.TurnID {
 		e.releasePending()
-		return store.RuntimeEvent{}, "", false, false, invalidArgument("durable admit granted another turn")
+		return turn.Event{}, "", false, false, invalidArgument("durable admit granted another turn")
 	}
 	createdAt, err := time.Parse(time.RFC3339Nano, result.EventCreatedAt)
 	if err != nil {
 		e.releasePending()
-		return store.RuntimeEvent{}, "", false, false, invalidArgument("durable admit returned an invalid accepted timestamp")
+		return turn.Event{}, "", false, false, invalidArgument("durable admit returned an invalid accepted timestamp")
 	}
-	accepted = store.RuntimeEvent{
+	accepted = turn.Event{
 		ID:            eventID,
 		SessionID:     req.SessionID,
 		Sequence:      result.Sequence,
@@ -206,7 +205,7 @@ func (e *Engine) claimDurable(ctx context.Context, req *turn.TurnRequest) (accep
 
 type durableStaging struct {
 	req      *turn.TurnRequest
-	accepted *store.RuntimeEvent
+	accepted *turn.Event
 	sub      *subscriber
 	granted  bool
 	adopted  bool
@@ -474,7 +473,7 @@ func (e *Engine) adoptDurable(ctx context.Context, active *runtimesessions.Queue
 	return nil
 }
 
-func (e *Engine) attachDurable(ctx context.Context, req *turn.TurnRequest, accepted *store.RuntimeEvent) {
+func (e *Engine) attachDurable(ctx context.Context, req *turn.TurnRequest, accepted *turn.Event) {
 	turnCtx, cancel := context.WithCancel(ctx)
 	t := &turnState{
 		req:      *req,
@@ -503,7 +502,7 @@ func (e *Engine) attachDurable(ctx context.Context, req *turn.TurnRequest, accep
 	go t.start()
 }
 
-func (e *Engine) turnEvents(ctx context.Context, req *turn.TurnRequest) ([]store.RuntimeEvent, error) {
+func (e *Engine) turnEvents(ctx context.Context, req *turn.TurnRequest) ([]turn.Event, error) {
 	events, err := e.dedupe.ListTurnEvents(ctx, req.SessionID, req.TurnID)
 	if err != nil {
 		return nil, codedError(turn.ErrorCodeStorageUnavailable, "failed to read the durable turn events", err)
@@ -511,7 +510,7 @@ func (e *Engine) turnEvents(ctx context.Context, req *turn.TurnRequest) ([]store
 	return events, nil
 }
 
-func acceptedEventOf(events []store.RuntimeEvent) (*store.RuntimeEvent, error) {
+func acceptedEventOf(events []turn.Event) (*turn.Event, error) {
 	for i := range events {
 		if events[i].Kind == turn.EventKindTurnAccepted {
 			accepted := events[i]
@@ -521,7 +520,7 @@ func acceptedEventOf(events []store.RuntimeEvent) (*store.RuntimeEvent, error) {
 	return nil, invalidArgument("durable turn has no accepted event")
 }
 
-func hasTerminalKind(events []store.RuntimeEvent) bool {
+func hasTerminalKind(events []turn.Event) bool {
 	for i := range events {
 		if isTerminalKind(events[i].Kind) {
 			return true
@@ -531,7 +530,7 @@ func hasTerminalKind(events []store.RuntimeEvent) bool {
 }
 
 func (e *Engine) terminateStaged(ctx context.Context, t *turnState) {
-	terminal := &store.RuntimeEvent{
+	terminal := &turn.Event{
 		ID:            NewTurnID(),
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,
@@ -561,7 +560,7 @@ func (e *Engine) terminateStaged(ctx context.Context, t *turnState) {
 	e.mu.Unlock()
 }
 
-func (e *Engine) fillTurnEvent(t *turnState, ev *store.RuntimeEvent) {
+func (e *Engine) fillTurnEvent(t *turnState, ev *turn.Event) {
 	if ev.ID == "" {
 		ev.ID = NewTurnID()
 	}
@@ -700,7 +699,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
 
-	persist := func(ctx context.Context, ev *store.RuntimeEvent) error {
+	persist := func(ctx context.Context, ev *turn.Event) error {
 		if ev.ID == "" {
 			ev.ID = scope.NextEventID(req.TurnID)
 		}
@@ -728,7 +727,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		return nil
 	}
 
-	var executed []store.RuntimeEvent
+	var executed []turn.Event
 	e.notifyPresenceStarted(ctx, req)
 	execErr := e.persistSkillActivation(ctx, req, journaledSkillActivation(scope, e.renderSkillActivation), persist)
 	if execErr == nil {
@@ -788,7 +787,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
 	}
 	e.notifyPresenceEnded(ctx, req)
-	terminal := &store.RuntimeEvent{ID: req.TurnID + "-terminal", Kind: terminalKind, Payload: terminalPayload}
+	terminal := &turn.Event{ID: req.TurnID + "-terminal", Kind: terminalKind, Payload: terminalPayload}
 	if err := persist(context.WithoutCancel(ctx), terminal); err != nil {
 		return err
 	}
@@ -865,7 +864,7 @@ func (e *Engine) sessionHoldsTurn(ctx context.Context, req *turn.TurnRequest) (b
 const unheldTurnDetail = "turn is no longer held by its session"
 
 func (e *Engine) refuseUnheldTurn(ctx context.Context, req *turn.TurnRequest) error {
-	cancelled := &store.RuntimeEvent{
+	cancelled := &turn.Event{
 		ID:            req.TurnID + "-cancel",
 		SessionID:     req.SessionID,
 		TurnID:        req.TurnID,
@@ -968,7 +967,7 @@ func (e *Engine) recordRunEnd(ctx context.Context, t *turnState, status *durable
 	if ended {
 		return true
 	}
-	terminal := &store.RuntimeEvent{
+	terminal := &turn.Event{
 		ID:            t.turnID + "-terminal",
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,
@@ -1014,7 +1013,7 @@ func (e *Engine) letGoOfEndedTurn(ctx context.Context, t *turnState) bool {
 }
 
 func (e *Engine) endCancelledTurn(ctx context.Context, t *turnState) {
-	cancelled := &store.RuntimeEvent{
+	cancelled := &turn.Event{
 		ID:            t.turnID + "-cancel",
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,
@@ -1042,7 +1041,7 @@ func (e *Engine) hasTerminalEvent(ctx context.Context, t *turnState) (bool, erro
 }
 
 func (e *Engine) failDurableStart(ctx context.Context, t *turnState, cause error) {
-	terminal := &store.RuntimeEvent{
+	terminal := &turn.Event{
 		ID:            t.turnID + "-terminal",
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,

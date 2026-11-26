@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -20,35 +19,35 @@ const (
 	frameKeepalives = ": keepalive"
 )
 
-type scriptRuntime func(ctx context.Context, yield func(store.RuntimeEvent, error) bool)
+type scriptRuntime func(ctx context.Context, yield func(turn.Event, error) bool)
 
-func (s scriptRuntime) Run(ctx context.Context, _ *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) { s(ctx, yield) }
+func (s scriptRuntime) Run(ctx context.Context, _ *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) { s(ctx, yield) }
 }
 
-func turnEvent(kind string) store.RuntimeEvent {
-	return store.RuntimeEvent{TurnID: testTurnID, Kind: kind}
+func turnEvent(kind string) turn.Event {
+	return turn.Event{TurnID: testTurnID, Kind: kind}
 }
 
-func answerEvent(text string) store.RuntimeEvent {
+func answerEvent(text string) turn.Event {
 	event := turnEvent(turn.EventKindMessageCompleted)
 	event.Payload = json.RawMessage(`{"text":` + jsonString(text) + `}`)
 	return event
 }
 
-func usageEvent(text string) store.RuntimeEvent {
+func usageEvent(text string) turn.Event {
 	event := answerEvent(text)
 	event.ProviderUsage = json.RawMessage(testUsageJSON)
 	return event
 }
 
-func failedEvent(code string) store.RuntimeEvent {
+func failedEvent(code string) turn.Event {
 	event := turnEvent(turn.EventKindTurnFailed)
 	event.Payload = json.RawMessage(`{"code":"` + code + `","detail":"internal detail with the prompt and secret model output"}`)
 	return event
 }
 
-func emit(yield func(store.RuntimeEvent, error) bool, events ...store.RuntimeEvent) bool {
+func emit(yield func(turn.Event, error) bool, events ...turn.Event) bool {
 	for i := range events {
 		if !yield(events[i], nil) {
 			return false
@@ -57,8 +56,8 @@ func emit(yield func(store.RuntimeEvent, error) bool, events ...store.RuntimeEve
 	return true
 }
 
-func fixedTurn(events ...store.RuntimeEvent) scriptRuntime {
-	return func(_ context.Context, yield func(store.RuntimeEvent, error) bool) {
+func fixedTurn(events ...turn.Event) scriptRuntime {
+	return func(_ context.Context, yield func(turn.Event, error) bool) {
 		emit(yield, events...)
 	}
 }

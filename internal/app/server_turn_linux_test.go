@@ -326,7 +326,7 @@ func leftTurnDescriptor() runtimesessions.Descriptor {
 func admitLeftTurn(t *testing.T, db *sql.DB) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	if err := store.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: leftSessionID, OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)

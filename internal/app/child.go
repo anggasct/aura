@@ -73,7 +73,7 @@ func (r *childRegistry) Spawn(ctx context.Context, spec *child.Spec, now time.Ti
 	if err != nil {
 		return child.Spawn{}, false, err
 	}
-	if err := sessions.Create(ctx, &store.Session{ID: spec.ChildSessionID, OwnerID: spec.OwnerID, AgentID: parent.AgentID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(ctx, &turn.Session{ID: spec.ChildSessionID, OwnerID: spec.OwnerID, AgentID: parent.AgentID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionIDConflict {
 			return child.Spawn{}, false, err
 		}
@@ -505,16 +505,16 @@ func childTurnRequest(sessionID, childID, task string, deadline time.Time, proje
 	return turnReq
 }
 
-func (r childSessionRunner) parentSession(ctx context.Context, parentSessionID string) (store.Session, error) {
+func (r childSessionRunner) parentSession(ctx context.Context, parentSessionID string) (turn.Session, error) {
 	if r.db == nil || strings.TrimSpace(parentSessionID) == "" {
-		return store.Session{}, errors.New("cli: parent session must not be empty")
+		return turn.Session{}, errors.New("cli: parent session must not be empty")
 	}
 	sess, err := store.NewSessionService(r.db).Get(ctx, strings.TrimSpace(parentSessionID))
 	if err != nil {
-		return store.Session{}, err
+		return turn.Session{}, err
 	}
 	if strings.TrimSpace(sess.OwnerID) == "" {
-		return store.Session{}, errors.New("cli: parent owner must not be empty")
+		return turn.Session{}, errors.New("cli: parent owner must not be empty")
 	}
 	return sess, nil
 }

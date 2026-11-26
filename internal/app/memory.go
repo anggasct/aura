@@ -367,8 +367,8 @@ func (s *llmSummarizer) Summarize(ctx context.Context, prompt *memory.SummaryPro
 	return collected.String(), nil
 }
 
-func buildMemoryHook(service *memory.Service, model *memory.SummaryModel, summarizer memory.Summarizer, logger *slog.Logger) func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
-	return func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+func buildMemoryHook(service *memory.Service, model *memory.SummaryModel, summarizer memory.Summarizer, logger *slog.Logger) func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
+	return func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 		if service == nil {
 			return memory.Errorf(memory.ErrorCodeInvalidArgument, "memory service must not be nil")
 		}

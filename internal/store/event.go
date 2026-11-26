@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const insertRuntimeEventSQL = `
@@ -28,14 +29,14 @@ func NewEventStore(db *sql.DB) EventStore {
 	return &sqliteEventStore{db: db}
 }
 
-func (s *sqliteEventStore) Append(ctx context.Context, e *RuntimeEvent) error {
+func (s *sqliteEventStore) Append(ctx context.Context, e *turn.Event) error {
 	if e == nil {
 		return errNilArgument("event")
 	}
 	return appendEvent(ctx, s.db, e)
 }
 
-func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []RuntimeEvent) error {
+func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []turn.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
@@ -73,7 +74,7 @@ func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (
 	return sequenceFromDB(seq.Int64)
 }
 
-func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string, e *RuntimeEvent) (uint64, error) {
+func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string, e *turn.Event) (uint64, error) {
 	if e == nil {
 		return 0, errNilArgument("event")
 	}
@@ -96,7 +97,7 @@ func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string
 	return assigned, nil
 }
 
-func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *RuntimeEvent) (sequence uint64, existed bool, err error) {
+func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *turn.Event) (sequence uint64, existed bool, err error) {
 	if e == nil {
 		return 0, false, errNilArgument("event")
 	}
@@ -175,28 +176,28 @@ func AllocateSequenceTx(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 	return sequence, nil
 }
 
-func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (RuntimeEvent, bool, error) {
+func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (turn.Event, bool, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+` FROM runtime_event WHERE id = ?`, id,
 	)
 	if err != nil {
-		return RuntimeEvent{}, false, classify(fmt.Errorf("lookup event %s: %w", id, err))
+		return turn.Event{}, false, classify(fmt.Errorf("lookup event %s: %w", id, err))
 	}
 	defer func() { _ = rows.Close() }()
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {
-			return RuntimeEvent{}, false, classify(fmt.Errorf("lookup event %s: %w", id, err))
+			return turn.Event{}, false, classify(fmt.Errorf("lookup event %s: %w", id, err))
 		}
-		return RuntimeEvent{}, false, nil
+		return turn.Event{}, false, nil
 	}
 	event, err := scanRuntimeEvent(rows)
 	if err != nil {
-		return RuntimeEvent{}, false, err
+		return turn.Event{}, false, err
 	}
 	return event, true, nil
 }
 
-func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *RuntimeEvent) error {
+func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *turn.Event) error {
 	if event == nil {
 		return errNilArgument("event")
 	}
@@ -283,7 +284,7 @@ type EventWriter interface {
 	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
 }
 
-func AppendEventTx(ctx context.Context, tx EventWriter, e *RuntimeEvent) error {
+func AppendEventTx(ctx context.Context, tx EventWriter, e *turn.Event) error {
 	if tx == nil {
 		return errNilArgument("tx")
 	}
@@ -293,13 +294,13 @@ func AppendEventTx(ctx context.Context, tx EventWriter, e *RuntimeEvent) error {
 	return appendEvent(ctx, tx, e)
 }
 
-func appendEvent(ctx context.Context, x EventWriter, e *RuntimeEvent) error {
+func appendEvent(ctx context.Context, x EventWriter, e *turn.Event) error {
 	return appendEventCore(ctx, func(ctx context.Context, args ...any) (sql.Result, error) {
 		return x.ExecContext(ctx, insertRuntimeEventSQL, args...)
 	}, e)
 }
 
-func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sql.Result, error), e *RuntimeEvent) error {
+func appendEventCore(ctx context.Context, exec func(context.Context, ...any) (sql.Result, error), e *turn.Event) error {
 	if !json.Valid(e.Payload) {
 		return fault.New(
 			ErrorCodeEventPayloadInvalid,
@@ -378,28 +379,28 @@ func nullableJSON(raw json.RawMessage) any {
 const selectRuntimeEventColumns = `id, session_id, sequence, turn_id, invocation_id, branch, author, kind,
 	                                schema_version, payload_json, provider_usage_json, created_at`
 
-func scanRuntimeEvent(rows *sql.Rows) (RuntimeEvent, error) {
-	var e RuntimeEvent
+func scanRuntimeEvent(rows *sql.Rows) (turn.Event, error) {
+	var e turn.Event
 	var sequence, schemaVersion int64
 	var payload, createdAt string
 	var providerUsage sql.NullString
 	if err := rows.Scan(&e.ID, &e.SessionID, &sequence, &e.TurnID, &e.InvocationID, &e.Branch, &e.Author, &e.Kind,
 		&schemaVersion, &payload, &providerUsage, &createdAt); err != nil {
-		return RuntimeEvent{}, classify(fmt.Errorf("scan runtime event: %w", err))
+		return turn.Event{}, classify(fmt.Errorf("scan runtime event: %w", err))
 	}
 	var err error
 	if e.Sequence, err = sequenceFromDB(sequence); err != nil {
-		return RuntimeEvent{}, err
+		return turn.Event{}, err
 	}
 	if e.SchemaVersion, err = schemaVersionFromDB(schemaVersion); err != nil {
-		return RuntimeEvent{}, err
+		return turn.Event{}, err
 	}
 	e.Payload = json.RawMessage(payload)
 	if providerUsage.Valid {
 		e.ProviderUsage = json.RawMessage(providerUsage.String)
 	}
 	if e.CreatedAt, err = time.Parse(time.RFC3339Nano, createdAt); err != nil {
-		return RuntimeEvent{}, fmt.Errorf("parse created_at for event %s: %w", e.ID, err)
+		return turn.Event{}, fmt.Errorf("parse created_at for event %s: %w", e.ID, err)
 	}
 	return e, nil
 }

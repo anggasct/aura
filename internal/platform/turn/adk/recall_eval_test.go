@@ -13,7 +13,6 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/tool"
@@ -123,9 +122,9 @@ func evalTurnRequest() *turn.TurnRequest {
 	}
 }
 
-func drainTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) []store.RuntimeEvent {
+func drainTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) []turn.Event {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
@@ -135,7 +134,7 @@ func drainTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) []sto
 	return events
 }
 
-func userMessageText(t *testing.T, events []store.RuntimeEvent) string {
+func userMessageText(t *testing.T, events []turn.Event) string {
 	t.Helper()
 	for i := range events {
 		ev := &events[i]

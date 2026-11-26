@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/store"
 )
@@ -68,7 +69,7 @@ func (s *discordCommandSessions) Create(ctx context.Context, caller *command.Cal
 		return command.Session{}, err
 	}
 	now := s.clock()
-	sess := store.Session{
+	sess := turn.Session{
 		ID:        caller.ConversationKey + conversationSessionSeparator + suffix,
 		OwnerID:   caller.PrincipalID,
 		AgentID:   caller.AgentID,
