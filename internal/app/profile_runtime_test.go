@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -434,28 +433,6 @@ func TestBuildProfileRuntimeDegradesWithoutRoute(t *testing.T) {
 	}
 	if check := rt.check(loaded.Config); check.ID != "profile" || len(check.Checker.Check(t.Context())) != 1 {
 		t.Errorf("check = %+v, want one profile finding", check)
-	}
-}
-
-func TestComposePostTurnHooks(t *testing.T) {
-	if composePostTurnHooks() != nil || composePostTurnHooks(nil) != nil {
-		t.Fatal("composed hook from nothing")
-	}
-	var calls []string
-	first := func(context.Context, *turn.TurnRequest, []turn.Event) error {
-		calls = append(calls, "first")
-		return errors.New("first failed")
-	}
-	second := func(context.Context, *turn.TurnRequest, []turn.Event) error {
-		calls = append(calls, "second")
-		return nil
-	}
-	err := composePostTurnHooks(first, nil, second)(t.Context(), ownerTurn(turn.OriginTerminal), nil)
-	if err == nil || !strings.Contains(err.Error(), "first failed") {
-		t.Errorf("err = %v, want the first failure", err)
-	}
-	if strings.Join(calls, ",") != "first,second" {
-		t.Errorf("calls = %v, want both hooks in order", calls)
 	}
 }
 

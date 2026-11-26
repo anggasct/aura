@@ -12,6 +12,7 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 )
 
@@ -51,7 +52,7 @@ func NewRootCommand() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newProfileCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newProfileCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
 	mountCommands(root, gf)
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageError{err}
@@ -65,6 +66,9 @@ func ExitCode(root *cobra.Command, args []string, err error) int {
 	}
 	var ue *usageError
 	if errors.As(err, &ue) {
+		return 2
+	}
+	if command.IsUsageError(err) {
 		return 2
 	}
 	if errors.Is(err, terminal.ErrInterrupted) {

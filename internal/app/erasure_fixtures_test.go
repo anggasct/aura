@@ -9,9 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 	"github.com/anggasct/aura/internal/store/storetest"
 )
@@ -39,9 +41,18 @@ func seedPersonaSession(t *testing.T, db *sql.DB, sessionID, ownerID, agentID st
 	}
 }
 
-func testMemoryDocument(id, session, kind string) *store.MemoryDocument {
+func newTestMemoryStore(t *testing.T, db *sql.DB) *memory.SQLiteStore {
+	t.Helper()
+	s, err := memory.NewSQLiteStore(db, turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("memory.NewSQLiteStore: %v", err)
+	}
+	return s
+}
+
+func testMemoryDocument(id, session, kind string) *memory.StoredDocument {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
-	return &store.MemoryDocument{
+	return &memory.StoredDocument{
 		ID: id, OwnerID: "owner-1", SessionID: session, Kind: kind,
 		FromSequence: 1, ToSequence: 1, Content: "the nightly backup finished",
 		TrustLabel: "owner_input", CreatedAt: now,
@@ -64,7 +75,7 @@ func seedErasureFixture(t *testing.T, db *sql.DB, root string) {
 	seedPersonaSession(t, db, "lobby/discord:owner/channel:333/principal:discord:601", "discord:601", "lobby")
 	seedPersonaSession(t, db, "lobby/discord:owner/thread:7001", "discord:602", "lobby")
 	seedPersonaSession(t, db, "main/discord:owner/dm:777", "local-owner", "main")
-	memories := store.NewMemoryStore(db)
+	memories := newTestMemoryStore(t, db)
 	for id, doc := range map[string]struct {
 		owner, session string
 		sequence       int64
@@ -74,7 +85,7 @@ func seedErasureFixture(t *testing.T, db *sql.DB, root string) {
 		"mem-602-thread": {"discord:602", "lobby/discord:owner/thread:7001", 2},
 		"mem-owner":      {"local-owner", "main/discord:owner/dm:777", 1},
 	} {
-		document := testMemoryDocument(id, doc.session, store.MemoryKindEventText)
+		document := testMemoryDocument(id, doc.session, memory.KindEventText)
 		document.OwnerID = doc.owner
 		document.FromSequence, document.ToSequence = doc.sequence, doc.sequence
 		if _, err := memories.UpsertDocument(ctx, document); err != nil {

@@ -154,7 +154,7 @@ func validateLoaded(cfg *Config, doc *document, profile capability.Profile) erro
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
 		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
 		legacyconfig.ValidateScheduler(&cfg.Scheduler),
-		legacyconfig.ValidateMemory(&cfg.Memory),
+		configkit.Under("memory", cfg.Memory.Validate()),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),
 		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),

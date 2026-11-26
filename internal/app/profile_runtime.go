@@ -35,23 +35,6 @@ const (
 
 type postTurnHook func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
 
-func composePostTurnHooks(hooks ...postTurnHook) postTurnHook {
-	active := slices.DeleteFunc(slices.Clone(hooks), func(hook postTurnHook) bool { return hook == nil })
-	switch len(active) {
-	case 0:
-		return nil
-	case 1:
-		return active[0]
-	}
-	return func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
-		errs := make([]error, 0, len(active))
-		for _, hook := range active {
-			errs = append(errs, hook(ctx, req, events))
-		}
-		return errors.Join(errs...)
-	}
-}
-
 type profileRuntime struct {
 	service   *profile.Service
 	extractor *profile.Extractor

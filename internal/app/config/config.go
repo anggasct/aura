@@ -4,6 +4,7 @@ import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/compaction"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/plugin"
 	"github.com/anggasct/aura/internal/modules/skills"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -42,7 +43,7 @@ type Config struct {
 	Webhook      platformwebhook.Config      `json:"webhook"`
 	Broadcast    legacyconfig.Broadcast      `json:"broadcast"`
 	Scheduler    legacyconfig.Scheduler      `json:"scheduler"`
-	Memory       legacyconfig.Memory         `json:"memory"`
+	Memory       memory.Config               `json:"memory"`
 	Skills       *skills.Config              `json:"skills,omitempty"`
 	Context      *compaction.Config          `json:"context,omitempty"`
 	Profile      *legacyconfig.Profile       `json:"profile,omitempty"`
@@ -82,7 +83,7 @@ func Default() Config {
 		Channels:     legacyconfig.DefaultChannels(),
 		Broadcast:    legacyconfig.DefaultBroadcast(),
 		Scheduler:    legacyconfig.DefaultScheduler(),
-		Memory:       legacyconfig.DefaultMemory(),
+		Memory:       memory.Default(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),
 		Skills:       &defaultSkills,
 		Sync:         legacyconfig.DefaultSync(),

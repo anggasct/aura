@@ -1,13 +1,24 @@
 package app
 
 import (
+	"database/sql"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/store"
 )
+
+func mustRekeyParticipants(t *testing.T, db *sql.DB) []principal.Rekeyer {
+	t.Helper()
+	participants, err := rekeyParticipants(db)
+	if err != nil {
+		t.Fatalf("rekeyParticipants: %v", err)
+	}
+	return participants
+}
 
 func requireRekeyCounts(t *testing.T, got principal.RekeyReport, sessions, memoryDocs, profileFacts, conflicts int64) {
 	t.Helper()
@@ -33,13 +44,13 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 	erasureSeedMemorySession(t, db, "terminal-1", "kuma")
 	erasureSeedMemorySession(t, db, "dm:111", "111")
 	erasureSeedMemorySession(t, db, "dm:777", "local-owner")
-	memories := store.NewMemoryStore(db)
-	ownerDoc := testMemoryDocument("mem-owner", "terminal-1", store.MemoryKindEventText)
+	memories := newTestMemoryStore(t, db)
+	ownerDoc := testMemoryDocument("mem-owner", "terminal-1", memory.KindEventText)
 	ownerDoc.OwnerID = "kuma"
-	trustedDoc := testMemoryDocument("mem-trusted", "dm:111", store.MemoryKindEventText)
+	trustedDoc := testMemoryDocument("mem-trusted", "dm:111", memory.KindEventText)
 	trustedDoc.OwnerID = "111"
 	trustedDoc.Content = "the weekly report shipped"
-	for _, doc := range []*store.MemoryDocument{ownerDoc, trustedDoc} {
+	for _, doc := range []*memory.StoredDocument{ownerDoc, trustedDoc} {
 		if _, err := memories.UpsertDocument(ctx, doc); err != nil {
 			t.Fatalf("UpsertDocument(%s): %v", doc.ID, err)
 		}
@@ -60,7 +71,7 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 		}
 	}
 
-	preview, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, false, rekeyParticipants(db))
+	preview, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, false, mustRekeyParticipants(t, db))
 	if err != nil {
 		t.Fatalf("dry run: %v", err)
 	}
@@ -70,16 +81,16 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 		t.Fatalf("dry run wrote: %d legacy sessions left, %v", untouched, err)
 	}
 
-	applied, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, rekeyParticipants(db))
+	applied, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, mustRekeyParticipants(t, db))
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 	requireRekeyCounts(t, applied, 2, 2, 1, 1)
-	hits, err := memories.Search(ctx, &store.MemoryQuery{OwnerID: "local-owner", Terms: "nightly backup", Limit: 10})
+	hits, err := memories.Search(ctx, &memory.StoredQuery{OwnerID: "local-owner", Terms: "nightly backup", Limit: 10})
 	if err != nil || len(hits) != 1 || hits[0].ID != "mem-owner" {
 		t.Fatalf("owner search after rekey = %+v, %v", hits, err)
 	}
-	hits, err = memories.Search(ctx, &store.MemoryQuery{OwnerID: "discord:111", Terms: "weekly report", Limit: 10})
+	hits, err = memories.Search(ctx, &memory.StoredQuery{OwnerID: "discord:111", Terms: "weekly report", Limit: 10})
 	if err != nil || len(hits) != 1 {
 		t.Fatalf("trusted search after rekey = %+v, %v", hits, err)
 	}
@@ -91,7 +102,7 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 		t.Fatalf("colliding fact = %+v, %v, %v; want left under the source", kept, found, err)
 	}
 
-	again, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, rekeyParticipants(db))
+	again, err := principal.Rekey(ctx, db, []principal.OwnerMove{osUser, trusted}, true, mustRekeyParticipants(t, db))
 	if err != nil {
 		t.Fatalf("second apply: %v", err)
 	}
@@ -102,7 +113,7 @@ func TestRekeyOwners_DryRunApplyIdempotent(t *testing.T) {
 
 func TestRekeyOwners_NoMatchesReportsZero(t *testing.T) {
 	db := newTestDB(t)
-	report, err := principal.Rekey(t.Context(), db, []principal.OwnerMove{{From: "kuma", To: "local-owner"}}, true, rekeyParticipants(db))
+	report, err := principal.Rekey(t.Context(), db, []principal.OwnerMove{{From: "kuma", To: "local-owner"}}, true, mustRekeyParticipants(t, db))
 	if err != nil {
 		t.Fatalf("Rekey: %v", err)
 	}
@@ -119,7 +130,7 @@ func TestRekeyOwners_RejectsInvalidMoves(t *testing.T) {
 		"chained move":     {{From: "kuma", To: "local-owner"}, {From: "local-owner", To: "x"}},
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := principal.Rekey(t.Context(), db, moves, false, rekeyParticipants(db))
+			_, err := principal.Rekey(t.Context(), db, moves, false, mustRekeyParticipants(t, db))
 			if code, ok := fault.CodeOf[principal.ErrorCode](err); !ok || code != principal.ErrorCodeInvalidArgument {
 				t.Fatalf("code = %q, %v; want invalid_argument", code, ok)
 			}

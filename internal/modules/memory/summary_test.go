@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"testing"
 	"time"
 
@@ -126,7 +127,7 @@ func TestSummarizeCapabilityGateFailsBeforeModelCall(t *testing.T) {
 	summarizer := &fakeSummarizer{text: "unused"}
 	if _, err := service.Summarize(t.Context(), "owner-1", "sess-1", "backup", documents, noStructured, summarizer); err == nil {
 		t.Error("model without structured output accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeModelCapabilityUnsupported {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeModelCapabilityUnsupported {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 	if summarizer.calls != 0 {
@@ -137,7 +138,7 @@ func TestSummarizeCapabilityGateFailsBeforeModelCall(t *testing.T) {
 	tiny.ContextTokens = 8
 	if _, err := service.Summarize(t.Context(), "owner-1", "sess-1", "backup", documents, tiny, summarizer); err == nil {
 		t.Error("overflowing context accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeModelCapabilityUnsupported {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeModelCapabilityUnsupported {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 	if summarizer.calls != 0 {
@@ -166,7 +167,7 @@ func TestSummarizeUnknownCapabilityUsesConservativeLimits(t *testing.T) {
 	tight.ContextTokens = estimateTokens("backup") + estimateTokens("nightly backup finished") + service.tokens + 4
 	if _, err := service.Summarize(t.Context(), "owner-1", "sess-1", "backup", documents, tight, &fakeSummarizer{text: "x"}); err == nil {
 		t.Error("unknown-tokenizer margin not applied")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeModelCapabilityUnsupported {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeModelCapabilityUnsupported {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
@@ -195,7 +196,7 @@ func TestSummarizeValidation(t *testing.T) {
 	}
 	if _, err := service.Summarize(t.Context(), "owner-1", "sess-1", "q", documents, capableModel(), &fakeSummarizer{text: "  "}); err == nil {
 		t.Error("empty summary accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeUnavailable {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeUnavailable {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
@@ -252,7 +253,7 @@ func TestRecallSurfacesCorruptProjection(t *testing.T) {
 		OwnerID: "owner-1", SessionID: "sess-1", Query: "nightly backup finished",
 	}); err == nil {
 		t.Fatal("corrupt row accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProjectionCorrupt {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProjectionCorrupt {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }

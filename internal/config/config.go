@@ -35,20 +35,6 @@ type Scheduler struct {
 	OccurrenceRetention configkit.Duration `json:"occurrence_retention"`
 }
 
-type Memory struct {
-	Enabled              bool               `json:"enabled"`
-	MaxDocuments         int                `json:"max_documents"`
-	RecallTokenBudget    int                `json:"recall_token_budget"`
-	Locale               string             `json:"locale"`
-	EnglishStemming      bool               `json:"english_stemming"`
-	SummaryPromptVersion string             `json:"summary_prompt_version"`
-	SummaryTTL           configkit.Duration `json:"summary_ttl"`
-	RangeThreshold       int                `json:"range_threshold"`
-	RangeLiveWindow      int                `json:"range_live_window"`
-	PurgeInterval        configkit.Duration `json:"purge_interval"`
-	PurgeLimit           int                `json:"purge_limit"`
-}
-
 type QuietHours struct {
 	Enabled bool   `json:"enabled"`
 	Start   string `json:"start"`
@@ -442,20 +428,6 @@ func DefaultScheduler() Scheduler {
 		DefaultTimezone:     "UTC",
 		DefaultCatchUpGrace: configkit.Duration(15 * time.Minute),
 		OccurrenceRetention: configkit.Duration(720 * time.Hour),
-	}
-}
-
-func DefaultMemory() Memory {
-	return Memory{
-		Enabled:              true,
-		MaxDocuments:         10,
-		RecallTokenBudget:    2000,
-		SummaryPromptVersion: "memory-summary-v1",
-		SummaryTTL:           configkit.Duration(720 * time.Hour),
-		RangeThreshold:       20,
-		RangeLiveWindow:      5,
-		PurgeInterval:        configkit.Duration(1 * time.Hour),
-		PurgeLimit:           100,
 	}
 }
 

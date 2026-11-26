@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"math"
 	"slices"
 	"strings"
@@ -187,7 +188,7 @@ type Summarizer interface {
 	Summarize(ctx context.Context, prompt *SummaryPrompt) (string, error)
 }
 
-type Config struct {
+type ServiceOptions struct {
 	MaxDocuments         int
 	TokenBudget          int
 	MaxContentBytes      int
@@ -218,12 +219,12 @@ type Service struct {
 	projectMu          sync.Mutex
 }
 
-func NewService(documents DocumentStore, secrets Secrets, config *Config) (*Service, error) {
+func NewService(documents DocumentStore, secrets Secrets, config *ServiceOptions) (*Service, error) {
 	if documents == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
 	if config == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "config must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "config must not be nil")
 	}
 	maxDocs := config.MaxDocuments
 	if maxDocs == 0 {
@@ -254,7 +255,7 @@ func NewService(documents DocumentStore, secrets Secrets, config *Config) (*Serv
 		fallbackTokens = defaultFallbackTokenBudget
 	}
 	if fallbackDocs <= 0 || fallbackDocs > hardMaxDocuments || fallbackTokens <= 0 || fallbackTokens > hardMaxTokenBudget {
-		return nil, Errorf(ErrorCodeBudgetInvalid, "fallback budget is not within bounds")
+		return nil, fault.New(ErrorCodeBudgetInvalid, "fallback budget is not within bounds")
 	}
 	rangeThreshold := config.RangeThreshold
 	if rangeThreshold == 0 {
@@ -265,7 +266,7 @@ func NewService(documents DocumentStore, secrets Secrets, config *Config) (*Serv
 		rangeLiveWindow = defaultRangeLiveWindow
 	}
 	if rangeThreshold <= 0 || rangeThreshold > maxRangeThreshold || rangeLiveWindow <= 0 || rangeLiveWindow > maxRangeLiveWindow {
-		return nil, Errorf(ErrorCodeBudgetInvalid, "range budget is not within bounds")
+		return nil, fault.New(ErrorCodeBudgetInvalid, "range budget is not within bounds")
 	}
 	return &Service{
 		documents:       documents,
@@ -384,14 +385,14 @@ func documentID(sessionID, kind string, from, to uint64, promptVersion string) s
 
 func sequenceToDB(sequence uint64) (int64, error) {
 	if sequence == 0 || sequence > math.MaxInt64 {
-		return 0, Errorf(ErrorCodeInvalidArgument, "sequence is not valid")
+		return 0, fault.New(ErrorCodeInvalidArgument, "sequence is not valid")
 	}
 	return int64(sequence), nil
 }
 
 func sequenceFromDB(sequence int64) (uint64, error) {
 	if sequence <= 0 {
-		return 0, Errorf(ErrorCodeInvalidArgument, "sequence is not valid")
+		return 0, fault.New(ErrorCodeInvalidArgument, "sequence is not valid")
 	}
 	return uint64(sequence), nil
 }
@@ -430,19 +431,19 @@ func stripRecallEvidence(text string) (string, bool) {
 
 func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event) (Document, bool, error) {
 	if ctx == nil {
-		return Document{}, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return Document{}, false, err
 	}
 	if strings.TrimSpace(ownerID) == "" {
-		return Document{}, false, Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if event == nil {
-		return Document{}, false, Errorf(ErrorCodeInvalidArgument, "event must not be nil")
+		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event must not be nil")
 	}
 	if event.SessionID == "" {
-		return Document{}, false, Errorf(ErrorCodeInvalidArgument, "event session must not be empty")
+		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event session must not be empty")
 	}
 	from, err := sequenceToDB(event.Sequence)
 	if err != nil {
@@ -537,22 +538,22 @@ func estimateTokens(content string) int {
 
 func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocument, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if req == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "recall request must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "recall request must not be nil")
 	}
 	if strings.TrimSpace(req.OwnerID) == "" || strings.TrimSpace(req.SessionID) == "" {
-		return nil, Errorf(ErrorCodeQueryInvalid, "recall owner and session must not be empty")
+		return nil, fault.New(ErrorCodeQueryInvalid, "recall owner and session must not be empty")
 	}
 	if len(req.AgentIDs) == 0 || slices.Contains(req.AgentIDs, "") {
-		return nil, Errorf(ErrorCodeQueryInvalid, "recall readable personas must not be empty")
+		return nil, fault.New(ErrorCodeQueryInvalid, "recall readable personas must not be empty")
 	}
 	if len([]rune(req.Query)) == 0 || len([]rune(req.Query)) > maxQueryRunes {
-		return nil, Errorf(ErrorCodeQueryInvalid, "recall query is not within bounds")
+		return nil, fault.New(ErrorCodeQueryInvalid, "recall query is not within bounds")
 	}
 	maxDocs := req.MaxDocuments
 	if maxDocs == 0 {
@@ -563,7 +564,7 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 		tokens = s.tokens
 	}
 	if maxDocs < 0 || maxDocs > hardMaxDocuments || tokens <= 0 || tokens > hardMaxTokenBudget {
-		return nil, Errorf(ErrorCodeBudgetInvalid, "recall budget is not within bounds")
+		return nil, fault.New(ErrorCodeBudgetInvalid, "recall budget is not within bounds")
 	}
 	hits, err := s.documents.Search(ctx, &StoredQuery{
 		OwnerID:   req.OwnerID,
@@ -642,11 +643,11 @@ func (s *Service) orderPrimary(ctx context.Context, sessionID string, primary []
 func recallDocumentFromHit(hit *StoredHit) (RecallDocument, error) {
 	from, err := sequenceFromDB(hit.FromSequence)
 	if err != nil {
-		return RecallDocument{}, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+		return RecallDocument{}, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
 	to, err := sequenceFromDB(hit.ToSequence)
 	if err != nil {
-		return RecallDocument{}, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+		return RecallDocument{}, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
 	return RecallDocument{
 		ID:            hit.ID,
@@ -711,10 +712,10 @@ func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDoc
 
 func (s *Service) Watermark(ctx context.Context, sessionID string) (mark uint64, found bool, err error) {
 	if ctx == nil {
-		return 0, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return 0, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if strings.TrimSpace(sessionID) == "" {
-		return 0, false, Errorf(ErrorCodeInvalidArgument, "session id must not be empty")
+		return 0, false, fault.New(ErrorCodeInvalidArgument, "session id must not be empty")
 	}
 	raw, found, err := s.documents.ProjectionWatermark(ctx, sessionID)
 	if err != nil {
@@ -732,10 +733,10 @@ func (s *Service) Watermark(ctx context.Context, sessionID string) (mark uint64,
 
 func (s *Service) RebuildSession(ctx context.Context, ownerID, sessionID string, events []*Event) (int, error) {
 	if ctx == nil {
-		return 0, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return 0, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(sessionID) == "" {
-		return 0, Errorf(ErrorCodeInvalidArgument, "owner and session must not be empty")
+		return 0, fault.New(ErrorCodeInvalidArgument, "owner and session must not be empty")
 	}
 	if err := s.documents.DeleteSessionDocuments(ctx, sessionID); err != nil {
 		return 0, err
@@ -758,10 +759,10 @@ func (s *Service) RebuildSession(ctx context.Context, ownerID, sessionID string,
 
 func (s *Service) PurgeExpired(ctx context.Context, now time.Time, limit int) (int, error) {
 	if ctx == nil {
-		return 0, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return 0, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if limit <= 0 || limit > maxPurgeLimit {
-		return 0, Errorf(ErrorCodeInvalidArgument, "purge limit is out of bounds")
+		return 0, fault.New(ErrorCodeInvalidArgument, "purge limit is out of bounds")
 	}
 	return s.documents.DeleteExpiredSummaries(ctx, now.UTC(), limit)
 }
@@ -782,13 +783,13 @@ func provenanceFor(documents []RecallDocument) []ProvenanceRef {
 
 func (s *Service) checkSummaryCapability(query string, documents []RecallDocument, model *SummaryModel) (int, error) {
 	if model == nil {
-		return 0, Errorf(ErrorCodeInvalidArgument, "summary model must not be nil")
+		return 0, fault.New(ErrorCodeInvalidArgument, "summary model must not be nil")
 	}
 	if strings.TrimSpace(model.Protocol) == "" || strings.TrimSpace(model.Name) == "" {
-		return 0, Errorf(ErrorCodeInvalidArgument, "summary model identity must not be empty")
+		return 0, fault.New(ErrorCodeInvalidArgument, "summary model identity must not be empty")
 	}
 	if !model.StructuredOutput {
-		return 0, Errorf(ErrorCodeModelCapabilityUnsupported, "summary model lacks structured output")
+		return 0, fault.New(ErrorCodeModelCapabilityUnsupported, "summary model lacks structured output")
 	}
 	input := estimateTokens(query)
 	for i := range documents {
@@ -798,26 +799,26 @@ func (s *Service) checkSummaryCapability(query string, documents []RecallDocumen
 		input *= 2
 	}
 	if model.ContextTokens > 0 && input+s.tokens > model.ContextTokens {
-		return 0, Errorf(ErrorCodeModelCapabilityUnsupported, "summary input exceeds model context")
+		return 0, fault.New(ErrorCodeModelCapabilityUnsupported, "summary input exceeds model context")
 	}
 	return s.tokens, nil
 }
 
 func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query string, documents []RecallDocument, model *SummaryModel, summarizer Summarizer) (RecallContext, error) {
 	if ctx == nil {
-		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return RecallContext{}, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return RecallContext{}, err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(sessionID) == "" {
-		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "owner and session must not be empty")
+		return RecallContext{}, fault.New(ErrorCodeInvalidArgument, "owner and session must not be empty")
 	}
 	if len(documents) == 0 {
-		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "summary requires at least one document")
+		return RecallContext{}, fault.New(ErrorCodeInvalidArgument, "summary requires at least one document")
 	}
 	if summarizer == nil {
-		return RecallContext{}, Errorf(ErrorCodeInvalidArgument, "summarizer must not be nil")
+		return RecallContext{}, fault.New(ErrorCodeInvalidArgument, "summarizer must not be nil")
 	}
 	maxTokens, err := s.checkSummaryCapability(query, documents, model)
 	if err != nil {
@@ -834,10 +835,10 @@ func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query strin
 	}
 	content, ok := cleanText(summary, s.maxBytes)
 	if !ok {
-		return RecallContext{}, Errorf(ErrorCodeUnavailable, "summarizer returned no usable content")
+		return RecallContext{}, fault.New(ErrorCodeUnavailable, "summarizer returned no usable content")
 	}
 	if s.secrets != nil && s.secrets.Contains(content) {
-		return RecallContext{}, Errorf(ErrorCodeUnavailable, "summarizer returned no usable content")
+		return RecallContext{}, fault.New(ErrorCodeUnavailable, "summarizer returned no usable content")
 	}
 	from, to := documents[0].FromSequence, documents[0].ToSequence
 	for i := range documents[1:] {
@@ -863,10 +864,10 @@ func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query strin
 		CreatedAt:     now,
 	}
 	if record.FromSequence, err = sequenceToDB(from); err != nil {
-		return RecallContext{}, Errorf(ErrorCodeProjectionCorrupt, "summary source range is not valid")
+		return RecallContext{}, fault.New(ErrorCodeProjectionCorrupt, "summary source range is not valid")
 	}
 	if record.ToSequence, err = sequenceToDB(to); err != nil {
-		return RecallContext{}, Errorf(ErrorCodeProjectionCorrupt, "summary source range is not valid")
+		return RecallContext{}, fault.New(ErrorCodeProjectionCorrupt, "summary source range is not valid")
 	}
 	if s.summaryTTL > 0 {
 		expires := now.Add(s.summaryTTL)

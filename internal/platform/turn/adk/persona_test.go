@@ -6,6 +6,7 @@ import (
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const kumaSoul = "You are Kuma: casual, brief, and warm."
@@ -27,7 +28,7 @@ func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
 			executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 				WithAgentResolver(registry, nil),
 				WithOwnerContext(owner),
-				WithRecallProvider(&stubRecallProvider{evidence: corpusEvidence()}),
+				WithContextProvider(&stubRecallProvider{evidence: corpusEvidence()}),
 			)
 			if err != nil {
 				t.Fatalf("NewADKExecutor: %v", err)
@@ -40,7 +41,7 @@ func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
 
 			system := strings.Join(model.systems, "\n")
 			soulAt := strings.Index(system, kumaSoul)
-			caveatAt := strings.Index(system, recallEvidenceCaveat)
+			caveatAt := strings.Index(system, turn.RecallEvidenceCaveat)
 			ownerAt := strings.Index(system, ownerContextHeader)
 			if soulAt < 0 || caveatAt < soulAt {
 				t.Fatalf("soul missing or after caveat (soul=%d caveat=%d):\n%s", soulAt, caveatAt, system)
