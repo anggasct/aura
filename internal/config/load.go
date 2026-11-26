@@ -14,27 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/secret"
 )
 
-func ValidateTerminal(t Terminal) error {
-	if t.RenderHz <= 0 {
-		return configkit.Invalid("terminal.render_hz", "must be positive")
-	}
-	if t.MaxInputBytes <= 0 {
-		return configkit.Invalid("terminal.max_input_bytes", "must be positive")
-	}
-	if t.InMemoryHistory < 0 {
-		return configkit.Invalid("terminal.in_memory_history", "must not be negative")
-	}
-	if t.SecondInterruptTime <= 0 {
-		return configkit.Invalid("terminal.second_interrupt_window", "must be positive")
-	}
-	switch t.PlainApproval {
-	case "deny":
-	default:
-		return configkit.Invalid("terminal.plain_approval", "must be \"deny\"")
-	}
-	return nil
-}
-
 const (
 	telegramMaxPollTimeout = 50 * time.Second
 	telegramMaxBackoffCap  = 10 * time.Minute

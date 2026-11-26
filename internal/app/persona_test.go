@@ -132,7 +132,10 @@ func TestResolveChatPersona(t *testing.T) {
 
 func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 	engine := &captureEngine{}
-	runner := &terminalRunner{engine: engine, agentID: "main"}
+	runner, err := terminal.NewRuntimeRunner(engine, "main")
+	if err != nil {
+		t.Fatalf("NewRuntimeRunner: %v", err)
+	}
 	for range runner.Run(t.Context(), &terminal.Request{SessionID: "sess-1", PrincipalID: "local-owner", AgentID: "engineer", Parts: []terminal.Input{{Text: "hi"}}}) {
 	}
 	if engine.got == nil || engine.got.AgentID != "engineer" {
@@ -141,7 +144,10 @@ func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 
 	db := discordTestDB(t)
 	svc := turnstore.NewSessionService(db)
-	sessions := &terminalSessions{sessions: svc, agentID: "engineer"}
+	sessions, err := terminal.NewTurnSessions(svc, "engineer")
+	if err != nil {
+		t.Fatalf("NewTurnSessions: %v", err)
+	}
 	created, err := sessions.Create(t.Context(), "local-owner", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)

@@ -16,6 +16,7 @@ import (
 	"go.opentelemetry.io/otel/metric"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/github"
@@ -659,7 +660,7 @@ func (b *build) buildTurnRuntime() error {
 	if b.liveEvents == nil {
 		return invalidOptions("the turn runtime requires the live event bus")
 	}
-	var broker turn.ToolBroker = terminalBroker{}
+	var broker turn.ToolBroker = terminal.DenyPolicy{}
 	if b.builtin != nil {
 		broker = b.builtin
 	}

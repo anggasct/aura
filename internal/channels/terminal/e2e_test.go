@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -98,15 +99,19 @@ func TestTerminalVerticalSlice(t *testing.T) {
 
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: engine},
-		e2eSessions{sessions: sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("hi\n"),
-		out, diag,
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine},
+		Sessions:  e2eSessions{sessions: sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("hi\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("console run: %v", err)
 	}

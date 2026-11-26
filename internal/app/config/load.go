@@ -148,7 +148,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		configkit.Under("telemetry", cfg.Telemetry.Validate()),
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),
-		legacyconfig.ValidateTerminal(cfg.Terminal),
+		configkit.Under("terminal", cfg.Terminal.Validate()),
 		validateWorkflows(cfg.Workflows),
 		validateMCP(cfg.MCP),
 		validatePlugins(cfg.Plugins),
