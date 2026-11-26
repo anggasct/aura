@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"go/ast"
+	"path/filepath"
 	"regexp"
 	"slices"
 )
@@ -22,25 +23,24 @@ var basicTypes = []string{
 }
 
 type sourceCheck struct {
-	name   string
-	fields int
-	find   func([]sourcePackage) []finding
+	name string
+	find func([]sourcePackage) []string
 }
 
 var sourceChecks = []sourceCheck{
-	{name: "fakes", fields: 2, find: findFakes},
-	{name: "setters", fields: 2, find: findSetters},
-	{name: "codederrors", fields: 1, find: findCodedErrors},
+	{name: "fakes", find: findFakes},
+	{name: "setters", find: findSetters},
+	{name: "codederrors", find: findCodedErrors},
 }
 
-func findFakes(packages []sourcePackage) []finding {
+func findFakes(packages []sourcePackage) []string {
 	kits := map[string]bool{}
 	for _, pkg := range packages {
 		if isTestKit(pkg.name) {
 			kits[pkg.path] = true
 		}
 	}
-	var findings []finding
+	var violations []string
 	for _, pkg := range packages {
 		if isTestKit(pkg.name) {
 			continue
@@ -48,24 +48,21 @@ func findFakes(packages []sourcePackage) []finding {
 		for _, file := range pkg.files {
 			for _, name := range declaredNames(file) {
 				if fakeName.MatchString(name) {
-					findings = append(findings, finding{
-						entry:   pkg.path + " " + name,
-						message: fmt.Sprintf("fakes: %s declares %s in a production file", pkg.path, name),
-					})
+					violations = append(violations, fmt.Sprintf("fakes: %s declares %s in a production file", pkg.path, name))
 				}
 			}
 		}
 		for _, imported := range pkg.imports {
 			if kits[imported] {
-				findings = append(findings, finding{message: fmt.Sprintf("fakes: %s imports the test kit %s from a production file", pkg.path, imported)})
+				violations = append(violations, fmt.Sprintf("fakes: %s imports the test kit %s from a production file", pkg.path, imported))
 			}
 		}
 	}
-	return findings
+	return uniqueSorted(violations)
 }
 
-func findSetters(packages []sourcePackage) []finding {
-	var findings []finding
+func findSetters(packages []sourcePackage) []string {
+	var violations []string
 	for _, pkg := range packages {
 		if isTestKit(pkg.name) {
 			continue
@@ -78,14 +75,11 @@ func findSetters(packages []sourcePackage) []finding {
 					continue
 				}
 				name := receiverName(method.Recv.List[0].Type) + "." + method.Name.Name
-				findings = append(findings, finding{
-					entry:   pkg.path + " " + name,
-					message: fmt.Sprintf("setters: %s %s injects a dependency after construction", pkg.path, name),
-				})
+				violations = append(violations, fmt.Sprintf("setters: %s %s injects a dependency after construction", pkg.path, name))
 			}
 		}
 	}
-	return findings
+	return uniqueSorted(violations)
 }
 
 func isDependencySetter(method *ast.FuncDecl, basic map[string]bool) bool {
@@ -158,25 +152,25 @@ func receiverName(expr ast.Expr) string {
 	}
 }
 
-func findCodedErrors(packages []sourcePackage) []finding {
-	var findings []finding
+func findCodedErrors(packages []sourcePackage) []string {
+	var violations []string
 	for _, pkg := range packages {
 		if isTestKit(pkg.name) || within(pkg.path, faultPackage) || within(pkg.path, pluginWire) || classify(pkg.path).kind == kindPlugin {
 			continue
 		}
 		for _, file := range pkg.files {
 			if slices.Contains(declaredTypes(file), "Error") {
-				findings = append(findings, finding{entry: pkg.path, message: fmt.Sprintf("codederrors: %s declares its own Error type; use platform/fault", pkg.path)})
+				violations = append(violations, fmt.Sprintf("codederrors: %s declares its own Error type; use platform/fault", pkg.path))
 			}
 			if slices.Contains(declaredFuncs(file), "CodeOf") {
-				findings = append(findings, finding{entry: pkg.path, message: fmt.Sprintf("codederrors: %s declares its own CodeOf; use fault.CodeOf", pkg.path)})
+				violations = append(violations, fmt.Sprintf("codederrors: %s declares its own CodeOf; use fault.CodeOf", pkg.path))
 			}
 		}
 	}
-	return findings
+	return uniqueSorted(violations)
 }
 
-func checkSources(selected []string, packages []repoPackage) ([]string, error) {
+func checkSources(selected []string, packages []repoPackage, allowDir string) ([]string, error) {
 	sources, err := parseSources(packages)
 	if err != nil {
 		return nil, err
@@ -186,12 +180,12 @@ func checkSources(selected []string, packages []repoPackage) ([]string, error) {
 		if !slices.Contains(selected, check.name) {
 			continue
 		}
-		b := baseline{file: check.name + ".allow", fields: check.fields}
-		content, err := readOptional(baselineDir + b.file)
+		absent, err := checkAllowListAbsent(filepath.Join(allowDir, check.name+".allow"))
 		if err != nil {
 			return nil, err
 		}
-		violations = append(violations, b.apply(check.find(sources), content)...)
+		violations = append(violations, absent...)
+		violations = append(violations, check.find(sources)...)
 	}
 	return violations, nil
 }

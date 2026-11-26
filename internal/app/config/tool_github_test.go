@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -150,7 +149,7 @@ func TestOwnerPreferencesMayNotRepeatAGitHubCredential(t *testing.T) {
 	body := strings.Replace(webSearchBase, "%s\n", githubConfigSection(githubEntry("ci", "env://AURA_TEST_GITHUB_TOKEN")), 1)
 	_, err := LoadWithOptions(writeTempConfig(t, body+"owner:\n  preferences:\n    note: \""+token+"\"\n"), execLinuxOptions(t))
 	code, ok := codeOf(err)
-	if !ok || code != legacyconfig.ErrorCodeOwnerSecret {
+	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid (err %v)", code, ok, err)
 	}
 	if strings.Contains(err.Error(), token) {

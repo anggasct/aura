@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/model"
 )
 
@@ -111,7 +110,7 @@ models:
 	tests := []struct {
 		name       string
 		body       string
-		wantCode   legacyconfig.ErrorCode
+		wantCode   ErrorCode
 		wantSubstr string
 	}{
 		{

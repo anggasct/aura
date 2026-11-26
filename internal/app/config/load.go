@@ -11,7 +11,6 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
@@ -325,12 +324,12 @@ func screenOwnerSecrets(owner *principal.Owner, cfg *Config) error {
 		{"owner.timezone", owner.Timezone},
 	} {
 		if field.value != "" && vault.Contains(field.value) {
-			problems = append(problems, configkit.Field(field.path, fault.New(legacyconfig.ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
+			problems = append(problems, configkit.Field(field.path, fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
 		}
 	}
 	for key, value := range owner.Preferences {
 		if (key != "" && vault.Contains(key)) || (value != "" && vault.Contains(value)) {
-			problems = append(problems, configkit.Field("owner.preferences", fault.New(legacyconfig.ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
+			problems = append(problems, configkit.Field("owner.preferences", fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
 			break
 		}
 	}
@@ -414,7 +413,7 @@ func validateMCP(section *mcp.Config) error {
 
 func checkVersion(v int) error {
 	if v != supportedVersion {
-		return configkit.Field("version", fault.New(legacyconfig.ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
+		return configkit.Field("version", fault.New(ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
 	}
 	return nil
 }

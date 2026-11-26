@@ -1,4 +1,4 @@
-package store
+package workflow
 
 import (
 	"database/sql"
@@ -20,7 +20,7 @@ func TestMigrationAddsRunTaintAndLineageWithoutDisturbingLegacyRows(t *testing.T
 	if err := sqlite.Migrate(ctx, db, history.Migrations()[:45]); err != nil {
 		t.Fatalf("migrate to v%d: %v", 45, err)
 	}
-	seedMemorySession(t, db, "sess-1", "owner-1")
+	seedMigrationSession(t, db, "sess-1", "owner-1")
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES ('flow', 1, 'g', 'defined', '{}', 'digest', '2026-11-13T10:00:00Z')`); err != nil {
 		t.Fatalf("seed definition: %v", err)
 	}

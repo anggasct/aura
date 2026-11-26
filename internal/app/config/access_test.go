@@ -9,7 +9,6 @@ import (
 	"testing"
 	"time"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
@@ -18,7 +17,7 @@ func TestLoad_PersonaAccessValidation(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
 	cases := map[string]struct {
 		fields string
-		code   legacyconfig.ErrorCode
+		code   ErrorCode
 		detail string
 	}{
 		"defaults":                         {},

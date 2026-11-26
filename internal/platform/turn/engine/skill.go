@@ -8,7 +8,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type SkillRenderer interface {
@@ -27,7 +26,7 @@ func (e *Engine) renderSkillActivation(ctx context.Context, req *turn.TurnReques
 			e.logger.WarnContext(ctx, "skill activation unavailable", "component", "skills", "skill_id", req.Skill.SkillID, "turn_id", req.TurnID, "error", err)
 			return nil, codedError(turn.ErrorCodeSkillUnavailable, "skill is not available", nil)
 		}
-		if _, ok := fault.CodeOf[sqlite.ErrorCode](err); ok || fault.HasCode(err, store.ErrorCodeStorageUnavailable) {
+		if _, ok := fault.CodeOf[sqlite.ErrorCode](err); ok {
 			return nil, codedError(turn.ErrorCodeStorageUnavailable, "read the pinned skill activation", err)
 		}
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "render the pinned skill activation", err)

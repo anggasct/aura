@@ -6,7 +6,6 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/workflow"
 )
 
@@ -19,7 +18,7 @@ func TestGeneratedWorkflowBudgets(t *testing.T) {
 	}
 	for label, tc := range map[string]struct {
 		body string
-		code legacyconfig.ErrorCode
+		code ErrorCode
 	}{
 		"zero steps":     {"workflows:\n  generated:\n    max_steps: 0\n", invalidCode},
 		"negative token": {"workflows:\n  generated:\n    max_tokens: -1\n", invalidCode},

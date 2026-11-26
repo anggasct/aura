@@ -1,4 +1,4 @@
-package store
+package workflow
 
 import (
 	"path/filepath"
@@ -19,7 +19,7 @@ func TestProposalPlanTextIsImmutable(t *testing.T) {
 	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
 		t.Fatalf("Migrate: %v", err)
 	}
-	seedMemorySession(t, db, "sess-plan", "owner-1")
+	seedMigrationSession(t, db, "sess-plan", "owner-1")
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, plan_text)
 VALUES ('prop-plan', 'sess-plan', 'main', 'owner-1', '{}', 'digest', 'proposed', '2026-11-13T10:00:00Z', '1. approve')`); err != nil {
 		t.Fatalf("seed proposal: %v", err)
