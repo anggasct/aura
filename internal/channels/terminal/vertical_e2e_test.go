@@ -125,7 +125,7 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	sessions := turnstore.NewSessionService(db)
 	events := turnstore.NewEventStore(db)
 	liveEvents := turn.NewEventBus(nil)
-	journal, err := effect.NewJournal(db, effect.Options{Events: liveEvents})
+	journal, err := effect.NewJournal(db, effect.Options{Events: liveEvents, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("journal: %v", err)
 	}

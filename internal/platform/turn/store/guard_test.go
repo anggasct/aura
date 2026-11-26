@@ -6,6 +6,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -163,17 +164,15 @@ func TestWorkflowSessionPrefixIsReserved(t *testing.T) {
 	if got := countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'wf-x'`); got != 0 {
 		t.Fatalf("a refused reserved id left %d session rows", got)
 	}
-	tx, err := db.BeginTx(ctx, nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := CreateSessionTx(ctx, tx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}); err != nil {
-		t.Fatalf("CreateSessionTx of a reserved id: %v", err)
-	}
-	wantCode(t, CreateSessionTx(ctx, tx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeSessionIDConflict)
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
+	ts := NewTurnStore(db)
+	if err := sqlite.RunInTx(ctx, db, func(ctx context.Context) error {
+		if err := ts.CreateSession(ctx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}); err != nil {
+			t.Fatalf("CreateSession of a reserved id: %v", err)
+		}
+		wantCode(t, ts.CreateSession(ctx, &turn.Session{ID: "wf-x", OwnerID: "discord:1"}), ErrorCodeSessionIDConflict)
+		return nil
+	}); err != nil {
+		t.Fatalf("RunInTx: %v", err)
 	}
 	if got := countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'wf-x' AND agent_id = 'main'`); got != 1 {
 		t.Fatalf("committed run session rows = %d, want 1 with the default agent", got)

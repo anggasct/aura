@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"log/slog"
 	"strings"
 	"sync"
@@ -457,7 +458,7 @@ func (m *fakeMailer) sent() []Submission {
 
 func newEffects(t *testing.T, db *sql.DB) *effect.Executor {
 	t.Helper()
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}

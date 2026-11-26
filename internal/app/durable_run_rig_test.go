@@ -50,7 +50,7 @@ func openRunLife(t *testing.T, plan runPlan) *runLife {
 		db:        db,
 		runtime:   newSuiteRuntime(t, db),
 		ledger:    &turnLedger{dir: plan.Ledger, life: plan.Life},
-		workflows: workflow.NewStore(db),
+		workflows: mustWorkflowStore(t, db),
 	}
 	scenario.host(t, life)
 	serveRuntime(t, life.runtime)

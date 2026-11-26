@@ -478,7 +478,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 			if err := ensurer.EnsureSession(t.Context(), "desk/email:work/thread:recover", principal.OwnerID, "desk"); err != nil {
 				t.Fatalf("EnsureSession: %v", err)
 			}
-			journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+			journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 			if err != nil {
 				t.Fatalf("NewJournal: %v", err)
 			}

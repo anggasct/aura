@@ -81,7 +81,7 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 		}
 	}
 	observed := &effectOutcomes{}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: observed})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: observed, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}

@@ -271,7 +271,7 @@ func prepareLikeDeliver(t *testing.T, f *deliveryFixture, journal *effect.Journa
 
 func restartedAdapter(t *testing.T, f *deliveryFixture) (*Adapter, *effect.Journal) {
 	t.Helper()
-	journal, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger})
+	journal, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -845,7 +845,7 @@ func TestDeliver_StartupRecoveryMakesOrphanedIntentsUnknownAndReconcilable(t *te
 		t.Fatalf("Start foreign: %v", err)
 	}
 
-	restarted, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger})
+	restarted, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}

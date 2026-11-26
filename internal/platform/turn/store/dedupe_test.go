@@ -3,12 +3,14 @@ package turnstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -147,23 +149,21 @@ func TestDedupeClaimedReportsLiveKeysOnly(t *testing.T) {
 
 func claimInTx(t *testing.T, db *sql.DB, claim *turn.DedupeClaim) (string, bool) {
 	t.Helper()
-	tx, err := db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	turnID, created, err := ClaimDedupeTx(t.Context(), tx, claim)
-	if err != nil {
-		t.Fatalf("ClaimDedupeTx(%s, %s): %v", claim.ExternalID, claim.TurnID, err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
+	var turnID string
+	var created bool
+	if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		var err error
+		turnID, created, err = NewTurnStore(db).ClaimDedupe(ctx, claim)
+		return err
+	}); err != nil {
+		t.Fatalf("ClaimDedupe(%s, %s): %v", claim.ExternalID, claim.TurnID, err)
 	}
 	return turnID, created
 }
 
-func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
+func TestClaimDedupeClaimsOncePerWindow(t *testing.T) {
 	db := newTestDB(t)
+	ts := NewTurnStore(db)
 	start := time.Date(2030, 1, 2, 3, 4, 0, 0, time.UTC)
 	window := &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-1", Now: start, ExpiresAt: start.Add(time.Hour)}
 	if turnID, created := claimInTx(t, db, window); !created || turnID != "turn-1" {
@@ -193,28 +193,24 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 		t.Fatalf("claim after a fractional expiry = (%q, %v), want (turn-c, true)", turnID, created)
 	}
 
-	tx, err := db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if _, created, err := ClaimDedupeTx(t.Context(), tx, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-3", TurnID: "turn-x", Now: start, ExpiresAt: later}); err != nil || !created {
-		t.Fatalf("claim in a rolled back transaction = (%v, %v)", created, err)
-	}
-	if err := tx.Rollback(); err != nil {
-		t.Fatalf("rollback: %v", err)
+	rollbackErr := errors.New("rollback")
+	if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		if _, created, err := ts.ClaimDedupe(ctx, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-3", TurnID: "turn-x", Now: start, ExpiresAt: later}); err != nil || !created {
+			t.Fatalf("claim in a rolled back transaction = (%v, %v)", created, err)
+		}
+		return rollbackErr
+	}); !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx err = %v, want rollbackErr", err)
 	}
 	var kept int
 	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM ingress_dedupe WHERE external_id = 'ext-3'`).Scan(&kept); err != nil || kept != 0 {
 		t.Fatalf("rows after rollback = %d (%v), want 0", kept, err)
 	}
 
-	valid := turn.DedupeClaim{Source: "telegram", ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}
 	invalid := []struct {
 		name  string
-		nilTx bool
 		claim *turn.DedupeClaim
 	}{
-		{name: "nil transaction", nilTx: true, claim: &valid},
 		{name: "nil claim"},
 		{name: "empty source", claim: &turn.DedupeClaim{ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}},
 		{name: "empty external id", claim: &turn.DedupeClaim{Source: "telegram", TurnID: "turn-4", Now: start, ExpiresAt: later}},
@@ -222,16 +218,10 @@ func TestClaimDedupeTxClaimsOncePerWindow(t *testing.T) {
 	}
 	for _, tc := range invalid {
 		t.Run(tc.name, func(t *testing.T) {
-			tx, err := db.BeginTx(t.Context(), nil)
-			if err != nil {
-				t.Fatalf("begin: %v", err)
-			}
-			defer func() { _ = tx.Rollback() }()
-			target := tx
-			if tc.nilTx {
-				target = nil
-			}
-			_, _, err = ClaimDedupeTx(t.Context(), target, tc.claim)
+			err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+				_, _, err := ts.ClaimDedupe(ctx, tc.claim)
+				return err
+			})
 			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Fatalf("err = %v, want %s", err, ErrorCodeInvalidArgument)
 			}

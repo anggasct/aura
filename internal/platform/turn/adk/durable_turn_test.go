@@ -282,7 +282,7 @@ func (r *durableTurnRig) startLife(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sqlite.New: %v", err)
 	}
-	sessionStore, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: r.db})
+	sessionStore, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: r.db, Turns: turnstore.NewTurnStore(r.db)})
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}

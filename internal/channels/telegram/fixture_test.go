@@ -503,7 +503,7 @@ func newHarness(t *testing.T) *harness {
 	t.Helper()
 	t.Setenv(testTokenEnv, testToken)
 	db := storetest.OpenMigrated(t)
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}

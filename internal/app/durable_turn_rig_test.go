@@ -430,7 +430,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	logger := slog.New(slog.DiscardHandler)
 	ledger := &turnLedger{dir: plan.Ledger, life: plan.Life}
 	rt := newSuiteRuntime(t, db)
-	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db})
+	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}

@@ -372,7 +372,7 @@ func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
 func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
-	return db, workflow.NewStore(db)
+	return db, mustWorkflowStore(t, db)
 }
 
 type queuedRuntime struct{ durable.Runtime }

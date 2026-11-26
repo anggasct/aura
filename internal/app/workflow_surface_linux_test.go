@@ -184,7 +184,7 @@ func (r *surfaceRig) seedProposal(t *testing.T, call *workflow.StepCall, claimed
 		ID: call.Approval.ProposalID, SessionID: session, AgentID: opsPersona, PrincipalID: principal.OwnerID,
 		Tainted: true, Spec: spec, Digest: "d", PlanText: "plan", CreatedAt: now,
 	}
-	if err := workflow.NewStore(r.db).CreateProposal(t.Context(), proposal); err != nil {
+	if err := mustWorkflowStore(t, r.db).CreateProposal(t.Context(), proposal); err != nil {
 		t.Fatalf("CreateProposal: %v", err)
 	}
 	if claimedRun != "" {
@@ -679,7 +679,7 @@ type driveStep struct {
 
 func driveToolRun(t *testing.T, rig *surfaceRig, id string, origin *workflow.RunOrigin, step *driveStep) []*workflow.StepRun {
 	t.Helper()
-	disk := workflow.NewStore(rig.db)
+	disk := mustWorkflowStore(t, rig.db)
 	fake := durabletest.NewFake()
 	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{Tools: rig.runner, Logger: slog.New(slog.DiscardHandler)})
 	tool := step.tool
@@ -895,7 +895,7 @@ func TestNewWorkflowToolRunnerFailsClosedWithoutItsDependencies(t *testing.T) {
 	rig := newSurfaceRig(t, &surfaceRigOptions{configure: surfacePersonas})
 	full := func() *workflowToolRunnerInput {
 		return &workflowToolRunnerInput{
-			Executor: rig.executor, Sessions: turnstore.NewSessionService(rig.db), Registry: rig.registry, Runs: workflow.NewStore(rig.db),
+			Executor: rig.executor, Sessions: turnstore.NewSessionService(rig.db), Registry: rig.registry, Runs: mustWorkflowStore(t, rig.db),
 		}
 	}
 	tests := []struct {

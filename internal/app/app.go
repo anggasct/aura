@@ -102,6 +102,7 @@ type App struct {
 	serve       func(ctx context.Context) error
 	logger      *slog.Logger
 	db          *sql.DB
+	turns       *turnstore.TurnStore
 	result      *appconfig.LoadResult
 	runtime     durable.Runtime
 	interpreter *workflow.Interpreter
@@ -126,7 +127,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	}
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
-		logger: b.logger, db: b.db, result: b.result,
+		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
 		runtime: b.runtime, interpreter: b.interpreter, models: b.models,
 	}, nil
 }
@@ -336,6 +337,7 @@ type build struct {
 	group  *server.LifecycleGroup
 
 	db           *sql.DB
+	turns        *turnstore.TurnStore
 	pipeline     *telemetry.Pipeline
 	prices       *usage.PriceRegistry
 	models       *model.Registry
@@ -464,6 +466,7 @@ func (b *build) openStorage(ctx context.Context) error {
 		return err
 	}
 	b.db = db
+	b.turns = turnstore.NewTurnStore(db)
 	return b.group.Defer("sqlite", func(context.Context) error {
 		_ = db.Close()
 		return nil

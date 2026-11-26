@@ -256,7 +256,7 @@ func (b *build) buildServerDurable() error {
 	if err != nil {
 		return err
 	}
-	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: b.db})
+	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: b.db, Turns: b.turns})
 	if err != nil {
 		return err
 	}
@@ -484,7 +484,11 @@ func (b *build) wireWorkflowParts() error {
 	if b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
 		return invalidOptions("the server's workflow parts need an interpreter and the surface tool executor")
 	}
-	controller, err := newWorkflowToolController(b.interpreter, workflow.NewStore(db), b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
+	runs, err := workflow.NewStore(db, b.turns)
+	if err != nil {
+		return err
+	}
+	controller, err := newWorkflowToolController(b.interpreter, runs, b.registry, quarantinedIDs(b.quarantined), replyTargeters(s.channels)...)
 	if err != nil {
 		return err
 	}
@@ -515,8 +519,12 @@ func (b *build) registerSweeps() error {
 	if err := b.registerRunRetention(); err != nil {
 		return err
 	}
+	notifier, err := newWorkflowCompletionNotifier(cfg, db, b.turns, registry, logger)
+	if err != nil {
+		return err
+	}
 	if err := b.group.Add(server.Background("workflow_completion", func(ctx context.Context) {
-		newWorkflowCompletionNotifier(cfg, db, registry, logger).run(ctx, workflowCompletionInterval)
+		notifier.run(ctx, workflowCompletionInterval)
 	})); err != nil {
 		return err
 	}

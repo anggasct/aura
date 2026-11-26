@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
@@ -245,7 +246,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	disk := workflow.NewStore(db)
+	disk := mustWorkflowStore(t, db)
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
@@ -273,7 +274,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 		t.Fatalf("reopen storage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	run, err := workflow.NewStore(db).Run(ctx, summary.ID)
+	run, err := mustWorkflowStore(t, db).Run(ctx, summary.ID)
 	if err != nil {
 		t.Fatalf("read run: %v", err)
 	}
@@ -311,7 +312,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	disk := workflow.NewStore(db)
+	disk := mustWorkflowStore(t, db)
 	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
@@ -386,22 +387,26 @@ func ownerStepCall(runID, stepID string, attempt int) *workflow.StepCall {
 	}
 }
 
+func mustWorkflowStore(t testing.TB, db *sql.DB) *workflow.Store {
+	t.Helper()
+	disk, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("workflow.NewStore: %v", err)
+	}
+	return disk
+}
+
 func seedRunSession(t *testing.T, db *sql.DB, call *workflow.StepCall) {
 	t.Helper()
-	tx, err := db.BeginTx(t.Context(), nil)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
 	sess := &turn.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
-	if err := turnstore.CreateSessionTx(t.Context(), tx, sess); err != nil {
+	err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		return turnstore.NewTurnStore(db).CreateSession(ctx, sess)
+	})
+	if err != nil {
 		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return
 		}
 		t.Fatalf("create run session: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -481,7 +486,7 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 
 	toolPtr := func(s string) *string { return &s }
 	fake := durabletest.NewFake()
-	disk := workflow.NewStore(db)
+	disk := mustWorkflowStore(t, db)
 	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{
 		Tools:  runner,
 		Logger: slog.Default(),
@@ -690,7 +695,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	disk := workflow.NewStore(db)
+	disk := mustWorkflowStore(t, db)
 	dir := filepath.Dir(gf.configPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {

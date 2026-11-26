@@ -25,7 +25,7 @@ func newBrokerEffectExecutor(t *testing.T) *effect.Executor {
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}

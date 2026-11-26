@@ -25,10 +25,7 @@ func NewDedupeStore(db *sql.DB) DedupeStore {
 	return &sqliteDedupeStore{db: db}
 }
 
-func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *turn.DedupeClaim) (originalTurnID string, created bool, err error) {
-	if tx == nil {
-		return "", false, errNilArgument("tx")
-	}
+func claimDedupe(ctx context.Context, q sqlite.Querier, claim *turn.DedupeClaim) (originalTurnID string, created bool, err error) {
 	if claim == nil {
 		return "", false, errNilArgument("claim")
 	}
@@ -40,7 +37,7 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *turn.DedupeClaim) (or
 	}
 	var claimedTurnID string
 	var expiresAtRaw string
-	err = tx.QueryRowContext(ctx,
+	err = q.QueryRowContext(ctx,
 		`SELECT turn_id, expires_at FROM ingress_dedupe WHERE source = ? AND external_id = ?`,
 		claim.Source, claim.ExternalID,
 	).Scan(&claimedTurnID, &expiresAtRaw)
@@ -53,7 +50,7 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *turn.DedupeClaim) (or
 		if !storedExpiry.Before(claim.Now) {
 			return claimedTurnID, false, nil
 		}
-		if _, err := tx.ExecContext(ctx,
+		if _, err := q.ExecContext(ctx,
 			`DELETE FROM ingress_dedupe WHERE source = ? AND external_id = ?`, claim.Source, claim.ExternalID,
 		); err != nil {
 			return "", false, classify(fmt.Errorf("expire dedupe key: %w", err))
@@ -62,7 +59,7 @@ func ClaimDedupeTx(ctx context.Context, tx *sql.Tx, claim *turn.DedupeClaim) (or
 	default:
 		return "", false, classify(fmt.Errorf("read dedupe key: %w", err))
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, err := q.ExecContext(ctx,
 		`INSERT INTO ingress_dedupe (source, external_id, accepted_at, expires_at, turn_id) VALUES (?, ?, ?, ?, ?)`,
 		claim.Source, claim.ExternalID, sqlite.FormatTime(claim.Now), sqlite.FormatTime(claim.ExpiresAt), claim.TurnID,
 	); err != nil {
@@ -78,35 +75,33 @@ func (s *sqliteDedupeStore) Accept(ctx context.Context, source, externalID strin
 	if source == "" || externalID == "" {
 		return "", false, errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", false, classify(fmt.Errorf("begin dedupe accept: %w", err))
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	originalTurnID, created, err = ClaimDedupeTx(ctx, tx, &turn.DedupeClaim{
-		Source:     source,
-		ExternalID: externalID,
-		TurnID:     accepted.TurnID,
-		Now:        time.Now().UTC(),
-		ExpiresAt:  expiresAt,
-	})
-	if err != nil || !created {
-		return originalTurnID, false, err
-	}
-
-	if accepted.Sequence == 0 {
-		assigned, err := assignNextSequence(ctx, tx, accepted.SessionID)
-		if err != nil {
-			return "", false, err
+	err = sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		var claimErr error
+		originalTurnID, created, claimErr = claimDedupe(ctx, q, &turn.DedupeClaim{
+			Source:     source,
+			ExternalID: externalID,
+			TurnID:     accepted.TurnID,
+			Now:        time.Now().UTC(),
+			ExpiresAt:  expiresAt,
+		})
+		if claimErr != nil || !created {
+			return claimErr
 		}
-		accepted.Sequence = assigned
-	}
-	if err := appendEvent(ctx, tx, accepted); err != nil {
+		if accepted.Sequence == 0 {
+			assigned, seqErr := assignNextSequence(ctx, q, accepted.SessionID)
+			if seqErr != nil {
+				return seqErr
+			}
+			accepted.Sequence = assigned
+		}
+		return appendEvent(ctx, q, accepted)
+	})
+	if err != nil {
 		return "", false, err
 	}
-	if err := tx.Commit(); err != nil {
-		return "", false, classify(fmt.Errorf("commit dedupe accept: %w", err))
+	if !created {
+		return originalTurnID, false, nil
 	}
 	return accepted.TurnID, true, nil
 }
@@ -116,7 +111,7 @@ func (s *sqliteDedupeStore) Claimed(ctx context.Context, source, externalID stri
 		return false, errorf(ErrorCodeInvalidArgument, "dedupe key must have a source and an external id")
 	}
 	var expiresAtRaw string
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT expires_at FROM ingress_dedupe WHERE source = ? AND external_id = ?`,
 		source, externalID,
 	).Scan(&expiresAtRaw)
@@ -133,7 +128,7 @@ func (s *sqliteDedupeStore) ListTurnEvents(ctx context.Context, sessionID, turnI
 	if sessionID == "" || turnID == "" {
 		return nil, errorf(ErrorCodeInvalidArgument, "turn events read must name a session and a turn")
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND turn_id = ?

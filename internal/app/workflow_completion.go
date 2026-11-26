@@ -46,8 +46,12 @@ type workflowCompletionNotifier struct {
 	now      func() time.Time
 }
 
-func newWorkflowCompletionNotifier(cfg *appconfig.Config, db *sql.DB, registry *auraagent.Registry, logger *slog.Logger) *workflowCompletionNotifier {
-	return &workflowCompletionNotifier{cfg: cfg, db: db, runs: workflow.NewStore(db), registry: registry, deliver: deliverText, logger: logger, now: time.Now}
+func newWorkflowCompletionNotifier(cfg *appconfig.Config, db *sql.DB, sessions workflow.SessionCreator, registry *auraagent.Registry, logger *slog.Logger) (*workflowCompletionNotifier, error) {
+	runs, err := workflow.NewStore(db, sessions)
+	if err != nil {
+		return nil, err
+	}
+	return &workflowCompletionNotifier{cfg: cfg, db: db, runs: runs, registry: registry, deliver: deliverText, logger: logger, now: time.Now}, nil
 }
 
 func (n *workflowCompletionNotifier) run(ctx context.Context, interval time.Duration) {

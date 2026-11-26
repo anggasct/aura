@@ -29,7 +29,7 @@ func (s *sqliteConversationSessionStore) Resolve(ctx context.Context, conversati
 	if conversationKey == "" {
 		return "", false, errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
 	}
-	err = s.db.QueryRowContext(ctx,
+	err = sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT session_id FROM conversation_session WHERE conversation_key = ?`, conversationKey,
 	).Scan(&sessionID)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -45,7 +45,7 @@ func (s *sqliteConversationSessionStore) Point(ctx context.Context, conversation
 	if conversationKey == "" || sessionID == "" {
 		return errorf(ErrorCodeInvalidArgument, "conversation key and session id must not be empty")
 	}
-	_, err := s.db.ExecContext(ctx, `
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 INSERT INTO conversation_session (conversation_key, session_id, updated_at) VALUES (?, ?, ?)
 ON CONFLICT(conversation_key) DO UPDATE SET
     session_id = excluded.session_id,
@@ -65,7 +65,7 @@ func (s *sqliteConversationSessionStore) Clear(ctx context.Context, conversation
 	if conversationKey == "" {
 		return errorf(ErrorCodeInvalidArgument, "conversation key must not be empty")
 	}
-	if _, err := s.db.ExecContext(ctx, `DELETE FROM conversation_session WHERE conversation_key = ?`, conversationKey); err != nil {
+	if _, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `DELETE FROM conversation_session WHERE conversation_key = ?`, conversationKey); err != nil {
 		return classify(fmt.Errorf("clear conversation session: %w", err))
 	}
 	return nil

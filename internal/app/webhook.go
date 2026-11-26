@@ -448,7 +448,11 @@ func buildWebhookListener(in *webhookListenerInput) (*webhookListener, error) {
 	if err != nil {
 		return nil, err
 	}
-	githubAdapter, err := github.NewAdapter(workflow.NewStore(db), in.runtime, logger)
+	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		return nil, err
+	}
+	githubAdapter, err := github.NewAdapter(runs, in.runtime, logger)
 	if err != nil {
 		return nil, err
 	}

@@ -174,9 +174,13 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	if cfg.Workflows != nil {
 		options.GeneratedBudget = workflow.Budget{MaxSteps: cfg.Workflows.Generated.MaxSteps, MaxTokens: cfg.Workflows.Generated.MaxTokens}
 	}
+	runs, err := workflow.NewStore(db, b.turns)
+	if err != nil {
+		return err
+	}
 	if host && b.builtin != nil {
 		input := &workflowToolRunnerInput{
-			Executor: b.builtin, Sessions: b.sessions, Registry: b.registry, Runs: workflow.NewStore(db), Logger: b.logger,
+			Executor: b.builtin, Sessions: b.sessions, Registry: b.registry, Runs: runs, Logger: b.logger,
 		}
 		if b.server != nil {
 			input.Route = b.server.workflowRoute
@@ -191,8 +195,8 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 	if err != nil {
 		return err
 	}
-	built := workflow.NewInterpreter(workflow.NewStore(db), runtime, options)
-	routines, err := workflow.NewStore(db).Routines(ctx)
+	built := workflow.NewInterpreter(runs, runtime, options)
+	routines, err := runs.Routines(ctx)
 	if err != nil {
 		return err
 	}

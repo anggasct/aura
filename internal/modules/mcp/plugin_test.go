@@ -26,7 +26,7 @@ func countingBroker(t *testing.T, prompts *int) *toolbroker.Broker {
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &session); err != nil {
 		t.Fatalf("Create(): %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal(): %v", err)
 	}

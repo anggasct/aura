@@ -52,7 +52,7 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 
 func newSessionStore(t *testing.T, db *sql.DB, clock durable.Clock) *SessionStore {
 	t.Helper()
-	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db, Clock: clock})
+	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db, Clock: clock, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}
@@ -245,13 +245,22 @@ func TestNewSessionStoreRejectsMissingOptions(t *testing.T) {
 			requireCode(t, err, ErrorCodeInvalidArgument)
 		})
 	}
-	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db})
+	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore without a clock: %v", err)
 	}
 	if sessions.clock == nil {
 		t.Fatal("a nil clock was not replaced by the real clock")
 	}
+}
+
+func TestSessionStoreRequiresATurnStore(t *testing.T) {
+	db := openDB(t, newDatabaseFile(t))
+	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db})
+	if sessions != nil {
+		t.Fatal("NewSessionStore returned a store without a turn store")
+	}
+	requireCode(t, err, ErrorCodeInvalidArgument)
 }
 
 func TestSessionStoreValidatesIds(t *testing.T) {

@@ -34,7 +34,7 @@ type hookedSessionStore struct {
 
 func newHookedSessionStore(t *testing.T, db *sql.DB) *hookedSessionStore {
 	t.Helper()
-	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db})
+	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}

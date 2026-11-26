@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/store"
 )
 
@@ -89,7 +90,7 @@ func New(toolsCfg *config.Tools, artifactQuota configkit.ByteSize, db *sql.DB, a
 	if err != nil {
 		return nil, err
 	}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Events: applied.liveEvents})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Events: applied.liveEvents, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		return nil, err
 	}
@@ -127,7 +128,7 @@ func NewChannelEffects(db *sql.DB, logger *slog.Logger) (*effect.Executor, error
 	if logger == nil {
 		logger = slog.Default()
 	}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		return nil, err
 	}

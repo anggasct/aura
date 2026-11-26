@@ -167,7 +167,7 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 		return total
 	}
 	runner.artifacts = storeSink{store: harness.artifacts}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatal(err)
 	}

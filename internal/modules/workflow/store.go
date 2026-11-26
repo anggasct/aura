@@ -16,13 +16,24 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
+type SessionCreator interface {
+	CreateSession(ctx context.Context, sess *turn.Session) error
+}
+
 type Store struct {
 	db       *sql.DB
+	sessions SessionCreator
 	newRunID func() string
 }
 
-func NewStore(db *sql.DB) *Store {
-	return &Store{db: db, newRunID: func() string { return newID("run") }}
+func NewStore(db *sql.DB, sessions SessionCreator) (*Store, error) {
+	if db == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "workflow store requires a database")
+	}
+	if sessions == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "workflow store requires a session creator")
+	}
+	return &Store{db: db, sessions: sessions, newRunID: func() string { return newID("run") }}, nil
 }
 
 func RunSessionID(runID string) string {
@@ -191,52 +202,50 @@ func (s *Store) createRun(ctx context.Context, create *runCreate) (*RunSummary, 
 		CreatedAt:         now,
 		UpdatedAt:         now,
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("begin run create: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	if err := turnstore.CreateSessionTx(ctx, tx, &turn.Session{
-		ID: RunSessionID(summary.ID), OwnerID: origin.PrincipalID, AgentID: origin.AgentID,
-		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
-			return nil, codedError(ErrorCodeSessionInvalid, "session "+RunSessionID(summary.ID)+" already exists")
+	if err := sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		if err := s.sessions.CreateSession(ctx, &turn.Session{
+			ID: RunSessionID(summary.ID), OwnerID: origin.PrincipalID, AgentID: origin.AgentID,
+			CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			if fault.HasCode(err, turnstore.ErrorCodeSessionIDConflict) {
+				return codedError(ErrorCodeSessionInvalid, "session "+RunSessionID(summary.ID)+" already exists")
+			}
+			return fmt.Errorf("create run session: %w", err)
 		}
-		return nil, fmt.Errorf("create run session: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, reply_account, reply_channel_id, tainted, parent_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		summary.ID, summary.DefinitionID, summary.DefinitionVersion, summary.DurableKey, summary.Goal,
-		string(encodedInput), summary.Status,
-		summary.CreatedAt.Format(time.RFC3339Nano), summary.UpdatedAt.Format(time.RFC3339Nano),
-		nullable(summary.Origin.PrincipalID), nullable(summary.Origin.PrincipalClass), nullable(summary.Origin.AgentID), nullable(summary.Origin.SessionID),
-		nullable(summary.Origin.ReplyAccount), nullable(summary.Origin.ReplyChannelID),
-		summary.Origin.Tainted, nullable(summary.ParentRunID),
-	); err != nil {
-		return nil, fmt.Errorf("insert run: %w", err)
-	}
-	if create.ClaimProposalID != "" {
-		if err := claimProposalRun(ctx, tx, create.ClaimProposalID, summary.ID); err != nil {
-			return nil, err
-		}
-	}
-	for index := range spec.Steps {
-		if _, err := tx.ExecContext(ctx,
-			`INSERT INTO workflow_step_run (run_id, step_id, status, attempt, updated_at) VALUES (?, ?, ?, 0, ?)`,
-			summary.ID, spec.Steps[index].ID, StepPending, summary.UpdatedAt.Format(time.RFC3339Nano),
+		if _, err := q.ExecContext(ctx,
+			`INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, reply_account, reply_channel_id, tainted, parent_run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			summary.ID, summary.DefinitionID, summary.DefinitionVersion, summary.DurableKey, summary.Goal,
+			string(encodedInput), summary.Status,
+			summary.CreatedAt.Format(time.RFC3339Nano), summary.UpdatedAt.Format(time.RFC3339Nano),
+			nullable(summary.Origin.PrincipalID), nullable(summary.Origin.PrincipalClass), nullable(summary.Origin.AgentID), nullable(summary.Origin.SessionID),
+			nullable(summary.Origin.ReplyAccount), nullable(summary.Origin.ReplyChannelID),
+			summary.Origin.Tainted, nullable(summary.ParentRunID),
 		); err != nil {
-			return nil, fmt.Errorf("insert step row: %w", err)
+			return fmt.Errorf("insert run: %w", err)
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit run create: %w", err)
+		if create.ClaimProposalID != "" {
+			if err := claimProposalRun(ctx, q, create.ClaimProposalID, summary.ID); err != nil {
+				return err
+			}
+		}
+		for index := range spec.Steps {
+			if _, err := q.ExecContext(ctx,
+				`INSERT INTO workflow_step_run (run_id, step_id, status, attempt, updated_at) VALUES (?, ?, ?, 0, ?)`,
+				summary.ID, spec.Steps[index].ID, StepPending, summary.UpdatedAt.Format(time.RFC3339Nano),
+			); err != nil {
+				return fmt.Errorf("insert step row: %w", err)
+			}
+		}
+		return nil
+	}); err != nil {
+		return nil, err
 	}
 	return summary, nil
 }
 
-func claimProposalRun(ctx context.Context, tx *sql.Tx, proposalID, runID string) error {
-	result, err := tx.ExecContext(ctx, `UPDATE workflow_proposal SET run_id = ? WHERE id = ? AND run_id IS NULL`, runID, proposalID)
+func claimProposalRun(ctx context.Context, q sqlite.Querier, proposalID, runID string) error {
+	result, err := q.ExecContext(ctx, `UPDATE workflow_proposal SET run_id = ? WHERE id = ? AND run_id IS NULL`, runID, proposalID)
 	if err != nil {
 		return fmt.Errorf("claim proposal run: %w", err)
 	}
@@ -244,7 +253,7 @@ func claimProposalRun(ctx context.Context, tx *sql.Tx, proposalID, runID string)
 		return err
 	}
 	var tainted bool
-	err = tx.QueryRowContext(ctx, `SELECT tainted FROM workflow_proposal WHERE id = ?`, proposalID).Scan(&tainted)
+	err = q.QueryRowContext(ctx, `SELECT tainted FROM workflow_proposal WHERE id = ?`, proposalID).Scan(&tainted)
 	switch {
 	case err == nil && !tainted:
 		return nil

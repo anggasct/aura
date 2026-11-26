@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -20,7 +21,7 @@ func (s *sqliteEventStore) LatestByKind(ctx context.Context, sessionID, kind str
 	if limit <= 0 {
 		return nil, errorf(ErrorCodeInvalidArgument, "limit must be positive")
 	}
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+`
 		 FROM runtime_event
 		 WHERE session_id = ? AND kind = ?

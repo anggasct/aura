@@ -202,7 +202,7 @@ func TestWorkflowProposalShowRunsThroughTheCommand(t *testing.T) {
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
-	if err := workflow.NewStore(db).CreateProposal(t.Context(), proposal); err != nil {
+	if err := mustWorkflowStore(t, db).CreateProposal(t.Context(), proposal); err != nil {
 		t.Fatal(err)
 	}
 	out, err := runWorkflowCommand(t, gf, "proposal", "show", proposal.ID)

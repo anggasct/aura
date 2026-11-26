@@ -317,7 +317,7 @@ func approvalRouted(ctx context.Context, definition *auraagent.Definition, c *Ca
 }
 
 func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, c *Case) (bool, error) {
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		return false, err
 	}

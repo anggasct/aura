@@ -27,6 +27,7 @@ func newTestJournalWithEvents(t *testing.T, events EventPublisher) (*Journal, *s
 		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
 		Logger: slog.New(slog.DiscardHandler),
 		Events: events,
+		Turns:  turnstore.NewTurnStore(db),
 	})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)

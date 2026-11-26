@@ -18,7 +18,6 @@ import (
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
-	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -150,7 +149,7 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
 	built, err := newWorkflowToolRunner(&workflowToolRunnerInput{
-		Executor: executor, Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: workflow.NewStore(in.db),
+		Executor: executor, Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: mustWorkflowStore(t, in.db),
 		Route: route, Logger: logger,
 	})
 	if err != nil {

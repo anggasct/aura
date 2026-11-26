@@ -70,7 +70,7 @@ type hostedRun struct {
 func newWorkflowHost(t *testing.T, options *Options) *workflowHost {
 	t.Helper()
 	db := storetest.OpenMigrated(t)
-	disk := NewStore(db)
+	disk := mustNewStore(t, db)
 	warnings := &warningLog{}
 	options.Logger = warnings
 	options.Driver = DriverConcurrent

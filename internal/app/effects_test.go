@@ -32,7 +32,7 @@ func seedUnknownEffect(t *testing.T, dataRoot string) (configPath, intentID stri
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	j, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	j, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}

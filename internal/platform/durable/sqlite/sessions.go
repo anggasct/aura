@@ -10,9 +10,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -22,14 +22,25 @@ const (
 	turnStateQueued            = "queued"
 )
 
+var errAbortSessionTx = errors.New("abort session transaction")
+
+type turnStore interface {
+	ClaimDedupe(ctx context.Context, claim *turn.DedupeClaim) (originalTurnID string, created bool, err error)
+	AllocateSequence(ctx context.Context, sessionID string) (uint64, error)
+	AppendEvent(ctx context.Context, e *turn.Event) error
+	TurnUsed(ctx context.Context, turnID string) (bool, error)
+}
+
 type SessionStoreOptions struct {
 	DB    *sql.DB
 	Clock durable.Clock
+	Turns turnStore
 }
 
 type SessionStore struct {
 	db    *sql.DB
 	clock durable.Clock
+	turns turnStore
 }
 
 func NewSessionStore(opts *SessionStoreOptions) (*SessionStore, error) {
@@ -39,27 +50,31 @@ func NewSessionStore(opts *SessionStoreOptions) (*SessionStore, error) {
 	if opts.DB == nil {
 		return nil, invalidArgument("durable session store requires a database")
 	}
+	if opts.Turns == nil {
+		return nil, invalidArgument("durable session store requires a turn store")
+	}
 	clock := opts.Clock
 	if clock == nil {
 		clock = durable.RealClock()
 	}
-	return &SessionStore{db: opts.DB, clock: clock}, nil
+	return &SessionStore{db: opts.DB, clock: clock, turns: opts.Turns}, nil
 }
 
-func (s *SessionStore) inTx(ctx context.Context, op string, fn func(tx *sql.Tx) (commit bool, err error)) error {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return fmt.Errorf("%s: begin: %w", op, err)
+func (s *SessionStore) inTx(ctx context.Context, fn func(ctx context.Context, q dbsqlite.Querier) (commit bool, err error)) error {
+	err := dbsqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		commit, err := fn(ctx, dbsqlite.Conn(ctx, s.db))
+		if err != nil {
+			return err
+		}
+		if !commit {
+			return errAbortSessionTx
+		}
+		return nil
+	})
+	if errors.Is(err, errAbortSessionTx) {
+		return nil
 	}
-	commit, err := fn(tx)
-	if err != nil || !commit {
-		_ = tx.Rollback()
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("%s: commit: %w", op, err)
-	}
-	return nil
+	return err
 }
 
 func (s *SessionStore) Admit(ctx context.Context, req *runtimesessions.AdmitRequest) (runtimesessions.AdmitResult, error) {
@@ -67,8 +82,8 @@ func (s *SessionStore) Admit(ctx context.Context, req *runtimesessions.AdmitRequ
 		return runtimesessions.AdmitResult{}, err
 	}
 	var result runtimesessions.AdmitResult
-	err := s.inTx(ctx, "durable session admit", func(tx *sql.Tx) (bool, error) {
-		adm := &admission{tx: tx, req: req, now: s.clock.Now().UTC()}
+	err := s.inTx(ctx, func(ctx context.Context, q dbsqlite.Querier) (bool, error) {
+		adm := &admission{q: q, turns: s.turns, req: req, now: s.clock.Now().UTC()}
 		var commit bool
 		var err error
 		result, commit, err = adm.run(ctx)
@@ -102,15 +117,16 @@ func validateAdmitRequest(req *runtimesessions.AdmitRequest) error {
 }
 
 type admission struct {
-	tx  *sql.Tx
-	req *runtimesessions.AdmitRequest
-	now time.Time
+	q     dbsqlite.Querier
+	turns turnStore
+	req   *runtimesessions.AdmitRequest
+	now   time.Time
 }
 
 func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool, error) {
 	desc := &a.req.Turn
 	if desc.IdempotencyKey != "" {
-		original, created, err := turnstore.ClaimDedupeTx(ctx, a.tx, &turn.DedupeClaim{
+		original, created, err := a.turns.ClaimDedupe(ctx, &turn.DedupeClaim{
 			Source:     desc.Origin,
 			ExternalID: desc.IdempotencyKey,
 			TurnID:     desc.TurnID,
@@ -124,13 +140,13 @@ func (a *admission) run(ctx context.Context) (runtimesessions.AdmitResult, bool,
 			return runtimesessions.AdmitResult{Replayed: true, OriginalTurnID: original}, false, nil
 		}
 	}
-	if err := rejectHeldTurn(ctx, a.tx, desc.TurnID); err != nil {
+	if err := rejectHeldTurn(ctx, a.q, desc.TurnID); err != nil {
 		return runtimesessions.AdmitResult{}, false, err
 	}
-	if err := rejectUsedTurn(ctx, a.tx, desc.TurnID); err != nil {
+	if err := rejectUsedTurn(ctx, a.q, a.turns, desc.TurnID); err != nil {
 		return runtimesessions.AdmitResult{}, false, err
 	}
-	held, err := countHeldTurns(ctx, a.tx, desc.SessionID)
+	held, err := countHeldTurns(ctx, a.q, desc.SessionID)
 	if err != nil {
 		return runtimesessions.AdmitResult{}, false, err
 	}
@@ -165,7 +181,7 @@ func (a *admission) appendAccepted(ctx context.Context) (*turn.Event, error) {
 	if err != nil {
 		return nil, fmt.Errorf("durable session admit: encode accepted payload: %w", err)
 	}
-	sequence, err := turnstore.AllocateSequenceTx(ctx, a.tx, desc.SessionID)
+	sequence, err := a.turns.AllocateSequence(ctx, desc.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("durable session admit: %w", err)
 	}
@@ -180,7 +196,7 @@ func (a *admission) appendAccepted(ctx context.Context) (*turn.Event, error) {
 		Payload:       payload,
 		CreatedAt:     a.now,
 	}
-	if err := turnstore.AppendEventTx(ctx, a.tx, accepted); err != nil {
+	if err := a.turns.AppendEvent(ctx, accepted); err != nil {
 		return nil, fmt.Errorf("durable session admit: %w", err)
 	}
 	return accepted, nil
@@ -198,7 +214,7 @@ func (a *admission) insertTurn(ctx context.Context, entry queueEntry) error {
 		return fmt.Errorf("durable session admit: encode turn: %w", err)
 	}
 	stamp := a.now.Format(time.RFC3339Nano)
-	if _, err := a.tx.ExecContext(ctx, `INSERT INTO durable_session_turn (turn_id, session_id, sequence, state, descriptor_json, deadline, created_at, updated_at)
+	if _, err := a.q.ExecContext(ctx, `INSERT INTO durable_session_turn (turn_id, session_id, sequence, state, descriptor_json, deadline, created_at, updated_at)
 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, desc.TurnID, desc.SessionID, entry.sequence, entry.state, string(descriptorJSON), deadlineColumn(desc.Deadline), stamp, stamp); err != nil {
 		return fmt.Errorf("durable session admit: write turn: %w", err)
 	}
@@ -212,9 +228,9 @@ func deadlineColumn(deadline time.Time) sql.NullString {
 	return sql.NullString{String: deadline.UTC().Format(time.RFC3339Nano), Valid: true}
 }
 
-func rejectHeldTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
+func rejectHeldTurn(ctx context.Context, q dbsqlite.Querier, turnID string) error {
 	var held bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_session_turn WHERE turn_id = ?)`, turnID).Scan(&held); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_session_turn WHERE turn_id = ?)`, turnID).Scan(&held); err != nil {
 		return fmt.Errorf("durable session admit: read turn: %w", err)
 	}
 	if held {
@@ -223,11 +239,17 @@ func rejectHeldTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
 	return nil
 }
 
-func rejectUsedTurn(ctx context.Context, tx *sql.Tx, turnID string) error {
+func rejectUsedTurn(ctx context.Context, q dbsqlite.Querier, turns turnStore, turnID string) error {
 	var used bool
-	if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_run WHERE key = ?1)
-    OR EXISTS (SELECT 1 FROM runtime_event WHERE turn_id = ?1)`, turnID).Scan(&used); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_run WHERE key = ?)`, turnID).Scan(&used); err != nil {
 		return fmt.Errorf("durable session admit: read turn use: %w", err)
+	}
+	if !used {
+		var err error
+		used, err = turns.TurnUsed(ctx, turnID)
+		if err != nil {
+			return fmt.Errorf("durable session admit: read turn use: %w", err)
+		}
 	}
 	if used {
 		return admissionRefused(fmt.Sprintf("turn %q was already used", turnID))
@@ -255,9 +277,9 @@ func (h heldTurns) grantState() (string, error) {
 	}
 }
 
-func countHeldTurns(ctx context.Context, tx *sql.Tx, sessionID string) (heldTurns, error) {
+func countHeldTurns(ctx context.Context, q dbsqlite.Querier, sessionID string) (heldTurns, error) {
 	var held heldTurns
-	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(SUM(state = 'active'), 0), COALESCE(SUM(state = 'queued'), 0)
+	if err := q.QueryRowContext(ctx, `SELECT COALESCE(SUM(state = 'active'), 0), COALESCE(SUM(state = 'queued'), 0)
 FROM durable_session_turn WHERE session_id = ?`, sessionID).Scan(&held.active, &held.queued); err != nil {
 		return heldTurns{}, fmt.Errorf("durable session admit: count turns: %w", err)
 	}
@@ -277,9 +299,9 @@ func (s *SessionStore) Release(ctx context.Context, sessionID, turnID string) (r
 		return runtimesessions.ReleaseResult{}, invalidArgument("durable session release requires a turn id")
 	}
 	var result runtimesessions.ReleaseResult
-	err := s.inTx(ctx, "durable session release", func(tx *sql.Tx) (bool, error) {
+	err := s.inTx(ctx, func(ctx context.Context, q dbsqlite.Querier) (bool, error) {
 		var err error
-		result, err = s.release(ctx, tx, turnRef{sessionID: sessionID, turnID: turnID})
+		result, err = s.release(ctx, q, turnRef{sessionID: sessionID, turnID: turnID})
 		return true, err
 	})
 	if err != nil {
@@ -288,12 +310,12 @@ func (s *SessionStore) Release(ctx context.Context, sessionID, turnID string) (r
 	return result, nil
 }
 
-func (s *SessionStore) release(ctx context.Context, tx *sql.Tx, ref turnRef) (runtimesessions.ReleaseResult, error) {
+func (s *SessionStore) release(ctx context.Context, q dbsqlite.Querier, ref turnRef) (runtimesessions.ReleaseResult, error) {
 	var holder, state string
-	err := tx.QueryRowContext(ctx, `SELECT session_id, state FROM durable_session_turn WHERE turn_id = ?`, ref.turnID).Scan(&holder, &state)
+	err := q.QueryRowContext(ctx, `SELECT session_id, state FROM durable_session_turn WHERE turn_id = ?`, ref.turnID).Scan(&holder, &state)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
-		depth, err := queuedDepth(ctx, tx, ref.sessionID)
+		depth, err := queuedDepth(ctx, q, ref.sessionID)
 		return runtimesessions.ReleaseResult{QueueDepth: depth}, err
 	case err != nil:
 		return runtimesessions.ReleaseResult{}, fmt.Errorf("durable session release: read turn: %w", err)
@@ -302,14 +324,14 @@ func (s *SessionStore) release(ctx context.Context, tx *sql.Tx, ref turnRef) (ru
 	case state != turnStateActive:
 		return runtimesessions.ReleaseResult{}, invalidArgument(fmt.Sprintf("release for turn %q does not match the active turn", ref.turnID))
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM durable_session_turn WHERE turn_id = ?`, ref.turnID); err != nil {
+	if _, err := q.ExecContext(ctx, `DELETE FROM durable_session_turn WHERE turn_id = ?`, ref.turnID); err != nil {
 		return runtimesessions.ReleaseResult{}, fmt.Errorf("durable session release: delete turn: %w", err)
 	}
-	next, found, err := s.grantNext(ctx, tx, ref.sessionID)
+	next, found, err := s.grantNext(ctx, q, ref.sessionID)
 	if err != nil {
 		return runtimesessions.ReleaseResult{}, err
 	}
-	depth, err := queuedDepth(ctx, tx, ref.sessionID)
+	depth, err := queuedDepth(ctx, q, ref.sessionID)
 	if err != nil {
 		return runtimesessions.ReleaseResult{}, err
 	}
@@ -320,10 +342,10 @@ func (s *SessionStore) release(ctx context.Context, tx *sql.Tx, ref turnRef) (ru
 	return result, nil
 }
 
-func (s *SessionStore) grantNext(ctx context.Context, tx *sql.Tx, sessionID string) (runtimesessions.QueuedTurn, bool, error) {
+func (s *SessionStore) grantNext(ctx context.Context, q dbsqlite.Querier, sessionID string) (runtimesessions.QueuedTurn, bool, error) {
 	var turnID, descriptorJSON string
 	var sequence uint64
-	err := tx.QueryRowContext(ctx, `SELECT turn_id, descriptor_json, sequence FROM durable_session_turn
+	err := q.QueryRowContext(ctx, `SELECT turn_id, descriptor_json, sequence FROM durable_session_turn
 WHERE session_id = ? AND state = 'queued' ORDER BY sequence LIMIT 1`, sessionID).Scan(&turnID, &descriptorJSON, &sequence)
 	if errors.Is(err, sql.ErrNoRows) {
 		return runtimesessions.QueuedTurn{}, false, nil
@@ -335,16 +357,16 @@ WHERE session_id = ? AND state = 'queued' ORDER BY sequence LIMIT 1`, sessionID)
 	if err != nil {
 		return runtimesessions.QueuedTurn{}, false, fmt.Errorf("durable session release: %w", err)
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE durable_session_turn SET state = 'active', updated_at = ? WHERE turn_id = ?`,
+	if _, err := q.ExecContext(ctx, `UPDATE durable_session_turn SET state = 'active', updated_at = ? WHERE turn_id = ?`,
 		s.clock.Now().UTC().Format(time.RFC3339Nano), turnID); err != nil {
 		return runtimesessions.QueuedTurn{}, false, fmt.Errorf("durable session release: grant next turn: %w", err)
 	}
 	return runtimesessions.QueuedTurn{Descriptor: desc, Sequence: sequence}, true, nil
 }
 
-func queuedDepth(ctx context.Context, tx *sql.Tx, sessionID string) (int, error) {
+func queuedDepth(ctx context.Context, q dbsqlite.Querier, sessionID string) (int, error) {
 	var depth int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM durable_session_turn WHERE session_id = ? AND state = 'queued'`, sessionID).Scan(&depth); err != nil {
+	if err := q.QueryRowContext(ctx, `SELECT COUNT(*) FROM durable_session_turn WHERE session_id = ? AND state = 'queued'`, sessionID).Scan(&depth); err != nil {
 		return 0, fmt.Errorf("durable session release: count queued turns: %w", err)
 	}
 	return depth, nil
@@ -365,7 +387,7 @@ func (s *SessionStore) Status(ctx context.Context, sessionID string) (runtimeses
 	var result runtimesessions.StatusResult
 	var activeID, descriptorJSON, deadline sql.NullString
 	var activeSequence sql.Null[uint64]
-	if err := s.db.QueryRowContext(ctx, `SELECT
+	if err := dbsqlite.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT
     (SELECT COUNT(*) FROM durable_session_turn WHERE session_id = ?1 AND state = 'queued'),
     (SELECT COALESCE(MAX(sequence), 0) FROM durable_session_turn WHERE session_id = ?1),
     active.turn_id, active.descriptor_json, active.sequence, active.deadline
@@ -394,7 +416,7 @@ LEFT JOIN durable_session_turn AS active ON active.session_id = wanted.session_i
 }
 
 func (s *SessionStore) ActiveTurns(ctx context.Context) ([]runtimesessions.QueuedTurn, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT turn_id, descriptor_json, sequence FROM durable_session_turn WHERE state = 'active' ORDER BY rowid`)
+	rows, err := dbsqlite.Conn(ctx, s.db).QueryContext(ctx, `SELECT turn_id, descriptor_json, sequence FROM durable_session_turn WHERE state = 'active' ORDER BY rowid`)
 	if err != nil {
 		return nil, fmt.Errorf("durable session active turns: %w", err)
 	}
@@ -423,13 +445,13 @@ func (s *SessionStore) Abort(ctx context.Context, sessionID string) (runtimesess
 		return runtimesessions.AbortResult{}, invalidArgument("durable session abort requires a session id")
 	}
 	var dropped []runtimesessions.QueuedTurn
-	err := s.inTx(ctx, "durable session abort", func(tx *sql.Tx) (bool, error) {
+	err := s.inTx(ctx, func(ctx context.Context, q dbsqlite.Querier) (bool, error) {
 		var err error
-		dropped, err = heldInGrantOrder(ctx, tx, sessionID)
+		dropped, err = heldInGrantOrder(ctx, q, sessionID)
 		if err != nil {
 			return false, err
 		}
-		if _, err := tx.ExecContext(ctx, `DELETE FROM durable_session_turn WHERE session_id = ?`, sessionID); err != nil {
+		if _, err := q.ExecContext(ctx, `DELETE FROM durable_session_turn WHERE session_id = ?`, sessionID); err != nil {
 			return false, fmt.Errorf("durable session abort: delete turns: %w", err)
 		}
 		return true, nil
@@ -440,8 +462,8 @@ func (s *SessionStore) Abort(ctx context.Context, sessionID string) (runtimesess
 	return runtimesessions.AbortResult{Dropped: dropped}, nil
 }
 
-func heldInGrantOrder(ctx context.Context, tx *sql.Tx, sessionID string) ([]runtimesessions.QueuedTurn, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT descriptor_json, sequence FROM durable_session_turn
+func heldInGrantOrder(ctx context.Context, q dbsqlite.Querier, sessionID string) ([]runtimesessions.QueuedTurn, error) {
+	rows, err := q.QueryContext(ctx, `SELECT descriptor_json, sequence FROM durable_session_turn
 WHERE session_id = ? ORDER BY CASE state WHEN 'active' THEN 0 ELSE 1 END, sequence`, sessionID)
 	if err != nil {
 		return nil, fmt.Errorf("durable session abort: read turns: %w", err)

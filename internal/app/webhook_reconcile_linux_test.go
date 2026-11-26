@@ -58,7 +58,7 @@ func admitLeftWebhookTurn(t *testing.T, db *sql.DB) {
 	}); err != nil {
 		t.Fatalf("InsertExecution: %v", err)
 	}
-	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db})
+	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}

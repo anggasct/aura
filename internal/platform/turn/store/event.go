@@ -41,36 +41,32 @@ func (s *sqliteEventStore) Append(ctx context.Context, e *turn.Event) error {
 	if e == nil {
 		return errNilArgument("event")
 	}
-	return appendEvent(ctx, s.db, e)
+	return appendEvent(ctx, sqlite.Conn(ctx, s.db), e)
 }
 
 func (s *sqliteEventStore) AppendBatch(ctx context.Context, events []turn.Event) error {
 	if len(events) == 0 {
 		return nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return classify(fmt.Errorf("begin append batch: %w", err))
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	stmt, err := tx.PrepareContext(ctx, insertRuntimeEventSQL)
-	if err != nil {
-		return classify(fmt.Errorf("prepare append batch: %w", err))
-	}
-	defer func() { _ = stmt.Close() }()
-
-	for i := range events {
-		if err := appendEventCore(ctx, stmt.ExecContext, &events[i]); err != nil {
-			return err
+	return sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		stmt, err := sqlite.Conn(ctx, s.db).PrepareContext(ctx, insertRuntimeEventSQL)
+		if err != nil {
+			return classify(fmt.Errorf("prepare append batch: %w", err))
 		}
-	}
-	return classify(tx.Commit())
+		defer func() { _ = stmt.Close() }()
+
+		for i := range events {
+			if err := appendEventCore(ctx, stmt.ExecContext, &events[i]); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func (s *sqliteEventStore) LastSequence(ctx context.Context, sessionID string) (uint64, error) {
 	var seq sql.NullInt64
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT MAX(sequence) FROM runtime_event WHERE session_id = ?`, sessionID,
 	).Scan(&seq)
 	if err != nil {
@@ -86,21 +82,22 @@ func (s *sqliteEventStore) AppendSequenced(ctx context.Context, sessionID string
 	if e == nil {
 		return 0, errNilArgument("event")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, classify(fmt.Errorf("begin sequenced append: %w", err))
-	}
-	defer func() { _ = tx.Rollback() }()
-	assigned, err := assignNextSequence(ctx, tx, sessionID)
+	var assigned uint64
+	err := sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		seq, err := assignNextSequence(ctx, q, sessionID)
+		if err != nil {
+			return err
+		}
+		e.Sequence = seq
+		if err := appendEvent(ctx, q, e); err != nil {
+			return err
+		}
+		assigned = seq
+		return nil
+	})
 	if err != nil {
 		return 0, err
-	}
-	e.Sequence = assigned
-	if err := appendEvent(ctx, tx, e); err != nil {
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, classify(fmt.Errorf("commit sequenced append: %w", err))
 	}
 	return assigned, nil
 }
@@ -112,44 +109,44 @@ func (s *sqliteEventStore) UpsertEvent(ctx context.Context, e *turn.Event) (sequ
 	if e.ID == "" {
 		return 0, false, errorf(ErrorCodeInvalidArgument, "upsert event requires an id")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return 0, false, classify(fmt.Errorf("begin upsert event: %w", err))
-	}
-	defer func() { _ = tx.Rollback() }()
-	var stored int64
-	err = tx.QueryRowContext(ctx, `SELECT sequence FROM runtime_event WHERE id = ?`, e.ID).Scan(&stored)
-	switch {
-	case err == nil:
-		assigned, err := sequenceFromDB(stored)
-		if err != nil {
-			return 0, false, err
+	err = sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		var stored int64
+		lookupErr := q.QueryRowContext(ctx, `SELECT sequence FROM runtime_event WHERE id = ?`, e.ID).Scan(&stored)
+		switch {
+		case lookupErr == nil:
+			assigned, seqErr := sequenceFromDB(stored)
+			if seqErr != nil {
+				return seqErr
+			}
+			sequence = assigned
+			existed = true
+			return nil
+		case errors.Is(lookupErr, sql.ErrNoRows):
+		default:
+			return classify(fmt.Errorf("lookup upsert event: %w", lookupErr))
 		}
-		if err := tx.Commit(); err != nil {
-			return 0, false, classify(fmt.Errorf("commit upsert event: %w", err))
+		assigned, seqErr := assignNextSequence(ctx, q, e.SessionID)
+		if seqErr != nil {
+			return seqErr
 		}
-		return assigned, true, nil
-	case errors.Is(err, sql.ErrNoRows):
-	default:
-		return 0, false, classify(fmt.Errorf("lookup upsert event: %w", err))
-	}
-	assigned, err := assignNextSequence(ctx, tx, e.SessionID)
+		e.Sequence = assigned
+		if appendErr := appendEvent(ctx, q, e); appendErr != nil {
+			return appendErr
+		}
+		sequence = assigned
+		existed = false
+		return nil
+	})
 	if err != nil {
 		return 0, false, err
 	}
-	e.Sequence = assigned
-	if err := appendEvent(ctx, tx, e); err != nil {
-		return 0, false, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, false, classify(fmt.Errorf("commit upsert event: %w", err))
-	}
-	return assigned, false, nil
+	return sequence, existed, nil
 }
 
-func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint64, error) {
+func assignNextSequence(ctx context.Context, q sqlite.Querier, sessionID string) (uint64, error) {
 	var highest sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
+	if err := q.QueryRowContext(ctx,
 		`SELECT MAX(sequence) FROM runtime_event WHERE session_id = ?`, sessionID,
 	).Scan(&highest); err != nil {
 		return 0, classify(fmt.Errorf("read max sequence for session %s: %w", sessionID, err))
@@ -167,25 +164,8 @@ func assignNextSequence(ctx context.Context, tx *sql.Tx, sessionID string) (uint
 	return sequenceFromDB(next)
 }
 
-func AllocateSequenceTx(ctx context.Context, tx *sql.Tx, sessionID string) (uint64, error) {
-	if tx == nil {
-		return 0, errNilArgument("tx")
-	}
-	if sessionID == "" {
-		return 0, fault.New(ErrorCodeInvalidArgument, "session id must not be empty")
-	}
-	if !rowExists(ctx, tx, `SELECT 1 FROM session WHERE id = ?`, sessionID) {
-		return 0, fault.New(ErrorCodeSessionNotFound, "session does not exist")
-	}
-	sequence, err := assignNextSequence(ctx, tx, sessionID)
-	if err != nil {
-		return 0, classify(fmt.Errorf("allocate sequence: %w", err))
-	}
-	return sequence, nil
-}
-
 func (s *sqliteEventStore) LookupEvent(ctx context.Context, id string) (turn.Event, bool, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT `+selectRuntimeEventColumns+` FROM runtime_event WHERE id = ?`, id,
 	)
 	if err != nil {
@@ -209,43 +189,34 @@ func (s *sqliteEventStore) AppendCheckpoint(ctx context.Context, event *turn.Eve
 	if event == nil {
 		return errNilArgument("event")
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return classify(fmt.Errorf("begin checkpoint append: %w", err))
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	var sessionID, turnID, invocationID, branch, author, kind, payload string
-	var schemaVersion int64
-	err = tx.QueryRowContext(ctx, `
-		SELECT session_id, turn_id, invocation_id, branch, author, kind, schema_version, payload_json
-		FROM runtime_event WHERE id = ?`, event.ID,
-	).Scan(&sessionID, &turnID, &invocationID, &branch, &author, &kind, &schemaVersion, &payload)
-	if err == nil {
-		existingSchemaVersion, schemaErr := schemaVersionFromDB(schemaVersion)
-		if schemaErr != nil {
-			return schemaErr
+	return sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		var sessionID, turnID, invocationID, branch, author, kind, payload string
+		var schemaVersion int64
+		err := q.QueryRowContext(ctx, `
+			SELECT session_id, turn_id, invocation_id, branch, author, kind, schema_version, payload_json
+			FROM runtime_event WHERE id = ?`, event.ID,
+		).Scan(&sessionID, &turnID, &invocationID, &branch, &author, &kind, &schemaVersion, &payload)
+		if err == nil {
+			existingSchemaVersion, schemaErr := schemaVersionFromDB(schemaVersion)
+			if schemaErr != nil {
+				return schemaErr
+			}
+			if sessionID == event.SessionID && turnID == event.TurnID && invocationID == event.InvocationID &&
+				branch == event.Branch && author == event.Author && kind == event.Kind &&
+				existingSchemaVersion == event.SchemaVersion && payload == string(event.Payload) {
+				return nil
+			}
+			return fault.New(
+				ErrorCodeEventSequenceConflict,
+				fmt.Sprintf("event %s is already bound to different checkpoint state", event.ID),
+			)
 		}
-		if sessionID == event.SessionID && turnID == event.TurnID && invocationID == event.InvocationID &&
-			branch == event.Branch && author == event.Author && kind == event.Kind &&
-			existingSchemaVersion == event.SchemaVersion && payload == string(event.Payload) {
-			return nil
+		if !errors.Is(err, sql.ErrNoRows) {
+			return classify(fmt.Errorf("lookup checkpoint event %s: %w", event.ID, err))
 		}
-		return fault.New(
-			ErrorCodeEventSequenceConflict,
-			fmt.Sprintf("event %s is already bound to different checkpoint state", event.ID),
-		)
-	}
-	if !errors.Is(err, sql.ErrNoRows) {
-		return classify(fmt.Errorf("lookup checkpoint event %s: %w", event.ID, err))
-	}
-	if err := AppendEventTx(ctx, tx, event); err != nil {
-		return err
-	}
-	if err := tx.Commit(); err != nil {
-		return classify(fmt.Errorf("commit checkpoint append: %w", err))
-	}
-	return nil
+		return appendEvent(ctx, q, event)
+	})
 }
 
 func sequenceToDB(sequence uint64) (int64, error) {
@@ -288,23 +259,9 @@ func schemaVersionToDB(version uint16) (int64, error) {
 	return int64(version), nil
 }
 
-type EventWriter interface {
-	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
-}
-
-func AppendEventTx(ctx context.Context, tx EventWriter, e *turn.Event) error {
-	if tx == nil {
-		return errNilArgument("tx")
-	}
-	if e == nil {
-		return errNilArgument("event")
-	}
-	return appendEvent(ctx, tx, e)
-}
-
-func appendEvent(ctx context.Context, x EventWriter, e *turn.Event) error {
+func appendEvent(ctx context.Context, q sqlite.Querier, e *turn.Event) error {
 	return appendEventCore(ctx, func(ctx context.Context, args ...any) (sql.Result, error) {
-		return x.ExecContext(ctx, insertRuntimeEventSQL, args...)
+		return q.ExecContext(ctx, insertRuntimeEventSQL, args...)
 	}, e)
 }
 

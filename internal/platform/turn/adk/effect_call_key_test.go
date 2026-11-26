@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"iter"
 	"log/slog"
 	"slices"
@@ -88,7 +89,7 @@ type effectTools struct {
 
 func newEffectTools(t *testing.T, db *sql.DB) *effectTools {
 	t.Helper()
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("effect.NewJournal: %v", err)
 	}

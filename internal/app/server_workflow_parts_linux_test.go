@@ -141,7 +141,7 @@ func TestServerPostsWorkflowCompletionsOnTheDefaultConfiguration(t *testing.T) {
 	db := compositionDatabase(t, path)
 	routine := quarantineRoutine("done_routine")
 	routine.Steps[0].Executor.ToolArgs = json.RawMessage(`{"path":"note.txt"}`)
-	if err := workflow.NewStore(db).SaveDefinition(t.Context(), routine); err != nil {
+	if err := mustWorkflowStore(t, db).SaveDefinition(t.Context(), routine); err != nil {
 		t.Fatalf("seed routine: %v", err)
 	}
 	createTestSession(t, db, "sess-done", principal.OwnerID)
