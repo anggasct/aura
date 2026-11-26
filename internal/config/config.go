@@ -325,16 +325,6 @@ type ToolWebSearch struct {
 	MaxResults    int        `json:"max_results"`
 }
 
-type Storage struct {
-	Path               string             `json:"path"`
-	BusyTimeout        configkit.Duration `json:"busy_timeout"`
-	MaxOpenConnections int                `json:"max_open_connections"`
-	ArtifactQuota      configkit.ByteSize `json:"artifact_quota"`
-	BackupDirectory    string             `json:"backup_directory"`
-	BackupInterval     configkit.Duration `json:"backup_interval"`
-	BackupRetention    int                `json:"backup_retention"`
-}
-
 type Workflows struct {
 	DefinitionsDir     string             `json:"definitions_dir"`
 	MaxConcurrentSteps int                `json:"max_concurrent_steps"`
@@ -429,16 +419,6 @@ func DefaultWorkflows() *Workflows {
 		MaxConcurrentSteps: 4,
 		DefaultStepTimeout: configkit.Duration(15 * time.Minute),
 		Generated:          GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000},
-	}
-}
-
-func DefaultStorage() Storage {
-	return Storage{
-		BusyTimeout:        configkit.Duration(5 * time.Second),
-		MaxOpenConnections: 4,
-		ArtifactQuota:      configkit.ByteSize(5 << 30),
-		BackupInterval:     configkit.Duration(24 * time.Hour),
-		BackupRetention:    7,
 	}
 }
 

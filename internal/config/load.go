@@ -234,25 +234,6 @@ func ApplyMCPServerDefaults(s *MCPServer) {
 	}
 }
 
-func ValidateStorage(storage Storage) error {
-	if storage.MaxOpenConnections < 1 || storage.MaxOpenConnections > 16 {
-		return configkit.Invalid("storage.max_open_connections", fmt.Sprintf("%d is out of range (1-16)", storage.MaxOpenConnections))
-	}
-	if storage.BusyTimeout <= 0 {
-		return configkit.Invalid("storage.busy_timeout", "must be positive")
-	}
-	if storage.ArtifactQuota <= 0 {
-		return configkit.Invalid("storage.artifact_quota", "must be positive")
-	}
-	if storage.BackupInterval <= 0 {
-		return configkit.Invalid("storage.backup_interval", "must be positive")
-	}
-	if storage.BackupRetention < 1 {
-		return configkit.Invalid("storage.backup_retention", "must be at least 1")
-	}
-	return nil
-}
-
 func ValidateTerminal(t Terminal) error {
 	if t.RenderHz <= 0 {
 		return configkit.Invalid("terminal.render_hz", "must be positive")
