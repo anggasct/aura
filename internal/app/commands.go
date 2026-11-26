@@ -10,6 +10,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
@@ -36,6 +37,7 @@ func usageWrap(err error) error {
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(shellexec.Commands(usageWrap)...)
+	root.AddCommand(gitsync.Commands(syncOpener(gf))...)
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
 	root.AddCommand(memory.Commands(memoryOpener(gf))...)
 	root.AddCommand(profile.Commands(profileOpener(gf))...)
@@ -140,6 +142,26 @@ func pluginOpener(gf *globalFlags) plugin.Opener {
 		}
 		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartPlugins}}, func(ctx context.Context, app *App) error {
 			return fn(ctx, app.plugins, &pluginAuditAdapter{db: app.db})
+		})
+	}
+}
+
+func syncOpener(gf *globalFlags) gitsync.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, env gitsync.CommandEnv) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		if result.Config.Sync == nil {
+			return gitsync.Errorf(gitsync.ErrorCodeNotConfigured, "sync is not configured")
+		}
+		_, dataRoot, _, err := storagePaths(result.Config)
+		if err != nil {
+			return err
+		}
+		return fn(cmd.Context(), gitsync.CommandEnv{
+			Config:   result.Config.Sync,
+			DataRoot: dataRoot,
 		})
 	}
 }

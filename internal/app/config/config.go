@@ -4,6 +4,7 @@ import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/memory"
@@ -55,7 +56,7 @@ type Config struct {
 	Owner        *principal.Owner            `json:"owner,omitempty"`
 	Children     *legacyconfig.Children      `json:"children,omitempty"`
 	Access       *principal.Config           `json:"access,omitempty"`
-	Sync         *legacyconfig.Sync          `json:"sync,omitempty"`
+	Sync         *gitsync.Config             `json:"sync,omitempty"`
 	Vision       *vision.Config              `json:"vision,omitempty"`
 	Knowledge    *knowledge.Config           `json:"knowledge,omitempty"`
 	Interpreter  legacyconfig.Interpreter    `json:"interpreter"`
@@ -93,7 +94,7 @@ func Default() Config {
 		Memory:       memory.Default(),
 		Interpreter:  legacyconfig.DefaultInterpreter(),
 		Skills:       &defaultSkills,
-		Sync:         legacyconfig.DefaultSync(),
+		Sync:         gitsync.Default(),
 		Vision:       &defaultVision,
 		Context:      &defaultContext,
 		Profile:      &defaultProfile,

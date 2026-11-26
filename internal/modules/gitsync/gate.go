@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 type GateResult struct {
@@ -15,7 +13,7 @@ type GateResult struct {
 	Reason    string
 }
 
-func CheckGate(_ context.Context, cfg *config.Sync) GateResult {
+func CheckGate(_ context.Context, cfg *Config) GateResult {
 	if cfg == nil {
 		return GateResult{Reason: "sync section is not configured"}
 	}
@@ -31,7 +29,7 @@ func CheckGate(_ context.Context, cfg *config.Sync) GateResult {
 	return GateResult{Available: true}
 }
 
-func CheckProfile(cfg *config.Sync) GateResult {
+func CheckProfile(cfg *Config) GateResult {
 	if cfg == nil {
 		return GateResult{Reason: "sync section is not configured"}
 	}

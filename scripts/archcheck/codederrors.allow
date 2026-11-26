@@ -8,4 +8,3 @@ internal/channels/telegram  # until this channel's errors move to platform/fault
 internal/modules/child  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec  # until this module's errors move to platform/fault with the module
 internal/modules/codeexec/interpreter  # until this module's errors move to platform/fault with the module
-internal/modules/gitsync  # until this module's errors move to platform/fault with the module

@@ -14,6 +14,7 @@ import (
 	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
 	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/mcp"
 	"github.com/anggasct/aura/internal/modules/plugin"
@@ -135,7 +136,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		validateProfile(cfg.Profile),
 		legacyconfig.ValidateChildren(cfg.Children),
 		validateAccess(cfg.Access),
-		legacyconfig.ValidateSync(cfg.Sync),
+		validateSync(cfg.Sync),
 		validateVision(cfg.Vision),
 		validateKnowledge(cfg.Knowledge),
 		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
@@ -457,4 +458,11 @@ func validateWorkflows(section *workflow.Config) error {
 		return nil
 	}
 	return configkit.Under("workflows", section.Validate())
+}
+
+func validateSync(section *gitsync.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("sync", section.Validate())
 }
