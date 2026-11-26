@@ -155,7 +155,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
 		configkit.Under("broadcast", cfg.Broadcast.Validate()),
 		configkit.Under("scheduler", cfg.Scheduler.Validate()),
-		legacyconfig.ValidateMemory(&cfg.Memory),
+		configkit.Under("memory", cfg.Memory.Validate()),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),
 		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),

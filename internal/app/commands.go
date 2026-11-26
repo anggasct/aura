@@ -11,12 +11,14 @@ import (
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
 )
 
 func mountCommands(root *cobra.Command, gf *globalFlags) {
 	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
+	root.AddCommand(memory.Commands(memoryOpener(gf))...)
 	root.AddCommand(profile.Commands(profileOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
 	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
@@ -31,6 +33,18 @@ func knowledgeOpener(gf *globalFlags) knowledge.Opener {
 		}
 		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartKnowledge}}, func(ctx context.Context, app *App) error {
 			return fn(ctx, app.logger, app.knowledge)
+		})
+	}
+}
+
+func memoryOpener(gf *globalFlags) memory.Opener {
+	return func(cmd *cobra.Command, fn func(ctx context.Context, logger *slog.Logger, service *memory.Service) error) error {
+		result, err := appconfig.Load(gf.configPath)
+		if err != nil {
+			return err
+		}
+		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartMemory}}, func(ctx context.Context, app *App) error {
+			return fn(ctx, app.logger, app.memory)
 		})
 	}
 }

@@ -20,7 +20,6 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
-	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -159,7 +158,7 @@ agents:
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	memoryService, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{})
+	memoryService, err := memory.NewService(newTestMemoryStore(t, db), nil, &memory.ServiceOptions{})
 	if err != nil {
 		t.Fatalf("memory.NewService: %v", err)
 	}
@@ -169,7 +168,7 @@ agents:
 		Executor:     executor,
 		Config:       engineLimits(2, 4),
 		Personas:     registryPersonas{registry: personaRegistry(t, path)},
-		PostTurnHook: buildMemoryHook(memoryService, nil, nil, nil),
+		PostTurnHook: memory.NewTurnHook(memoryService, nil, nil, nil).AfterTurn,
 		LiveEvents:   turn.NewEventBus(nil),
 	})
 	if err != nil {

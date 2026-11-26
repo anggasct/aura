@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 )
 
@@ -26,19 +27,19 @@ func (s *Service) redactedCopy(document *StoredDocument) StoredDocument {
 
 func (s *Service) PreviewForgetBySession(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(sessionID) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "owner and session must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "owner and session must not be empty")
 	}
 	if limit <= 0 {
 		limit = maxForgetLimit
 	}
 	if limit > maxForgetLimit {
-		return nil, Errorf(ErrorCodeInvalidArgument, "forget limit is out of bounds")
+		return nil, fault.New(ErrorCodeInvalidArgument, "forget limit is out of bounds")
 	}
 	owned, err := s.documents.ListSessionDocuments(ctx, ownerID, sessionID, limit)
 	if err != nil {
@@ -56,20 +57,20 @@ func (s *Service) PreviewForgetBySession(ctx context.Context, ownerID, sessionID
 		return nil, err
 	}
 	if total > 0 {
-		return nil, Errorf(ErrorCodeForbidden, "memory session is owned by another owner")
+		return nil, fault.New(ErrorCodeForbidden, "memory session is owned by another owner")
 	}
 	return []StoredDocument{}, nil
 }
 
 func (s *Service) PreviewForgetByID(ctx context.Context, ownerID, documentID string) ([]StoredDocument, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(documentID) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "owner and document id must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "owner and document id must not be empty")
 	}
 	document, found, err := s.documents.GetDocument(ctx, documentID)
 	if err != nil {
@@ -79,26 +80,26 @@ func (s *Service) PreviewForgetByID(ctx context.Context, ownerID, documentID str
 		return []StoredDocument{}, nil
 	}
 	if document.OwnerID != ownerID {
-		return nil, Errorf(ErrorCodeForbidden, "memory document is owned by another owner")
+		return nil, fault.New(ErrorCodeForbidden, "memory document is owned by another owner")
 	}
 	return []StoredDocument{s.redactedCopy(&document)}, nil
 }
 
 func (s *Service) PreviewForgetByQuery(ctx context.Context, ownerID, sessionID, query string, limit int) ([]StoredDocument, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(query) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "owner and query must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "owner and query must not be empty")
 	}
 	if limit <= 0 {
 		limit = maxForgetLimit
 	}
 	if limit > maxForgetLimit {
-		return nil, Errorf(ErrorCodeInvalidArgument, "forget limit is out of bounds")
+		return nil, fault.New(ErrorCodeInvalidArgument, "forget limit is out of bounds")
 	}
 	hits, err := s.documents.Search(ctx, &StoredQuery{
 		OwnerID:   ownerID,
@@ -177,19 +178,19 @@ func (s *Service) ForgetByQuery(ctx context.Context, ownerID, sessionID, query s
 
 func (s *Service) Inspect(ctx context.Context, ownerID, sessionID, query string, limit int) ([]StoredDocument, error) {
 	if ctx == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(ownerID) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "owner must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if limit <= 0 {
 		limit = maxInspectLimit
 	}
 	if limit > maxInspectLimit {
-		return nil, Errorf(ErrorCodeInvalidArgument, "inspect limit is out of bounds")
+		return nil, fault.New(ErrorCodeInvalidArgument, "inspect limit is out of bounds")
 	}
 	if strings.TrimSpace(query) != "" {
 		hits, err := s.documents.Search(ctx, &StoredQuery{

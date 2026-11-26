@@ -15,11 +15,11 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -77,13 +77,17 @@ func writeProfileLines(cmd *cobra.Command, lines []string) error {
 }
 
 func rekeyParticipants(db *sql.DB) ([]principal.Rekeyer, error) {
+	memoryRekeyer, err := memory.NewRekeyer(db)
+	if err != nil {
+		return nil, err
+	}
 	profileRekeyer, err := profile.NewRekeyer(db)
 	if err != nil {
 		return nil, err
 	}
 	return []principal.Rekeyer{
 		turnstore.NewSessionRekeyer(db),
-		store.NewMemoryRekeyer(db),
+		memoryRekeyer,
 		profileRekeyer,
 	}, nil
 }

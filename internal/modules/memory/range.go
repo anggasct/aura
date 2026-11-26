@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -10,11 +11,11 @@ import (
 func storedToRecall(document *StoredDocument) (RecallDocument, error) {
 	from, err := sequenceFromDB(document.FromSequence)
 	if err != nil {
-		return RecallDocument{}, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+		return RecallDocument{}, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
 	to, err := sequenceFromDB(document.ToSequence)
 	if err != nil {
-		return RecallDocument{}, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+		return RecallDocument{}, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
 	return RecallDocument{
 		ID:            document.ID,
@@ -38,25 +39,25 @@ const (
 
 func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID string, model *SummaryModel, summarizer Summarizer) (RecallContext, bool, error) {
 	if ctx == nil {
-		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return RecallContext{}, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
 		return RecallContext{}, false, err
 	}
 	if strings.TrimSpace(ownerID) == "" || strings.TrimSpace(sessionID) == "" {
-		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "owner and session must not be empty")
+		return RecallContext{}, false, fault.New(ErrorCodeInvalidArgument, "owner and session must not be empty")
 	}
 	if model == nil {
-		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "summary model must not be nil")
+		return RecallContext{}, false, fault.New(ErrorCodeInvalidArgument, "summary model must not be nil")
 	}
 	if summarizer == nil {
-		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "summarizer must not be nil")
+		return RecallContext{}, false, fault.New(ErrorCodeInvalidArgument, "summarizer must not be nil")
 	}
 	if s == nil {
-		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "memory service must not be nil")
+		return RecallContext{}, false, fault.New(ErrorCodeInvalidArgument, "memory service must not be nil")
 	}
 	if s.documents == nil {
-		return RecallContext{}, false, Errorf(ErrorCodeInvalidArgument, "document store must not be nil")
+		return RecallContext{}, false, fault.New(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
 	var result RecallContext
 	summarized := false
@@ -79,7 +80,7 @@ func (s *Service) SummarizeClosedRange(ctx context.Context, ownerID, sessionID s
 		}
 		next, err := s.Summarize(ctx, ownerID, sessionID, "", chunk, model, summarizer)
 		if err != nil {
-			if code, ok := CodeOf(err); ok && code == ErrorCodeModelCapabilityUnsupported {
+			if code, ok := fault.CodeOf[ErrorCode](err); ok && code == ErrorCodeModelCapabilityUnsupported {
 				s.observe(ctx, &Observation{
 					Outcome:       string(ErrorCodeModelCapabilityUnsupported),
 					Documents:     len(chunk),
@@ -120,7 +121,7 @@ func (s *Service) nextClosedRangeChunk(ctx context.Context, ownerID, sessionID s
 	}
 	minRaw, err := sequenceFromDB(probe[0].FromSequence)
 	if err != nil {
-		return nil, false, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+		return nil, false, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
 	minDB, err := sequenceToDB(minRaw)
 	if err != nil {
@@ -176,11 +177,11 @@ func (s *Service) coveredRange(ctx context.Context, ownerID, sessionID string, m
 		}
 		from, err := sequenceFromDB(summaries[i].FromSequence)
 		if err != nil {
-			return 0, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+			return 0, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 		}
 		to, err := sequenceFromDB(summaries[i].ToSequence)
 		if err != nil {
-			return 0, Errorf(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
+			return 0, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 		}
 		if from == minRaw {
 			anchored = true

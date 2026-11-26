@@ -19,6 +19,7 @@ import (
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -27,6 +28,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
@@ -53,6 +55,7 @@ const (
 	PartWorkflows Part = "workflows"
 	PartModels    Part = "models"
 	PartKnowledge Part = "knowledge"
+	PartMemory    Part = "memory"
 	PartProfile   Part = "profile"
 )
 
@@ -109,6 +112,7 @@ type App struct {
 	interpreter *workflow.Interpreter
 	models      *model.Registry
 	knowledge   *knowledge.Service
+	memory      *memory.Service
 	profile     *profile.Service
 
 	mu    sync.Mutex
@@ -131,7 +135,7 @@ func Build(ctx context.Context, opts *Options) (*App, error) {
 	return &App{
 		surface: opts.Surface, group: b.group, builtin: b.builtin, serve: b.serve,
 		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
-		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, profile: b.profile,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge, memory: b.memory, profile: b.profile,
 	}, nil
 }
 
@@ -235,7 +239,7 @@ func validateParts(parts []Part) error {
 	var seen []Part
 	for _, part := range parts {
 		switch part {
-		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartProfile:
+		case PartDurable, PartWorkflows, PartModels, PartKnowledge, PartMemory, PartProfile:
 		default:
 			return invalidOptions("part " + string(part) + " is not supported")
 		}
@@ -335,6 +339,7 @@ type build struct {
 	runtime      durable.Runtime
 	interpreter  *workflow.Interpreter
 	knowledge    *knowledge.Service
+	memory       *memory.Service
 	profile      *profile.Service
 	quarantined  []workflow.Quarantined
 	artifactRoot string
@@ -402,6 +407,27 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			return err
 		}
 		b.knowledge = service
+	}
+	if slices.Contains(parts, PartMemory) {
+		if !b.cfg.Memory.Enabled {
+			return errors.New("memory is not enabled")
+		}
+		memStore, err := memory.NewSQLiteStore(b.db, turnstore.NewSessionService(b.db))
+		if err != nil {
+			return err
+		}
+		service, err := memory.NewService(memStore, secret.New(), &memory.ServiceOptions{
+			MaxDocuments:         b.cfg.Memory.MaxDocuments,
+			TokenBudget:          b.cfg.Memory.RecallTokenBudget,
+			SummaryPromptVersion: b.cfg.Memory.SummaryPromptVersion,
+			SummaryTTL:           time.Duration(b.cfg.Memory.SummaryTTL),
+			RangeThreshold:       b.cfg.Memory.RangeThreshold,
+			RangeLiveWindow:      b.cfg.Memory.RangeLiveWindow,
+		})
+		if err != nil {
+			return err
+		}
+		b.memory = service
 	}
 	if slices.Contains(parts, PartProfile) {
 		store, err := profile.NewSQLiteStore(b.db)
@@ -605,11 +631,7 @@ func (b *build) buildTurnRuntime() error {
 		return err
 	}
 	b.executor = executor
-	hooks := make([]turn.TurnHook, 0, len(b.turnHooks)+1)
-	if b.modules.memoryHook != nil {
-		hooks = append(hooks, turnHookFunc(b.modules.memoryHook))
-	}
-	hooks = append(hooks, b.turnHooks...)
+	hooks := slices.Clone(b.turnHooks)
 	var durableConfig *runtimeengine.DurableConfig
 	var countTurn func(context.Context, *turn.TurnRequest)
 	var channels []runtimechannelhost.ChannelPort
