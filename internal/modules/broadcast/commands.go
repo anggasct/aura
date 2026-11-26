@@ -1,34 +1,67 @@
-package app
+package broadcast
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"io"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/modules/broadcast"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
 )
 
-func newBroadcastCmd(gf *globalFlags) *cobra.Command {
+type cliUsageError struct {
+	err error
+}
+
+func (e *cliUsageError) Error() string { return e.err.Error() }
+
+func (e *cliUsageError) Unwrap() error { return e.err }
+
+func (e *cliUsageError) UsageError() bool { return true }
+
+type EffectReconciler interface {
+	GetIntent(ctx context.Context, id string) (*effect.Intent, error)
+	Reconcile(ctx context.Context, id string, provider effect.Provider) (*effect.Intent, error)
+}
+
+type CommandEnv struct {
+	Store           *SQLiteStore
+	Runtime         durable.Runtime
+	Effects         func() (EffectReconciler, error)
+	EffectProviders func() (map[string]effect.Provider, error)
+}
+
+type Opener func(cmd *cobra.Command, needDurable bool, fn func(ctx context.Context, env *CommandEnv) error) error
+
+func Commands(open Opener) []*cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "broadcast",
 		Short: "Inspect proactive broadcast notifications",
 	}
-	cmd.AddCommand(newBroadcastStatusCmd(gf), newBroadcastReconcileCmd(gf))
-	return cmd
+	cmd.AddCommand(newStatusCmd(open), newReconcileCmd(open))
+	return []*cobra.Command{cmd}
 }
 
-func newBroadcastStatusCmd(gf *globalFlags) *cobra.Command {
+func requireOpener(open Opener) error {
+	if open == nil {
+		return fault.New(ErrorCodeInvalidArgument, "broadcast command opener must not be nil")
+	}
+	return nil
+}
+
+func exactOneBroadcastID(cmd *cobra.Command, args []string) error {
+	if len(args) != 1 || strings.TrimSpace(args[0]) == "" {
+		return &cliUsageError{fmt.Errorf("%s requires exactly one broadcast ID", cmd.CommandPath())}
+	}
+	return nil
+}
+
+func newStatusCmd(open Opener) *cobra.Command {
 	var state string
 	var showContent bool
 	var limit int
@@ -36,15 +69,21 @@ func newBroadcastStatusCmd(gf *globalFlags) *cobra.Command {
 		Use:   "status",
 		Short: "List broadcast notifications without content by default",
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if err := requireOpener(open); err != nil {
+				return err
+			}
 			if limit <= 0 || limit > 1000 {
-				return &usageError{fmt.Errorf("%s: --limit must be between 1 and 1000", cmd.CommandPath())}
+				return &cliUsageError{fmt.Errorf("%s: --limit must be between 1 and 1000", cmd.CommandPath())}
 			}
 			var states []string
 			if strings.TrimSpace(state) != "" {
 				states = strings.Split(state, ",")
 			}
-			return withStorage(cmd, gf, true, func(ctx context.Context, _ *slog.Logger, _ *appconfig.Config, db *sql.DB) error {
-				items, err := store.NewBroadcastStore(db).ListItems(ctx, states, limit)
+			return open(cmd, false, func(ctx context.Context, env *CommandEnv) error {
+				if env == nil || env.Store == nil {
+					return fault.New(ErrorCodeInvalidArgument, "broadcast command environment is incomplete")
+				}
+				items, err := env.Store.ListItems(ctx, states, limit)
 				if err != nil {
 					return err
 				}
@@ -98,19 +137,20 @@ func newBroadcastStatusCmd(gf *globalFlags) *cobra.Command {
 	return cmd
 }
 
-func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
-	cmd := &cobra.Command{
+func newReconcileCmd(open Opener) *cobra.Command {
+	return &cobra.Command{
 		Use:   "reconcile <id>",
 		Short: "Settle an unknown broadcast or restart a stalled run",
-		Args:  exactOneArg,
+		Args:  exactOneBroadcastID,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			result, err := appconfig.Load(gf.configPath)
-			if err != nil {
+			if err := requireOpener(open); err != nil {
 				return err
 			}
-			return withApp(cmd, &commandInput{result: &result, parts: []Part{PartDurable}}, func(ctx context.Context, app *App) error {
-				adapter := &broadcastItemStore{store: store.NewBroadcastStore(app.db)}
-				item, found, err := adapter.Load(ctx, args[0])
+			return open(cmd, true, func(ctx context.Context, env *CommandEnv) error {
+				if env == nil || env.Store == nil || env.Runtime == nil {
+					return fault.New(ErrorCodeInvalidArgument, "broadcast command environment is incomplete")
+				}
+				item, found, err := env.Store.Load(ctx, args[0])
 				if err != nil {
 					return err
 				}
@@ -119,14 +159,14 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 				}
 				out := cmd.OutOrStdout()
 				switch item.State {
-				case broadcast.StateUnknown:
-					return reconcileUnknownBroadcast(ctx, cmd.OutOrStdout(), app.db, app.logger, result.Config, adapter, &item)
-				case broadcast.StateHeld, broadcast.StateScheduled:
+				case StateUnknown:
+					return reconcileUnknownBroadcast(ctx, out, env, &item)
+				case StateHeld, StateScheduled:
 					if item.NotBefore.UTC().After(time.Now().UTC()) {
 						_, err := fmt.Fprintf(out, "id: %s\nresult: no-op (not due until %s)\n", item.ID, item.NotBefore.UTC().Format(time.RFC3339))
 						return err
 					}
-					if err := broadcast.ResumeItemRun(ctx, app.runtime, item.ID); err != nil {
+					if err := ResumeItemRun(ctx, env.Runtime, item.ID); err != nil {
 						return err
 					}
 					_, err = fmt.Fprintf(out, "id: %s\nresult: run started\n", item.ID)
@@ -138,23 +178,28 @@ func newBroadcastReconcileCmd(gf *globalFlags) *cobra.Command {
 			})
 		},
 	}
-	return cmd
 }
 
-func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, db *sql.DB, logger *slog.Logger, cfg *appconfig.Config, adapter *broadcastItemStore, item *broadcast.FullItem) error {
+func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, env *CommandEnv, item *FullItem) error {
 	if item.EffectID == "" {
 		_, err := fmt.Fprintf(out, "id: %s\nresult: unchanged (no linked effect)\n", item.ID)
 		return err
 	}
-	executor, err := toolsbuiltin.NewChannelEffects(db, logger)
+	if env.Effects == nil || env.EffectProviders == nil {
+		return fault.New(ErrorCodeInvalidArgument, "broadcast effect reconciler is not configured")
+	}
+	reconciler, err := env.Effects()
 	if err != nil {
 		return err
 	}
-	intent, err := executor.Journal().Get(ctx, item.EffectID)
+	if reconciler == nil {
+		return fault.New(ErrorCodeInvalidArgument, "broadcast effect reconciler must not be nil")
+	}
+	intent, err := reconciler.GetIntent(ctx, item.EffectID)
 	if err != nil {
 		return err
 	}
-	providers, err := broadcastEffectProviders(cfg, db, logger)
+	providers, err := env.EffectProviders()
 	if err != nil {
 		return err
 	}
@@ -163,7 +208,7 @@ func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, db *sql.DB, l
 		_, err := fmt.Fprintf(out, "id: %s\nresult: unchanged (provider %q not wired)\n", item.ID, intent.Provider)
 		return err
 	}
-	resolved, err := executor.Reconcile(ctx, item.EffectID, provider, nil)
+	resolved, err := reconciler.Reconcile(ctx, item.EffectID, provider)
 	if err != nil {
 		_, reportErr := fmt.Fprintf(out, "id: %s\nresult: unchanged (%s)\n", item.ID, reconcileReason(err))
 		if reportErr != nil {
@@ -174,13 +219,13 @@ func reconcileUnknownBroadcast(ctx context.Context, out io.Writer, db *sql.DB, l
 	now := time.Now().UTC()
 	switch resolved.State {
 	case effect.StateSucceeded:
-		if err := adapter.Settle(ctx, item.ID, broadcast.StateSucceeded, resolved.ID, now); err != nil {
+		if err := env.Store.Settle(ctx, item.ID, StateSucceeded, resolved.ID, now); err != nil {
 			return err
 		}
 		_, err := fmt.Fprintf(out, "id: %s\nresult: settled succeeded\n", item.ID)
 		return err
 	case effect.StateFailed:
-		if err := adapter.Settle(ctx, item.ID, broadcast.StateFailed, resolved.ID, now); err != nil {
+		if err := env.Store.Settle(ctx, item.ID, StateFailed, resolved.ID, now); err != nil {
 			return err
 		}
 		_, err := fmt.Fprintf(out, "id: %s\nresult: settled failed\n", item.ID)

@@ -20,6 +20,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/httpchat"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/health"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -455,9 +456,9 @@ func TestHTTPChatAppliesTheSharedAccessGates(t *testing.T) {
 		if created.status != http.StatusOK {
 			t.Fatalf("create = %+v", created)
 		}
-		err := store.NewHandoffStore(h.db).Open(t.Context(), &store.Handoff{
+		err := mustHandoffStore(t, h.db).Open(t.Context(), &handoff.Handoff{
 			SessionID: created.session, Reason: "refund", PrincipalID: "http:" + keyID, AgentID: "lobby",
-			Account: "office", Channel: store.HandoffChannelDiscord, ReplyChannelID: "1", OpenedAt: time.Now().UTC(),
+			Account: "office", Channel: handoff.ChannelDiscord, ReplyChannelID: "1", OpenedAt: time.Now().UTC(),
 		})
 		if err != nil {
 			t.Fatalf("Open handoff: %v", err)

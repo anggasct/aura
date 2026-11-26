@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/github"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -139,7 +139,7 @@ func TestPersonasMayListTheGitHubTools(t *testing.T) {
 		}}
 	}
 	configured := appconfig.Default()
-	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	configured.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	bare := appconfig.Default()
 	cases := []struct {
 		name        string

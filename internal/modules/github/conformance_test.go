@@ -52,8 +52,12 @@ func TestBrokerConformance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := Register(broker, toolOptions(server)); err != nil {
-		t.Fatalf("Register: %v", err)
+	provider, err := NewToolProvider(toolOptions(server))
+	if err != nil {
+		t.Fatalf("NewToolProvider: %v", err)
+	}
+	if err := broker.RegisterProvider(provider); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
 	}
 	names := map[string]bool{}
 	for _, definition := range broker.Definitions() {
@@ -110,8 +114,12 @@ func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := Register(broker, &ToolOptions{Credentials: testCredentials()}); err != nil {
-		t.Fatalf("Register: %v", err)
+	provider, err := NewToolProvider(&ToolOptions{Credentials: testCredentials()})
+	if err != nil {
+		t.Fatalf("NewToolProvider: %v", err)
+	}
+	if err := broker.RegisterProvider(provider); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
 	}
 	request := &toolbroker.ToolRequest{
 		RequestID: "request-2", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
@@ -128,12 +136,16 @@ func TestBrokerDeniesARequestClaimingACapabilityTheHostLacks(t *testing.T) {
 }
 
 func TestBrokerSchemasMatchValidators(t *testing.T) {
-	registrar := &recordingRegistrar{}
-	if err := Register(registrar, &ToolOptions{Credentials: testCredentials()}); err != nil {
-		t.Fatalf("Register: %v", err)
+	provider, err := NewToolProvider(&ToolOptions{Credentials: testCredentials()})
+	if err != nil {
+		t.Fatalf("NewToolProvider: %v", err)
+	}
+	registered := make([]tools.Definition, 0, len(provider.Tools()))
+	for _, reg := range provider.Tools() {
+		registered = append(registered, reg.Definition)
 	}
 	t.Run("plain", func(t *testing.T) { assertSchemasMatchValidators(t, Definitions()) })
-	t.Run("registered", func(t *testing.T) { assertSchemasMatchValidators(t, registrar.definitions) })
+	t.Run("registered", func(t *testing.T) { assertSchemasMatchValidators(t, registered) })
 }
 
 func assertSchemasMatchValidators(t *testing.T, definitions []tools.Definition) {
@@ -282,8 +294,12 @@ func TestRegisteredToolsRefuseAnUnconfiguredCredentialBeforeApproval(t *testing.
 		t.Fatalf("New: %v", err)
 	}
 	creds := []Credential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN")}}
-	if err := Register(broker, &ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: creds}); err != nil {
-		t.Fatalf("Register: %v", err)
+	provider, err := NewToolProvider(&ToolOptions{BaseURL: server.URL, HTTPClient: server.Client(), Credentials: creds})
+	if err != nil {
+		t.Fatalf("NewToolProvider: %v", err)
+	}
+	if err := broker.RegisterProvider(provider); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
 	}
 	var sequence uint64
 	execute := func(credential string) error {
@@ -327,31 +343,20 @@ func TestRegisteredToolsRefuseAnUnconfiguredCredentialBeforeApproval(t *testing.
 	assertRefusedBeforeApproval("other", 2, 2)
 }
 
-type recordingRegistrar struct {
-	registered  []string
-	definitions []tools.Definition
-}
-
-func (r *recordingRegistrar) RegisterTool(definition *tools.Definition, _ toolbroker.Adapter, _ *approval.Rule) error {
-	r.registered = append(r.registered, definition.Name)
-	r.definitions = append(r.definitions, *definition)
-	return nil
-}
-
 func TestRegisterAdvertisesTheConfiguredCredentialNames(t *testing.T) {
-	registrar := &recordingRegistrar{}
-	err := Register(registrar, &ToolOptions{Credentials: []Credential{
+	provider, err := NewToolProvider(&ToolOptions{Credentials: []Credential{
 		{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TEST_TOKEN")},
 		{Name: "release", Ref: secrettest.Ref("file:///run/aura/gh-release")},
 	}})
 	if err != nil {
-		t.Fatalf("Register: %v", err)
+		t.Fatalf("NewToolProvider: %v", err)
 	}
-	if len(registrar.definitions) != 3 {
-		t.Fatalf("registered %d definitions, want 3", len(registrar.definitions))
+	registrations := provider.Tools()
+	if len(registrations) != 3 {
+		t.Fatalf("registered %d definitions, want 3", len(registrations))
 	}
-	for i := range registrar.definitions {
-		definition := &registrar.definitions[i]
+	for i := range registrations {
+		definition := &registrations[i].Definition
 		var schema struct {
 			Required   []string `json:"required"`
 			Properties map[string]struct {
@@ -418,14 +423,13 @@ func TestRegisterRefusesMissingEmptyOrRepeatedCredentials(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			registrar := &recordingRegistrar{}
-			err := Register(registrar, tc.options)
+			provider, err := NewToolProvider(tc.options)
 			var coded *fault.Error[toolbroker.ResultClass]
 			if !errors.As(err, &coded) || coded.Code != toolbroker.ResultInvalidArgument {
 				t.Fatalf("err = %v, want an invalid_argument error", err)
 			}
-			if len(registrar.registered) != 0 {
-				t.Errorf("registered = %v, want nothing", registrar.registered)
+			if provider != nil {
+				t.Errorf("provider = %v, want nil", provider)
 			}
 			if tc.name == "repeated name" && (!strings.Contains(coded.Detail, `"ci"`) || strings.Contains(coded.Detail, "env://")) {
 				t.Errorf("detail = %q, want the name and no reference", coded.Detail)
@@ -450,8 +454,12 @@ func TestApprovalCardShowsTheTargetFirstAndRefusesWhatDoesNotFit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := Register(broker, toolOptions(server)); err != nil {
-		t.Fatalf("Register: %v", err)
+	provider, err := NewToolProvider(toolOptions(server))
+	if err != nil {
+		t.Fatalf("NewToolProvider: %v", err)
+	}
+	if err := broker.RegisterProvider(provider); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
 	}
 	var sequence uint64
 	execute := func(tool, arguments string) error {

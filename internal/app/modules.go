@@ -9,6 +9,7 @@ import (
 
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/profile"
@@ -61,6 +62,7 @@ func (b *build) buildModules(ctx context.Context) error {
 		b.buildProfile,
 		b.buildSkills,
 		b.buildKnowledge,
+		b.buildGitHub,
 		b.buildInterpreter,
 	}
 	for _, step := range steps {
@@ -220,6 +222,14 @@ func (b *build) buildKnowledge(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (b *build) buildGitHub(context.Context) error {
+	mod, err := github.New(&github.ModuleDeps{Config: githubConfig(b.cfg)})
+	if err != nil {
+		return err
+	}
+	return b.registerModule("github", mod)
 }
 
 func (b *build) buildInterpreter(ctx context.Context) error {

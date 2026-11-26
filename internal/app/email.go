@@ -98,7 +98,7 @@ func wireEmailOwnerAccess(ports []runtimechannelhost.ChannelPort, route *approva
 	for _, approver := range approvers {
 		notifiers = append(notifiers, approver)
 	}
-	handoffs := &ownerHandoffRouter{notifiers: notifiers}
+	handoffs := &emailOwnerHandoffRouter{router: newOwnerHandoffRouter(notifiers)}
 	var adapters []*email.Adapter
 	for _, port := range ports {
 		adapter, ok := port.(*email.Adapter)

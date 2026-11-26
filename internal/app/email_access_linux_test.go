@@ -26,6 +26,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -260,7 +261,10 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	adapter.SetMediaStore(&channelMediaStore{store: storage.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota))})
 	mailboxes := wireEmailOwnerAccess([]runtimechannelhost.ChannelPort{adapter}, route, approvers)
 	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
-	builtin.SetHandoffOpener(newHandoffService(db, []handoffNotifier{adapter}))
+	handoffService := mustHandoffService(t, db, []handoff.Notifier{&channelHandoffNotifier{target: adapter}})
+	if err := builtin.Broker().RegisterProvider(handoff.NewToolProvider(handoffService)); err != nil {
+		t.Fatalf("RegisterProvider(handoff): %v", err)
+	}
 	events := turnstore.NewEventStore(db)
 	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, turnstore.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
@@ -606,11 +610,11 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 		t.Fatalf("sessions = %v", sessions)
 	}
 	session := sessions[0]
-	handoff, found, err := store.NewHandoffStore(h.db).Get(t.Context(), session)
-	if err != nil || !found || handoff.Channel != store.HandoffChannelEmail || handoff.Account != "work" || handoff.ReplyChannelID != accessStranger {
-		t.Fatalf("handoff = %+v, %v, %v", handoff, found, err)
+	hRecord, found, err := mustHandoffStore(t, h.db).Get(t.Context(), session)
+	if err != nil || !found || hRecord.Channel != handoff.ChannelEmail || hRecord.Account != "work" || hRecord.ReplyChannelID != accessStranger {
+		t.Fatalf("handoff = %+v, %v, %v", hRecord, found, err)
 	}
-	if thread := email.ParseThreadReference(handoff.ReplyThreadID); thread.MessageID != first || thread.Subject != "Refund" {
+	if thread := email.ParseThreadReference(hRecord.ReplyThreadID); thread.MessageID != first || thread.Subject != "Refund" {
 		t.Fatalf("handoff thread = %+v, want the opening message", thread)
 	}
 
@@ -624,13 +628,13 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 		t.Errorf("mails to the held sender = %d, want only the pre-handoff reply: a held sender gets no mail", got)
 	}
 
-	if _, err := runAccessCommand(t, newReplyCmd, h.configPath, session, "Your", "refund", "is", "approved."); err != nil {
+	if _, err := runReplyCommand(t, h.configPath, session, "Your", "refund", "is", "approved."); err != nil {
 		t.Fatalf("aura reply: %v", err)
 	}
 	if len(delivered) != 1 || delivered[0].To != accessStranger || delivered[0].Text != "Your refund is approved." || delivered[0].Thread.MessageID != first {
 		t.Fatalf("delivered = %+v", delivered)
 	}
-	if _, err := runAccessCommand(t, newHandoffCmd, h.configPath, "release", session); err != nil {
+	if _, err := runHandoffCommand(t, h.configPath, "release", session); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if len(delivered) != 2 || delivered[1].Text != auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffClosed] {

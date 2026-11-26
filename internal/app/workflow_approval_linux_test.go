@@ -14,8 +14,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -39,7 +39,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	if err := os.MkdirAll(cfg.Tools.Workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	cfg.Agents = &auraagent.Config{Definitions: []auraagent.Persona{{
 		ID: "ops", Description: "operator", Instructions: "You plan work.", Tools: []string{"github_comment", "workflow_propose"},
 	}}}
@@ -61,6 +61,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registerGitHubModule(t, executor, &cfg)
 	h.controller.registry = registry
 	h.cfg = &cfg
 	h.controller.enableCallDisplay(executor.Broker().ExactCallText)

@@ -53,10 +53,11 @@ func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 func runBroadcastCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := newBroadcastCmd(gf)
+	cmd := broadcast.Commands(broadcastOpener(gf))[0]
 	out := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errBuf)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err

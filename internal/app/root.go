@@ -24,6 +24,8 @@ func (e *usageError) Error() string { return e.err.Error() }
 
 func (e *usageError) Unwrap() error { return e.err }
 
+func (e *usageError) UsageError() bool { return true }
+
 type exitCodeError struct {
 	code int
 	err  error
@@ -52,7 +54,7 @@ func NewRootCommand() *cobra.Command {
 	pf.StringVar(&gf.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	pf.StringVar(&gf.logFormat, "log-format", "text", "log format (text, json)")
 
-	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newReplyCmd(gf), newHandoffCmd(gf), newWorkflowCmd(gf), newBroadcastCmd(gf), newScheduleCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
+	root.AddCommand(newVersionCmd(), newServerCmd(gf), newChatCmd(gf), newExecCmd(), newStorageCmd(gf), newUsageCmd(gf), newEffectsCmd(gf), newAgentsCmd(gf), newPersonaCmd(gf), newBindingsCmd(gf), newSkillsCmd(gf), newMemoryCmd(gf), newOwnerCmd(gf), newChildrenCmd(gf), newGrantsCmd(gf), newPairingCmd(gf), newPrincipalCmd(gf), newWorkflowCmd(gf), newStatusCmd(gf, sandbox.Negotiate), newDoctorCmd(gf, sandbox.Negotiate), newModelsCmd(gf), newSyncCmd(gf), newMCPCmd(gf), newPluginCmd(gf), newAPIKeyCmd(gf), newInterpreterCmd(gf, interpreterDeps{load: appconfig.Load, manifest: interpreter.DefaultManifest, platformSupported: interpreter.HostSupported}), newConfigCmd(gf))
 	mountCommands(root, gf)
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageError{err}
@@ -64,8 +66,12 @@ func ExitCode(root *cobra.Command, args []string, err error) int {
 	if err == nil {
 		return 0
 	}
-	var ue *usageError
-	if errors.As(err, &ue) || command.IsUsageError(err) {
+	var ue interface{ UsageError() bool }
+	if errors.As(err, &ue) && ue.UsageError() {
+		return 2
+	}
+	var flagged interface{ IsUsageError() bool }
+	if (errors.As(err, &flagged) && flagged.IsUsageError()) || command.IsUsageError(err) {
 		return 2
 	}
 	if errors.Is(err, terminal.ErrInterrupted) {
