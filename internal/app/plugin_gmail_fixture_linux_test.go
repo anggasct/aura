@@ -194,7 +194,7 @@ func (bearerStrategy) Authorize(_ context.Context, req *http.Request) error {
 type gmailFixture struct {
 	h       *mcpHarness
 	api     *gmailAPI
-	starter mcp.SessionStarter
+	starter connector.Starter
 	process *processStarter
 	manager *connector.Manager
 }
@@ -230,7 +230,7 @@ func gmailConnectorConfig(t *testing.T, bundle string) connector.Config {
 	return cfg
 }
 
-func newGmailFixture(t *testing.T, starter mcp.SessionStarter) *gmailFixture {
+func newGmailFixture(t *testing.T, starter connector.Starter) *gmailFixture {
 	t.Helper()
 	f := &gmailFixture{h: newMCPHarness(t, nil), api: newGmailAPI(t), process: &processStarter{}}
 	f.starter = starter
@@ -238,13 +238,18 @@ func newGmailFixture(t *testing.T, starter mcp.SessionStarter) *gmailFixture {
 		f.starter = f.process
 	}
 	bundle := buildGmailBundle(t)
-	manager, err := startConnectorPlugins(t.Context(), &connectorRuntimeOptions{
-		Broker: f.h.executor.Broker(), Logger: slog.New(slog.DiscardHandler), Starter: f.starter,
-		HTTPClient: f.api.client(), Plugins: []connector.Config{gmailConnectorConfig(t, bundle)},
+	manager, err := connector.NewManager(&connector.ManagerOptions{
+		Broker:     f.h.executor.Broker(),
+		Logger:     slog.New(slog.DiscardHandler),
+		Starter:    f.starter,
+		HTTPClient: f.api.client(),
+		Validator:  mcp.MakeValidator,
+		Plugins:    []connector.Config{gmailConnectorConfig(t, bundle)},
 	})
 	if err != nil {
-		t.Fatalf("startConnectorPlugins: %v", err)
+		t.Fatalf("connector.NewManager: %v", err)
 	}
+	_ = manager.Start(t.Context())
 	f.manager = manager
 	t.Cleanup(func() { _ = manager.Close(context.WithoutCancel(t.Context())) })
 	if statuses := manager.Statuses(); len(statuses) != 1 || statuses[0].Code != "" || !statuses[0].Connected || len(statuses[0].Drift) != 0 {
