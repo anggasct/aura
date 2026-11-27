@@ -12,7 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
-var freshTurnStart = regexp.MustCompile(`^\{"started_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z","journal":2\}$`)
+var freshTurnStart = regexp.MustCompile(`^\{"started_at":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z","journal":3\}$`)
 
 func turnStartResult(t *testing.T, rig *durableHostRig, turnID string) string {
 	t.Helper()
@@ -53,10 +53,10 @@ func TestTurnJournalOfAnotherVersionIsRefused(t *testing.T) {
 		record string
 	}{
 		{name: "a bare instant", record: `"` + stamp + `"`},
-		{name: "the previous journal version", record: `{"started_at":"` + stamp + `","journal":1}`},
+		{name: "the previous journal version", record: `{"started_at":"` + stamp + `","journal":2}`},
 		{name: "another journal version", record: `{"started_at":"` + stamp + `","journal":0}`},
-		{name: "an unknown field", record: `{"started_at":"` + stamp + `","journal":2,"extra":true}`},
-		{name: "trailing data", record: `{"started_at":"` + stamp + `","journal":2} {}`},
+		{name: "an unknown field", record: `{"started_at":"` + stamp + `","journal":3,"extra":true}`},
+		{name: "trailing data", record: `{"started_at":"` + stamp + `","journal":3} {}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -104,7 +104,7 @@ func TestTurnJournalOfAnotherVersionIsRefused(t *testing.T) {
 			t.Fatalf("turn ended with %q, want turn.completed", got)
 		}
 		if raw := turnStartResult(t, rig, "turn-1"); !freshTurnStart.MatchString(raw) {
-			t.Errorf("turn-start record = %s, want {\"started_at\":<instant>,\"journal\":2}", raw)
+			t.Errorf("turn-start record = %s, want {\"started_at\":<instant>,\"journal\":3}", raw)
 		}
 	})
 }

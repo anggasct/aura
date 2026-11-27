@@ -45,23 +45,7 @@ func terminalRecordOf(t *testing.T, db *sql.DB, turnID string) terminalRecord {
 
 func deliveryRecordsOf(t *testing.T, db *sql.DB, turnID string) []string {
 	t.Helper()
-	rows, err := db.QueryContext(t.Context(), `SELECT CAST(result AS TEXT) FROM durable_action WHERE run_key = ? AND action_key = ?`, turnID, deliveryAction)
-	if err != nil {
-		t.Fatalf("read the delivery records of %s: %v", turnID, err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var result string
-		if err := rows.Scan(&result); err != nil {
-			t.Fatalf("scan a delivery record of %s: %v", turnID, err)
-		}
-		out = append(out, result)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("read the delivery records of %s: %v", turnID, err)
-	}
-	return out
+	return actionRecordsOf(t, db, turnID, deliveryAction)
 }
 
 func startDurableChannelTurn(t *testing.T, adapter runtimechannelhost.ChannelPort, executor TurnExecutor) (rig *durableHostRig, outcome <-chan turnOutcome) {
@@ -166,17 +150,17 @@ func TestDurableTurnJournalsItsDelivery(t *testing.T) {
 			t.Fatalf("Deliver calls = %d, want 1", got)
 		}
 	})
-	t.Run("a reply without text", func(t *testing.T) {
+	t.Run("a reply without text sends the empty-turn message", func(t *testing.T) {
 		capture := &capturingAdapter{}
 		rig := runDurableChannelTurn(t, capture, turntest.FakeStep{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)})
 		if got := terminalRecordOf(t, rig.db, "turn-1"); got.kind != turn.EventKindTurnCompleted {
 			t.Fatalf("terminal of turn-1 = %+v, want turn.completed", got)
 		}
-		if got := deliveryRecordsOf(t, rig.db, "turn-1"); len(got) != 1 || got[0] != `{"outcome":"skipped"}` {
-			t.Fatalf("delivery records = %v, want one skipped record", got)
+		if got := deliveryRecordsOf(t, rig.db, "turn-1"); len(got) != 1 || got[0] != `{"outcome":"sent"}` {
+			t.Fatalf("delivery records = %v, want one sent record", got)
 		}
-		if got := capture.count(); got != 0 {
-			t.Fatalf("Deliver calls = %d, want 0", got)
+		if got := capture.count(); got != 1 {
+			t.Fatalf("Deliver calls = %d, want 1", got)
 		}
 	})
 	t.Run("a reply whose channel has no adapter", func(t *testing.T) {

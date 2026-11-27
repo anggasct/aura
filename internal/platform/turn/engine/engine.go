@@ -20,19 +20,20 @@ import (
 )
 
 type Deps struct {
-	Events         EventStore
-	Dedupe         DedupeStore
-	Executor       TurnExecutor
-	Logger         *slog.Logger
-	Config         Config
-	DefaultAgentID string
-	Personas       turn.Personas
-	Skills         SkillRenderer
-	Durable        *DurableConfig
-	PostTurnHook   func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
-	CountTurn      func(ctx context.Context, req *turn.TurnRequest)
-	LiveEvents     LiveEventSource
-	Channels       []runtimechannelhost.ChannelPort
+	Events             EventStore
+	Dedupe             DedupeStore
+	Executor           TurnExecutor
+	Logger             *slog.Logger
+	Config             Config
+	DefaultAgentID     string
+	Personas           turn.Personas
+	RepliesToRequester func(toolName string) bool
+	Skills             SkillRenderer
+	Durable            *DurableConfig
+	PostTurnHook       func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error
+	CountTurn          func(ctx context.Context, req *turn.TurnRequest)
+	LiveEvents         LiveEventSource
+	Channels           []runtimechannelhost.ChannelPort
 }
 
 type LiveEventSource interface {
@@ -694,18 +695,13 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 		}
 	}
 
-	terminalKind, terminalPayload = e.terminalOutcome(ctx, execErr, &t.req)
-	if terminalKind == turn.EventKindTurnCompleted {
+	if end := e.endOf(ctx.Err(), execErr); end.cancelled {
+		terminalKind, terminalPayload = turn.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(&t.req))
+	} else {
+		final := e.planFinalMessage(&t.req, executed, end)
 		deliveryCtx := context.WithoutCancel(ctx)
-		if deliveryErr := e.deliverCompletedTurn(deliveryCtx, &t.req, executed); deliveryErr != nil {
-			if fault.HasCode(deliveryErr, turn.ErrorCodeDeliverySkipped) {
-				e.logger.DebugContext(deliveryCtx, "turn delivery skipped", "error", deliveryErr, "turn_id", t.turnID)
-			} else {
-				e.logger.ErrorContext(deliveryCtx, "turn delivery failed", "error", deliveryErr, "turn_id", t.turnID)
-				terminalKind = turn.EventKindTurnFailed
-				terminalPayload = failedPayload(turn.ErrorCodeDeliveryFailed, "channel delivery failed", deliveryErr, e.agentID(&t.req))
-			}
-		}
+		deliveryErr := e.deliverFinalMessage(deliveryCtx, &t.req, &final)
+		terminalKind, terminalPayload = e.inMemoryTerminal(deliveryCtx, &t.req, &final, deliveryErr)
 	}
 	if e.deps.PostTurnHook != nil {
 		hookCtx := context.WithoutCancel(ctx)
@@ -727,6 +723,21 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	for sub := range t.subs {
 		sub.closeEvents()
 	}
+}
+
+func (e *Engine) inMemoryTerminal(ctx context.Context, req *turn.TurnRequest, final *finalMessage, deliveryErr error) (kind string, payload []byte) {
+	record := deliveryRecord{Outcome: deliverySent}
+	switch {
+	case deliveryErr == nil:
+	case fault.HasCode(deliveryErr, turn.ErrorCodeDeliverySkipped):
+		e.logger.DebugContext(ctx, "turn delivery skipped", "error", deliveryErr, "turn_id", req.TurnID)
+	case final.failed():
+		e.logger.ErrorContext(ctx, "turn fallback delivery failed", "error", deliveryErr, "code", turn.ErrorCodeDeliveryFailed, "turn_id", req.TurnID)
+	default:
+		e.logger.ErrorContext(ctx, "turn delivery failed", "error", deliveryErr, "turn_id", req.TurnID)
+		return turn.EventKindTurnFailed, failedPayload(turn.ErrorCodeDeliveryFailed, "channel delivery failed", deliveryErr, e.agentID(req))
+	}
+	return final.terminal(e.agentID(req), record)
 }
 
 func (e *Engine) broadcast(t *turnState, ev *turn.Event) {

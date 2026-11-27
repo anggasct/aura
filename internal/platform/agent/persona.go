@@ -46,6 +46,15 @@ func (p RegistryPersonas) Knowledge(agentID string, class principal.Class) []str
 	return definition.KnowledgeFor(class)
 }
 
+func (p RegistryPersonas) Message(agentID, key string) string {
+	if p.Registry != nil {
+		if definition, ok := p.Registry.Lookup(agentID); ok {
+			return definition.Message(key)
+		}
+	}
+	return PersonaMessageDefaults()[key]
+}
+
 func LogPersonas(ctx context.Context, logger *slog.Logger, registry *Registry) {
 	if logger == nil || registry == nil {
 		return

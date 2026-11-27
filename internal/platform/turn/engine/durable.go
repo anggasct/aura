@@ -588,23 +588,6 @@ func (e *Engine) fillTurnEvent(t *turnState, ev *turn.Event) {
 	}
 }
 
-func (e *Engine) terminalOutcome(ctx context.Context, execErr error, req *turn.TurnRequest) (kind string, payload []byte) {
-	switch {
-	case ctx.Err() == context.Canceled:
-		return turn.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(req))
-	case ctx.Err() == context.DeadlineExceeded:
-		return turn.EventKindTurnFailed, failedPayload(turn.ErrorCodeTurnDeadlineExceeded, "turn deadline elapsed", nil, e.agentID(req))
-	case execErr != nil:
-		code, ok := fault.CodeOf[turn.ErrorCode](execErr)
-		if !ok {
-			code = turn.ErrorCodeRuntimeInternal
-		}
-		return turn.EventKindTurnFailed, failedPayload(code, "turn execution failed", execErr, e.agentID(req))
-	default:
-		return turn.EventKindTurnCompleted, completedPayload(e.agentID(req))
-	}
-}
-
 func (e *Engine) finishTurn(ctx context.Context, t *turnState) {
 	e.mu.Lock()
 	e.active--
@@ -623,7 +606,7 @@ type turnStartRecord struct {
 	Journal   int       `json:"journal"`
 }
 
-const turnJournalVersion = 2
+const turnJournalVersion = 3
 
 func decodeTurnStart(raw []byte) (turnStartRecord, bool) {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -783,15 +766,17 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 		e.closeCancelledPresence(ctx, req)
 		return ctx.Err()
 	}
-	terminalKind, terminalPayload := e.terminalOutcome(ctx, execErr, req)
-	if terminalKind == turn.EventKindTurnCompleted {
-		record, err := e.journalDelivery(context.WithoutCancel(ctx), scope, &endedTurn{req: req, events: executed})
-		if err != nil {
-			return err
-		}
-		terminalKind, terminalPayload = record.terminal(e.agentID(req))
+	ended := &endedTurn{req: req, events: executed}
+	final, err := e.journalFinalMessage(context.WithoutCancel(ctx), scope, ended, e.endOf(ctx.Err(), execErr))
+	if err != nil {
+		return err
 	}
-	if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, &endedTurn{req: req, events: executed}); err != nil {
+	record, err := e.journalDelivery(context.WithoutCancel(ctx), scope, req, &final)
+	if err != nil {
+		return err
+	}
+	terminalKind, terminalPayload := final.terminal(e.agentID(req), record)
+	if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, ended); err != nil {
 		return err
 	}
 	if terminalKind != turn.EventKindTurnCompleted {
@@ -833,12 +818,12 @@ func (e *Engine) journalPostTurn(ctx context.Context, scope *durable.TurnScope, 
 	return nil
 }
 
-func (e *Engine) journalDelivery(ctx context.Context, scope *durable.TurnScope, done *endedTurn) (deliveryRecord, error) {
-	if done == nil || done.req == nil {
-		return deliveryRecord{}, invalidArgument("turn delivery requires the completed turn")
+func (e *Engine) journalDelivery(ctx context.Context, scope *durable.TurnScope, req *turn.TurnRequest, final *finalMessage) (deliveryRecord, error) {
+	if req == nil || final == nil {
+		return deliveryRecord{}, invalidArgument("turn delivery requires the request and its final message")
 	}
 	raw, err := scope.Invocation().RunAction(ctx, deliveryAction, func(ctx context.Context) ([]byte, error) {
-		return json.Marshal(e.deliverOnce(ctx, done))
+		return json.Marshal(e.deliverOnce(ctx, req, final))
 	})
 	if err != nil {
 		return deliveryRecord{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the turn delivery", err)
@@ -1065,6 +1050,8 @@ func (e *Engine) failDurableStart(ctx context.Context, t *turnState, cause error
 	if _, _, err := e.events.UpsertEvent(context.WithoutCancel(ctx), terminal); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist turn start failure", "error", err, "turn_id", t.turnID)
 	}
+	failure := e.startFailureMessage(&t.req, turn.ErrorCodeStorageUnavailable, "durable turn did not start")
+	e.deliverOnce(context.WithoutCancel(ctx), &t.req, &failure)
 	e.broadcast(t, &t.accepted)
 	e.broadcast(t, terminal)
 	e.closeSubscribers(t)
