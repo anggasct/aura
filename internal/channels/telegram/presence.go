@@ -38,6 +38,7 @@ type presenceSession struct {
 	lastEdit   time.Time
 	lastTick   time.Time
 	attempts   int
+	version    uint64
 	dirty      bool
 	statusMu   sync.Mutex
 	wake       chan struct{}
@@ -70,12 +71,13 @@ func (a *Adapter) snapshot(session *presenceSession) presenceSnapshot {
 	}
 }
 
-func (a *Adapter) renderSession(session *presenceSession, now time.Time) string {
+func (a *Adapter) renderSession(session *presenceSession, now time.Time) (display string, version uint64) {
 	a.presenceMu.Lock()
 	steps := status.StepsOf(session.steps)
 	started := session.started
+	version = session.version
 	a.presenceMu.Unlock()
-	return status.Render(steps, now.Sub(started), status.DefaultTexts(), a.secretVault)
+	return status.Render(steps, now.Sub(started), status.DefaultTexts(), a.secretVault), version
 }
 
 func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*presenceSession, error) {
@@ -206,8 +208,13 @@ func (a *Adapter) postInitialStatus(ctx context.Context, session *presenceSessio
 	if current.statusID != 0 || current.stopped {
 		return
 	}
-	display := a.renderSession(session, time.Now())
-	a.publishOrDefer(ctx, session, display)
+	if a.statusWait(session) > 0 {
+		a.markDirty(session)
+		wakeClock(session)
+		return
+	}
+	display, version := a.renderSession(session, time.Now())
+	a.publishOrDefer(ctx, session, display, version)
 }
 
 func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.DeliveryRequest, update runtimechannelhost.PresenceUpdate) error {
@@ -222,6 +229,7 @@ func (a *Adapter) PresenceUpdated(ctx context.Context, req *runtimechannelhost.D
 		return nil
 	}
 	session.steps = status.ApplyUpdate(session.steps, update)
+	session.version++
 	session.dirty = true
 	statusID := session.statusID
 	started := session.started
@@ -250,8 +258,8 @@ func (a *Adapter) coalescedStatusUpdate(ctx context.Context, session *presenceSe
 		wakeClock(session)
 		return
 	}
-	display := a.renderSession(session, time.Now())
-	a.publishOrDefer(ctx, session, display)
+	display, version := a.renderSession(session, time.Now())
+	a.publishOrDefer(ctx, session, display, version)
 }
 
 func (a *Adapter) flushStatus(ctx context.Context, session *presenceSession) {
@@ -268,12 +276,12 @@ func (a *Adapter) flushStatus(ctx context.Context, session *presenceSession) {
 		wakeClock(session)
 		return
 	}
-	display := a.renderSession(session, time.Now())
+	display, version := a.renderSession(session, time.Now())
 	if current.statusID != 0 && display == current.shownText {
-		a.clearDirty(session)
+		a.clearDirtyIfCurrent(session, version)
 		return
 	}
-	a.publishOrDefer(ctx, session, display)
+	a.publishOrDefer(ctx, session, display, version)
 }
 
 func (a *Adapter) tickElapsed(ctx context.Context, session *presenceSession) {
@@ -299,15 +307,15 @@ func (a *Adapter) tickElapsed(ctx context.Context, session *presenceSession) {
 	a.presenceMu.Lock()
 	session.lastTick = now
 	a.presenceMu.Unlock()
-	display := a.renderSession(session, now)
+	display, version := a.renderSession(session, now)
 	if display == current.shownText {
 		return
 	}
-	a.publishOrDefer(ctx, session, display)
+	a.publishOrDefer(ctx, session, display, version)
 }
 
-func (a *Adapter) publishOrDefer(ctx context.Context, session *presenceSession, display string) {
-	if err := a.publishStatusLocked(ctx, session, display); err != nil && a.statusWait(session) > 0 {
+func (a *Adapter) publishOrDefer(ctx context.Context, session *presenceSession, display string, version uint64) {
+	if err := a.publishStatusLocked(ctx, session, display, version); err != nil && a.statusWait(session) > 0 {
 		a.markDirty(session)
 		wakeClock(session)
 	}
@@ -315,13 +323,14 @@ func (a *Adapter) publishOrDefer(ctx context.Context, session *presenceSession, 
 
 func (a *Adapter) markDirty(session *presenceSession) {
 	a.presenceMu.Lock()
+	session.version++
 	session.dirty = true
 	a.presenceMu.Unlock()
 }
 
-func (a *Adapter) clearDirty(session *presenceSession) {
+func (a *Adapter) clearDirtyIfCurrent(session *presenceSession, renderedVersion uint64) {
 	a.presenceMu.Lock()
-	session.dirty = false
+	session.dirty = session.version != renderedVersion
 	a.presenceMu.Unlock()
 }
 
@@ -354,7 +363,7 @@ func (a *Adapter) idleWait(session *presenceSession) (time.Duration, bool) {
 	return max(wait, a.statusWait(session)), true
 }
 
-func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSession, display string) error {
+func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSession, display string, renderedVersion uint64) error {
 	a.presenceMu.Lock()
 	statusID := session.statusID
 	shownText := session.shownText
@@ -369,29 +378,29 @@ func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSess
 			a.logger.WarnContext(ctx, "status post failed", "component", "telegram", "error", err)
 			return err
 		}
-		a.recordShown(session, id, display)
+		a.recordShown(session, id, display, renderedVersion)
 		return nil
 	}
 	if display == shownText {
-		a.clearDirty(session)
+		a.clearDirtyIfCurrent(session, renderedVersion)
 		return nil
 	}
 	if err := a.editStatusMessage(ctx, session, statusID, attempt, display); err != nil {
 		a.logger.WarnContext(ctx, "status edit failed", "component", "telegram", "error", err)
 		return err
 	}
-	a.recordShown(session, statusID, display)
+	a.recordShown(session, statusID, display, renderedVersion)
 	return nil
 }
 
-func (a *Adapter) recordShown(session *presenceSession, statusID int64, display string) {
+func (a *Adapter) recordShown(session *presenceSession, statusID int64, display string, renderedVersion uint64) {
 	now := time.Now()
 	a.presenceMu.Lock()
 	session.statusID = statusID
 	session.shownText = display
 	session.lastEdit = now
 	session.lastTick = now
-	session.dirty = false
+	session.dirty = session.version != renderedVersion
 	a.presenceMu.Unlock()
 	wakeClock(session)
 }

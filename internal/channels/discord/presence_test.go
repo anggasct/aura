@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -941,15 +942,16 @@ func TestLateInitialStatusNeverOverwritesANewerStatus(t *testing.T) {
 		adapter.postInitialStatus(t.Context(), session)
 	}()
 	time.Sleep(50 * time.Millisecond)
-	firstDisplay := adapter.renderSession(session, time.Now())
-	if err := adapter.postOrPatchStatusLocked(t.Context(), session, firstDisplay); err != nil {
+	firstDisplay, firstVersion := adapter.renderSession(session, time.Now())
+	if err := adapter.postOrPatchStatusLocked(t.Context(), session, firstDisplay, firstVersion); err != nil {
 		t.Fatalf("status post: %v", err)
 	}
 	adapter.presenceMu.Lock()
 	session.steps = status.ApplyUpdate(session.steps, stepUpdate("c1", "Checking tasks", runtimechannelhost.StepFailed))
+	session.version++
 	adapter.presenceMu.Unlock()
-	failedDisplay := adapter.renderSession(session, time.Now())
-	if err := adapter.postOrPatchStatusLocked(t.Context(), session, failedDisplay); err != nil {
+	failedDisplay, failedVersion := adapter.renderSession(session, time.Now())
+	if err := adapter.postOrPatchStatusLocked(t.Context(), session, failedDisplay, failedVersion); err != nil {
 		t.Fatalf("failure edit: %v", err)
 	}
 	session.statusMu.Unlock()
@@ -966,4 +968,128 @@ func TestLateInitialStatusNeverOverwritesANewerStatus(t *testing.T) {
 	if content, _ := payload["content"].(string); content != failedDisplay {
 		t.Fatalf("final status = %q, want %q", content, failedDisplay)
 	}
+}
+
+func TestPresenceUpdateDuringInFlightPostFlushesAfterMinEditInterval(t *testing.T) {
+	adapter, api := newMemoryDiscordAdapter(t, func(cfg *Config) {
+		cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+	})
+	baseTransport := adapter.httpClient.Transport
+	req := presenceTestRequest("turn-inflight-flush")
+
+	synctest.Test(t, func(t *testing.T) {
+		postStarted := make(chan struct{})
+		releasePost := make(chan struct{})
+		var postCalls atomic.Int32
+		adapter.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/messages") && postCalls.Add(1) == 1 {
+				close(postStarted)
+				<-releasePost
+			}
+			return baseTransport.RoundTrip(r)
+		})
+
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted(): %v", err)
+		}
+		adapter.presenceMu.Lock()
+		session := adapter.presence["turn-inflight-flush"]
+		adapter.presenceMu.Unlock()
+
+		time.Sleep(statusPostAfter)
+		<-postStarted
+
+		updateDone := make(chan error, 1)
+		go func() {
+			updateDone <- adapter.PresenceUpdated(t.Context(), req, stepUpdate("c1", "Inspecting logs", runtimechannelhost.StepRunning))
+		}()
+		for {
+			adapter.presenceMu.Lock()
+			updated := session.version > 0
+			adapter.presenceMu.Unlock()
+			if updated {
+				break
+			}
+			runtime.Gosched()
+		}
+
+		close(releasePost)
+		if err := <-updateDone; err != nil {
+			t.Fatalf("PresenceUpdated(): %v", err)
+		}
+		synctest.Wait()
+		if got := len(api.patchContents(t)); got != 0 {
+			t.Fatalf("edits immediately after post = %d, want 0 within min_edit_interval", got)
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		edits := api.patchContents(t)
+		if len(edits) != 1 {
+			t.Fatalf("edits after min_edit_interval = %d, want 1", len(edits))
+		}
+		if !strings.HasPrefix(edits[0], "⏳ Inspecting logs\n⏱ ") {
+			t.Errorf("flushed edit = %q, want step queued during in-flight post", edits[0])
+		}
+		if err := adapter.PresenceEnded(t.Context(), "turn-inflight-flush"); err != nil {
+			t.Fatalf("PresenceEnded(): %v", err)
+		}
+	})
+}
+
+func TestInitialStatusDefersDuringTypingRateHold(t *testing.T) {
+	adapter, api := newMemoryDiscordAdapter(t, func(cfg *Config) {
+		cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+	})
+	baseTransport := adapter.httpClient.Transport
+	var typingCalls atomic.Int32
+	adapter.httpClient.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/typing") && typingCalls.Add(1) == 2 {
+			rec := httptest.NewRecorder()
+			rec.Header().Set("Retry-After", "5")
+			rec.WriteHeader(http.StatusTooManyRequests)
+			resp := rec.Result()
+			resp.Request = r
+			return resp, nil
+		}
+		return baseTransport.RoundTrip(r)
+	})
+
+	req := presenceTestRequest("turn-typing-hold")
+	synctest.Test(t, func(t *testing.T) {
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted(): %v", err)
+		}
+		time.Sleep(typingRefreshInterval)
+		synctest.Wait()
+
+		time.Sleep(statusPostAfter - typingRefreshInterval)
+		synctest.Wait()
+		if got := len(api.messagePosts()); got != 0 {
+			t.Fatalf("status posts during active typing rate hold = %d, want 0", got)
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if got := len(api.messagePosts()); got != 0 {
+			t.Fatalf("status posts before rate hold expiry = %d, want 0", got)
+		}
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		posts := api.messagePosts()
+		if len(posts) != 1 {
+			t.Fatalf("status posts after rate hold expiry = %d, want 1", len(posts))
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(posts[0].body, &payload); err != nil {
+			t.Fatalf("post body: %v", err)
+		}
+		if payload["content"] != "Working…\n⏱ 0:13" {
+			t.Errorf("deferred initial status = %q, want Working… at 0:13", payload["content"])
+		}
+		if err := adapter.PresenceEnded(t.Context(), "turn-typing-hold"); err != nil {
+			t.Fatalf("PresenceEnded(): %v", err)
+		}
+	})
 }

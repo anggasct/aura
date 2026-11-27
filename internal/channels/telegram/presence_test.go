@@ -4,7 +4,9 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"testing/synctest"
 	"time"
@@ -605,4 +607,118 @@ func TestPresenceRejectsRequestsWithoutAChat(t *testing.T) {
 	if got := h.api.count("sendChatAction"); got != 0 {
 		t.Fatalf("typing calls = %d, want 0", got)
 	}
+}
+
+func TestPresenceUpdateDuringInFlightPostFlushesAfterMinEditInterval(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	adapter.cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+	req := presenceRequest(t, h, "turn-inflight-flush")
+
+	synctest.Test(t, func(t *testing.T) {
+		postStarted := make(chan struct{})
+		releasePost := make(chan struct{})
+		var sendCalls atomic.Int32
+		adapter.bot.base = "https://telegram.test"
+		adapter.bot.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if strings.HasSuffix(r.URL.Path, "/sendMessage") && sendCalls.Add(1) == 1 {
+				close(postStarted)
+				<-releasePost
+			}
+			rec := httptest.NewRecorder()
+			h.api.serve(rec, r)
+			resp := rec.Result()
+			resp.Request = r
+			return resp, nil
+		})
+
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted: %v", err)
+		}
+		adapter.presenceMu.Lock()
+		session := adapter.presence["turn-inflight-flush"]
+		adapter.presenceMu.Unlock()
+
+		time.Sleep(statusPostAfter)
+		<-postStarted
+
+		updateDone := make(chan error, 1)
+		go func() {
+			updateDone <- adapter.PresenceUpdated(t.Context(), req, stepUpdate("c1", "Inspecting logs", runtimechannelhost.StepRunning))
+		}()
+		for {
+			adapter.presenceMu.Lock()
+			updated := session.version > 0
+			adapter.presenceMu.Unlock()
+			if updated {
+				break
+			}
+			runtime.Gosched()
+		}
+
+		close(releasePost)
+		if err := <-updateDone; err != nil {
+			t.Fatalf("PresenceUpdated: %v", err)
+		}
+		synctest.Wait()
+		if got := h.api.count("editMessageText"); got != 0 {
+			t.Fatalf("edits immediately after post = %d, want 0 within min_edit_interval", got)
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		edits := h.api.bodies("editMessageText")
+		if len(edits) != 1 {
+			t.Fatalf("edits after min_edit_interval = %d, want 1", len(edits))
+		}
+		text, _ := edits[0]["text"].(string)
+		if !strings.HasPrefix(text, "⏳ Inspecting logs\n⏱ ") {
+			t.Errorf("flushed edit = %q, want step queued during in-flight post", text)
+		}
+		endPresence(t, adapter, "turn-inflight-flush")
+	})
+}
+
+func TestInitialStatusDefersDuringTypingRateHold(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	adapter.rateCap = rateLimitCap
+	adapter.cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+	useInMemoryBotAPI(adapter, h.api)
+	req := presenceRequest(t, h, "turn-typing-hold")
+
+	synctest.Test(t, func(t *testing.T) {
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted: %v", err)
+		}
+		time.Sleep(typingRefreshInterval)
+		synctest.Wait()
+		h.api.failNextOn("sendChatAction", apiFailure(http.StatusTooManyRequests, 5))
+		time.Sleep(typingRefreshInterval)
+		synctest.Wait()
+
+		time.Sleep(statusPostAfter - 2*typingRefreshInterval)
+		synctest.Wait()
+		if got := h.api.count("sendMessage"); got != 0 {
+			t.Fatalf("sendMessage during active typing rate hold = %d, want 0", got)
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if got := h.api.count("sendMessage"); got != 0 {
+			t.Fatalf("sendMessage before rate hold expiry = %d, want 0", got)
+		}
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		sends := h.api.sends()
+		if len(sends) != 1 {
+			t.Fatalf("sendMessage after rate hold expiry = %d, want 1", len(sends))
+		}
+		text, _ := sends[0]["text"].(string)
+		if text != "Working…\n⏱ 0:13" {
+			t.Errorf("deferred initial status = %q, want Working… at 0:13", text)
+		}
+		endPresence(t, adapter, "turn-typing-hold")
+	})
 }
