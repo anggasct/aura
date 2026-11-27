@@ -121,7 +121,7 @@ func (n *CompletionNotifier) notify(ctx context.Context, run *RunSummary) {
 	if run.Origin.Reply.IsZero() {
 		return
 	}
-	if err := n.deliver.DeliverReply(ctx, &run.Origin.Reply, completionMessage(&definition, run)); err != nil {
+	if err := n.deliver.DeliverReply(ctx, &run.Origin.Reply, n.completionText(ctx, completionMessage(&definition, run), run)); err != nil {
 		exhausted, releaseErr := n.runs.ReleaseCompletion(ctx, run.ID)
 		n.logger.WarnContext(ctx, "workflow completion delivery failed", "component", "workflow", "run_id", run.ID, "error", err,
 			"gave_up", exhausted, "release_error", releaseErr)

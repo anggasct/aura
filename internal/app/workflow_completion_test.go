@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"strings"
@@ -106,6 +107,11 @@ func newCompletionNotifier(t *testing.T, runs *workflow.Store, registry *auraage
 func completionFixture(t *testing.T) *completionHarness {
 	t.Helper()
 	base, runs, db := workflowToolFixture(t, "book_visit")
+	return completionHarnessFor(t, base, runs, db)
+}
+
+func completionHarnessFor(t *testing.T, base *workflow.Controller, runs *workflow.Store, db *sql.DB) *completionHarness {
+	t.Helper()
 	visitor := caller(principal.ClassPublic, "discord:111")
 	seedConversation(t, db, visitor.SessionID, visitor.PrincipalID)
 	seedConversation(t, db, telegramTopicSession, "telegram:5")
@@ -281,6 +287,56 @@ func finishRun(t *testing.T, runs *workflow.Store, runID, status string) {
 	}
 	if err := runs.SetRunStatus(t.Context(), runID, status); err != nil {
 		t.Fatal(err)
+	}
+}
+
+type webResultTools struct{}
+
+func (webResultTools) Invoke(context.Context, string, json.RawMessage) (workflow.ToolStepResult, error) {
+	return workflow.ToolStepResult{Output: json.RawMessage(`{"page": "news"}`), Tainted: true}, nil
+}
+
+func resultSpec() *workflow.Spec {
+	spec := waitingSpec("book_visit", "Book a visit")
+	tool := "web_fetch"
+	fetch := workflow.StepSpec{ID: "fetch", Executor: workflow.ExecutorSpec{Kind: workflow.KindTool, ToolID: &tool, ToolArgs: json.RawMessage(`{"url":"https://example.test"}`)}, Timeout: time.Minute}
+	spec.Steps[0].DependsOn = []string{"fetch"}
+	spec.Steps = append([]workflow.StepSpec{fetch}, spec.Steps...)
+	return spec
+}
+
+func resultCompletionFixture(t *testing.T) *completionHarness {
+	t.Helper()
+	options := &workflow.Options{Logger: slog.New(slog.DiscardHandler), Tools: webResultTools{}}
+	base, runs, db := workflowFixtureFor(t, options, []*workflow.Spec{resultSpec()}, "book_visit")
+	return completionHarnessFor(t, base, runs, db)
+}
+
+const completionWithResult = "Selesai: Book a visit\n\n" + "(from web content, not verified)\n" + `{"page":"news"}`
+
+func TestCompletionWithAResultIsDeliveredOnceToTheDiscordConversation(t *testing.T) {
+	h := resultCompletionFixture(t)
+	started, err := h.controller.Start(t.Context(), caller(principal.ClassPublic, "discord:111"), "book_visit", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	finishRun(t, h.runs, started.RunID, workflow.RunSucceeded)
+	h.notifier.Sweep(t.Context())
+	h.notifier.Sweep(t.Context())
+	if want := (deliveredText{account: "front", channel: "333", text: completionWithResult}); len(h.sent) != 1 || h.sent[0] != want || len(h.telegram) != 0 {
+		t.Fatalf("discord = %+v, telegram = %+v; want one delivery %+v", h.sent, h.telegram, want)
+	}
+}
+
+func TestCompletionWithAResultIsDeliveredOnceToTheTelegramTopic(t *testing.T) {
+	h := resultCompletionFixture(t)
+	started := startTelegramRun(t, h)
+	finishRun(t, h.runs, started.RunID, workflow.RunSucceeded)
+	h.notifier.Sweep(t.Context())
+	h.notifier.Sweep(t.Context())
+	want := deliveredTelegramText{account: "pocket", chat: "-1001234567890", thread: "7", text: completionWithResult}
+	if len(h.telegram) != 1 || h.telegram[0] != want || len(h.sent) != 0 {
+		t.Fatalf("telegram = %+v, discord = %+v; want one delivery %+v", h.telegram, h.sent, want)
 	}
 }
 
