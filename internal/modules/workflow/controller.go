@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
 const proposalCardQueue = 16
@@ -194,14 +196,7 @@ func (c *Controller) offerProposal(ctx context.Context, sessionID string, card P
 }
 
 func (c *Controller) deliverProposalCard(ctx context.Context, offer *proposalOffer) {
-	sessionID, proposalID := offer.sessionID, offer.card.ID
-	offerer := c.cards.offerers[0]
-	for _, candidate := range c.cards.offerers {
-		if candidate.ServesSession(sessionID) {
-			offerer = candidate
-			break
-		}
-	}
+	proposalID := offer.card.ID
 	decide := func(ctx context.Context, approved bool) (string, error) {
 		if !approved {
 			if err := c.runs.DecideProposal(ctx, proposalID, ProposalRejected, "", c.now()); err != nil {
@@ -215,9 +210,34 @@ func (c *Controller) deliverProposalCard(ctx context.Context, offer *proposalOff
 		}
 		return "approved " + proposalID + ": run " + runID, nil
 	}
-	if err := offerer.OfferProposal(ctx, offer.card, decide); err != nil {
-		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", proposalID, "error", err)
+	var failures []error
+	ambiguous := false
+	for _, offerer := range c.cards.servingFirst(offer.sessionID) {
+		err := offerer.OfferProposal(ctx, offer.card, decide)
+		if err == nil {
+			return
+		}
+		failures = append(failures, err)
+		if errors.Is(err, runtimechannelhost.ErrDeliveryAmbiguous) {
+			ambiguous = true
+			break
+		}
 	}
+	c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", proposalID, "error", errors.Join(failures...), "ambiguous", ambiguous)
+}
+
+func (p *proposalCards) servingFirst(sessionID string) []ProposalOfferer {
+	serving := slices.IndexFunc(p.offerers, func(offerer ProposalOfferer) bool { return offerer.ServesSession(sessionID) })
+	ordered := make([]ProposalOfferer, 0, len(p.offerers))
+	if serving >= 0 {
+		ordered = append(ordered, p.offerers[serving])
+	}
+	for i, offerer := range p.offerers {
+		if i != serving {
+			ordered = append(ordered, offerer)
+		}
+	}
+	return ordered
 }
 
 func (c *Controller) permits(caller *Caller, id string) bool {
