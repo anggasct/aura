@@ -376,3 +376,22 @@ func (c *botClient) getMe(ctx context.Context, token string) (botIdentity, error
 	}
 	return self, nil
 }
+
+type botCommand struct {
+	Command     string `json:"command"`
+	Description string `json:"description"`
+}
+
+type botCommandScope struct {
+	Type   string `json:"type"`
+	ChatID int64  `json:"chat_id,omitempty"`
+}
+
+type setMyCommandsRequest struct {
+	Commands []botCommand    `json:"commands"`
+	Scope    botCommandScope `json:"scope"`
+}
+
+func (c *botClient) setMyCommands(ctx context.Context, token string, req *setMyCommandsRequest) error {
+	return c.call(ctx, token, "setMyCommands", req, nil)
+}

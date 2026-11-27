@@ -294,6 +294,7 @@ func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) er
 		return fault.New(ErrorCodeInvalidArgument, "ingress sink must not be nil")
 	}
 	a.sink = sink
+	a.publishCommandMenu(ctx)
 	var lookups sync.WaitGroup
 	if len(a.account.AllowedChatIDs) > 0 {
 		lookups.Go(func() { a.identityLoop(ctx) })
