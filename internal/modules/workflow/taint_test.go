@@ -165,6 +165,7 @@ func TestWorkflowStepTaint(t *testing.T) {
 			steps:       []StepSpec{labelStep("summarize", agentExecutor("engineer"))},
 			wantRequest: map[string]bool{"summarize": true},
 			wantOutput:  map[string]bool{"summarize": true},
+			replayed:    []string{"summarize"},
 		},
 		{
 			name: "an agent step reading a tainted dependency runs tainted",
@@ -283,17 +284,16 @@ func TestWorkflowStepTaint(t *testing.T) {
 			if tc.origin != nil {
 				origin = tc.origin()
 			}
+			var summary *RunSummary
 			if tc.approval {
-				runStartedUnderATaintedApproval(t, interpreter, disk, probe, spec)
-				requests, _ := probe.snapshot()
-				if !maps.Equal(requests, tc.wantRequest) {
-					t.Fatalf("request taint = %v, want %v", requests, tc.wantRequest)
+				holdWorkflowHandler(t, fake)
+				summary = runStartedUnderATaintedApproval(t, interpreter, disk, spec)
+			} else {
+				started, err := disk.newRun(ctx, spec, &RunInput{}, origin)
+				if err != nil {
+					t.Fatalf("newRun: %v", err)
 				}
-				return
-			}
-			summary, err := disk.newRun(ctx, spec, &RunInput{}, origin)
-			if err != nil {
-				t.Fatalf("newRun: %v", err)
+				summary = started
 			}
 			inv, _ := holdInvocation(t, fake, "holder-labels")
 			watch := &journalWatch{Invocation: inv, records: map[string][]byte{}, live: map[string]bool{}}
@@ -366,7 +366,20 @@ func TestWorkflowStepTaint(t *testing.T) {
 	}
 }
 
-func runStartedUnderATaintedApproval(t *testing.T, interpreter *Interpreter, disk *Store, probe *labelProbe, spec *Spec) {
+func holdWorkflowHandler(t *testing.T, fake *durabletest.Fake) {
+	t.Helper()
+	release := make(chan struct{})
+	fake.RegisterHandler(HandlerName, func(ctx context.Context, _ durable.Invocation) error {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return nil
+	})
+	t.Cleanup(func() { close(release) })
+}
+
+func runStartedUnderATaintedApproval(t *testing.T, interpreter *Interpreter, disk *Store, spec *Spec) *RunSummary {
 	t.Helper()
 	generated := NormalizeProposal(spec, "prop_taint")
 	if err := interpreter.LoadAll(t.Context(), []*Spec{generated}, taintTestDeps()); err != nil {
@@ -383,7 +396,7 @@ func runStartedUnderATaintedApproval(t *testing.T, interpreter *Interpreter, dis
 	if !run.Origin.Tainted {
 		t.Fatal("a run started under a tainted approval is not tainted")
 	}
-	waitForRunStatus(t, disk, run.ID, RunSucceeded, 5*time.Second)
+	return run
 }
 
 func assertChildTaint(t *testing.T, disk *Store, parentID string, want []bool) {
