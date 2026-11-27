@@ -1,6 +1,26 @@
 package turn
 
-import "context"
+import (
+	"context"
+	"time"
+)
+
+type startedAtContextKey struct{}
+
+func WithStartedAt(ctx context.Context, startedAt time.Time) context.Context {
+	if startedAt.IsZero() {
+		return ctx
+	}
+	return context.WithValue(ctx, startedAtContextKey{}, startedAt.UTC())
+}
+
+func StartedAtFrom(ctx context.Context) (time.Time, bool) {
+	startedAt, ok := ctx.Value(startedAtContextKey{}).(time.Time)
+	if !ok || startedAt.IsZero() {
+		return time.Time{}, false
+	}
+	return startedAt, true
+}
 
 const (
 	ContextOrderRecall    = 100

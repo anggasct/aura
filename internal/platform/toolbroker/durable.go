@@ -3,11 +3,19 @@ package toolbroker
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 )
+
+func withCallDeadline(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
+	if deadline.IsZero() {
+		return ctx, func() {}
+	}
+	return context.WithDeadline(ctx, deadline)
+}
 
 func (b *Broker) evaluatePolicy(ctx context.Context, slot *toolcall.Slot, request *approval.ToolRequest) (approval.PolicyDecision, error) {
 	scope, ok := durable.TurnScopeFrom(ctx)
@@ -15,7 +23,12 @@ func (b *Broker) evaluatePolicy(ctx context.Context, slot *toolcall.Slot, reques
 		return b.engine.Evaluate(ctx, request)
 	}
 	raw, err := scope.Invocation().RunAction(ctx, slot.Action("policy"), b.recordApproval(func(ctx context.Context) ([]byte, error) {
-		decision, err := b.engine.Evaluate(ctx, request)
+		if ctx.Err() == nil && !request.Deadline.IsZero() && !time.Now().Before(request.Deadline) {
+			return nil, errorf(ResultDeadlineExceeded, "tool request deadline exceeded")
+		}
+		callCtx, cancel := withCallDeadline(ctx, request.Deadline)
+		defer cancel()
+		decision, err := b.engine.Evaluate(callCtx, request)
 		if err != nil {
 			return nil, err
 		}
@@ -66,7 +79,12 @@ func (b *Broker) validateDurable(ctx context.Context, slot *toolcall.Slot, canon
 		return b.engine.ValidateAndConsume(ctx, toApprovalRequest(canonical, b.PolicyVersion()), grant)
 	}
 	raw, err := scope.Invocation().RunAction(ctx, slot.Action("grant-validation"), b.recordApproval(func(ctx context.Context) ([]byte, error) {
-		if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(canonical, b.PolicyVersion()), grant); err != nil {
+		if ctx.Err() == nil && !canonical.Deadline.IsZero() && !time.Now().Before(canonical.Deadline) {
+			return nil, errorf(ResultDeadlineExceeded, "tool request deadline exceeded")
+		}
+		callCtx, cancel := withCallDeadline(ctx, canonical.Deadline)
+		defer cancel()
+		if err := b.engine.ValidateAndConsume(callCtx, toApprovalRequest(canonical, b.PolicyVersion()), grant); err != nil {
 			return nil, err
 		}
 		return []byte(`{}`), nil

@@ -32,6 +32,9 @@ func testLimits(active, pending int) Config {
 
 func (c Config) withTurnTimeout(timeout time.Duration) Config {
 	c.TurnTimeout = configkit.Duration(timeout)
+	if c.AnswerReserve >= c.TurnTimeout && timeout > 1 {
+		c.AnswerReserve = configkit.Duration(timeout / 2)
+	}
 	return c
 }
 

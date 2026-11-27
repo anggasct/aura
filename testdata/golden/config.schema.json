@@ -17,6 +17,16 @@
           "type": "string",
           "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
         },
+        "answer_reserve": {
+          "type": "string",
+          "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"
+        },
+        "max_consecutive_tool_errors": {
+          "type": "integer"
+        },
+        "max_tool_errors_per_turn": {
+          "type": "integer"
+        },
         "shutdown_timeout": {
           "type": "string",
           "pattern": "^[-+]?(0|(([0-9]+(\\.[0-9]*)?|\\.[0-9]+)(ns|us|µs|μs|ms|s|m|h))+)$"

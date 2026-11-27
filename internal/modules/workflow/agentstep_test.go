@@ -863,3 +863,80 @@ func TestAgentStepRefusesAnOversizedInputBeforeTheModel(t *testing.T) {
 		t.Fatal("the model ran on an oversized input")
 	}
 }
+
+func TestAgentStepJournalVersionIsFenced(t *testing.T) {
+	cases := []struct {
+		name   string
+		record string
+	}{
+		{name: "previous version", record: `{"journal":3}`},
+		{name: "zero version", record: `{"journal":0}`},
+		{name: "unknown field", record: `{"journal":4,"extra":true}`},
+		{name: "trailing data", record: `{"journal":4} {}`},
+		{name: "bare number", record: `4`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newAgentHarness(t, &Options{})
+			h.turns.replies = finalAnswer("done")
+			h.prepare(t, agentSpec("fenced", agentStep("s", agentExec("go", ""))))
+			call := h.call(t, 0)
+			key := agentJournalPrefix(call) + agentJournalAction
+			if _, err := h.inv.RunAction(t.Context(), key, func(context.Context) ([]byte, error) {
+				return []byte(tc.record), nil
+			}); err != nil {
+				t.Fatalf("seed journal record: %v", err)
+			}
+			_, err := h.runner.RunStep(t.Context(), call)
+			if !hasCode(err, ErrorCodeRuntimeInternal) {
+				t.Fatalf("RunStep = %v, want %s", err, ErrorCodeRuntimeInternal)
+			}
+			requests, models, toolRuns := h.turns.snapshot()
+			if len(requests) != 0 || models != 0 || toolRuns != 0 {
+				t.Fatalf("executor ran despite mismatched journal version: requests=%d models=%d toolRuns=%d", len(requests), models, toolRuns)
+			}
+		})
+	}
+	t.Run("fresh attempt writes journal version 4", func(t *testing.T) {
+		h := newAgentHarness(t, &Options{})
+		h.turns.replies = finalAnswer("done")
+		h.prepare(t, agentSpec("fresh-journal", agentStep("s", agentExec("go", ""))))
+		call := h.call(t, 0)
+		if _, err := h.runner.RunStep(t.Context(), call); err != nil {
+			t.Fatalf("RunStep: %v", err)
+		}
+		key := agentJournalPrefix(call) + agentJournalAction
+		raw, err := h.inv.RunAction(t.Context(), key, func(context.Context) ([]byte, error) {
+			return nil, errors.New("expected journal record to already exist")
+		})
+		if err != nil {
+			t.Fatalf("read journal record: %v", err)
+		}
+		if string(raw) != `{"journal":4}` {
+			t.Fatalf("journal record = %s, want {\"journal\":4}", raw)
+		}
+	})
+}
+
+func TestAgentStepMapsToolBudgetExhaustedToStepFailure(t *testing.T) {
+	h := newAgentHarness(t, &Options{Driver: DriverSerial})
+	h.turns.beforeRun = func(*turn.TurnRequest) error {
+		return fault.New(turn.ErrorCodeToolBudgetExhausted, "the tool read_file did not succeed 3 times in a row")
+	}
+	step := agentStep("s", agentExec("go", ""))
+	step.Retry = RetryPolicy{Attempts: 1}
+	runID, terminal := h.drive(t, agentSpec("tool-budget-step", step))
+	if terminal != RunFailed {
+		t.Fatalf("terminal = %s, want %s", terminal, RunFailed)
+	}
+	stored := h.step(t, runID, "s")
+	if stored.Status != StepFailed || stored.ErrorCode != string(ErrorCodeToolBudgetExhausted) {
+		t.Fatalf("step = %+v, want failed with %s", stored, ErrorCodeToolBudgetExhausted)
+	}
+	if len(stored.Output) != 0 {
+		t.Fatalf("step output = %s, want empty", stored.Output)
+	}
+	if stored.Attempt != 2 {
+		t.Fatalf("attempt = %d, want 2 (retries apply)", stored.Attempt)
+	}
+}

@@ -1488,3 +1488,37 @@ func TestModelAPIKeyIsAReference(t *testing.T) {
 		})
 	}
 }
+
+func TestLoad_RuntimeToolBudgetEnvOverrides(t *testing.T) {
+	t.Run("valid overrides", func(t *testing.T) {
+		t.Setenv("AURA_RUNTIME_ANSWER_RESERVE", "15s")
+		t.Setenv("AURA_RUNTIME_MAX_CONSECUTIVE_TOOL_ERRORS", "2")
+		t.Setenv("AURA_RUNTIME_MAX_TOOL_ERRORS_PER_TURN", "6")
+
+		res, err := Load(fixture(t, "valid.yaml"))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if got := time.Duration(res.Config.Runtime.AnswerReserve); got != 15*time.Second {
+			t.Errorf("AnswerReserve = %v, want 15s", got)
+		}
+		if got := res.Config.Runtime.MaxConsecutiveToolErrors; got != 2 {
+			t.Errorf("MaxConsecutiveToolErrors = %d, want 2", got)
+		}
+		if got := res.Config.Runtime.MaxToolErrorsPerTurn; got != 6 {
+			t.Errorf("MaxToolErrorsPerTurn = %d, want 6", got)
+		}
+	})
+	t.Run("answer reserve at or above turn timeout is refused", func(t *testing.T) {
+		t.Setenv("AURA_RUNTIME_TURN_TIMEOUT", "20s")
+		t.Setenv("AURA_RUNTIME_ANSWER_RESERVE", "20s")
+		_, err := Load(fixture(t, "valid.yaml"))
+		requireProblemText(t, err, invalidText("runtime.answer_reserve", "env AURA_RUNTIME_ANSWER_RESERVE", "must be less than runtime.turn_timeout"))
+	})
+	t.Run("total errors below consecutive errors is refused", func(t *testing.T) {
+		t.Setenv("AURA_RUNTIME_MAX_CONSECUTIVE_TOOL_ERRORS", "5")
+		t.Setenv("AURA_RUNTIME_MAX_TOOL_ERRORS_PER_TURN", "4")
+		_, err := Load(fixture(t, "valid.yaml"))
+		requireProblemText(t, err, invalidText("runtime.max_tool_errors_per_turn", "env AURA_RUNTIME_MAX_TOOL_ERRORS_PER_TURN", "must be at least runtime.max_consecutive_tool_errors"))
+	})
+}

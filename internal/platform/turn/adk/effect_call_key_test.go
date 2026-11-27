@@ -11,6 +11,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"google.golang.org/adk/v2/agent"
 	adkmodel "google.golang.org/adk/v2/model"
@@ -372,7 +373,7 @@ func TestBuiltinToolCallWithoutACallKeyIsRefused(t *testing.T) {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 
-	_, err = executor.executeBuiltinTool(slotlessContext{}, "tool-e", map[string]any{"note": "one"})
+	_, err = executor.executeBuiltinTool(t.Context(), slotlessContext{}, "tool-e", map[string]any{"note": "one"}, time.Time{})
 
 	if !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
 		t.Errorf("executeBuiltinTool error = %v, want %s", err, turn.ErrorCodeInvalidArgument)

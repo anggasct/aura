@@ -499,12 +499,13 @@ func (b *build) buildPersonaEval(_ context.Context) error {
 	if !b.onServer() {
 		return nil
 	}
-	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models}
+	capturer := newPersonaCapturer(b.cfg)
+	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models, toolBudget: toolBudgetFromRuntime(b.cfg.Runtime)}
 	mod, err := personaeval.New(&personaeval.ModuleDeps{
 		DB:           b.db,
 		Registry:     b.registry,
 		ConfigPath:   b.result.Path,
-		Capturer:     capturePersonaTurn,
+		Capturer:     capturer.capture,
 		Converse:     models.converse,
 		JudgeFor:     models.judge,
 		Catalog:      appconfig.BuiltinToolDefinitions(),
@@ -2778,6 +2779,21 @@ func (r *readOnlyAgentStepTools) Execute(ctx context.Context, request *runtimead
 	return r.inner.Execute(ctx, &forwarded)
 }
 
+func toolBudgetFromRuntime(cfg runtimeengine.Config) runtimeadk.ToolBudget {
+	return runtimeadk.ToolBudget{
+		AnswerReserve:            time.Duration(cfg.AnswerReserve),
+		MaxConsecutiveToolErrors: cfg.MaxConsecutiveToolErrors,
+		MaxToolErrorsPerTurn:     cfg.MaxToolErrorsPerTurn,
+	}
+}
+
+func effectiveToolBudget(budget runtimeadk.ToolBudget) runtimeadk.ToolBudget {
+	if budget == (runtimeadk.ToolBudget{}) {
+		return toolBudgetFromRuntime(runtimeengine.Default())
+	}
+	return budget
+}
+
 type agentStepExecutorInput struct {
 	models     runtimeadk.ModelSource
 	modelName  string
@@ -2786,11 +2802,13 @@ type agentStepExecutorInput struct {
 	ledger     *usage.Ledger
 	registry   *auraagent.Registry
 	routeModel func(route string) (string, error)
+	toolBudget runtimeadk.ToolBudget
 	logger     *slog.Logger
 }
 
 func newAgentStepExecutor(in *agentStepExecutorInput) (*runtimeadk.ADKExecutor, error) {
 	opts := []runtimeadk.ExecutorOption{
+		runtimeadk.WithToolBudget(effectiveToolBudget(in.toolBudget)),
 		runtimeadk.WithBudgetLedger(in.ledger, "primary"),
 		runtimeadk.WithAgentResolver(in.registry, in.routeModel),
 	}
@@ -2807,7 +2825,8 @@ func newAgentStepExecutor(in *agentStepExecutorInput) (*runtimeadk.ADKExecutor, 
 func (b *build) newAgentStepExecutor() (*runtimeadk.ADKExecutor, error) {
 	return newAgentStepExecutor(&agentStepExecutorInput{
 		models: b.models, modelName: b.primaryModel(), sessions: b.sessions, builtin: b.builtin,
-		ledger: b.ledger, registry: b.registry, routeModel: b.routeModel, logger: b.logger,
+		ledger: b.ledger, registry: b.registry, routeModel: b.routeModel,
+		toolBudget: toolBudgetFromRuntime(b.cfg.Runtime), logger: b.logger,
 	})
 }
 
@@ -2848,6 +2867,7 @@ type behaviorModels struct {
 	defaultModel string
 	route        func(string) (string, error)
 	models       runtimeadk.ModelSource
+	toolBudget   runtimeadk.ToolBudget
 }
 
 func routedBehaviorModels(cfg *appconfig.Config, models runtimeadk.ModelSource) (behaviorModels, error) {
@@ -2856,20 +2876,25 @@ func routedBehaviorModels(cfg *appconfig.Config, models runtimeadk.ModelSource) 
 	if err != nil {
 		return behaviorModels{}, err
 	}
-	return behaviorModels{defaultModel: defaultModel, route: route, models: models}, nil
+	return behaviorModels{defaultModel: defaultModel, route: route, models: models, toolBudget: toolBudgetFromRuntime(cfg.Runtime)}, nil
+}
+
+func (m behaviorModels) newExecutor(sessions runtimeadk.SessionPort, definition *auraagent.Definition) (*runtimeadk.ADKExecutor, error) {
+	return runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, sessions, personaEvalDenyAll{}, nil, nil,
+		runtimeadk.WithToolBudget(effectiveToolBudget(m.toolBudget)),
+		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
+		runtimeadk.WithAgentResolver(&staticResolver{definition: *definition}, m.route),
+		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
+		runtimeadk.WithContextProvider(profileMarkerProvider{text: personaeval.MarkerProfile}),
+		runtimeadk.WithContextProvider(markerProvider{text: personaeval.MarkerSkill}),
+		runtimeadk.WithContextProvider(recallMarkerProvider{text: personaeval.MarkerRecall}),
+	)
 }
 
 func (m behaviorModels) converse(ctx context.Context, definition *auraagent.Definition, class principal.Class, turns []string) ([]personaeval.Exchange, error) {
 	return personaeval.WithEvalDB(ctx, "discord:eval", func(db *sql.DB) ([]personaeval.Exchange, error) {
 		events := turnstore.NewEventStore(db)
-		executor, err := runtimeadk.NewADKExecutor("aura", m.defaultModel, m.models, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
-			runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
-			runtimeadk.WithAgentResolver(&staticResolver{definition: *definition}, m.route),
-			runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
-			runtimeadk.WithContextProvider(profileMarkerProvider{text: personaeval.MarkerProfile}),
-			runtimeadk.WithContextProvider(markerProvider{text: personaeval.MarkerSkill}),
-			runtimeadk.WithContextProvider(recallMarkerProvider{text: personaeval.MarkerRecall}),
-		)
+		executor, err := m.newExecutor(turnstore.NewSessionService(db), definition)
 		if err != nil {
 			return nil, err
 		}
@@ -3049,23 +3074,45 @@ func (personaEvalDenyAll) Evaluate(context.Context, *policyapproval.ToolRequest)
 	return policyapproval.PolicyDecision{Outcome: policyapproval.OutcomeDeny}, nil
 }
 
+type personaCapturer struct {
+	budget runtimeadk.ToolBudget
+}
+
+func newPersonaCapturer(cfg *appconfig.Config) personaCapturer {
+	if cfg == nil {
+		return personaCapturer{budget: toolBudgetFromRuntime(runtimeengine.Default())}
+	}
+	return personaCapturer{budget: toolBudgetFromRuntime(cfg.Runtime)}
+}
+
+func (c personaCapturer) capture(ctx context.Context, definition *auraagent.Definition, class principal.Class) (personaeval.Capture, error) {
+	return capturePersonaTurnWithBudget(ctx, definition, class, c.budget)
+}
+
+func (c personaCapturer) newExecutor(sessions runtimeadk.SessionPort, evalModel adkmodel.LLM, definition *auraagent.Definition) (*runtimeadk.ADKExecutor, error) {
+	return newCaptureExecutor(sessions, evalModel, definition, c.budget)
+}
+
 func capturePersonaTurn(ctx context.Context, definition *auraagent.Definition, class principal.Class) (personaeval.Capture, error) {
+	return newPersonaCapturer(nil).capture(ctx, definition, class)
+}
+
+func capturePersonaTurnWithBudget(ctx context.Context, definition *auraagent.Definition, class principal.Class, budget runtimeadk.ToolBudget) (personaeval.Capture, error) {
 	principalID := "discord:eval"
 	if class == principal.ClassOwner {
 		principalID = principal.OwnerID
 	}
 	return personaeval.WithEvalDB(ctx, principalID, func(db *sql.DB) (personaeval.Capture, error) {
-		return captureWith(ctx, db, definition, class, principalID)
+		return captureWith(ctx, db, definition, class, principalID, budget)
 	})
 }
 
-func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, class principal.Class, principalID string) (personaeval.Capture, error) {
-	sessions := turnstore.NewSessionService(db)
-	evalModel := &personaEvalModel{}
+func newCaptureExecutor(sessions runtimeadk.SessionPort, evalModel adkmodel.LLM, definition *auraagent.Definition, budget runtimeadk.ToolBudget) (*runtimeadk.ADKExecutor, error) {
 	name := evalModel.Name()
 	evaluated := *definition
 	evaluated.ModelRoute = ""
-	executor, err := runtimeadk.NewADKExecutor("aura", name, model.Set{name: evalModel}, sessions, personaEvalDenyAll{}, nil, nil,
+	return runtimeadk.NewADKExecutor("aura", name, model.Set{name: evalModel}, sessions, personaEvalDenyAll{}, nil, nil,
+		runtimeadk.WithToolBudget(effectiveToolBudget(budget)),
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(&staticResolver{definition: evaluated}, nil),
 		runtimeadk.WithOwnerContext(personaeval.MarkerOwnerContext),
@@ -3073,6 +3120,12 @@ func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definiti
 		runtimeadk.WithContextProvider(markerProvider{text: personaeval.MarkerSkill}),
 		runtimeadk.WithContextProvider(recallMarkerProvider{text: personaeval.MarkerRecall}),
 	)
+}
+
+func captureWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, class principal.Class, principalID string, budget runtimeadk.ToolBudget) (personaeval.Capture, error) {
+	sessions := turnstore.NewSessionService(db)
+	evalModel := &personaEvalModel{}
+	executor, err := newCaptureExecutor(sessions, evalModel, definition, budget)
 	if err != nil {
 		return personaeval.Capture{}, err
 	}

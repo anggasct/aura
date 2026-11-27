@@ -3,6 +3,9 @@ runtime:
   max_active_turns: 4
   max_pending_turns: 64
   turn_timeout: 5m0s
+  answer_reserve: 30s
+  max_consecutive_tool_errors: 3
+  max_tool_errors_per_turn: 8
   shutdown_timeout: 30s
   run_retention: 720h0m0s
 capabilities:

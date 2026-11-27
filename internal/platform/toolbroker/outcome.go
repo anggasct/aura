@@ -101,12 +101,21 @@ type journaledTool struct {
 }
 
 func (b *Broker) runJournaledTool(ctx context.Context, call *journaledTool) ([]byte, error) {
+	if err := contextError(ctx, call.canonical.Deadline); err != nil {
+		if ctx.Err() != nil {
+			return nil, b.interruption(toolKey(call.canonical), ResultDeadlineExceeded, err)
+		}
+		classified := b.classifyExecutionError(ctx, call.canonical, err)
+		return encodeOutcomeFailure(classified.Code, classified.Detail)
+	}
+	callCtx, cancel := withCallDeadline(ctx, call.canonical.Deadline)
+	defer cancel()
 	var result ToolResult
 	var err error
 	if call.effectful {
-		result, err = b.executeEffect(ctx, call.canonical, call.constraints, call.adapter)
+		result, err = b.executeEffect(callCtx, call.canonical, call.constraints, call.adapter)
 	} else {
-		result, err = call.adapter(ctx, call.canonical, call.constraints)
+		result, err = call.adapter(callCtx, call.canonical, call.constraints)
 	}
 	if ctx.Err() != nil && (err != nil || (result.Class != "" && result.Class != ResultOK)) {
 		return nil, b.interruption(toolKey(call.canonical), result.Class, err)

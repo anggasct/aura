@@ -165,7 +165,7 @@ func TestFailedTurnDeliversOneFallback(t *testing.T) {
 	cases := []finalTurnCase{
 		{
 			name:         "the deadline",
-			timeout:      time.Nanosecond,
+			timeout:      2 * time.Nanosecond,
 			executor:     turntest.NewFakeExecutor([]turntest.FakeStep{textStep("too late")}),
 			wantKind:     finalTurnTimeout,
 			wantMessage:  defaultMessage(agent.MessageTurnTimeout),
@@ -371,7 +371,7 @@ func TestFinalMessageIsDecidedOnce(t *testing.T) {
 			crash:         crashAfterTheSend,
 			first:         turntest.NewFakeExecutor([]turntest.FakeStep{textStep("the answer")}),
 			second:        turntest.NewFakeExecutor([]turntest.FakeStep{textStep("the answer")}),
-			secondTimeout: time.Nanosecond,
+			secondTimeout: 2 * time.Nanosecond,
 			wantText:      "the answer",
 			wantKind:      finalAnswer,
 			wantTerminal:  terminalRecord{kind: turn.EventKindTurnCompleted},
@@ -399,7 +399,7 @@ func TestFinalMessageIsDecidedOnce(t *testing.T) {
 			crash:         crashBeforeTheDecision,
 			first:         errorExecutor{err: errors.New("provider exploded")},
 			second:        turntest.NewFakeExecutor([]turntest.FakeStep{textStep("the answer")}),
-			secondTimeout: time.Nanosecond,
+			secondTimeout: 2 * time.Nanosecond,
 			wantText:      defaultMessage(agent.MessageTurnTimeout),
 			wantKind:      finalTurnTimeout,
 			wantTerminal:  terminalRecord{kind: turn.EventKindTurnFailed, code: turn.ErrorCodeTurnDeadlineExceeded},
@@ -418,7 +418,7 @@ func TestAnswerSentIsNeverFollowedByAFailedTerminal(t *testing.T) {
 		crash:         crashAfterTheSend,
 		first:         turntest.NewFakeExecutor([]turntest.FakeStep{textStep("the answer")}),
 		second:        errorExecutor{err: errors.New("provider exploded")},
-		secondTimeout: time.Nanosecond,
+		secondTimeout: 2 * time.Nanosecond,
 		wantText:      "the answer",
 		wantKind:      finalAnswer,
 		wantTerminal:  terminalRecord{kind: turn.EventKindTurnCompleted},
@@ -646,7 +646,7 @@ func TestInMemoryTurnDeliversTheSameFallback(t *testing.T) {
 	handoffFailed := toolResult{name: handoffToolName, response: map[string]any{"error": "no owner"}}
 	completed := terminalRecord{kind: turn.EventKindTurnCompleted}
 	cases := []memoryCase{
-		{name: "the deadline", timeout: time.Nanosecond, executor: turntest.NewFakeExecutor([]turntest.FakeStep{textStep("late")}), wantMessage: defaultMessage(agent.MessageTurnTimeout), wantTerminal: terminalRecord{kind: turn.EventKindTurnFailed, code: turn.ErrorCodeTurnDeadlineExceeded}},
+		{name: "the deadline", timeout: 2 * time.Nanosecond, executor: turntest.NewFakeExecutor([]turntest.FakeStep{textStep("late")}), wantMessage: defaultMessage(agent.MessageTurnTimeout), wantTerminal: terminalRecord{kind: turn.EventKindTurnFailed, code: turn.ErrorCodeTurnDeadlineExceeded}},
 		{name: "an executor error without a code", executor: errorExecutor{err: errors.New("provider exploded")}, wantMessage: defaultMessage(agent.MessageTurnFailed), wantTerminal: terminalRecord{kind: turn.EventKindTurnFailed, code: turn.ErrorCodeRuntimeInternal}},
 		{name: "an exhausted budget", executor: errorExecutor{err: fault.New(turn.ErrorCodeBudgetExhausted, "budget")}, wantMessage: defaultMessage(agent.MessageTurnFailed), wantTerminal: terminalRecord{kind: turn.EventKindTurnFailed, code: turn.ErrorCodeBudgetExhausted}},
 		{name: "a completed turn without text", executor: turntest.NewFakeExecutor([]turntest.FakeStep{jsonStep(turn.EventKindMessageCompleted)}), wantMessage: defaultMessage(agent.MessageTurnEmpty), wantTerminal: completed},

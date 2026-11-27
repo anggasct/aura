@@ -108,7 +108,7 @@ func TestToolGateMarshalsAnEmptyObject(t *testing.T) {
 	model := &scriptedModel{}
 	executor, _, _ := newADKTestExecutor(t, model.Name(), auramodel.Set{model.Name(): model}, broker)
 
-	if err := executor.toolGate(gateContext{}, "list_items", nil); err != nil {
+	if err := executor.toolGate(t.Context(), gateContext{}, "list_items", nil); err != nil {
 		t.Fatalf("toolGate: %v", err)
 	}
 

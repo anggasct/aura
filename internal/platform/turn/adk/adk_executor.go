@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -56,6 +57,8 @@ type ADKExecutor struct {
 	modelDefinitionID string
 	ownerContext      string
 	providers         []turn.ContextProvider
+	toolBudget        ToolBudget
+	clock             func() time.Time
 }
 
 type AgentResolver interface {
@@ -180,6 +183,17 @@ func WithContextProvider(provider turn.ContextProvider) ExecutorOption {
 	}
 }
 
+func (x *ADKExecutor) ToolBudget() ToolBudget {
+	return x.toolBudget
+}
+
+func (x *ADKExecutor) now() time.Time {
+	if x.clock != nil {
+		return x.clock().UTC()
+	}
+	return time.Now().UTC()
+}
+
 func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	return func(yield func(turn.Event, error) bool) {
 		definition, err := x.resolveDefinition(req)
@@ -201,6 +215,8 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			runCtx, cancel = context.WithTimeout(runCtx, definition.Limits.TurnTimeout)
 			defer cancel()
 		}
+		toolBudget := newTurnToolBudget(runCtx, x.toolBudget, req.TurnID, x.now, x.logger)
+		runCtx = withTurnToolBudget(runCtx, toolBudget)
 		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
 			yield(turn.Event{}, err)
@@ -264,6 +280,10 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			}
 			if exceeded := turnUsage.add(ev); exceeded {
 				yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
+				return
+			}
+			if budgetErr := toolBudget.observeEvent(ev, req.Origin); budgetErr != nil {
+				yield(turn.Event{}, budgetErr)
 				return
 			}
 			re, err := turnstore.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
@@ -387,12 +407,12 @@ func canonicalToolArguments(args map[string]any) (json.RawMessage, error) {
 	return json.Marshal(args)
 }
 
-func (x *ADKExecutor) toolGate(actx agent.Context, toolName string, args map[string]any) error {
+func (x *ADKExecutor) toolGate(callCtx context.Context, actx agent.Context, toolName string, args map[string]any) error {
 	raw, err := canonicalToolArguments(args)
 	if err != nil {
 		return codedError(turn.ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
 	}
-	decision, err := x.broker.Evaluate(actx, &approval.ToolRequest{
+	decision, err := x.broker.Evaluate(callCtx, &approval.ToolRequest{
 		RequestID:   actx.InvocationID(),
 		TurnID:      actx.InvocationID(),
 		SessionID:   actx.SessionID(),
@@ -410,7 +430,7 @@ func (x *ADKExecutor) toolGate(actx agent.Context, toolName string, args map[str
 	return nil
 }
 
-func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, args map[string]any) (map[string]any, error) {
+func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Context, toolName string, args map[string]any, callDeadline time.Time) (map[string]any, error) {
 	definitions := x.builtins.Definitions()
 	var definition *BuiltinToolDefinition
 	for i := range definitions {
@@ -426,7 +446,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	if err != nil {
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
 	}
-	slot, ok := toolcall.From(actx)
+	slot, ok := toolcall.From(callCtx)
 	if !ok {
 		return nil, invalidArgument(fmt.Sprintf("tool %q has no call key", toolName))
 	}
@@ -434,12 +454,15 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	if requestID == "" {
 		requestID = actx.InvocationID()
 	}
-	turnID := turnIDFromContext(actx)
+	turnID := turnIDFromContext(callCtx)
 	if turnID == "" {
 		turnID = actx.InvocationID()
 	}
-	deadline, _ := actx.Deadline()
-	access := turnAccessFromContext(actx)
+	deadline := callDeadline
+	if deadline.IsZero() {
+		deadline, _ = callCtx.Deadline()
+	}
+	access := turnAccessFromContext(callCtx)
 	request := &BuiltinToolRequest{
 		RequestID:       requestID,
 		TurnID:          turnID,
@@ -460,7 +483,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 		EventBranch:     actx.Branch(),
 		EventAuthor:     actx.AgentName(),
 	}
-	output, err := x.builtins.Execute(actx, request)
+	output, err := x.builtins.Execute(callCtx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -690,10 +713,30 @@ func withUntrustedContextPart(block string) llmagent.BeforeModelCallback {
 }
 
 func (x *ADKExecutor) beforeTool(actx agent.Context, t tool.Tool, args map[string]any) (map[string]any, error) {
-	if x.builtins != nil {
-		return x.executeBuiltinTool(actx, t.Name(), args)
+	callCtx := context.Context(actx)
+	var callDeadline time.Time
+	if budget := turnToolBudgetFromContext(actx); budget != nil {
+		slot, _ := toolcall.From(actx)
+		decision, err := budget.check(actx, slot, t.Name(), actx.FunctionCallID())
+		if err != nil {
+			return nil, err
+		}
+		if !decision.allowed {
+			return decision.refusal, nil
+		}
+		if !decision.softDeadline.IsZero() {
+			callDeadline = decision.softDeadline
+			if _, scoped := durable.TurnScopeFrom(actx); !scoped || x.builtins == nil {
+				var cancel context.CancelFunc
+				callCtx, cancel = context.WithDeadline(actx, decision.softDeadline)
+				defer cancel()
+			}
+		}
 	}
-	if err := x.toolGate(actx, t.Name(), args); err != nil {
+	if x.builtins != nil {
+		return x.executeBuiltinTool(callCtx, actx, t.Name(), args, callDeadline)
+	}
+	if err := x.toolGate(callCtx, actx, t.Name(), args); err != nil {
 		return nil, err
 	}
 	return args, nil

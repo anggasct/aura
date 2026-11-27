@@ -1328,7 +1328,7 @@ func (b *build) buildTurnRuntime() error {
 		return invalidOptions("the turn runtime requires the live event bus")
 	}
 	var broker turn.ToolBroker = terminal.DenyPolicy{}
-	execOpts := slices.Clone(b.execOpts)
+	execOpts := append([]runtimeadk.ExecutorOption{runtimeadk.WithToolBudget(toolBudgetFromRuntime(b.cfg.Runtime))}, b.execOpts...)
 	if b.builtin != nil {
 		broker = b.builtin
 		if len(b.builtin.Definitions()) > 0 {
