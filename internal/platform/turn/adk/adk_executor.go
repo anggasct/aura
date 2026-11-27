@@ -187,7 +187,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			yield(turn.Event{}, err)
 			return
 		}
-		if err := x.checkPersonaPin(req.Persona, &definition); err != nil {
+		if err := x.checkPersonaPin(req, &definition); err != nil {
 			yield(turn.Event{}, err)
 			return
 		}
@@ -293,8 +293,9 @@ func (x *ADKExecutor) resolveDefinition(req *turn.TurnRequest) (auraagent.Defini
 	return definition, nil
 }
 
-func (x *ADKExecutor) checkPersonaPin(pin *turn.PersonaFingerprint, definition *auraagent.Definition) error {
-	if pin == nil || x.agents == nil {
+func (x *ADKExecutor) checkPersonaPin(req *turn.TurnRequest, definition *auraagent.Definition) error {
+	pin := req.Persona
+	if pin == nil || x.agents == nil || req.Origin != turn.OriginWorkflow {
 		return nil
 	}
 	current := definition.Fingerprint()

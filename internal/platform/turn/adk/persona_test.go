@@ -57,21 +57,24 @@ func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
 	}
 }
 
-func TestExecuteRefusesAPinnedPersonaThatChanged(t *testing.T) {
+func TestExecuteRefusesAChangedPersonaOnlyForAPinnedWorkflowTurn(t *testing.T) {
 	pinned := auraagent.Definition{ID: "researcher", Instructions: "Read carefully."}
 	fingerprint := pinned.Fingerprint()
 	cases := []struct {
 		name     string
+		origin   turn.Origin
 		pin      *turn.PersonaFingerprint
 		current  auraagent.Definition
 		wantCode turn.ErrorCode
 		wantRuns int
 	}{
-		{name: "no pin runs", current: pinned, wantRuns: 1},
-		{name: "unchanged persona runs", pin: &turn.PersonaFingerprint{AgentID: fingerprint.AgentID, SoulSHA256: fingerprint.SoulSHA256, ToolsSHA256: fingerprint.ToolsSHA256, ModelRoute: fingerprint.ModelRoute}, current: pinned, wantRuns: 1},
-		{name: "changed tools alone still runs", pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ToolsSHA256: "other-tools", ModelRoute: fingerprint.ModelRoute}, current: pinned, wantRuns: 1},
-		{name: "edited instructions are refused", pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ModelRoute: fingerprint.ModelRoute}, current: auraagent.Definition{ID: "researcher", Instructions: "Read carelessly."}, wantCode: turn.ErrorCodePersonaMismatch},
-		{name: "changed model route is refused", pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ModelRoute: "premium"}, current: pinned, wantCode: turn.ErrorCodePersonaMismatch},
+		{name: "no pin runs", origin: turn.OriginWorkflow, current: pinned, wantRuns: 1},
+		{name: "unchanged persona runs", origin: turn.OriginWorkflow, pin: &turn.PersonaFingerprint{AgentID: fingerprint.AgentID, SoulSHA256: fingerprint.SoulSHA256, ToolsSHA256: fingerprint.ToolsSHA256, ModelRoute: fingerprint.ModelRoute}, current: pinned, wantRuns: 1},
+		{name: "changed tools alone still runs", origin: turn.OriginWorkflow, pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ToolsSHA256: "other-tools", ModelRoute: fingerprint.ModelRoute}, current: pinned, wantRuns: 1},
+		{name: "edited instructions are refused", origin: turn.OriginWorkflow, pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ModelRoute: fingerprint.ModelRoute}, current: auraagent.Definition{ID: "researcher", Instructions: "Read carelessly."}, wantCode: turn.ErrorCodePersonaMismatch},
+		{name: "changed model route is refused", origin: turn.OriginWorkflow, pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ModelRoute: "premium"}, current: pinned, wantCode: turn.ErrorCodePersonaMismatch},
+		{name: "a channel turn runs on an edited persona", origin: "telegram:pocket", pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ModelRoute: fingerprint.ModelRoute}, current: auraagent.Definition{ID: "researcher", Instructions: "Read carelessly."}, wantRuns: 1},
+		{name: "a terminal turn runs on a changed model route", origin: turn.OriginTerminal, pin: &turn.PersonaFingerprint{SoulSHA256: fingerprint.SoulSHA256, ModelRoute: "premium"}, current: pinned, wantRuns: 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -82,6 +85,7 @@ func TestExecuteRefusesAPinnedPersonaThatChanged(t *testing.T) {
 			mustCreateSession(t, db, "session-1")
 			req := personaTurn()
 			req.AgentID = "researcher"
+			req.Origin = tc.origin
 			req.Persona = tc.pin
 			var got error
 			for _, err := range executor.Execute(t.Context(), req) {
@@ -114,6 +118,7 @@ func TestExecuteWithoutAPersonaResolverHasNoPersonaToCompareWithThePin(t *testin
 	}
 	mustCreateSession(t, db, "session-1")
 	req := personaTurn()
+	req.Origin = turn.OriginWorkflow
 	req.Persona = &turn.PersonaFingerprint{AgentID: "researcher", SoulSHA256: "soul", ModelRoute: "premium"}
 	drainTurn(t, executor, req)
 	if model.callCount != 1 {
