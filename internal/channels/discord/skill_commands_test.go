@@ -91,9 +91,9 @@ func TestDiscordSkillFailuresReplyWithoutATurn(t *testing.T) {
 	f.admit(t, dmMessage("8821", "112", "/skill pdf"))
 	f.admit(t, dmMessage("8822", "111", "/skill"))
 	want := []sentReply{
-		{channel: "555", replyTo: "8820", content: "Skill missing is not available."},
-		{channel: "555", replyTo: "8821", content: command.ReplyDenied},
-		{channel: "555", replyTo: "8822", content: "usage: /skill <name> [request…]"},
+		{channel: "555", content: "Skill missing is not available."},
+		{channel: "555", content: command.ReplyDenied},
+		{channel: "555", content: "usage: /skill <name> [request…]"},
 	}
 	if got := f.replies(t); !slices.Equal(got, want) {
 		t.Fatalf("replies =\n%+v\nwant\n%+v", got, want)
@@ -113,8 +113,8 @@ func TestDiscordSkillCreateStagesADraft(t *testing.T) {
 	f.admit(t, dmMessage("8830", "111", "/skill-create notes Keep tidy notes."))
 	f.admit(t, dmMessage("8831", "111", "/skill-create notes"))
 	want := []sentReply{
-		{channel: "555", replyTo: "8830", content: "draft local/notes@0123456789ab\ndigest 0123456789abcdef\nreview with: aura skills review local/notes@0123456789ab"},
-		{channel: "555", replyTo: "8831", content: "usage: /skill-create <name> <description…>"},
+		{channel: "555", content: "draft local/notes@0123456789ab\ndigest 0123456789abcdef\nreview with: aura skills review local/notes@0123456789ab"},
+		{channel: "555", content: "usage: /skill-create <name> <description…>"},
 	}
 	if got := f.replies(t); !slices.Equal(got, want) {
 		t.Fatalf("replies =\n%+v\nwant\n%+v", got, want)

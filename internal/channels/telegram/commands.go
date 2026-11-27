@@ -104,7 +104,11 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 }
 
 func (a *Adapter) replyCommand(ctx context.Context, msg *message, intentID, sessionID string, lines []string) error {
-	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID, ThreadID: msg.topicID()})
+	var fromID int64
+	if msg.From != nil {
+		fromID = msg.From.ID
+	}
+	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID, ChatType: msg.Chat.Type, ThreadID: msg.topicID(), FromID: fromID})
 	if err != nil {
 		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}

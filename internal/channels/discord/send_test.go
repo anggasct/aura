@@ -120,8 +120,8 @@ func deliverTestRequest(effectID, channel, text string) *runtimechannelhost.Deli
 	return &runtimechannelhost.DeliveryRequest{
 		EffectID:       effectID,
 		Channel:        "discord",
-		ConversationID: "dm:111",
-		ReplyContext:   json.RawMessage(`{"channel_id":"333","message_id":"999"}`),
+		ConversationID: "channel:333",
+		ReplyContext:   json.RawMessage(`{"channel_id":"333","message_id":"999","guild_id":"222"}`),
 		Parts:          []runtimechannelhost.OutputPart{{Text: text}},
 		IdempotencyKey: "key-" + effectID,
 	}

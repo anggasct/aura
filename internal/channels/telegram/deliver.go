@@ -17,12 +17,14 @@ import (
 )
 
 const (
-	ProviderName    = "telegram"
-	OpSendMessage   = "send_message"
-	opEditMessage   = "edit_message"
-	messageLimit    = 4096
-	sendTimeout     = 30 * time.Second
-	sendMaxAttempts = 3
+	ProviderName         = "telegram"
+	OpSendMessage        = "send_message"
+	opEditMessage        = "edit_message"
+	opDeleteMessage      = "delete_message"
+	messageLimit         = 4096
+	sendTimeout          = 30 * time.Second
+	defaultDeleteTimeout = typingTimeout
+	sendMaxAttempts      = 3
 )
 
 type sendOperation struct {
@@ -40,6 +42,11 @@ type editOperation struct {
 	MessageID   int64           `json:"message_id"`
 	Text        string          `json:"text"`
 	ReplyMarkup *inlineKeyboard `json:"reply_markup,omitempty"`
+}
+
+type deleteOperation struct {
+	ChatID    int64 `json:"chat_id"`
+	MessageID int64 `json:"message_id"`
 }
 
 type messageReceipt struct {
@@ -78,9 +85,10 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	}
 	defer func() { <-a.deliverSem }()
 	var receipt runtimechannelhost.ProviderReceipt
+	quote := a.shouldQuote(&target)
 	for index, chunk := range splitMessage(strings.Join(texts, "\n")) {
 		operation := sendOperation{ChatID: target.ChatID, ThreadID: target.ThreadID, Text: chunk, HTML: renderHTML(chunk)}
-		if index == 0 {
+		if index == 0 && quote {
 			operation.ReplyTo = target.MessageID
 		}
 		messageID, err := a.executeSend(ctx, req, index, &operation)
@@ -89,7 +97,48 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 		}
 		receipt = runtimechannelhost.ProviderReceipt{ProviderID: ProviderName, ExternalID: strconv.FormatInt(messageID, 10), At: time.Now().UTC()}
 	}
+	if req.EffectID != "" {
+		a.deleteStatus(ctx, req)
+	}
 	return receipt, nil
+}
+
+func (a *Adapter) shouldQuote(target *replyReference) bool {
+	if target.MessageID == 0 {
+		return false
+	}
+	if target.ChatType != chatTypePrivate {
+		return true
+	}
+	return a.latestPrivate.hasNewer(target.ChatID, target.FromID, target.MessageID)
+}
+
+func (a *Adapter) deleteStatus(ctx context.Context, req *runtimechannelhost.DeliveryRequest) {
+	chatID, statusID, ok := a.takeStatusToDelete(req.EffectID)
+	if !ok {
+		return
+	}
+	request, err := json.Marshal(deleteOperation{ChatID: chatID, MessageID: statusID})
+	if err != nil {
+		a.logger.WarnContext(ctx, "status delete failed", "component", "telegram", "error", err)
+		return
+	}
+	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
+		SessionID:      req.ConversationID,
+		IdempotencyKey: deleteKey(req.EffectID, statusID),
+		Provider:       ProviderName,
+		Operation:      opDeleteMessage,
+		Classification: effect.ClassificationEffectful,
+		Request:        request,
+		EventKind:      effect.EventKindChannelRequested,
+	}, a)
+	if err != nil {
+		a.logger.WarnContext(ctx, "status delete failed", "component", "telegram", "error", err)
+		return
+	}
+	if intent == nil || intent.State != effect.StateSucceeded {
+		a.logger.WarnContext(ctx, "status delete failed", "component", "telegram")
+	}
 }
 
 func (a *Adapter) executeSend(ctx context.Context, req *runtimechannelhost.DeliveryRequest, index int, operation *sendOperation) (int64, error) {
@@ -135,6 +184,11 @@ func statusKey(base string, chatID int64, slot, text string) string {
 	return effectKey(base, chatID, slot, slot, text)
 }
 
+func deleteKey(turnID string, messageID int64) string {
+	sum := sha256.Sum256([]byte(strconv.FormatInt(messageID, 10)))
+	return ProviderName + ":" + turnID + ":d:" + hex.EncodeToString(sum[:])[:16]
+}
+
 func effectKey(base string, chatID int64, slot, digestSlot, text string) string {
 	sum := sha256.Sum256([]byte(base + "|" + strconv.FormatInt(chatID, 10) + "|" + digestSlot + "|" + text))
 	return ProviderName + ":" + base + ":" + slot + ":" + hex.EncodeToString(sum[:])[:16]
@@ -171,6 +225,8 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 		return a.invokeSend(ctx, invocation.Request)
 	case opEditMessage:
 		return a.invokeEdit(ctx, invocation.Request)
+	case opDeleteMessage:
+		return a.invokeDelete(ctx, invocation.Request)
 	default:
 		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
@@ -221,14 +277,45 @@ func (a *Adapter) invokeEdit(ctx context.Context, raw json.RawMessage) (effect.O
 	})
 }
 
+func (a *Adapter) invokeDelete(ctx context.Context, raw json.RawMessage) (effect.Outcome, error) {
+	var operation deleteOperation
+	if err := json.Unmarshal(raw, &operation); err != nil {
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "delete request is not decodable")
+	}
+	if operation.ChatID == 0 || operation.MessageID == 0 {
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "delete request is missing chat or message")
+	}
+	return a.dispatchWithTimeout(ctx, operation.ChatID, false, a.deleteTimeoutOrDefault(), func(call context.Context, token string) (int64, error) {
+		err := a.bot.deleteMessage(call, token, operation.ChatID, operation.MessageID)
+		if apiErr, rejected := apiErrorOf(err); rejected && apiErr.Status == http.StatusBadRequest && apiErr.DeleteNotFound {
+			return operation.MessageID, nil
+		}
+		if err != nil {
+			return 0, err
+		}
+		return operation.MessageID, nil
+	})
+}
+
+func (a *Adapter) deleteTimeoutOrDefault() time.Duration {
+	if a.deleteTimeout > 0 {
+		return a.deleteTimeout
+	}
+	return defaultDeleteTimeout
+}
+
 func (a *Adapter) dispatch(ctx context.Context, chatID int64, waitOnLimit bool, send func(ctx context.Context, token string) (int64, error)) (effect.Outcome, error) {
+	return a.dispatchWithTimeout(ctx, chatID, waitOnLimit, sendTimeout, send)
+}
+
+func (a *Adapter) dispatchWithTimeout(ctx context.Context, chatID int64, waitOnLimit bool, timeout time.Duration, send func(ctx context.Context, token string) (int64, error)) (effect.Outcome, error) {
 	token, ok := a.botToken()
 	if !ok {
 		return effect.Outcome{Succeeded: false, SafeErrorCode: faultBotRefUnresolved}, nil
 	}
 	limited := 0
 	for range sendMaxAttempts {
-		call, cancel := context.WithTimeout(ctx, sendTimeout)
+		call, cancel := context.WithTimeout(ctx, timeout)
 		messageID, err := send(call, token)
 		cancel()
 		if err == nil {

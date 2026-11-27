@@ -123,7 +123,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	}
 	text := neutralizeMentions(strings.Join(texts, "\n"))
 	chunks := splitMessage(text)
-	target, parent, _, err := parseDeliveryContext(req.ReplyContext, req.Channel)
+	dest, err := parseDeliveryContext(req.ReplyContext, req.Channel)
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
@@ -135,22 +135,28 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	}
 	posted, ok := a.postedMessages(key)
 	if tracked && ok {
-		return a.deliverEdit(ctx, req, key, target, posted, chunks)
+		return a.deliverEdit(ctx, req, key, dest.target, posted, chunks)
 	}
-	receipt, err := a.deliverPost(ctx, req, key, tracked, target, req.ReplyContext, chunks)
+	receipt, err := a.deliverPost(ctx, req, key, tracked, dest.target, req.ReplyContext, chunks)
 	if err == nil {
+		if tracked {
+			a.deleteStatus(ctx, req)
+		}
 		return receipt, nil
 	}
-	if parent == "" || ctx.Err() != nil {
+	if dest.parent == "" || ctx.Err() != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
 	if !fault.HasCode(err, ErrorCodeDeliveryFailed) {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
 	a.logger.WarnContext(ctx, "thread delivery fallback", "component", "discord", "error", err)
-	fallback, fallbackErr := a.deliverPost(ctx, req, key, tracked, parent, req.ReplyContext, chunks)
+	fallback, fallbackErr := a.deliverPost(ctx, req, key, tracked, dest.parent, req.ReplyContext, chunks)
 	if fallbackErr != nil {
 		return runtimechannelhost.ProviderReceipt{}, fallbackErr
+	}
+	if tracked {
+		a.deleteStatus(ctx, req)
 	}
 	return fallback, nil
 }
@@ -229,12 +235,13 @@ func (a *Adapter) reconcileMessages(ctx context.Context, req *runtimechannelhost
 
 func (a *Adapter) postChunks(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyContext []byte, texts []string, uploads []uploadChunk) ([]string, error) {
 	var ids []string
-	_, parent, inboundMessage, err := parseDeliveryContext(replyContext, channelID)
+	dest, err := parseDeliveryContext(replyContext, channelID)
 	if err != nil {
 		return nil, err
 	}
-	if parent != "" {
-		inboundMessage = ""
+	inboundMessage := ""
+	if a.shouldQuote(&dest) {
+		inboundMessage = dest.messageID
 	}
 	for index, text := range texts {
 		var replyTo *string
@@ -255,6 +262,44 @@ func (a *Adapter) postChunks(ctx context.Context, req *runtimechannelhost.Delive
 		ids = append(ids, id)
 	}
 	return ids, nil
+}
+
+func (a *Adapter) shouldQuote(dest *deliveryDestination) bool {
+	if dest.messageID == "" || dest.parent != "" {
+		return false
+	}
+	if dest.guildID != "" {
+		return true
+	}
+	return a.latestDM.hasNewer(dest.target, dest.authorID, dest.messageID)
+}
+
+func (a *Adapter) deleteStatus(ctx context.Context, req *runtimechannelhost.DeliveryRequest) {
+	channelID, statusID, ok := a.takeStatusToDelete(req.EffectID)
+	if !ok {
+		return
+	}
+	request, err := marshalOperation(deleteOperation{ChannelID: channelID, MessageID: statusID})
+	if err != nil {
+		a.logger.WarnContext(ctx, "status delete failed", "component", "discord", "error", err)
+		return
+	}
+	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
+		SessionID:      req.ConversationID,
+		IdempotencyKey: deleteKey(req.EffectID, statusID),
+		Provider:       "discord",
+		Operation:      opDeleteMessage,
+		Classification: effect.ClassificationEffectful,
+		Request:        request,
+		EventKind:      effect.EventKindChannelRequested,
+	}, a)
+	if err != nil {
+		a.logger.WarnContext(ctx, "status delete failed", "component", "discord", "error", err)
+		return
+	}
+	if intent == nil || intent.State != effect.StateSucceeded {
+		a.logger.WarnContext(ctx, "status delete failed", "component", "discord")
+	}
 }
 
 func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyTo *string, index int, text string, upload *uploadChunk) (string, error) {

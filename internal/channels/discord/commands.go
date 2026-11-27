@@ -2,14 +2,12 @@ package discord
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"unicode"
 
 	"github.com/anggasct/aura/internal/channels/kit/chatcommand"
 	"github.com/anggasct/aura/internal/platform/command"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -113,27 +111,23 @@ func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *comm
 		envelope.Skill = outcome.Receipt.Skill
 		return false, nil
 	}
-	if err := a.replyCommand(ctx, msg, outcome.IntentID, scope.effectSession, outcome.Receipt.Lines); err != nil {
+	if err := a.replyCommand(ctx, envelope.ReplyContext, outcome.IntentID, scope.effectSession, outcome.Receipt.Lines); err != nil {
 		a.logger.WarnContext(ctx, "command reply failed", "component", "command", "session_id", scope.effectSession, "error", err)
 	}
 	return true, nil
 }
 
-func (a *Adapter) replyCommand(ctx context.Context, msg *messagePayload, intentID, sessionID string, lines []string) error {
-	chunks := splitMessage(neutralizeMentions(strings.Join(lines, "\n")))
-	texts, uploads, err := splitUploads(chunks, a.cfg.MaxAttachmentBytes)
-	if err != nil {
-		return err
+func (a *Adapter) replyCommand(ctx context.Context, replyContext []byte, intentID, sessionID string, lines []string) error {
+	text := strings.Join(lines, "\n")
+	if strings.TrimSpace(text) == "" {
+		return nil
 	}
-	reference, err := json.Marshal(replyReference{ChannelID: msg.ChannelID, MessageID: msg.ID, GuildID: msg.GuildID})
-	if err != nil {
-		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
-	}
-	_, err = a.postChunks(ctx, &runtimechannelhost.DeliveryRequest{
+	_, err := a.Deliver(ctx, &runtimechannelhost.DeliveryRequest{
 		Channel:        a.source(),
 		ConversationID: sessionID,
 		EffectID:       intentID,
-		ReplyContext:   reference,
-	}, msg.ChannelID, reference, texts, uploads)
+		ReplyContext:   replyContext,
+		Parts:          []runtimechannelhost.OutputPart{{Text: text}},
+	})
 	return err
 }

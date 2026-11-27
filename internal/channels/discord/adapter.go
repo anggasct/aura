@@ -156,8 +156,10 @@ type Adapter struct {
 	typingRefresh  time.Duration
 	statusAfter    time.Duration
 	elapsedTick    time.Duration
+	deleteTimeout  time.Duration
 	holdMu         sync.Mutex
 	holds          map[string]time.Time
+	latestDM       latestInbound
 	approvals      *approval.Registry
 	stops          *approval.Registry
 	targetsMu      sync.Mutex
