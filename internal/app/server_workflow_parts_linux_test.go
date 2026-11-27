@@ -199,6 +199,9 @@ func TestServerPostsWorkflowCompletionsOnTheDefaultConfiguration(t *testing.T) {
 			if n := countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ?`, "sess-done"); n != 1 {
 				t.Fatalf("events in sess-done = %d, want 1", n)
 			}
+			awaitSchedule(t, "the completion of run-done is delivered to its conversation", func() bool {
+				return len(posts.recorded()) >= len(tc.want)
+			})
 			if got := posts.recorded(); !slices.Equal(got, tc.want) {
 				t.Fatalf("telegram posts = %v, want %v", got, tc.want)
 			}
