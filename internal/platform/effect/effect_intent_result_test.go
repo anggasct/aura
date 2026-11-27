@@ -25,9 +25,9 @@ func seedEffectSession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
 
 func TestEffectIntentBaselineSchemaAndResultConstraints(t *testing.T) {
 	ctx := t.Context()
-	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)

@@ -25,7 +25,7 @@ type ModuleDeps struct {
 	Targets         []ReplyTargeter
 	Offerers        []ProposalOfferer
 	Appender        SessionTextAppender
-	Deliver         DiscordDeliverer
+	Deliver         ReplyDeliverer
 	CheckTimeout    time.Duration
 	ErasureSessions ErasureSessionPort
 	ErasureDurable  ErasureDurablePort

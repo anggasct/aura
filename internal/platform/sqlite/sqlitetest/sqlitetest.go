@@ -25,9 +25,9 @@ var templateCache sync.Map
 
 func Seed(t testing.TB, dbPath string, owners ...sqlite.SchemaOwner) {
 	t.Helper()
-	migrations, err := sqlite.Baseline(owners...)
+	migrations, err := sqlite.History(owners...)
 	if err != nil {
-		t.Fatalf("build baseline migrations: %v", err)
+		t.Fatalf("build migration history: %v", err)
 	}
 	SeedMigrations(t, dbPath, migrations)
 }
@@ -58,9 +58,9 @@ func SeedMigrations(t testing.TB, dbPath string, migrations []sqlite.Migration) 
 
 func OpenMigrated(t testing.TB, owners ...sqlite.SchemaOwner) *sql.DB {
 	t.Helper()
-	migrations, err := sqlite.Baseline(owners...)
+	migrations, err := sqlite.History(owners...)
 	if err != nil {
-		t.Fatalf("build baseline migrations: %v", err)
+		t.Fatalf("build migration history: %v", err)
 	}
 	return OpenMigrations(t, migrations)
 }

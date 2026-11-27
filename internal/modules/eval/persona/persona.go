@@ -312,7 +312,7 @@ func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.
 		return zero, err
 	}
 	defer func() { _ = db.Close() }()
-	migrations, err := sqlite.Baseline(turnstore.Schema(), effect.Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), effect.Schema())
 	if err != nil {
 		return zero, err
 	}

@@ -20,15 +20,15 @@ type SessionTextAppender interface {
 	AppendSessionText(ctx context.Context, sessionID, id, author, text string, at time.Time) error
 }
 
-type DiscordDeliverer interface {
-	DeliverDiscordText(ctx context.Context, accountName, channelID, text string) error
+type ReplyDeliverer interface {
+	DeliverReply(ctx context.Context, target *ReplyTarget, text string) error
 }
 
 type CompletionNotifierDeps struct {
 	Runs     *Store
 	Registry *auraagent.Registry
 	Appender SessionTextAppender
-	Deliver  DiscordDeliverer
+	Deliver  ReplyDeliverer
 	Logger   *slog.Logger
 	Now      func() time.Time
 	Batch    int
@@ -38,7 +38,7 @@ type CompletionNotifier struct {
 	runs     *Store
 	registry *auraagent.Registry
 	appender SessionTextAppender
-	deliver  DiscordDeliverer
+	deliver  ReplyDeliverer
 	logger   *slog.Logger
 	now      func() time.Time
 	batch    int
@@ -118,10 +118,10 @@ func (n *CompletionNotifier) notify(ctx context.Context, run *RunSummary) {
 			n.logger.WarnContext(ctx, "workflow completion event failed", "component", "workflow", "run_id", run.ID, "error", err)
 		}
 	}
-	if run.Origin.ReplyChannelID == "" {
+	if run.Origin.Reply.IsZero() {
 		return
 	}
-	if err := n.deliver.DeliverDiscordText(ctx, run.Origin.ReplyAccount, run.Origin.ReplyChannelID, completionMessage(&definition, run)); err != nil {
+	if err := n.deliver.DeliverReply(ctx, &run.Origin.Reply, completionMessage(&definition, run)); err != nil {
 		exhausted, releaseErr := n.runs.ReleaseCompletion(ctx, run.ID)
 		n.logger.WarnContext(ctx, "workflow completion delivery failed", "component", "workflow", "run_id", run.ID, "error", err,
 			"gave_up", exhausted, "release_error", releaseErr)

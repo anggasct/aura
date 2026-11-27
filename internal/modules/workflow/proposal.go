@@ -32,6 +32,7 @@ type Proposal struct {
 	SessionID   string
 	AgentID     string
 	PrincipalID string
+	Reply       ReplyTarget
 	Tainted     bool
 	Spec        *Spec
 	PlanText    string
@@ -157,19 +158,23 @@ func cmpOr(values ...string) string {
 }
 
 func (s *Store) CreateProposal(ctx context.Context, proposal *Proposal) error {
+	if err := proposal.Reply.Validate(); err != nil {
+		return err
+	}
 	encoded, err := json.Marshal(proposal.Spec)
 	if err != nil {
 		return codedError(ErrorCodeSpecInvalid, "encode proposal spec: "+err.Error())
 	}
-	_, err = sqlite.Conn(ctx, s.db).ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted, plan_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted, proposal.PlanText)
+	_, err = sqlite.Conn(ctx, s.db).ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted, plan_text, reply_channel, reply_account, reply_channel_id, reply_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted, proposal.PlanText,
+		nullable(proposal.Reply.Channel), nullable(proposal.Reply.Account), nullable(proposal.Reply.ChannelID), nullable(proposal.Reply.ThreadID))
 	if err != nil {
 		return sqlite.Classify(fmt.Errorf("insert proposal: %w", err))
 	}
 	return nil
 }
 
-const proposalColumns = `id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, COALESCE(decided_at, ''), COALESCE(run_id, ''), created_at, tainted, plan_text`
+const proposalColumns = `id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, COALESCE(decided_at, ''), COALESCE(run_id, ''), created_at, tainted, plan_text, COALESCE(reply_channel, ''), COALESCE(reply_account, ''), COALESCE(reply_channel_id, ''), COALESCE(reply_thread_id, '')`
 
 func (s *Store) Proposal(ctx context.Context, id string, now time.Time) (*Proposal, error) {
 	if err := s.expireProposals(ctx, now); err != nil {
@@ -244,7 +249,8 @@ type proposalRow interface {
 func scanProposal(row proposalRow) (*Proposal, error) {
 	var proposal Proposal
 	var specJSON, decidedAt, createdAt string
-	if err := row.Scan(&proposal.ID, &proposal.SessionID, &proposal.AgentID, &proposal.PrincipalID, &specJSON, &proposal.Digest, &proposal.Status, &decidedAt, &proposal.RunID, &createdAt, &proposal.Tainted, &proposal.PlanText); err != nil {
+	if err := row.Scan(&proposal.ID, &proposal.SessionID, &proposal.AgentID, &proposal.PrincipalID, &specJSON, &proposal.Digest, &proposal.Status, &decidedAt, &proposal.RunID, &createdAt, &proposal.Tainted, &proposal.PlanText,
+		&proposal.Reply.Channel, &proposal.Reply.Account, &proposal.Reply.ChannelID, &proposal.Reply.ThreadID); err != nil {
 		return nil, err
 	}
 	proposal.Spec = &Spec{}

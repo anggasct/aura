@@ -472,7 +472,7 @@ func (b *build) buildWorkflows(ctx context.Context, host bool) error {
 		modDeps.RunSessions = b.sessions
 		modDeps.Registry = b.registry
 		modDeps.Appender = &workflowSessionTextAppender{db: db}
-		modDeps.Deliver = &workflowCompletionDeliverer{cfg: cfg, deliver: deliverText}
+		modDeps.Deliver = &workflowCompletionDeliverer{cfg: cfg, deliver: deliverText, deliverTelegram: deliverTelegramText}
 		modDeps.CheckTimeout = time.Duration(cfg.Health.CheckTimeout)
 		if b.server != nil {
 			modDeps.Route = newWorkflowOwnerRoute(b.server.workflowRoute)
@@ -2692,23 +2692,23 @@ type replyTargeter interface {
 	ReplyTarget(sessionID string) (access.HandoffTarget, bool)
 }
 
-type discordReplyTargeterAdapter struct {
+type workflowReplyTargeterAdapter struct {
 	target replyTargeter
 }
 
-func (a *discordReplyTargeterAdapter) DiscordReplyTarget(sessionID string) (account, channelID string, ok bool) {
+func (a *workflowReplyTargeterAdapter) ReplyTarget(sessionID string) (workflow.ReplyTarget, bool) {
 	target, found := a.target.ReplyTarget(sessionID)
-	if !found || target.Channel != principal.ChannelDiscord {
-		return "", "", false
+	if !found || (target.Channel != principal.ChannelDiscord && target.Channel != principal.ChannelTelegram) {
+		return workflow.ReplyTarget{}, false
 	}
-	return target.Account, target.ChannelID, true
+	return workflow.ReplyTarget{Channel: target.Channel, Account: target.Account, ChannelID: target.ChannelID, ThreadID: target.ThreadID}, true
 }
 
 func workflowReplyTargeters(ports []runtimechannelhost.ChannelPort) []workflow.ReplyTargeter {
 	var targeters []workflow.ReplyTargeter
 	for _, port := range ports {
 		if targeter, ok := port.(replyTargeter); ok {
-			targeters = append(targeters, &discordReplyTargeterAdapter{target: targeter})
+			targeters = append(targeters, &workflowReplyTargeterAdapter{target: targeter})
 		}
 	}
 	return targeters
@@ -2751,20 +2751,28 @@ func (a *workflowSessionTextAppender) AppendSessionText(ctx context.Context, ses
 }
 
 type workflowCompletionDeliverer struct {
-	cfg     *appconfig.Config
-	deliver func(ctx context.Context, account *discord.Account, channelID, text string) error
+	cfg             *appconfig.Config
+	deliver         func(ctx context.Context, account *discord.Account, channelID, text string) error
+	deliverTelegram func(ctx context.Context, account *telegram.Account, chatID, threadID, text string) error
 }
 
-func (d *workflowCompletionDeliverer) DeliverDiscordText(ctx context.Context, accountName, channelID, text string) error {
-	account, ok := discordAccount(d.cfg, accountName)
-	if !ok {
-		return fmt.Errorf("discord account %q is not configured", accountName)
+func (d *workflowCompletionDeliverer) DeliverReply(ctx context.Context, target *workflow.ReplyTarget, text string) error {
+	switch target.Channel {
+	case principal.ChannelDiscord:
+		account, ok := discordAccount(d.cfg, target.Account)
+		if !ok {
+			return fmt.Errorf("discord account %q is not configured", target.Account)
+		}
+		return d.deliver(ctx, account, target.ChannelID, text)
+	case principal.ChannelTelegram:
+		account, ok := telegramAccount(d.cfg, target.Account)
+		if !ok {
+			return fmt.Errorf("telegram account %q is not configured", target.Account)
+		}
+		return d.deliverTelegram(ctx, account, target.ChannelID, target.ThreadID, text)
+	default:
+		return fmt.Errorf("reply channel %q is not supported", target.Channel)
 	}
-	deliver := d.deliver
-	if deliver == nil {
-		deliver = deliverText
-	}
-	return deliver(ctx, account, channelID, text)
 }
 
 type behaviorModels struct {

@@ -518,24 +518,24 @@ func TestErasureDeletesThePrincipalsWorkflowRuns(t *testing.T) {
 	}
 	requireErasureReport(t, applied, want)
 	for query, expect := range map[string]int{
-		`SELECT COUNT(*) FROM workflow_run WHERE principal_id = 'discord:601'`:                                                                          0,
-		`SELECT COUNT(*) FROM workflow_step_run WHERE run_id IN ('run-1', 'run-1-child')`:                                                               0,
-		`SELECT COUNT(*) FROM durable_run WHERE key = 'dur-1'`:                                                                                          0,
-		`SELECT COUNT(*) FROM durable_action WHERE run_key = 'dur-1'`:                                                                                   0,
-		`SELECT COUNT(*) FROM durable_signal WHERE run_key = 'dur-1'`:                                                                                   0,
-		`SELECT COUNT(*) FROM session WHERE id IN ('` + strings.Join(legacy, `','`) + `')`:                                                              0,
-		`SELECT COUNT(*) FROM runtime_event WHERE session_id IN ('` + strings.Join(legacy, `','`) + `')`:                                                0,
-		`SELECT COUNT(*) FROM effect_intent WHERE session_id IN ('` + strings.Join(legacy, `','`) + `')`:                                                0,
-		`SELECT COUNT(*) FROM session WHERE id = 'wf-run-1'`:                                                                                            0,
-		`SELECT COUNT(*) FROM workflow_run WHERE id IN ('run-2', 'run-owner')`:                                                                          2,
-		`SELECT COUNT(*) FROM workflow_step_run WHERE run_id = 'run-2'`:                                                                                 1,
-		`SELECT COUNT(*) FROM durable_run WHERE key IN ('dur-2', 'dur-owner')`:                                                                          2,
-		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ('dur-2', 'dur-owner')`:                                                                   2,
-		`SELECT COUNT(*) FROM session WHERE id = '` + keptLegacy + `'`:                                                                                  1,
-		`SELECT COUNT(*) FROM effect_intent WHERE session_id = '` + keptLegacy + `'`:                                                                    1,
-		`SELECT COUNT(*) FROM workflow_run WHERE id = 'run-owner' AND origin_session_id IS NULL AND reply_account IS NULL AND reply_channel_id IS NULL`: 1,
-		`SELECT COUNT(*) FROM workflow_run WHERE id = 'run-2' AND reply_account = 'acct' AND reply_channel_id = 'chan'`:                                 1,
-		`SELECT COUNT(*) FROM usage_reservation WHERE id = 'r-1' AND principal_id IS NULL AND principal_class = 'public'`:                               1,
+		`SELECT COUNT(*) FROM workflow_run WHERE principal_id = 'discord:601'`:                           0,
+		`SELECT COUNT(*) FROM workflow_step_run WHERE run_id IN ('run-1', 'run-1-child')`:                0,
+		`SELECT COUNT(*) FROM durable_run WHERE key = 'dur-1'`:                                           0,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key = 'dur-1'`:                                    0,
+		`SELECT COUNT(*) FROM durable_signal WHERE run_key = 'dur-1'`:                                    0,
+		`SELECT COUNT(*) FROM session WHERE id IN ('` + strings.Join(legacy, `','`) + `')`:               0,
+		`SELECT COUNT(*) FROM runtime_event WHERE session_id IN ('` + strings.Join(legacy, `','`) + `')`: 0,
+		`SELECT COUNT(*) FROM effect_intent WHERE session_id IN ('` + strings.Join(legacy, `','`) + `')`: 0,
+		`SELECT COUNT(*) FROM session WHERE id = 'wf-run-1'`:                                             0,
+		`SELECT COUNT(*) FROM workflow_run WHERE id IN ('run-2', 'run-owner')`:                           2,
+		`SELECT COUNT(*) FROM workflow_step_run WHERE run_id = 'run-2'`:                                  1,
+		`SELECT COUNT(*) FROM durable_run WHERE key IN ('dur-2', 'dur-owner')`:                           2,
+		`SELECT COUNT(*) FROM durable_action WHERE run_key IN ('dur-2', 'dur-owner')`:                    2,
+		`SELECT COUNT(*) FROM session WHERE id = '` + keptLegacy + `'`:                                   1,
+		`SELECT COUNT(*) FROM effect_intent WHERE session_id = '` + keptLegacy + `'`:                     1,
+		`SELECT COUNT(*) FROM workflow_run WHERE id = 'run-owner' AND origin_session_id IS NULL AND reply_channel IS NULL AND reply_account IS NULL AND reply_channel_id IS NULL AND reply_thread_id IS NULL`: 1,
+		`SELECT COUNT(*) FROM workflow_run WHERE id = 'run-2' AND reply_channel = 'discord' AND reply_account = 'acct' AND reply_channel_id = 'chan' AND reply_thread_id = 'topic'`:                           1,
+		`SELECT COUNT(*) FROM usage_reservation WHERE id = 'r-1' AND principal_id IS NULL AND principal_class = 'public'`:                                                                                     1,
 	} {
 		if got := countRows(t, db, query); got != expect {
 			t.Errorf("%s = %d, want %d", query, got, expect)
@@ -576,16 +576,18 @@ func TestErasingTheOwnerOfAProposalsSessionSucceeds(t *testing.T) {
 		t.Fatalf("counts = %v, want 2 approvals and 1 session", report.Lines())
 	}
 	for query, expect := range map[string]int{
-		`SELECT COUNT(*) FROM workflow_proposal WHERE session_id = '` + thread + `'`:                  0,
-		`SELECT COUNT(*) FROM workflow_approval WHERE proposal_id IN ('prop-free', 'prop-used')`:      0,
-		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'unreferenced'`:                          0,
-		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'referenced'`:                            1,
-		`SELECT COUNT(*) FROM workflow_run WHERE id = 'run-done'`:                                     1,
-		`SELECT COUNT(*) FROM workflow_approval WHERE kind = 'routine' AND definition_id = 'routine'`: 1,
-		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'routine'`:                               1,
-		`SELECT COUNT(*) FROM workflow_proposal WHERE id = 'prop-elsewhere'`:                          1,
-		`SELECT COUNT(*) FROM workflow_approval WHERE proposal_id = 'prop-elsewhere'`:                 1,
-		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'routine-copy'`:                          1,
+		`SELECT COUNT(*) FROM workflow_proposal WHERE session_id = '` + thread + `'`:                                                                                                          0,
+		`SELECT COUNT(*) FROM workflow_proposal WHERE reply_channel IS NOT NULL`:                                                                                                              1,
+		`SELECT COUNT(*) FROM workflow_proposal WHERE id = 'prop-elsewhere' AND reply_channel = 'telegram' AND reply_account = 'pocket' AND reply_channel_id = '5' AND reply_thread_id = '7'`: 1,
+		`SELECT COUNT(*) FROM workflow_approval WHERE proposal_id IN ('prop-free', 'prop-used')`:                                                                                              0,
+		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'unreferenced'`:                                                                                                                  0,
+		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'referenced'`:                                                                                                                    1,
+		`SELECT COUNT(*) FROM workflow_run WHERE id = 'run-done'`:                                                                                                                             1,
+		`SELECT COUNT(*) FROM workflow_approval WHERE kind = 'routine' AND definition_id = 'routine'`:                                                                                         1,
+		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'routine'`:                                                                                                                       1,
+		`SELECT COUNT(*) FROM workflow_proposal WHERE id = 'prop-elsewhere'`:                                                                                                                  1,
+		`SELECT COUNT(*) FROM workflow_approval WHERE proposal_id = 'prop-elsewhere'`:                                                                                                         1,
+		`SELECT COUNT(*) FROM workflow_definition WHERE id = 'routine-copy'`:                                                                                                                  1,
 	} {
 		if got := countRows(t, db, query); got != expect {
 			t.Errorf("%s = %d, want %d", query, got, expect)

@@ -78,9 +78,9 @@ func TestConversationSessionPointerCascadesAndRejectsUnknownSessions(t *testing.
 
 func TestConversationSessionBaselineSchemaAndForeignKeys(t *testing.T) {
 	ctx := t.Context()
-	migrations, err := sqlite.Baseline(Schema())
+	migrations, err := sqlite.History(Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	seedPersonaSession(t, db, "main/discord:owner/dm:111", "local-owner", "main")

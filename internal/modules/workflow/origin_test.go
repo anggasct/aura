@@ -47,7 +47,7 @@ func TestCompletionOutboxClaimsOnceAndRetriesWithinTheCap(t *testing.T) {
 	if err := disk.SaveDefinition(t.Context(), spec); err != nil {
 		t.Fatal(err)
 	}
-	origin := RunOrigin{PrincipalID: "discord:111", PrincipalClass: "public", AgentID: "lobby", SessionID: "lobby/discord:111/dm", ReplyAccount: "front", ReplyChannelID: "333"}
+	origin := RunOrigin{PrincipalID: "discord:111", PrincipalClass: "public", AgentID: "lobby", SessionID: "lobby/discord:111/dm", Reply: ReplyTarget{Channel: "discord", Account: "front", ChannelID: "333"}}
 	tool, err := disk.newRun(t.Context(), spec, &RunInput{}, &origin)
 	if err != nil {
 		t.Fatal(err)
@@ -108,7 +108,7 @@ var originDrivers = []struct {
 }
 
 func toolStartedOrigin() *RunOrigin {
-	return &RunOrigin{PrincipalID: "discord:111", PrincipalClass: "public", AgentID: "lobby", SessionID: "lobby/discord:111/dm", ReplyAccount: "front", ReplyChannelID: "333", Tainted: true}
+	return &RunOrigin{PrincipalID: "discord:111", PrincipalClass: "public", AgentID: "lobby", SessionID: "lobby/discord:111/dm", Reply: ReplyTarget{Channel: "discord", Account: "front", ChannelID: "333"}, Tainted: true}
 }
 
 func countRuns(t *testing.T, disk *Store) int {
