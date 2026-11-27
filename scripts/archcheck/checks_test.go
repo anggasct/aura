@@ -449,8 +449,9 @@ func TestAllowListAntiResurrection(t *testing.T) {
 }
 
 type typedFixture struct {
-	dir    string
-	source string
+	dir     string
+	source  string
+	foreign string
 }
 
 type fixtureImporter map[string]*types.Package
@@ -473,7 +474,7 @@ func typedSources(t *testing.T, fixtures ...typedFixture) []sourcePackage {
 		if err != nil {
 			t.Fatalf("parse fixture %s: %v", fixture.dir, err)
 		}
-		source := sourcePackage{path: fixture.dir, name: name, files: []*ast.File{file}, fset: fset}
+		source := sourcePackage{path: fixture.dir, name: name, files: []*ast.File{file}, current: []*ast.File{file}, fset: fset}
 		for _, spec := range file.Imports {
 			source.imports = append(source.imports, relativePath(strings.Trim(spec.Path.Value, `"`)))
 		}
@@ -482,6 +483,13 @@ func typedSources(t *testing.T, fixtures ...typedFixture) []sourcePackage {
 			t.Fatalf("type-check fixture %s: %v", fixture.dir, err)
 		}
 		imp[modulePath+"/"+fixture.dir] = checked
+		if fixture.foreign != "" {
+			other, err := parser.ParseFile(fset, name+"_other.go", "package "+name+"\n"+fixture.foreign, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatalf("parse the other-platform file of %s: %v", fixture.dir, err)
+			}
+			source.files = append(source.files, other)
+		}
 		sources = append(sources, source)
 	}
 	return sources
@@ -499,8 +507,28 @@ func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
 		source string
 		extra  []typedFixture
 		alone  bool
+		other  string
 		want   []string
 	}{
+		{
+			name:   "an other-platform file importing a package this platform cannot resolve",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+			other:  "import _ \"example.invalid/only/on/another/os\"\n",
+		},
+		{
+			name:   "an other-platform file that sets an owned field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+			other:  "import \"example.invalid/only/on/another/os\"\nvar d = os.Definition{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Operation in a file for another platform outside internal/platform/operation"},
+		},
+		{
+			name:   "an other-platform file that sets no owned field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+			other:  "var name = \"windows\"\n",
+		},
 		{
 			name:   "a literal with an operation outside the operation package",
 			dir:    "internal/modules/widget",
@@ -619,7 +647,7 @@ func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			fixtures := []typedFixture{{dir: tc.dir, source: tc.source}}
+			fixtures := []typedFixture{{dir: tc.dir, source: tc.source, foreign: tc.other}}
 			if !tc.alone {
 				fixtures = append(append([]typedFixture{toolsFixture}, tc.extra...), fixtures...)
 			}
@@ -652,6 +680,30 @@ func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
 			t.Fatal("a package that names an Operation field is not a candidate")
 		}
 	})
+	t.Run("a file for another platform is not type-checked", func(t *testing.T) {
+		t.Parallel()
+		fset := token.NewFileSet()
+		built, err := parser.ParseFile(fset, "widget.go", "package widget\nvar d = 1\n", parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		other, err := parser.ParseFile(fset, "widget_other.go", "package widget\nimport _ \"example.invalid/only/on/another/os\"\n", parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		source := sourcePackage{path: "internal/modules/widget", name: "widget", imports: []string{toolsPackage}, files: []*ast.File{built, other}, current: []*ast.File{built}, fset: fset}
+		load := func(context.Context) (map[string]string, error) { return map[string]string{}, nil }
+		if err := typeOperationCandidates(t.Context(), []sourcePackage{source}, load); err != nil {
+			t.Fatalf("typeOperationCandidates = %v, want the other-platform import ignored", err)
+		}
+	})
+	t.Run("only the current build's files are listed as type-checkable", func(t *testing.T) {
+		t.Parallel()
+		listed := listedPackage{Dir: "/repo/pkg", GoFiles: []string{"a.go", "a_test.go"}, CgoFiles: []string{"c.go"}, IgnoredGoFiles: []string{"b_windows.go"}}
+		if got, want := builtFiles(&listed), []string{"/repo/pkg/a.go", "/repo/pkg/c.go"}; !slices.Equal(got, want) {
+			t.Fatalf("builtFiles = %q, want %q", got, want)
+		}
+	})
 	t.Run("an export that cannot be imported fails the run", func(t *testing.T) {
 		t.Parallel()
 		fset := token.NewFileSet()
@@ -659,7 +711,7 @@ func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
 		if err != nil {
 			t.Fatalf("parse: %v", err)
 		}
-		source := sourcePackage{path: "internal/modules/widget", name: "widget", imports: []string{toolsPackage}, files: []*ast.File{file}, fset: fset}
+		source := sourcePackage{path: "internal/modules/widget", name: "widget", imports: []string{toolsPackage}, files: []*ast.File{file}, current: []*ast.File{file}, fset: fset}
 		load := func(context.Context) (map[string]string, error) { return map[string]string{}, nil }
 		if err := typeOperationCandidates(t.Context(), []sourcePackage{source}, load); err == nil {
 			t.Fatal("typeOperationCandidates accepted a package whose imports have no export data")

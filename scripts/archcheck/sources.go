@@ -15,6 +15,7 @@ type sourcePackage struct {
 	name    string
 	imports []string
 	files   []*ast.File
+	current []*ast.File
 	fset    *token.FileSet
 	info    *types.Info
 }
@@ -35,6 +36,9 @@ func parseSources(packages []repoPackage) ([]sourcePackage, error) {
 				return nil, fmt.Errorf("parse %s: %w", path, err)
 			}
 			source.files = append(source.files, file)
+			if slices.Contains(pkg.built, path) {
+				source.current = append(source.current, file)
+			}
 		}
 		if source.name == "" && len(source.files) > 0 {
 			source.name = source.files[0].Name.Name

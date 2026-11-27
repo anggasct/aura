@@ -104,7 +104,7 @@ func typeCheck(pkg *sourcePackage, imp types.Importer) (*types.Package, error) {
 			}
 		},
 	}
-	checked, _ := config.Check(modulePath+"/"+pkg.path, pkg.fset, pkg.files, pkg.info)
+	checked, _ := config.Check(modulePath+"/"+pkg.path, pkg.fset, pkg.current, pkg.info)
 	if len(unresolved) > 0 {
 		return nil, fmt.Errorf("type-check %s: %w", pkg.path, errors.Join(unresolved...))
 	}
@@ -145,6 +145,12 @@ func findOperationDefinitions(packages []sourcePackage) []string {
 			continue
 		}
 		for _, file := range pkg.files {
+			if !slices.Contains(pkg.current, file) {
+				for _, field := range foreignWrites(file) {
+					violations = append(violations, fmt.Sprintf("operation-definitions: %s sets %s in a file for another platform outside %s", pkg.path, field, operationPackage))
+				}
+				continue
+			}
 			for _, field := range definitionWrites(pkg.info, file) {
 				violations = append(violations, fmt.Sprintf("operation-definitions: %s sets Definition.%s outside %s", pkg.path, field, operationPackage))
 			}
@@ -156,7 +162,17 @@ func findOperationDefinitions(packages []sourcePackage) []string {
 	return uniqueSorted(violations)
 }
 
+func foreignWrites(file *ast.File) []string {
+	return writtenFields(file, func(name *ast.Ident) bool { return isOperationOwned(name.Name) })
+}
+
 func definitionWrites(info *types.Info, file *ast.File) []string {
+	return writtenFields(file, func(name *ast.Ident) bool {
+		return isOperationOwned(name.Name) && isDefinitionField(info.Uses[name])
+	})
+}
+
+func writtenFields(file *ast.File, owned func(name *ast.Ident) bool) []string {
 	var fields []string
 	record := func(expr ast.Expr) {
 		var name *ast.Ident
@@ -166,7 +182,7 @@ func definitionWrites(info *types.Info, file *ast.File) []string {
 		case *ast.SelectorExpr:
 			name = node.Sel
 		}
-		if name != nil && isOperationOwned(name.Name) && isDefinitionField(info.Uses[name]) {
+		if name != nil && owned(name) {
 			fields = append(fields, name.Name)
 		}
 	}
