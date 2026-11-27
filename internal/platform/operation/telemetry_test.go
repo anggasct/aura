@@ -131,7 +131,7 @@ func TestOperationTelemetry(t *testing.T) {
 
 func TestOperationTelemetryCountsBrokerCalls(t *testing.T) {
 	observed := newObservedInvocations(t)
-	outcome := observed.rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.Change), sensitiveSubject))
+	outcome := observed.rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.Change), sensitiveSubject))
 	if outcome.Err != nil {
 		t.Fatalf("Execute: %v", outcome.Err)
 	}

@@ -38,7 +38,7 @@ func runLegacyCall(t *testing.T, options *operationtest.Options) legacyRun {
 	definition := legacyDefinition()
 	options.Tools = operationtest.LegacyTools(&definition)
 	rig := operationtest.NewRig(t, options)
-	request := operationtest.Request(legacyTool, "a")
+	request := operationtest.Request(t, legacyTool, "a")
 	var run legacyRun
 	key := hosted.Start(t, func(ctx context.Context, inv durable.Invocation) error {
 		run.outcome = rig.Execute(operationtest.InTurn(ctx, inv), request)

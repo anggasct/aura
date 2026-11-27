@@ -49,7 +49,7 @@ func TestOperationCallReplaysOnDurableTurn(t *testing.T) {
 	db := operationtest.OpenDatabase(t)
 	hosted := operationtest.StartHosted(t, db)
 	rig := operationtest.NewRig(t, &operationtest.Options{DB: db})
-	request := operationtest.Request(operationtest.ToolOf(operationtest.Delete), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Delete), "a")
 	var recorded recordedOutcomes
 	called := make(chan struct{})
 	signal := closeOnce(called)
@@ -88,7 +88,7 @@ func TestKilledAfterCommitReplaysOnce(t *testing.T) {
 	db := operationtest.OpenDatabase(t)
 	hosted := operationtest.StartHosted(t, db)
 	rig := operationtest.NewRig(t, &operationtest.Options{DB: db})
-	request := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 	committed := make(chan struct{})
 	signal := closeOnce(committed)
 	rig.Stubs.AfterCommit(operationtest.Change, func(ctx context.Context, _ *operation.Call) error {
@@ -127,7 +127,7 @@ func TestPreemptedInvocationDoesNotRunTwice(t *testing.T) {
 	db := operationtest.OpenDatabase(t)
 	hosted := operationtest.StartHosted(t, db)
 	rig := operationtest.NewRig(t, &operationtest.Options{DB: db})
-	request := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	finished := make(chan struct{})

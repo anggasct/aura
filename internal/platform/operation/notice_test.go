@@ -14,7 +14,7 @@ import (
 func TestOwnerNoticeRunsWithoutACardThroughItsRateLimit(t *testing.T) {
 	rig := operationtest.NewRig(t, nil)
 
-	outcome := rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.Notice), "hello"))
+	outcome := rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.Notice), "hello"))
 
 	if outcome.Class != toolbroker.ResultOK {
 		t.Fatalf("outcome = %+v, want ok", outcome)
@@ -52,7 +52,7 @@ func TestOwnerNoticeOverItsRateLimitNeverRuns(t *testing.T) {
 		}
 	})
 	t.Run("through the broker", func(t *testing.T) {
-		outcome := rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.Notice), "hello"))
+		outcome := rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.Notice), "hello"))
 		if outcome.Class != toolbroker.ResultExecutionFailed {
 			t.Fatalf("outcome = %+v, want execution_failed", outcome)
 		}

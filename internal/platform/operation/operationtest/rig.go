@@ -181,10 +181,11 @@ func (r *Rig) Execute(ctx context.Context, request *toolbroker.ToolRequest) Outc
 	return OutcomeOf(&result, err)
 }
 
-func Request(tool, subject string) *toolbroker.ToolRequest {
+func Request(tb testing.TB, tool, subject string) *toolbroker.ToolRequest {
+	tb.Helper()
 	arguments, err := json.Marshal(map[string]string{"subject": subject})
 	if err != nil {
-		panic(err)
+		tb.Fatalf("encode the arguments: %v", err)
 	}
 	return &toolbroker.ToolRequest{
 		RequestID: "call-1", TurnID: "turn-1", SessionID: SessionID,

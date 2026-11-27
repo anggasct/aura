@@ -31,7 +31,7 @@ func killedHook(reached chan<- struct{}) operationtest.Hook {
 
 func killCall(t *testing.T, rig *operationtest.Rig, id string, point killPoint) *toolbroker.ToolRequest {
 	t.Helper()
-	request := operationtest.Request(operationtest.ToolOf(id), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(id), "a")
 	reached := make(chan struct{})
 	if point == killAfterCommit {
 		rig.Stubs.AfterCommit(id, killedHook(reached))
@@ -180,7 +180,7 @@ func TestResumeLeavesAnOldTransactionalCallForTheOwner(t *testing.T) {
 
 func TestDuplicateCallWhileOriginalRunsWaits(t *testing.T) {
 	rig := operationtest.NewRig(t, nil)
-	request := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 	entered := make(chan struct{})
 	release := make(chan struct{})
 	var once sync.Once
@@ -223,7 +223,7 @@ func TestDuplicateCallWhileOriginalRunsWaits(t *testing.T) {
 
 func TestDuplicateCallGivesUpAtItsDeadline(t *testing.T) {
 	rig := operationtest.NewRig(t, nil)
-	request := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 	entered := make(chan struct{})
 	var once sync.Once
 	rig.Stubs.BeforeCommit(operationtest.Change, func(ctx context.Context, _ *operation.Call) error {

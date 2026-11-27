@@ -128,7 +128,7 @@ func TestChangeHandlerMustCommit(t *testing.T) {
 	t.Run("through the broker the intent fails and nothing is written", func(t *testing.T) {
 		rig := operationtest.NewRig(t, nil)
 		rig.Stubs.SkipCommit(operationtest.Change)
-		request := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+		request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 		outcome := rig.Execute(t.Context(), request)
 		if outcome.Class != toolbroker.ResultExecutionFailed {
 			t.Fatalf("outcome = %+v, want execution_failed", outcome)
@@ -144,7 +144,7 @@ func TestChangeHandlerMustCommit(t *testing.T) {
 	t.Run("a handler error before Commit fails the intent definitively", func(t *testing.T) {
 		rig := operationtest.NewRig(t, nil)
 		rig.Stubs.FailWith(operationtest.Change, operation.Fail(effect.ErrorCodeNotFound, errBoom))
-		outcome := rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.Change), "a"))
+		outcome := rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a"))
 		if outcome.Class != toolbroker.ResultExecutionFailed {
 			t.Fatalf("outcome = %+v, want execution_failed", outcome)
 		}
@@ -156,7 +156,7 @@ func TestChangeHandlerMustCommit(t *testing.T) {
 	t.Run("a handler error from an external operation leaves the intent unknown", func(t *testing.T) {
 		rig := operationtest.NewRig(t, nil)
 		rig.Stubs.FailWith(operationtest.External, errBoom)
-		outcome := rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.External), "a"))
+		outcome := rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.External), "a"))
 		if outcome.Class != toolbroker.ResultExecutionFailed {
 			t.Fatalf("outcome = %+v, want execution_failed", outcome)
 		}
@@ -266,11 +266,11 @@ func TestGeneratedToolsCarryTheirDefinition(t *testing.T) {
 
 func TestOperationToolsRunThroughTheBroker(t *testing.T) {
 	rig := operationtest.NewRig(t, nil)
-	outcome := rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.Read), "a"))
+	outcome := rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.Read), "a"))
 	if outcome.Class != toolbroker.ResultOK || outcome.Output != `{"done":true,"operation":"stub.read"}` {
 		t.Fatalf("read outcome = %+v, want ok with the handler's data", outcome)
 	}
-	changed := rig.Execute(t.Context(), operationtest.Request(operationtest.ToolOf(operationtest.Change), "a"))
+	changed := rig.Execute(t.Context(), operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a"))
 	if changed.Class != toolbroker.ResultOK {
 		t.Fatalf("change outcome = %+v, want ok", changed)
 	}
@@ -280,7 +280,7 @@ func TestOperationToolsRunThroughTheBroker(t *testing.T) {
 	if n := receiptCount(t, rig); n != 1 {
 		t.Errorf("receipts = %d, want the change's one receipt", n)
 	}
-	invalid := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+	invalid := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 	invalid.Arguments = json.RawMessage(`{"subject":"a","extra":1}`)
 	if rejected := rig.Execute(t.Context(), invalid); rejected.Class != toolbroker.ResultInvalidArgument {
 		t.Errorf("unknown argument outcome = %+v, want invalid_argument", rejected)
@@ -289,7 +289,7 @@ func TestOperationToolsRunThroughTheBroker(t *testing.T) {
 
 func TestOperationReplayOnANonDurableTurnReturnsTheRecordedResult(t *testing.T) {
 	rig := operationtest.NewRig(t, nil)
-	request := operationtest.Request(operationtest.ToolOf(operationtest.Change), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
 	first := rig.Execute(t.Context(), request)
 	again := rig.Execute(t.Context(), request)
 	if first.Class != toolbroker.ResultOK || first != again {
