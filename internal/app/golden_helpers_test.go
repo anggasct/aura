@@ -8,7 +8,7 @@ import (
 
 func compareAppGolden(t *testing.T, name, got string) {
 	t.Helper()
-	path := filepath.Join("..", "..", "testdata", "golden", name)
+	path := filepath.Join("testdata", "golden", name)
 	if *updateGolden {
 		if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
 			t.Fatalf("write %s: %v", path, err)
