@@ -30,13 +30,13 @@ func parseSources(packages []repoPackage) ([]sourcePackage, error) {
 	for index := range packages {
 		pkg := &packages[index]
 		source := sourcePackage{path: pkg.path, name: pkg.name, imports: pkg.productionImports, fset: fset}
-		for _, path := range pkg.files {
-			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		for _, listed := range pkg.files {
+			file, err := parser.ParseFile(fset, listed.path, nil, parser.SkipObjectResolution)
 			if err != nil {
-				return nil, fmt.Errorf("parse %s: %w", path, err)
+				return nil, fmt.Errorf("parse %s: %w", listed.path, err)
 			}
 			source.files = append(source.files, file)
-			if slices.Contains(pkg.built, path) {
+			if listed.built {
 				source.current = append(source.current, file)
 			}
 		}

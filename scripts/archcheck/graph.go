@@ -33,8 +33,12 @@ type repoPackage struct {
 	name              string
 	imports           []string
 	productionImports []string
-	files             []string
-	built             []string
+	files             []packageFile
+}
+
+type packageFile struct {
+	path  string
+	built bool
 }
 
 type repository struct {
@@ -70,7 +74,6 @@ func (repo *repository) newPackage(p *listedPackage) repoPackage {
 		imports:           slices.Concat(production, repo.moduleImports(p.TestImports), repo.moduleImports(p.XTestImports)),
 		productionImports: production,
 		files:             productionFiles(p),
-		built:             builtFiles(p),
 	}
 }
 
@@ -88,21 +91,16 @@ func (repo *repository) moduleImports(imports []string) []string {
 	return result
 }
 
-func productionFiles(p *listedPackage) []string {
-	var files []string
-	for _, name := range slices.Concat(p.GoFiles, p.CgoFiles, p.IgnoredGoFiles) {
-		if !strings.HasSuffix(name, "_test.go") {
-			files = append(files, filepath.Join(p.Dir, name))
-		}
-	}
-	return files
-}
-
-func builtFiles(p *listedPackage) []string {
-	var files []string
+func productionFiles(p *listedPackage) []packageFile {
+	var files []packageFile
 	for _, name := range slices.Concat(p.GoFiles, p.CgoFiles) {
 		if !strings.HasSuffix(name, "_test.go") {
-			files = append(files, filepath.Join(p.Dir, name))
+			files = append(files, packageFile{path: filepath.Join(p.Dir, name), built: true})
+		}
+	}
+	for _, name := range p.IgnoredGoFiles {
+		if !strings.HasSuffix(name, "_test.go") {
+			files = append(files, packageFile{path: filepath.Join(p.Dir, name)})
 		}
 	}
 	return files

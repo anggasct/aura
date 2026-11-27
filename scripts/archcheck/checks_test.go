@@ -246,11 +246,25 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 	}
 	t.Run("test files are not production sources", func(t *testing.T) {
 		t.Parallel()
-		listed := listedPackage{Dir: "/repo/pkg", GoFiles: []string{"a.go"}, IgnoredGoFiles: []string{"b_windows.go", "a_test.go"}}
+		listed := listedPackage{Dir: "/repo/pkg", GoFiles: []string{"a.go", "a_test.go"}, CgoFiles: []string{"c.go"}, IgnoredGoFiles: []string{"b_windows.go", "a_test.go"}}
 		got := productionFiles(&listed)
-		want := []string{"/repo/pkg/a.go", "/repo/pkg/b_windows.go"}
+		want := []packageFile{{path: "/repo/pkg/a.go", built: true}, {path: "/repo/pkg/c.go", built: true}, {path: "/repo/pkg/b_windows.go"}}
 		if !slices.Equal(got, want) {
-			t.Fatalf("productionFiles = %q, want %q", got, want)
+			t.Fatalf("productionFiles = %v, want %v", got, want)
+		}
+	})
+	t.Run("only built files are type-checkable", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		built, other := filepath.Join(dir, "a.go"), filepath.Join(dir, "a_other.go")
+		for _, name := range []string{built, other} {
+			if err := os.WriteFile(name, []byte("package a\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sources, err := parseSources([]repoPackage{{path: "internal/a", files: []packageFile{{path: built, built: true}, {path: other}}}})
+		if err != nil || len(sources) != 1 || len(sources[0].files) != 2 || len(sources[0].current) != 1 {
+			t.Fatalf("parseSources = %+v, %v; want two files of which one is current", sources, err)
 		}
 	})
 	t.Run("an unparsable file fails with its path", func(t *testing.T) {
@@ -259,7 +273,7 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 		if err := os.WriteFile(broken, []byte("package broken\nfunc ("), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := parseSources([]repoPackage{{path: "internal/broken", files: []string{broken}}})
+		_, err := parseSources([]repoPackage{{path: "internal/broken", files: []packageFile{{path: broken}}}})
 		if err == nil || !strings.Contains(err.Error(), broken) {
 			t.Fatalf("parseSources error = %v, want one naming %s", err, broken)
 		}
@@ -695,13 +709,6 @@ func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
 		load := func(context.Context) (map[string]string, error) { return map[string]string{}, nil }
 		if err := typeOperationCandidates(t.Context(), []sourcePackage{source}, load); err != nil {
 			t.Fatalf("typeOperationCandidates = %v, want the other-platform import ignored", err)
-		}
-	})
-	t.Run("only the current build's files are listed as type-checkable", func(t *testing.T) {
-		t.Parallel()
-		listed := listedPackage{Dir: "/repo/pkg", GoFiles: []string{"a.go", "a_test.go"}, CgoFiles: []string{"c.go"}, IgnoredGoFiles: []string{"b_windows.go"}}
-		if got, want := builtFiles(&listed), []string{"/repo/pkg/a.go", "/repo/pkg/c.go"}; !slices.Equal(got, want) {
-			t.Fatalf("builtFiles = %q, want %q", got, want)
 		}
 	})
 	t.Run("an export that cannot be imported fails the run", func(t *testing.T) {
