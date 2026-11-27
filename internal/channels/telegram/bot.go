@@ -248,6 +248,7 @@ type linkPreviewOptions struct {
 type sendMessageRequest struct {
 	ChatID             int64               `json:"chat_id"`
 	Text               string              `json:"text"`
+	Entities           []messageEntity     `json:"entities,omitempty"`
 	ParseMode          string              `json:"parse_mode,omitempty"`
 	ReplyParameters    *replyParameters    `json:"reply_parameters,omitempty"`
 	MessageThreadID    int64               `json:"message_thread_id,omitempty"`

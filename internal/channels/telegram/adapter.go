@@ -167,10 +167,11 @@ type Adapter struct {
 	identity        atomic.Pointer[botIdentity]
 	identityRefresh chan struct{}
 
-	approvals *approval.Registry
-	targetsMu sync.Mutex
-	targets   map[string]approvalTarget
-	commands  *command.Dispatcher
+	approvals   *approval.Registry
+	proposalTTL time.Duration
+	targetsMu   sync.Mutex
+	targets     map[string]approvalTarget
+	commands    *command.Dispatcher
 
 	secretVault   *secret.Vault
 	presenceMu    sync.Mutex
@@ -250,6 +251,7 @@ func New(deps *Deps) (*Adapter, error) {
 		presence:    map[string]*presenceSession{},
 		holds:       map[int64]time.Time{},
 		approvals:   approvals,
+		proposalTTL: approval.ProposalCardTTL,
 		targets:     map[string]approvalTarget{},
 		commands:    deps.Commands,
 		secretVault: deps.SecretVault,

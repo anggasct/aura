@@ -20,6 +20,14 @@ type approvalTarget struct {
 	dest    destination
 }
 
+type cardRequest struct {
+	binding   *approval.Binding
+	dest      destination
+	text      string
+	entities  []messageEntity
+	expiresAt time.Time
+}
+
 type openedCard struct {
 	tokenID   string
 	pending   *approval.Pending
@@ -115,7 +123,7 @@ func (a *Adapter) decideInChat(ctx context.Context, prompt *approval.Prompt, tar
 		a.logger.WarnContext(ctx, "approval token unavailable", "component", "telegram", "account", a.account.Name)
 		return false, ctx.Err()
 	}
-	card, err := a.openCard(ctx, token, &target.binding, target.dest, approval.RenderCard(prompt, "", nil), expiresAt)
+	card, err := a.openCard(ctx, token, &cardRequest{binding: &target.binding, dest: target.dest, text: approval.RenderCard(prompt, "", nil), expiresAt: expiresAt})
 	if err != nil {
 		a.logger.WarnContext(ctx, "approval card delivery failed", "component", "telegram", "account", a.account.Name)
 		return false, ctx.Err()
@@ -158,7 +166,7 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		Standing:  approval.OffersStandingGrant(prompt, requester.binding.Class, approval.StandingOffer{Grants: a.access.Grants, TTL: a.access.StandingGrantTTL}),
 	}
 	text := approval.RenderCard(prompt, approval.PersonaLabel(definition.ID, definition.Name), nil)
-	card, err := a.openCard(ctx, token, &binding, ownerDest, text, expiresAt)
+	card, err := a.openCard(ctx, token, &cardRequest{binding: &binding, dest: ownerDest, text: text, expiresAt: expiresAt})
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, approvalUnavailable("owner approval card delivery failed")
@@ -198,12 +206,12 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 	}
 }
 
-func (a *Adapter) openCard(ctx context.Context, token string, binding *approval.Binding, dest destination, text string, expiresAt time.Time) (openedCard, error) {
-	tokenID, pending, err := a.approvals.Issue(binding, expiresAt)
+func (a *Adapter) openCard(ctx context.Context, token string, card *cardRequest) (openedCard, error) {
+	tokenID, pending, err := a.approvals.Issue(card.binding, card.expiresAt)
 	if err != nil {
 		return openedCard{}, err
 	}
-	callbacks := a.approvals.Callbacks(tokenID, binding, expiresAt)
+	callbacks := a.approvals.Callbacks(tokenID, card.binding, card.expiresAt)
 	row := []inlineButton{{Text: "Approve", CallbackData: callbacks.Approve}}
 	if callbacks.Standing != "" {
 		row = append(row, inlineButton{Text: approval.StandingGrantLabel(a.access.StandingGrantTTL), CallbackData: callbacks.Standing})
@@ -212,21 +220,29 @@ func (a *Adapter) openCard(ctx context.Context, token string, binding *approval.
 	call, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	sent, err := a.bot.sendMessage(call, token, &sendMessageRequest{
-		ChatID:             dest.chatID,
-		MessageThreadID:    dest.threadID,
-		Text:               text,
+		ChatID:             card.dest.chatID,
+		MessageThreadID:    card.dest.threadID,
+		Text:               card.text,
+		Entities:           card.entities,
 		ReplyMarkup:        &inlineKeyboard{Rows: [][]inlineButton{row}},
 		LinkPreviewOptions: previewsDisabled(),
 	})
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)
-		return openedCard{}, err
+		return openedCard{}, cardSendError(err)
 	}
 	if sent.MessageID == 0 {
 		a.approvals.Drop(tokenID, pending)
 		return openedCard{}, deliveryAmbiguous("approval card post has no message id")
 	}
-	return openedCard{tokenID: tokenID, pending: pending, dest: dest, messageID: sent.MessageID}, nil
+	return openedCard{tokenID: tokenID, pending: pending, dest: card.dest, messageID: sent.MessageID}, nil
+}
+
+func cardSendError(err error) error {
+	if _, rejected := apiErrorOf(err); rejected || isDialError(err) {
+		return err
+	}
+	return deliveryAmbiguous("approval card send outcome is unknown")
 }
 
 func (a *Adapter) awaitApproval(ctx context.Context, token string, card *openedCard) (approval.Outcome, bool, error) {
