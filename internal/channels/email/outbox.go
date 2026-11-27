@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -76,17 +78,58 @@ type EffectRecoverer interface {
 	RecoverProvider(ctx context.Context, provider string) (effect.RecoveryReport, error)
 }
 
-func RecoverEffects(ctx context.Context, journal EffectRecoverer, logger *slog.Logger) error {
-	if journal == nil {
+type RecoveryDeps struct {
+	Journal EffectRecoverer
+	Logger  *slog.Logger
+	Clock   durable.Clock
+}
+
+func (d *RecoveryDeps) validate() error {
+	if d == nil || d.Journal == nil {
 		return fault.New(ErrorCodeInvalidArgument, "effect journal must not be nil")
 	}
-	if logger == nil {
-		logger = slog.Default()
+	if d.Clock == nil {
+		return fault.New(ErrorCodeInvalidArgument, "recovery clock must not be nil")
 	}
-	report, err := journal.RecoverProvider(ctx, ProviderName)
-	if err != nil {
-		return fmt.Errorf("recover email effects: %w", err)
-	}
-	logger.InfoContext(ctx, "email effects recovered", "component", "email", "scanned", report.Scanned, "claimed", report.Claimed)
 	return nil
+}
+
+func (d *RecoveryDeps) pass(ctx context.Context) (effect.RecoveryReport, error) {
+	report, err := d.Journal.RecoverProvider(ctx, ProviderName)
+	if err != nil {
+		return report, fmt.Errorf("recover email effects: %w", err)
+	}
+	d.logger().InfoContext(ctx, "email effects recovered", "component", "email", "scanned", report.Scanned, "claimed", report.Claimed)
+	return report, nil
+}
+
+func (d *RecoveryDeps) logger() *slog.Logger {
+	if d.Logger == nil {
+		return slog.Default()
+	}
+	return d.Logger
+}
+
+func RecoverEffects(ctx context.Context, deps *RecoveryDeps) (time.Time, error) {
+	if err := deps.validate(); err != nil {
+		return time.Time{}, err
+	}
+	report, err := deps.pass(ctx)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return report.RetryAt, nil
+}
+
+func RecoverEffectsAt(ctx context.Context, deps *RecoveryDeps, retryAt time.Time) error {
+	if err := deps.validate(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-deps.Clock.Timer(retryAt.Sub(deps.Clock.Now())):
+	}
+	_, err := deps.pass(ctx)
+	return err
 }

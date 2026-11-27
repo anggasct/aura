@@ -1176,8 +1176,14 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 	if err != nil {
 		return toolWiring{}, err
 	}
-	if err := recoverEmailEffects(ctx, cfg, db, b.logger); err != nil {
+	emailRetry, err := recoverEmailEffects(ctx, cfg, db, b.logger)
+	if err != nil {
 		return toolWiring{}, err
+	}
+	if emailRetry.pending() {
+		if err := b.group.Add(server.Background("email_effect_recovery", emailRetry.run)); err != nil {
+			return toolWiring{}, err
+		}
 	}
 	commandRecorder, err := telemetry.NewCommandRecorder(b.pipeline.TracerProvider(), meters)
 	if err != nil {
