@@ -132,3 +132,46 @@ func TestInterpreterResolvesStoredDefinitionsItDidNotLoad(t *testing.T) {
 		t.Fatalf("driving a stored generated definition = %s, %v", terminal, err)
 	}
 }
+
+func TestRenderPlanAgentStep(t *testing.T) {
+	research := agentStepWith("research", func(e *ExecutorSpec) {
+		e.AgentID = ptr("researcher")
+		e.Prompt = "Find it.\nBe brief."
+		e.Tools = []string{"web_search", "web_fetch"}
+		e.Output = OutputJSON
+		e.MaxTokens = intPtr(30000)
+	})
+	summarise := withCondition(agentStepWith("summarise", func(e *ExecutorSpec) { e.Prompt = "x\x1b[2Jy" }, "research"), `steps.research.output.json.ok == true`)
+	spec := &Spec{ID: "gen_plan", Goal: "Research", Version: 1, Source: SourceGenerated, Steps: []StepSpec{research, summarise}}
+	graph := &Graph{ByStep: map[string]*StepSpec{}}
+	for index := range spec.Steps {
+		step := &spec.Steps[index]
+		graph.Order = append(graph.Order, step.ID)
+		graph.ByStep[step.ID] = step
+	}
+	plan, err := RenderPlan(spec, graph, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Join([]string{
+		"Plan: Research",
+		"1. research — ask agent researcher",
+		"    tools: web_search, web_fetch",
+		"    reads: none",
+		"    output: json",
+		"    budget: 30000 tokens",
+		"    prompt:",
+		"        Find it.",
+		"        Be brief.",
+		`2. summarise — ask agent engineer (after research) if steps.research.output.json.ok == true`,
+		"    tools: none",
+		"    reads: research",
+		"    output: text",
+		"    budget: 50000 tokens",
+		"    prompt:",
+		`        x\u{001b}[2Jy`,
+	}, "\n")
+	if plan != want {
+		t.Fatalf("plan =\n%s\nwant\n%s", plan, want)
+	}
+}

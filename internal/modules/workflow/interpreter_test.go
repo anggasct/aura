@@ -176,8 +176,8 @@ func TestInterpreterRunsMixedWorkflowEndToEnd(t *testing.T) {
 	spec := &Spec{
 		ID: "mixed", Goal: "Mixed E2E", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "implement", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("engineer")}, Timeout: 5 * time.Second},
-			{ID: "verify", DependsOn: []string{"implement"}, Executor: ExecutorSpec{Kind: KindAgent, RequiredCapabilities: []string{auraagent.CapabilityRepositoryRead}}, Timeout: 5 * time.Second},
+			{ID: "implement", Executor: agentExecutor("engineer"), Timeout: 5 * time.Second},
+			{ID: "verify", DependsOn: []string{"implement"}, Executor: agentExecutor("reviewer"), Timeout: 5 * time.Second},
 			{ID: "record", DependsOn: []string{"verify"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: &tool}, Timeout: 5 * time.Second},
 			{ID: "approve", DependsOn: []string{"record"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 			{
@@ -253,7 +253,7 @@ func TestInterpreterSkipsDownstreamOnFalseCondition(t *testing.T) {
 	spec := &Spec{
 		ID: "skipflow", Goal: "Skip", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "decide", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+			{ID: "decide", Executor: agentExecutor("main"), Timeout: 5 * time.Second},
 			{
 				ID: "merge", DependsOn: []string{"decide"},
 				Condition: strPtr(`steps.decide.output.decision == "approve"`),
@@ -309,7 +309,7 @@ func testStepTimeoutRetriesThenFailsRun(t *testing.T) {
 	spec := &Spec{
 		ID: "slowflow", Goal: "Slow", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -364,7 +364,7 @@ func TestInterpreterBoundsConcurrentSteps(t *testing.T) {
 	})
 	steps := make([]StepSpec, 0, 6)
 	for _, id := range []string{"s1", "s2", "s3", "s4", "s5", "s6"} {
-		steps = append(steps, StepSpec{ID: id, Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second})
+		steps = append(steps, StepSpec{ID: id, Executor: agentExecutor("main"), Timeout: 5 * time.Second})
 	}
 	spec := &Spec{ID: "fan", Goal: "Fan", Version: 1, Source: SourceDefined, Steps: steps}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -443,7 +443,7 @@ func TestInterpreterCancelReachesCancelled(t *testing.T) {
 	spec := &Spec{
 		ID: "cancelflow", Goal: "Cancel", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Hour},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: time.Hour},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -690,7 +690,7 @@ func testTimeoutCancelsAttemptBeforeRetry(t *testing.T) {
 	spec := &Spec{
 		ID: "attemptflow", Goal: "Attempts", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: time.Minute, Retry: RetryPolicy{Attempts: 2, Backoff: time.Minute}},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -800,7 +800,7 @@ func TestInterpreterSinksOversizedOutputThroughArtifactSink(t *testing.T) {
 	spec := &Spec{
 		ID: "sinkflow", Goal: "Sink", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: 5 * time.Second},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -895,7 +895,7 @@ func TestInterpreterOversizedOutputWithoutSinkFailsTheRun(t *testing.T) {
 	spec := &Spec{
 		ID: "nosink", Goal: "No sink", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: 5 * time.Second},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -935,7 +935,7 @@ func TestInterpreterStepPersistFailureFailsTheRun(t *testing.T) {
 	spec := &Spec{
 		ID: "persistfail", Goal: "Persist fail", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: 5 * time.Second},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -972,7 +972,7 @@ func TestInterpreterSuspendedRunStaysSuspendedWhenSiblingCompletes(t *testing.T)
 		ID: "siblingflow", Goal: "Sibling", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
 			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: 5 * time.Second},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {
@@ -1021,7 +1021,7 @@ func TestInterpreterSuspendedStepReleasesConcurrencySlot(t *testing.T) {
 		ID: "slotflow", Goal: "Suspension releases the slot", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
 			{ID: "gate", Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
-			{ID: "work", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("main")}, Timeout: 5 * time.Second},
+			{ID: "work", Executor: agentExecutor("main"), Timeout: 5 * time.Second},
 		},
 	}
 	if err := interpreter.Install(ctx, []*Spec{spec}, &ValidationDeps{Agents: registry}); err != nil {

@@ -34,13 +34,16 @@ type stepFileEntry struct {
 }
 
 type executorFile struct {
-	Kind     string   `yaml:"kind"`
-	AgentID  *string  `yaml:"agent_id"`
-	Requires []string `yaml:"requires"`
-	ToolID   *string  `yaml:"tool"`
-	Args     any      `yaml:"args"`
-	Event    *string  `yaml:"event"`
-	Workflow *string  `yaml:"workflow"`
+	Kind      string   `yaml:"kind"`
+	AgentID   *string  `yaml:"agent_id"`
+	Prompt    string   `yaml:"prompt"`
+	Tools     []string `yaml:"tools"`
+	Output    string   `yaml:"output"`
+	MaxTokens *int     `yaml:"max_tokens"`
+	ToolID    *string  `yaml:"tool"`
+	Args      any      `yaml:"args"`
+	Event     *string  `yaml:"event"`
+	Workflow  *string  `yaml:"workflow"`
 }
 
 type retryFile struct {
@@ -100,7 +103,10 @@ func parseSpec(content []byte) (*Spec, error) {
 		}
 		step.Executor.Kind = Kind(entry.Executor.Kind)
 		step.Executor.AgentID = entry.Executor.AgentID
-		step.Executor.RequiredCapabilities = entry.Executor.Requires
+		step.Executor.Prompt = entry.Executor.Prompt
+		step.Executor.Tools = entry.Executor.Tools
+		step.Executor.Output = entry.Executor.Output
+		step.Executor.MaxTokens = entry.Executor.MaxTokens
 		step.Executor.ToolID = entry.Executor.ToolID
 		step.Executor.Event = entry.Executor.Event
 		step.Executor.WorkflowID = entry.Executor.Workflow

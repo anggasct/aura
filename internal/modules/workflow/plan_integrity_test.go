@@ -160,10 +160,8 @@ func TestPlanFieldsAreValidated(t *testing.T) {
 		{name: "wait event with a carriage return", mutate: func(s *Spec) { wait(s, "ci\rdone") }},
 		{name: "wait event of 129 runes", mutate: func(s *Spec) { wait(s, strings.Repeat("e", 129)) }},
 		{name: "agent id with an escape character", mutate: func(s *Spec) { s.Steps[0].Executor.AgentID = ptr("engineer\x1b[2J") }},
-		{name: "requires entry with a newline", mutate: func(s *Spec) {
-			s.Steps[0].Executor.AgentID = nil
-			s.Steps[0].Executor.RequiredCapabilities = []string{"review\n2. fake"}
-		}},
+		{name: "agent prompt with an escape character", mutate: func(s *Spec) { s.Steps[0].Executor.Prompt = "review\x1b[2J" }},
+		{name: "agent prompt with a carriage return", mutate: func(s *Spec) { s.Steps[0].Executor.Prompt = "review\r2. fake" }},
 		{name: "spec id with an uppercase letter", mutate: func(s *Spec) { s.ID = "Demo" }},
 		{name: "spec id with a dot", mutate: func(s *Spec) { s.ID = "de.mo" }},
 		{name: "spec id of 65 characters", mutate: func(s *Spec) { s.ID = "a" + strings.Repeat("b", 64) }},
@@ -216,6 +214,8 @@ func workflowStepSpec(spec *Spec, workflowID string) {
 	spec.Steps[0].Executor = ExecutorSpec{Kind: KindWorkflow, WorkflowID: &workflowID}
 }
 
+const agentPlanDetailLines = 6
+
 func TestPlanEscapesEveryField(t *testing.T) {
 	hostile := "\x1b[2J\nfake"
 	event := hostile
@@ -223,9 +223,8 @@ func TestPlanEscapesEveryField(t *testing.T) {
 	condition := "steps." + hostile + ".status == \"" + hostile + "\""
 	agent := hostile
 	spec := &Spec{ID: "demo", Goal: hostile, Version: 1, Source: SourceDefined, Steps: []StepSpec{
-		{ID: hostile + "a", Executor: ExecutorSpec{Kind: KindAgent, AgentID: &agent}, Timeout: time.Minute},
-		{ID: hostile + "b", Executor: ExecutorSpec{Kind: KindAgent, RequiredCapabilities: []string{hostile, hostile}}, Timeout: time.Minute},
-		{ID: hostile + "c", DependsOn: []string{hostile + "a", hostile + "b"}, Condition: &condition, Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute},
+		{ID: hostile + "a", Executor: ExecutorSpec{Kind: KindAgent, AgentID: &agent, Prompt: "ok"}, Timeout: time.Minute},
+		{ID: hostile + "c", DependsOn: []string{hostile + "a"}, Condition: &condition, Executor: ExecutorSpec{Kind: KindWait, Event: &event}, Timeout: time.Minute},
 		{ID: hostile + "d", DependsOn: []string{hostile + "c"}, Executor: ExecutorSpec{Kind: KindWorkflow, WorkflowID: &workflowID}, Timeout: time.Minute},
 	}}
 	graph := &Graph{ByStep: map[string]*StepSpec{}}
@@ -241,7 +240,7 @@ func TestPlanEscapesEveryField(t *testing.T) {
 	if strings.ContainsRune(plan, 0x1b) {
 		t.Fatalf("plan holds a raw escape character: %q", plan)
 	}
-	if got, want := strings.Count(plan, "\n"), len(spec.Steps); got != want {
+	if got, want := strings.Count(plan, "\n"), len(spec.Steps)+agentPlanDetailLines; got != want {
 		t.Fatalf("plan holds %d raw newlines, want %d: %q", got, want, plan)
 	}
 	lines := strings.Split(plan, "\n")
@@ -251,7 +250,7 @@ func TestPlanEscapesEveryField(t *testing.T) {
 	wantShown := []struct {
 		line int
 		want int
-	}{{1, 2}, {2, 3}, {3, 6}, {4, 3}}
+	}{{1, 2}, {8, 5}, {9, 3}}
 	for _, tc := range wantShown {
 		if got := strings.Count(lines[tc.line], `\u{001b}`); got != tc.want {
 			t.Errorf("line %d = %q holds %d escaped escape characters, want %d", tc.line, lines[tc.line], got, tc.want)

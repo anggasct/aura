@@ -9,7 +9,6 @@ import (
 	"sync"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
@@ -194,14 +193,8 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec) *stepU
 	if runner == nil || resolver == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no agent runner is wired", EndedAt: nowPtr()}
 	}
-	var resolved auraagent.Definition
-	var err error
-	if step.Executor.AgentID != nil && *step.Executor.AgentID != "" {
-		prefer := *step.Executor.AgentID
-		resolved, err = resolver.Resolve(nil, &prefer)
-	} else {
-		resolved, err = resolver.Resolve(step.Executor.RequiredCapabilities, nil)
-	}
+	prefer := deref(step.Executor.AgentID)
+	resolved, err := resolver.Resolve(nil, &prefer)
 	if err != nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: err.Error(), EndedAt: nowPtr()}
 	}

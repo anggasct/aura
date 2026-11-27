@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -44,8 +45,19 @@ func newID(prefix string) string {
 	return prefix + "-" + rand.Text()
 }
 
+func withAgentDefaults(spec *Spec) *Spec {
+	canonical := *spec
+	canonical.Steps = slices.Clone(spec.Steps)
+	for index := range canonical.Steps {
+		if canonical.Steps[index].Executor.Kind == KindAgent {
+			canonical.Steps[index].Executor.applyAgentDefaults()
+		}
+	}
+	return &canonical
+}
+
 func specJSON(spec *Spec) ([]byte, error) {
-	encoded, err := json.Marshal(spec)
+	encoded, err := json.Marshal(withAgentDefaults(spec))
 	if err != nil {
 		return nil, codedError(ErrorCodeSpecInvalid, "encode spec: "+err.Error())
 	}
