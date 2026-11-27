@@ -142,6 +142,7 @@ type Options struct {
 	ApprovalReachable    func(sessionID string) bool
 	HostCapabilities     []string
 	ArgumentChecks       map[string]ArgumentCheck
+	Clock                durable.Clock
 }
 
 type ArgumentCheck func(arguments json.RawMessage) error
@@ -163,6 +164,8 @@ type Broker struct {
 	approvalReachable    func(sessionID string) bool
 	argumentChecks       map[string]ArgumentCheck
 	previewers           map[string]Previewer
+	recoveries           map[string]Recovery
+	clock                durable.Clock
 }
 
 func New(options *Options) (*Broker, error) {
@@ -179,6 +182,10 @@ func New(options *Options) (*Broker, error) {
 	}
 	if options.MaxInlineResultBytes <= 0 {
 		options.MaxInlineResultBytes = 64 * 1024
+	}
+	clock := options.Clock
+	if clock == nil {
+		clock = durable.RealClock()
 	}
 	engine, err := approval.NewEngine(policy, func(context.Context, approval.ToolRequest, approval.Constraints) (approval.ToolResult, error) {
 		return approval.ToolResult{}, errors.New("toolbroker: direct approval handler is unavailable")
@@ -205,6 +212,8 @@ func New(options *Options) (*Broker, error) {
 		approvalReachable:    options.ApprovalReachable,
 		argumentChecks:       argumentChecks,
 		previewers:           map[string]Previewer{},
+		recoveries:           map[string]Recovery{},
+		clock:                clock,
 	}, nil
 }
 
@@ -310,10 +319,12 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 	oldDef, hadOldDef := b.definitions[key]
 	oldAdapter, hadOldAdapter := b.adapters[key]
 	oldPreviewer, hadOldPreviewer := b.previewers[key]
+	oldRecovery, hadOldRecovery := b.recoveries[key]
 
 	b.definitions[key] = &defCopy
 	b.adapters[key] = adapter
 	delete(b.previewers, key)
+	delete(b.recoveries, key)
 
 	if err := b.engine.RegisterRule(rule); err != nil {
 		if hadOldDef {
@@ -329,6 +340,9 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 		if hadOldPreviewer {
 			b.previewers[key] = oldPreviewer
 		}
+		if hadOldRecovery {
+			b.recoveries[key] = oldRecovery
+		}
 		return err
 	}
 	return nil
@@ -343,6 +357,7 @@ func (b *Broker) UnregisterTool(toolName, toolVersion string) {
 	delete(b.adapters, key)
 	delete(b.argumentChecks, key)
 	delete(b.previewers, key)
+	delete(b.recoveries, key)
 	delete(b.guards, toolName)
 	b.engine.UnregisterRule(toolName)
 }
@@ -577,10 +592,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 	if scoped {
-		result, err = b.executeDurable(ctx, slot, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: definition.Effectful, provider: providerFor(definition)})
+		result, err = b.executeDurable(ctx, slot, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: definition.Effectful, provider: providerFor(definition), recovery: b.recoveryFor(definition)})
 	} else {
 		if definition.Effectful {
-			result, err = b.executeEffect(ctx, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: true, provider: providerFor(definition)})
+			result, err = b.executeEffect(ctx, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: true, provider: providerFor(definition), recovery: b.recoveryFor(definition)})
 		} else {
 			result, err = adapter(ctx, &canonical, decision.Constraints)
 		}
@@ -734,9 +749,12 @@ type effectInvocation struct {
 	invoked     bool
 	notDone     error
 	failure     error
+	takeover    bool
 }
 
 func (i *effectInvocation) SupportsIdempotency() bool { return false }
+
+func (i *effectInvocation) SupportsTakeover() bool { return i.takeover }
 
 func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (effect.Outcome, error) {
 	result, err := i.adapter(ctx, i.request, i.constraints)
@@ -748,7 +766,11 @@ func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (ef
 		}
 		return effect.Outcome{}, err
 	}
-	i.result = result
+	return i.complete(ctx, &result)
+}
+
+func (i *effectInvocation) complete(ctx context.Context, result *ToolResult) (effect.Outcome, error) {
+	i.result = *result
 	i.invoked = true
 	digest := sha256.Sum256(result.Output)
 	audit := result.Audit
@@ -771,7 +793,7 @@ func (i *effectInvocation) Invoke(ctx context.Context, _ *effect.Invocation) (ef
 	if err != nil {
 		return effect.Outcome{}, err
 	}
-	return i.record(ctx, receipt, &result), nil
+	return i.record(ctx, receipt, result), nil
 }
 
 func (i *effectInvocation) record(ctx context.Context, receipt json.RawMessage, result *ToolResult) effect.Outcome {
@@ -838,6 +860,7 @@ func (b *Broker) executeEffect(ctx context.Context, call *journaledTool) (ToolRe
 	}
 	invocation := &effectInvocation{
 		adapter: call.adapter, request: request, constraints: call.constraints, limit: b.outputLimit(call.constraints),
+		takeover: call.recovery != nil,
 		finalize: func(ctx context.Context, pending *pendingResult) (ToolResult, error) {
 			return b.finalize(ctx, request, pending)
 		},
@@ -854,6 +877,12 @@ func (b *Broker) executeEffect(ctx context.Context, call *journaledTool) (ToolRe
 			return ToolResult{}, errorf(ResultInvalidArgument, "tool %q was called again under its idempotency key with a different request", request.ToolName)
 		}
 		return ToolResult{}, err
+	}
+	if call.recovery != nil && (intent.State == effect.StateStarted || intent.State == effect.StateUnknown) {
+		intent, err = b.recoverIntent(ctx, call, invocation, intent)
+		if err != nil {
+			return ToolResult{}, err
+		}
 	}
 	if invocation.notDone != nil && intent.State == effect.StateFailed {
 		return ToolResult{}, invocation.notDone
