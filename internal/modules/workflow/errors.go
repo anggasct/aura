@@ -20,6 +20,8 @@ const (
 	ErrorCodeApprovalRejected      ErrorCode = "workflow_approval_rejected"
 	ErrorCodeStepTimeout           ErrorCode = "workflow_step_timeout"
 	ErrorCodeBudgetExhausted       ErrorCode = "workflow_budget_exhausted"
+	ErrorCodeToolBudgetExhausted   ErrorCode = "tool_budget_exhausted"
+	ErrorCodeRuntimeInternal       ErrorCode = "runtime_internal"
 	ErrorCodeConcurrencyBounded    ErrorCode = "workflow_concurrency_bounded"
 	ErrorCodeCompositionInvalid    ErrorCode = "workflow_composition_invalid"
 	ErrorCodeChildFailed           ErrorCode = "workflow_child_failed"

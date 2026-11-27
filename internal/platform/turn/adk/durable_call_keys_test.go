@@ -59,8 +59,8 @@ func TestDurableToolCallKeysFollowTheCall(t *testing.T) {
 		keys = append(keys, key)
 	}
 	want := []string{
-		"call-1-0/authorization", "call-1-0/execution", "call-1-0/policy",
-		"call-1-1/authorization", "call-1-1/execution", "call-1-1/policy",
+		"call-1-0/authorization", "call-1-0/budget", "call-1-0/execution", "call-1-0/policy",
+		"call-1-1/authorization", "call-1-1/budget", "call-1-1/execution", "call-1-1/policy",
 		"delivery", "final-message", "model-1", "model-2", "release", "turn-start",
 	}
 	if !slices.Equal(keys, want) {

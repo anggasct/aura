@@ -54,7 +54,7 @@ func TestDurationAndByteSizeTakeOnlyStrings(t *testing.T) {
 		content string
 		check   func(*Config) bool
 	}{
-		{"a duration string", "version: 1\nruntime:\n  turn_timeout: \"30s\"\n", func(c *Config) bool { return c.Runtime.TurnTimeout == configkit.Duration(30e9) }},
+		{"a duration string", "version: 1\nruntime:\n  turn_timeout: \"45s\"\n", func(c *Config) bool { return c.Runtime.TurnTimeout == configkit.Duration(45e9) }},
 		{"a quoted byte count", "version: 1\nstorage:\n  artifact_quota: \"1048576\"\n", func(c *Config) bool { return c.Storage.ArtifactQuota == 1048576 }},
 		{"a byte size with a unit", "version: 1\nstorage:\n  artifact_quota: 1GiB\n", func(c *Config) bool { return c.Storage.ArtifactQuota == 1<<30 }},
 	}

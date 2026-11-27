@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -182,10 +183,49 @@ func (r *AgentTurnRunner) refused(ctx context.Context, call *AgentStepCall, err 
 	return err
 }
 
+const (
+	agentJournalAction  = "journal"
+	agentJournalVersion = 4
+)
+
+type agentJournalRecord struct {
+	Journal int `json:"journal"`
+}
+
+func decodeAgentJournal(raw []byte) bool {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	var record agentJournalRecord
+	if err := decoder.Decode(&record); err != nil {
+		return false
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return false
+	}
+	return record.Journal == agentJournalVersion
+}
+
+func checkAgentJournalVersion(ctx context.Context, scope *durable.TurnScope) error {
+	raw, err := scope.Invocation().RunAction(ctx, agentJournalAction, func(context.Context) ([]byte, error) {
+		return json.Marshal(agentJournalRecord{Journal: agentJournalVersion})
+	})
+	if err != nil {
+		return mapAgentTurnError(ctx, err)
+	}
+	if !decodeAgentJournal(raw) {
+		return codedError(ErrorCodeRuntimeInternal, "agent step journal was written by another build")
+	}
+	return nil
+}
+
 func (r *AgentTurnRunner) drive(ctx context.Context, attempt *agentAttempt, text string) (AgentStepResult, error) {
 	call := attempt.call
 	scope := durable.NewTurnScopeWithin(call.Invocation, agentJournalPrefix(call))
 	attempt.scope = scope
+	if err := checkAgentJournalVersion(ctx, scope); err != nil {
+		r.finished(ctx, attempt, string(failureCode(err)))
+		return AgentStepResult{}, err
+	}
 	origin := call.Origin
 	origin.Tainted = attempt.tainted
 	turnCtx := durable.WithTurnScope(WithStepCall(ctx, &StepCall{
@@ -293,6 +333,8 @@ func (r *AgentTurnRunner) finished(ctx context.Context, attempt *agentAttempt, o
 
 func mapAgentTurnError(ctx context.Context, err error) error {
 	switch {
+	case fault.HasCode(err, turn.ErrorCodeToolBudgetExhausted):
+		return codedError(ErrorCodeToolBudgetExhausted, err.Error())
 	case fault.HasCode(err, turn.ErrorCodeBudgetExhausted), fault.HasCode(err, usage.ErrorCodeBudgetExceeded), errors.Is(err, usage.ErrBudgetExceeded):
 		return codedError(ErrorCodeBudgetExhausted, "the agent step exceeded its token budget")
 	case fault.HasCode(err, turn.ErrorCodePersonaMismatch):

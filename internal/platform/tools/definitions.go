@@ -72,6 +72,7 @@ func ListedInCeiling(ceiling []string, name string, definition *Definition) bool
 const (
 	Version          = "v1"
 	KBSearchToolName = "kb_search"
+	HandoffToolName  = "handoff_to_owner"
 )
 
 type Definition struct {

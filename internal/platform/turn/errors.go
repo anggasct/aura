@@ -12,6 +12,7 @@ const (
 	ErrorCodePolicyDenied               ErrorCode = "policy_denied"
 	ErrorCodeStorageUnavailable         ErrorCode = "storage_unavailable"
 	ErrorCodeBudgetExhausted            ErrorCode = "budget_exhausted"
+	ErrorCodeToolBudgetExhausted        ErrorCode = "tool_budget_exhausted"
 	ErrorCodeRuntimeInternal            ErrorCode = "runtime_internal"
 	ErrorCodeInvalidArgument            ErrorCode = "invalid_argument"
 	ErrorCodeDeliveryFailed             ErrorCode = "delivery_failed"
