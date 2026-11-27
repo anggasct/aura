@@ -263,9 +263,9 @@ func TestMemoryStore_RejectsInvalidRows(t *testing.T) {
 }
 
 func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
-	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, migrations)

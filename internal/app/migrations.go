@@ -56,9 +56,9 @@ func Schemas() []sqlite.SchemaOwner {
 }
 
 func Migrations() []sqlite.Migration {
-	migrations, err := sqlite.Baseline(Schemas()...)
+	migrations, err := sqlite.History(Schemas()...)
 	if err != nil {
-		panic(fmt.Sprintf("invalid baseline schema owners: %v", err))
+		panic(fmt.Sprintf("invalid schema owners: %v", err))
 	}
 	return migrations
 }

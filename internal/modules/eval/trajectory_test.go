@@ -28,7 +28,7 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 		return nil, nil, fmt.Errorf("eval: open store: %w", err)
 	}
 	cleanup := func() { _ = db.Close() }
-	migrations, err := sqlite.Baseline(turnstore.Schema())
+	migrations, err := sqlite.History(turnstore.Schema())
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: baseline: %w", err)

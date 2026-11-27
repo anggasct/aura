@@ -18,9 +18,9 @@ import (
 
 func storageBaselineMigrations(t *testing.T) []sqlite.Migration {
 	t.Helper()
-	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	return migrations
 }

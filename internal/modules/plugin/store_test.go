@@ -49,9 +49,9 @@ func TestNewSQLiteStoreRejectsNilDB(t *testing.T) {
 }
 
 func TestPluginBaselineSchema(t *testing.T) {
-	migrations, err := sqlite.Baseline(Schema())
+	migrations, err := sqlite.History(Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, migrations)

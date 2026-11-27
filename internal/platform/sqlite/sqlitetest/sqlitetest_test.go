@@ -60,3 +60,19 @@ func TestOpenMigrationsCachesDistinctKeys(t *testing.T) {
 		t.Fatalf("second_tbl missing: %d %v", count, err)
 	}
 }
+
+func TestOpenMigratedAppliesOwnerStepsAfterTheBaselines(t *testing.T) {
+	owner := sqlite.StaticSchema{
+		Name:  "alpha",
+		SQL:   `CREATE TABLE alpha (id TEXT PRIMARY KEY);`,
+		Steps: []sqlite.Step{{Version: 9, SQL: `ALTER TABLE alpha ADD COLUMN label TEXT;`}},
+	}
+	db := OpenMigrated(t, owner)
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO alpha (id, label) VALUES ('a1', 'x')`); err != nil {
+		t.Fatalf("insert with the stepped column: %v", err)
+	}
+	var version int
+	if err := db.QueryRowContext(t.Context(), `SELECT MAX(version) FROM schema_migration`).Scan(&version); err != nil || version != 9 {
+		t.Fatalf("latest version = %d, %v; want 9", version, err)
+	}
+}

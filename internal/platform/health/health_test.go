@@ -21,9 +21,9 @@ func fixedNow() time.Time { return time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC) 
 
 func TestMigrationCheckerAgainstRealStore(t *testing.T) {
 	ctx := context.Background()
-	migrations, err := sqlite.Baseline(turnstore.Schema(), storage.Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), storage.Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 

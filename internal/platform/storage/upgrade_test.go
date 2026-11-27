@@ -21,9 +21,9 @@ import (
 
 func upgradeTestMigrations(t *testing.T) []sqlite.Migration {
 	t.Helper()
-	base, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	base, err := sqlite.History(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	return append(base, sqlite.Migration{
 		Version: len(base) + 1,
