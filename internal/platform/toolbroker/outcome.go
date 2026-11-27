@@ -98,6 +98,7 @@ type journaledTool struct {
 	constraints approval.Constraints
 	adapter     Adapter
 	effectful   bool
+	provider    string
 }
 
 func (b *Broker) runJournaledTool(ctx context.Context, call *journaledTool) ([]byte, error) {
@@ -113,7 +114,7 @@ func (b *Broker) runJournaledTool(ctx context.Context, call *journaledTool) ([]b
 	var result ToolResult
 	var err error
 	if call.effectful {
-		result, err = b.executeEffect(callCtx, call.canonical, call.constraints, call.adapter)
+		result, err = b.executeEffect(callCtx, call)
 	} else {
 		result, err = call.adapter(callCtx, call.canonical, call.constraints)
 	}

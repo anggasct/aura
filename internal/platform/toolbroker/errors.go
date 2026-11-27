@@ -20,13 +20,17 @@ const (
 
 	ResultApprovalDisplayTooLarge  ResultClass = "approval_display_too_large"
 	ResultUntrustedInputNoApprover ResultClass = "untrusted_input_no_approver"
+	ResultUntrustedInputTrustGrant ResultClass = "untrusted_input_trust_grant"
+	ResultOwnerTurnRequired        ResultClass = "owner_turn_required"
+	ResultFreshApprovalRequired    ResultClass = "fresh_approval_required"
 )
 
 func (c ResultClass) stable() bool {
 	switch c {
 	case ResultOK, ResultInvalidArgument, ResultPolicyDenied, ResultApprovalRequired,
 		ResultCapabilityUnavailable, ResultDeadlineExceeded, ResultExecutionFailed, ResultToolTierDenied,
-		ResultApprovalDisplayTooLarge, ResultUntrustedInputNoApprover:
+		ResultApprovalDisplayTooLarge, ResultUntrustedInputNoApprover,
+		ResultUntrustedInputTrustGrant, ResultOwnerTurnRequired, ResultFreshApprovalRequired:
 		return true
 	}
 	return false
