@@ -191,7 +191,7 @@ func (c *Controller) offerProposal(ctx context.Context, sessionID string, card P
 	select {
 	case c.cards.requests <- proposalOffer{sessionID: sessionID, card: card}:
 	default:
-		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", card.ID, "error", "card queue is full")
+		c.cards.logger.WarnContext(ctx, "proposal card unavailable", "component", "workflow", "proposal_id", card.ID, "error", "card queue is full", "ambiguous", false)
 	}
 }
 

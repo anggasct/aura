@@ -141,3 +141,20 @@ func TestProposalCardTriesTheServingChannelThenTheOthers(t *testing.T) {
 		})
 	}
 }
+
+func TestProposalCardQueueFullWarningCarriesTheAmbiguousAttribute(t *testing.T) {
+	warnings := &recordedWarnings{}
+	controller := &Controller{cards: &proposalCards{
+		logger:   slog.New(warnings),
+		requests: make(chan proposalOffer, 1),
+	}}
+	controller.cards.requests <- proposalOffer{}
+	controller.offerProposal(t.Context(), "ops/session", ProposalCard{ID: "prop_1"})
+	if len(warnings.records) != 1 || warnings.records[0].Message != "proposal card unavailable" {
+		t.Fatalf("warnings = %v, want one proposal card unavailable", warnings.records)
+	}
+	flag, ok := attrOf(warnings.records[0], "ambiguous")
+	if !ok || flag.Bool() {
+		t.Fatalf("ambiguous = (%v, %v), want present and false", flag.Bool(), ok)
+	}
+}
