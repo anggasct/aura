@@ -204,7 +204,7 @@ func (e *stepExecution) invokeExecutor(ctx context.Context, step *StepSpec, atte
 }
 
 func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
-	runner := e.interpreter.options.AgentSteps
+	runner := e.interpreter.agentSteps()
 	if runner == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no agent runner is wired", EndedAt: nowPtr()}
 	}

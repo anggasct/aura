@@ -34,6 +34,7 @@ type ModuleDeps struct {
 }
 
 type Module struct {
+	agentDeps    AgentTurnRunnerDeps
 	store        *Store
 	interpreter  *Interpreter
 	controller   *Controller
@@ -95,6 +96,7 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 		}
 		options.Tools = runner
 	}
+	agentDeps := AgentTurnRunnerDeps{Runs: runs, Validation: deps.ValidationDeps, Logger: logger}
 	interpreter, err := NewInterpreter(runs, deps.Durable, options)
 	if err != nil {
 		return nil, err
@@ -115,7 +117,11 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 			"definition_id", quarantined[i].ID, "version", quarantined[i].Version, "error", quarantined[i].Err)
 	}
 
+	if deps.Broker != nil {
+		agentDeps.Sessions, agentDeps.Tools = deps.RunSessions, deps.Broker
+	}
 	mod := &Module{
+		agentDeps:   agentDeps,
 		store:       runs,
 		interpreter: interpreter,
 		quarantined: quarantined,
@@ -166,6 +172,19 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 	}
 
 	return mod, nil
+}
+
+func (m *Module) BindAgentTurns(turns StepTurns, events StepEvents) error {
+	if m == nil || m.interpreter == nil {
+		return codedError(ErrorCodeInvalidArgument, "workflow module is not built")
+	}
+	deps := m.agentDeps
+	deps.Turns, deps.Events = turns, events
+	runner, err := NewAgentTurnRunner(&deps)
+	if err != nil {
+		return err
+	}
+	return m.interpreter.bindAgentSteps(runner)
 }
 
 func (m *Module) Tools() []toolbroker.ToolRegistration {
