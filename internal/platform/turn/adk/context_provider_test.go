@@ -134,7 +134,7 @@ func TestContextProviderOrdersBlocksAndCaveatsByOrder(t *testing.T) {
 	events := drainTurn(t, executor, ownerTurnRequest())
 
 	system := strings.Join(model.systems, "\n")
-	wantCaveats := []string{"CAVEAT-150-A", "CAVEAT-150-B", "CAVEAT-350", statusProtocolSuffix}
+	wantCaveats := []string{"CAVEAT-150-A", "CAVEAT-150-B", "CAVEAT-350", turnProtocol}
 	lastIndex := -1
 	for _, want := range wantCaveats {
 		idx := strings.Index(system, want)
