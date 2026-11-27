@@ -22,6 +22,26 @@ func NewTurnScope(inv Invocation) *TurnScope {
 	return &TurnScope{inv: inv}
 }
 
+func NewTurnScopeWithin(inv Invocation, prefix string) *TurnScope {
+	if inv == nil {
+		return nil
+	}
+	return &TurnScope{inv: &prefixedInvocation{Invocation: inv, prefix: prefix}}
+}
+
+type prefixedInvocation struct {
+	Invocation
+	prefix string
+}
+
+func (p *prefixedInvocation) RunAction(ctx context.Context, key string, fn func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+	return p.Invocation.RunAction(ctx, p.prefix+key, fn)
+}
+
+func (p *prefixedInvocation) ConcurrentActions() bool {
+	return ConcurrentActions(p.Invocation)
+}
+
 func (s *TurnScope) Invocation() Invocation {
 	return s.inv
 }

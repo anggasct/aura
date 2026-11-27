@@ -50,6 +50,7 @@ type BuiltinToolRequest struct {
 	EventAuthor     string
 	Knowledge       []string
 	Tainted         bool
+	Unattended      bool
 }
 
 type BuiltinToolExecutor interface {

@@ -20,6 +20,7 @@ const (
 	OriginHTTP     Origin = "http"
 	OriginChild    Origin = "child"
 	OriginSchedule Origin = "schedule"
+	OriginWorkflow Origin = "workflow"
 )
 
 type Budget struct {
@@ -46,6 +47,12 @@ type TurnRequest struct {
 	Skill            *SkillPin
 	StreamPartial    bool
 	Knowledge        []string
+	InputTainted     bool
+	ToolRestriction  *ToolRestriction
+}
+
+type ToolRestriction struct {
+	Allowed []string `json:"allowed"`
 }
 
 type SkillPin = runtimeingress.SkillPin

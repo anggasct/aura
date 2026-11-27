@@ -46,6 +46,8 @@ func requestWithEveryFieldSet() *turn.TurnRequest {
 		Skill:            &turn.SkillPin{SkillID: "skill-1", Digest: "digest", InvocationID: "invocation", PolicyVersion: "policy"},
 		StreamPartial:    true,
 		Knowledge:        []string{"support", "hr-docs"},
+		InputTainted:     true,
+		ToolRestriction:  &turn.ToolRestriction{Allowed: []string{"read_file"}},
 	}
 }
 
@@ -105,6 +107,15 @@ func TestTurnDescriptorCarriesEveryRequestField(t *testing.T) {
 		stored, _ := descriptorThroughJSON(t, req)
 		if restored := turnRequestFromDescriptor(&stored); !reflect.DeepEqual(restored, req) {
 			t.Fatalf("restored request = %+v, want %+v", restored, req)
+		}
+	})
+	t.Run("an empty tool restriction stays a restriction", func(t *testing.T) {
+		req := requestWithEveryFieldSet()
+		req.ToolRestriction = &turn.ToolRestriction{}
+		stored, _ := descriptorThroughJSON(t, req)
+		restored := turnRequestFromDescriptor(&stored)
+		if restored.ToolRestriction == nil || len(restored.ToolRestriction.Allowed) != 0 {
+			t.Fatalf("restored restriction = %+v, want a non-nil empty restriction", restored.ToolRestriction)
 		}
 	})
 	t.Run("a request without context stores no context", func(t *testing.T) {

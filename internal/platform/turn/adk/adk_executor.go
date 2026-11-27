@@ -187,6 +187,10 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			yield(turn.Event{}, err)
 			return
 		}
+		if err := x.checkPersonaPin(req, &definition); err != nil {
+			yield(turn.Event{}, err)
+			return
+		}
 		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req, definition.ID)
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
@@ -215,6 +219,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{
 			blocks:         blocks,
 			knowledgeScope: req.Knowledge,
+			restriction:    req.ToolRestriction,
 		})
 		if err != nil {
 			yield(turn.Event{}, err)
@@ -288,6 +293,18 @@ func (x *ADKExecutor) resolveDefinition(req *turn.TurnRequest) (auraagent.Defini
 	return definition, nil
 }
 
+func (x *ADKExecutor) checkPersonaPin(req *turn.TurnRequest, definition *auraagent.Definition) error {
+	pin := req.Persona
+	if pin == nil || x.agents == nil || req.Origin != turn.OriginWorkflow {
+		return nil
+	}
+	current := definition.Fingerprint()
+	if current.SoulSHA256 != pin.SoulSHA256 || current.ModelRoute != pin.ModelRoute {
+		return codedError(turn.ErrorCodePersonaMismatch, fmt.Sprintf("persona %q changed since it was pinned", definition.ID), nil)
+	}
+	return nil
+}
+
 func (x *ADKExecutor) ownerContextFor(req *turn.TurnRequest) string {
 	if req.PrincipalClass != principal.ClassOwner {
 		return ""
@@ -298,6 +315,7 @@ func (x *ADKExecutor) ownerContextFor(req *turn.TurnRequest) string {
 type turnContext struct {
 	blocks         []turn.ContextBlock
 	knowledgeScope []string
+	restriction    *turn.ToolRestriction
 }
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
@@ -346,7 +364,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class, origin, extra.knowledgeScope), x.beforeTool, recallAttached, ownerContext, extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class, origin, extra), x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -530,7 +548,7 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 	return model, nil
 }
 
-func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, knowledge []string) []tool.Tool {
+func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra turnContext) []tool.Tool {
 	allowed := definition.Tools
 	if class != "" {
 		ceiling, restricted := definition.ToolCeiling(class)
@@ -544,6 +562,9 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 	listed := len(allowed) > 0
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
+		if extra.restriction != nil && !slices.Contains(extra.restriction.Allowed, t.Name()) {
+			continue
+		}
 		if plugin, owned := x.pluginTools[t.Name()]; owned {
 			if exposesPluginTool(definition, class, t.Name(), plugin) {
 				filtered = append(filtered, t)
@@ -557,7 +578,7 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 			continue
 		}
 		if t.Name() == auratools.KBSearchToolName {
-			if exposesKnowledgeSearch(class, allowed, knowledge) {
+			if exposesKnowledgeSearch(class, allowed, extra.knowledgeScope) {
 				filtered = append(filtered, t)
 			}
 			continue
@@ -577,7 +598,7 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 }
 
 func (x *ADKExecutor) ownerListed(name string, origin turn.Origin) bool {
-	return x.ownerOptIn[name] && origin != turn.OriginChild
+	return x.ownerOptIn[name] && origin != turn.OriginChild && origin != turn.OriginWorkflow
 }
 
 func exposesKnowledgeSearch(class principal.Class, allowed, knowledge []string) bool {
