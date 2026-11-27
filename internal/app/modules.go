@@ -2715,19 +2715,19 @@ func workflowReplyTargeters(ports []runtimechannelhost.ChannelPort) []workflow.R
 }
 
 type proposalOfferer interface {
-	OfferProposal(ctx context.Context, card discord.ProposalCard, decide discord.ProposalDecider) error
+	OfferProposal(ctx context.Context, card approval.ProposalCard, decide approval.ProposalDecider) error
 	ReplyTarget(sessionID string) (access.HandoffTarget, bool)
 }
 
-type discordProposalOffererAdapter struct {
+type workflowProposalOffererAdapter struct {
 	offerer proposalOfferer
 }
 
-func (a *discordProposalOffererAdapter) OfferProposal(ctx context.Context, card workflow.ProposalCard, decide func(ctx context.Context, approved bool) (string, error)) error {
-	return a.offerer.OfferProposal(ctx, discord.ProposalCard{ID: card.ID, Plan: card.Plan, Tainted: card.Tainted}, decide)
+func (a *workflowProposalOffererAdapter) OfferProposal(ctx context.Context, card workflow.ProposalCard, decide func(ctx context.Context, approved bool) (string, error)) error {
+	return a.offerer.OfferProposal(ctx, approval.ProposalCard{ID: card.ID, Plan: card.Plan, Tainted: card.Tainted}, decide)
 }
 
-func (a *discordProposalOffererAdapter) ServesSession(sessionID string) bool {
+func (a *workflowProposalOffererAdapter) ServesSession(sessionID string) bool {
 	_, ok := a.offerer.ReplyTarget(sessionID)
 	return ok
 }
@@ -2736,7 +2736,7 @@ func workflowProposalOfferers(ports []runtimechannelhost.ChannelPort) []workflow
 	var offerers []workflow.ProposalOfferer
 	for _, port := range ports {
 		if offerer, ok := port.(proposalOfferer); ok {
-			offerers = append(offerers, &discordProposalOffererAdapter{offerer: offerer})
+			offerers = append(offerers, &workflowProposalOffererAdapter{offerer: offerer})
 		}
 	}
 	return offerers

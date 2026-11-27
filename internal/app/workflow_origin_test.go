@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/channels/discord"
+	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -125,7 +125,7 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 		t.Run("card/"+tc.name, func(t *testing.T) {
 			h := proposalFixture(t)
 			bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-			h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+			h.rebuildController(t, &workflowProposalOffererAdapter{offerer: bound})
 			go h.controller.RunProposalCards(t.Context())
 			owner := *h.owner
 			owner.Tainted = tc.tainted
@@ -135,7 +135,7 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 			}
 			bound.waitAttempts(t, 1)
 			bound.mu.Lock()
-			cards := append([]discord.ProposalCard(nil), bound.cards...)
+			cards := append([]kitapproval.ProposalCard(nil), bound.cards...)
 			bound.mu.Unlock()
 			if len(cards) != 1 || cards[0].Tainted != tc.tainted || cards[0].ID != proposed.ProposalID || cards[0].Plan != proposed.Plan {
 				t.Fatalf("card = %+v, want id %s, taint %v and the plan", cards, proposed.ProposalID, tc.tainted)

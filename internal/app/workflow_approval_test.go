@@ -22,7 +22,7 @@ func TestApprovedProposalRecordsTheApprover(t *testing.T) {
 				owner := *h.owner
 				owner.Tainted = tainted
 				bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-				h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+				h.rebuildController(t, &workflowProposalOffererAdapter{offerer: bound})
 				go h.controller.RunProposalCards(t.Context())
 				proposed, err := h.controller.Propose(t.Context(), &owner, json.RawMessage(coveredProposal))
 				if err != nil {

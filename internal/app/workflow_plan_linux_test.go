@@ -61,7 +61,7 @@ func TestApproveRefusesAnUnshowablePlan(t *testing.T) {
 		t.Run(via, func(t *testing.T) {
 			h := githubProposalFixture(t)
 			bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-			h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+			h.rebuildController(t, &workflowProposalOffererAdapter{offerer: bound})
 			go h.controller.RunProposalCards(t.Context())
 			proposed, err := h.controller.Propose(t.Context(), h.owner, commentProposal(t, body))
 			if err != nil {

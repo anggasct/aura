@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -11,6 +12,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/modules/workflow"
 )
 
@@ -18,13 +21,13 @@ type fakeOfferer struct {
 	mu       sync.Mutex
 	sessions map[string]bool
 	offered  []string
-	cards    []discord.ProposalCard
-	decide   discord.ProposalDecider
+	cards    []approval.ProposalCard
+	decide   approval.ProposalDecider
 	fail     error
 	attempts int
 }
 
-func (f *fakeOfferer) OfferProposal(_ context.Context, card discord.ProposalCard, decide discord.ProposalDecider) error {
+func (f *fakeOfferer) OfferProposal(_ context.Context, card approval.ProposalCard, decide approval.ProposalDecider) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.attempts++
@@ -60,7 +63,7 @@ func TestProposalCardsOfferTheBoundAccountAndDecideThroughTheCLIPath(t *testing.
 	h := proposalFixture(t)
 	other := &fakeOfferer{}
 	bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-	h.rebuildController(t, &discordProposalOffererAdapter{offerer: other}, &discordProposalOffererAdapter{offerer: bound})
+	h.rebuildController(t, &workflowProposalOffererAdapter{offerer: other}, &workflowProposalOffererAdapter{offerer: bound})
 	go h.controller.RunProposalCards(t.Context())
 	proposed, err := h.controller.Propose(t.Context(), h.owner, json.RawMessage(coveredProposal))
 	if err != nil {
@@ -98,7 +101,7 @@ func TestProposalCardsOfferTheBoundAccountAndDecideThroughTheCLIPath(t *testing.
 func TestProposalIsKeptWhenNoCardCanBeOffered(t *testing.T) {
 	h := proposalFixture(t)
 	failing := &fakeOfferer{fail: errors.New("owner has no discord identity")}
-	h.rebuildController(t, &discordProposalOffererAdapter{offerer: failing})
+	h.rebuildController(t, &workflowProposalOffererAdapter{offerer: failing})
 	go h.controller.RunProposalCards(t.Context())
 	proposed, err := h.controller.Propose(t.Context(), h.owner, json.RawMessage(coveredProposal))
 	if err != nil {
@@ -107,5 +110,35 @@ func TestProposalIsKeptWhenNoCardCanBeOffered(t *testing.T) {
 	failing.waitAttempts(t, 1)
 	if stored, err := h.runs.Proposal(t.Context(), proposed.ProposalID, time.Now()); err != nil || stored.Status != workflow.ProposalProposed {
 		t.Fatalf("proposal without a card = %+v, %v", stored, err)
+	}
+}
+
+func TestProposalOfferersFollowTheChannelOrderOfTheBuiltPorts(t *testing.T) {
+	db := discordTestDB(t)
+	cfg := enabledDiscordConfig()
+	telegramCfg := enabledTelegramConfig()
+	cfg.Owner = telegramCfg.Owner
+	cfg.Channels.Telegram = telegramCfg.Channels.Telegram
+	ports, _, _, err := buildChannelAdapters(&cfg, testRouter(t, &cfg), db, t.TempDir(), nil, nil, nil)
+	if err != nil {
+		t.Fatalf("buildChannelAdapters(): %v", err)
+	}
+	offerers := workflowProposalOfferers(ports)
+	var kinds []string
+	for _, offerer := range offerers {
+		switch wrapped := offerer.(*workflowProposalOffererAdapter).offerer.(type) {
+		case *discord.Adapter:
+			kinds = append(kinds, "discord")
+		case *telegram.Adapter:
+			kinds = append(kinds, "telegram")
+		default:
+			t.Fatalf("offerer wraps %T", wrapped)
+		}
+	}
+	if !slices.Equal(kinds, []string{"discord", "telegram"}) {
+		t.Fatalf("offerers = %v, want discord then telegram", kinds)
+	}
+	if targeters := workflowReplyTargeters(ports); len(targeters) != 2 {
+		t.Fatalf("reply targeters = %d, want one per port", len(targeters))
 	}
 }

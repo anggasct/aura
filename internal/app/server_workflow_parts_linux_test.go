@@ -18,6 +18,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
+	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -137,45 +139,72 @@ func TestServerWorkflowToolsStartARunOnTheDefaultConfiguration(t *testing.T) {
 }
 
 func TestServerPostsWorkflowCompletionsOnTheDefaultConfiguration(t *testing.T) {
-	restoreDefaultLogger(t)
-	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
-	path := writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, "")
-	seedConfiguredStorage(t, path)
-	db := compositionDatabase(t, path)
-	routine := quarantineRoutine("done_routine")
-	routine.Steps[0].Executor.ToolArgs = json.RawMessage(`{"path":"note.txt"}`)
-	if err := mustWorkflowStore(t, db).SaveDefinition(t.Context(), routine); err != nil {
-		t.Fatalf("seed routine: %v", err)
+	cases := []struct {
+		name      string
+		channel   any
+		account   any
+		channelID any
+		threadID  any
+		want      []string
+	}{
+		{name: "a run without a conversation"},
+		{name: "a run of a telegram topic", channel: "telegram", account: "pocket", channelID: "-1001234567890", threadID: "7", want: []string{"-1001234567890|7|Done: " + "Read the note"}},
 	}
-	createTestSession(t, db, "sess-done", principal.OwnerID)
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	if _, err := db.ExecContext(t.Context(),
-		`INSERT INTO workflow_run (id, definition_id, definition_version, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, tainted) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		"run-done", routine.ID, routine.Version, routine.Goal, `{}`, workflow.RunSucceeded, now, now, principal.OwnerID, string(principal.ClassOwner), "main", "sess-done", 0); err != nil {
-		t.Fatalf("seed run: %v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreDefaultLogger(t)
+			t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+			posts := &completionPosts{}
+			previous := deliverTelegramText
+			deliverTelegramText = func(_ context.Context, _ *telegram.Account, chatID, threadID, text string) error {
+				posts.record(chatID, threadID, text)
+				return nil
+			}
+			t.Cleanup(func() { deliverTelegramText = previous })
+			path := writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, "")
+			seedConfiguredStorage(t, path)
+			db := compositionDatabase(t, path)
+			routine := quarantineRoutine("done_routine")
+			routine.Goal = "Read the note"
+			routine.Steps[0].Executor.ToolArgs = json.RawMessage(`{"path":"note.txt"}`)
+			if err := mustWorkflowStore(t, db).SaveDefinition(t.Context(), routine); err != nil {
+				t.Fatalf("seed routine: %v", err)
+			}
+			createTestSession(t, db, "sess-done", principal.OwnerID)
+			now := time.Now().UTC().Format(time.RFC3339Nano)
+			if _, err := db.ExecContext(t.Context(),
+				`INSERT INTO workflow_run (id, definition_id, definition_version, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, tainted, reply_channel, reply_account, reply_channel_id, reply_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				"run-done", routine.ID, routine.Version, routine.Goal, `{}`, workflow.RunSucceeded, now, now, principal.OwnerID, string(principal.ClassOwner), "main", "sess-done", 0, tc.channel, tc.account, tc.channelID, tc.threadID); err != nil {
+				t.Fatalf("seed run: %v", err)
+			}
 
-	result := loadCompositionConfig(t, path)
-	srv := &compositionServer{app: buildApp(t, serverCompositionOptions(result, &syncBuffer{}))}
-	t.Cleanup(func() {
-		if srv.ran != nil {
-			srv.cancel()
-			<-srv.ran
-		}
-		_ = srv.app.Close(context.Background())
-	})
-	srv.run(t)
+			result := loadCompositionConfig(t, path)
+			result.Config.Channels.Telegram.Accounts = []telegram.Account{{Name: "pocket"}}
+			srv := &compositionServer{app: buildApp(t, serverCompositionOptions(result, &syncBuffer{}))}
+			t.Cleanup(func() {
+				if srv.ran != nil {
+					srv.cancel()
+					<-srv.ran
+				}
+				_ = srv.app.Close(context.Background())
+			})
+			srv.run(t)
 
-	awaitSchedule(t, "the completion of run-done is posted", func() bool {
-		return countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ? AND id = ?`, "sess-done", "workflow-run-done") == 1
-	})
-	if n := countRows(t, db, `SELECT COUNT(*) FROM workflow_run WHERE id = ? AND completion_notified_at IS NOT NULL`, "run-done"); n != 1 {
-		t.Fatalf("notified runs = %d, want 1", n)
+			awaitSchedule(t, "the completion of run-done is posted", func() bool {
+				return countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ? AND id = ?`, "sess-done", "workflow-run-done") == 1
+			})
+			if n := countRows(t, db, `SELECT COUNT(*) FROM workflow_run WHERE id = ? AND completion_notified_at IS NOT NULL`, "run-done"); n != 1 {
+				t.Fatalf("notified runs = %d, want 1", n)
+			}
+			if n := countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ?`, "sess-done"); n != 1 {
+				t.Fatalf("events in sess-done = %d, want 1", n)
+			}
+			if got := posts.recorded(); !slices.Equal(got, tc.want) {
+				t.Fatalf("telegram posts = %v, want %v", got, tc.want)
+			}
+			srv.stopRun(t)
+		})
 	}
-	if n := countRows(t, db, `SELECT COUNT(*) FROM runtime_event WHERE session_id = ?`, "sess-done"); n != 1 {
-		t.Fatalf("events in sess-done = %d, want 1", n)
-	}
-	srv.stopRun(t)
 }
 
 func TestServerStartsScheduledWorkflowsOnTheDefaultConfiguration(t *testing.T) {
@@ -212,14 +241,15 @@ func TestServerStartsScheduledWorkflowsOnTheDefaultConfiguration(t *testing.T) {
 
 type proposalChannel struct {
 	mu      sync.Mutex
-	cards   []discord.ProposalCard
-	decide  discord.ProposalDecider
+	cards   []kitapproval.ProposalCard
+	decide  kitapproval.ProposalDecider
 	offered chan struct{}
 	session string
+	target  access.HandoffTarget
 }
 
-func newProposalChannel(session string) *proposalChannel {
-	return &proposalChannel{offered: make(chan struct{}, 4), session: session}
+func newProposalChannel(session string, target access.HandoffTarget) *proposalChannel {
+	return &proposalChannel{offered: make(chan struct{}, 4), session: session, target: target}
 }
 
 func (c *proposalChannel) Start(ctx context.Context, _ runtimeingress.IngressSink) error {
@@ -235,7 +265,7 @@ func (c *proposalChannel) Health(context.Context) runtimechannelhost.ChannelHeal
 	return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelHealthy}
 }
 
-func (c *proposalChannel) OfferProposal(_ context.Context, card discord.ProposalCard, decide discord.ProposalDecider) error {
+func (c *proposalChannel) OfferProposal(_ context.Context, card kitapproval.ProposalCard, decide kitapproval.ProposalDecider) error {
 	c.mu.Lock()
 	c.cards = append(c.cards, card)
 	c.decide = decide
@@ -245,66 +275,124 @@ func (c *proposalChannel) OfferProposal(_ context.Context, card discord.Proposal
 }
 
 func (c *proposalChannel) ReplyTarget(sessionID string) (access.HandoffTarget, bool) {
-	return access.HandoffTarget{Channel: principal.ChannelDiscord, Account: "front", ChannelID: "333"}, sessionID == c.session
+	return c.target, sessionID == c.session
+}
+
+type completionPosts struct {
+	mu    sync.Mutex
+	posts []string
+}
+
+func (p *completionPosts) record(chatID, threadID, text string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.posts = append(p.posts, strings.Join([]string{chatID, threadID, text}, "|"))
+}
+
+func (p *completionPosts) recorded() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.posts)
 }
 
 func TestServerOffersAProposalCardOnTheDefaultConfiguration(t *testing.T) {
-	restoreDefaultLogger(t)
-	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
-	path := writeWorkflowServerConfig(t)
-	result := loadCompositionConfig(t, path)
-	result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
-	b := newBuild(serverCompositionOptions(result, &syncBuffer{}))
-	t.Cleanup(func() {
-		if b.group != nil {
-			_ = b.group.Stop(context.WithoutCancel(t.Context()))
-		}
-	})
-	phases := b.phases(t.Context())
-	for _, step := range phases[:5] {
-		if err := step(); err != nil {
-			t.Fatalf("build phase: %v", err)
-		}
+	cases := []struct {
+		name   string
+		target access.HandoffTarget
+		want   string
+	}{
+		{"discord port", access.HandoffTarget{Channel: principal.ChannelDiscord, Account: "front", ChannelID: "333"}, "333||Done: Read the note"},
+		{"telegram port", access.HandoffTarget{Channel: principal.ChannelTelegram, Account: "pocket", ChannelID: "-1001234567890", ThreadID: "7"}, "-1001234567890|7|Done: Read the note"},
 	}
-	owner := &workflow.Caller{SessionID: "main/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "main"}
-	channel := newProposalChannel(owner.SessionID)
-	b.server.channels = append(b.server.channels, channel)
-	for _, step := range phases[5:] {
-		if err := step(); err != nil {
-			t.Fatalf("build phase: %v", err)
-		}
-	}
-	createTestSession(t, b.db, owner.SessionID, owner.PrincipalID)
-	if err := b.group.Start(t.Context()); err != nil {
-		t.Fatalf("start the lifecycle: %v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			restoreDefaultLogger(t)
+			t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+			posts := &completionPosts{}
+			previousDiscord, previousTelegram := deliverText, deliverTelegramText
+			deliverText = func(_ context.Context, _ *discord.Account, channelID, text string) error {
+				posts.record(channelID, "", text)
+				return nil
+			}
+			deliverTelegramText = func(_ context.Context, _ *telegram.Account, chatID, threadID, text string) error {
+				posts.record(chatID, threadID, text)
+				return nil
+			}
+			t.Cleanup(func() { deliverText, deliverTelegramText = previousDiscord, previousTelegram })
+			path := writeWorkflowServerConfig(t)
+			result := loadCompositionConfig(t, path)
+			result.CapabilityReport = capabilitytest.Report(t, "workspace-read")
+			result.Config.Channels.Discord.Accounts = []discord.Account{{Name: "front"}}
+			result.Config.Channels.Telegram.Accounts = []telegram.Account{{Name: "pocket"}}
+			b := newBuild(serverCompositionOptions(result, &syncBuffer{}))
+			t.Cleanup(func() {
+				if b.group != nil {
+					_ = b.group.Stop(context.WithoutCancel(t.Context()))
+				}
+			})
+			phases := b.phases(t.Context())
+			for _, step := range phases[:5] {
+				if err := step(); err != nil {
+					t.Fatalf("build phase: %v", err)
+				}
+			}
+			owner := &workflow.Caller{SessionID: "main/terminal:owner", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, AgentID: "main"}
+			channel := newProposalChannel(owner.SessionID, tc.target)
+			b.server.channels = append(b.server.channels, channel)
+			for _, step := range phases[5:] {
+				if err := step(); err != nil {
+					t.Fatalf("build phase: %v", err)
+				}
+			}
+			createTestSession(t, b.db, owner.SessionID, owner.PrincipalID)
+			if err := b.group.Start(t.Context()); err != nil {
+				t.Fatalf("start the lifecycle: %v", err)
+			}
 
-	var proposed workflow.ProposalSummary
-	spec := `{"spec":{"goal":"Read the note","steps":[{"id":"read","executor":{"kind":"tool","tool":"read_file","args":{"path":"first.txt"}},"timeout":60000000000}]}}`
-	if err := json.Unmarshal(executeWorkflowTool(t, b.builtin, "workflow_propose", owner, spec), &proposed); err != nil || proposed.ProposalID == "" {
-		t.Fatalf("workflow_propose = %+v, %v", proposed, err)
-	}
-	if !strings.Contains(proposed.Plan, "read_file") {
-		t.Fatalf("the plan does not show the step's call:\n%s", proposed.Plan)
-	}
-	select {
-	case <-channel.offered:
-	case <-time.After(compositionServerWait):
-		t.Fatal("no proposal card was offered")
-	}
-	channel.mu.Lock()
-	cards, decide := channel.cards, channel.decide
-	channel.mu.Unlock()
-	if len(cards) != 1 || cards[0].ID != proposed.ProposalID || cards[0].Plan != proposed.Plan {
-		t.Fatalf("cards = %+v, want one for %s with the proposed plan", cards, proposed.ProposalID)
-	}
-	reply, err := decide(t.Context(), true)
-	if err != nil || !strings.HasPrefix(reply, "approved "+proposed.ProposalID+": run ") {
-		t.Fatalf("approve from the card = %q, %v", reply, err)
-	}
-	runID := strings.TrimPrefix(reply, "approved "+proposed.ProposalID+": run ")
-	if n := countRows(t, b.db, `SELECT COUNT(*) FROM workflow_run WHERE id = ? AND principal_id = ? AND origin_session_id = ?`, runID, owner.PrincipalID, owner.SessionID); n != 1 {
-		t.Fatalf("workflow runs %s with the proposer as origin = %d, want 1", runID, n)
+			var proposed workflow.ProposalSummary
+			spec := `{"spec":{"goal":"Read the note","steps":[{"id":"read","executor":{"kind":"tool","tool":"read_file","args":{"path":"first.txt"}},"timeout":60000000000}]}}`
+			if err := json.Unmarshal(executeWorkflowTool(t, b.builtin, "workflow_propose", owner, spec), &proposed); err != nil || proposed.ProposalID == "" {
+				t.Fatalf("workflow_propose = %+v, %v", proposed, err)
+			}
+			if !strings.Contains(proposed.Plan, "read_file") {
+				t.Fatalf("the plan does not show the step's call:\n%s", proposed.Plan)
+			}
+			select {
+			case <-channel.offered:
+			case <-time.After(compositionServerWait):
+				t.Fatal("no proposal card was offered")
+			}
+			channel.mu.Lock()
+			cards, decide := channel.cards, channel.decide
+			channel.mu.Unlock()
+			if len(cards) != 1 || cards[0].ID != proposed.ProposalID || cards[0].Plan != proposed.Plan {
+				t.Fatalf("cards = %+v, want one for %s with the proposed plan", cards, proposed.ProposalID)
+			}
+			reply, err := decide(t.Context(), true)
+			if err != nil || !strings.HasPrefix(reply, "approved "+proposed.ProposalID+": run ") {
+				t.Fatalf("approve from the card = %q, %v", reply, err)
+			}
+			runID := strings.TrimPrefix(reply, "approved "+proposed.ProposalID+": run ")
+			if n := countRows(t, b.db, `SELECT COUNT(*) FROM workflow_run WHERE id = ? AND principal_id = ? AND origin_session_id = ? AND reply_channel = ? AND reply_account = ? AND reply_channel_id = ?`, runID, owner.PrincipalID, owner.SessionID, tc.target.Channel, tc.target.Account, tc.target.ChannelID); n != 1 {
+				t.Fatalf("workflow runs %s with the proposer and its conversation as origin = %d, want 1", runID, n)
+			}
+			awaitSchedule(t, "the approved run succeeds", func() bool {
+				return countRows(t, b.db, `SELECT COUNT(*) FROM workflow_run WHERE id = ? AND status = ?`, runID, workflow.RunSucceeded) == 1
+			})
+			sweepCtx, stopSweeping := context.WithCancel(t.Context())
+			swept := make(chan struct{})
+			go func() {
+				defer close(swept)
+				b.workflowMod.CompletionRunner()(sweepCtx)
+			}()
+			defer func() {
+				stopSweeping()
+				<-swept
+			}()
+			awaitSchedule(t, "the approved run posts its completion to the proposing conversation", func() bool {
+				return slices.Contains(posts.recorded(), tc.want)
+			})
+		})
 	}
 }
 
