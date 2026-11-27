@@ -92,6 +92,11 @@ type Definition struct {
 	Orchestration        bool
 	RepliesToRequester   bool
 	ExactDisplay         bool
+	Risk                 Risk
+	Operation            string
+	FreshApproval        bool
+	OwnerNotice          bool
+	UntrustedOutput      bool
 	Description          string
 	Display              []string
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)

@@ -13,6 +13,7 @@ const (
 	ErrorCodeDisplayRedacted    ErrorCode = "approval_display_redacted"
 	ErrorCodeDisplayInvalid     ErrorCode = "tool_display_invalid"
 	ErrorCodeArgumentsAmbiguous ErrorCode = "arguments_ambiguous"
+	ErrorCodeDefinitionInvalid  ErrorCode = "tool_definition_invalid"
 )
 
 func errorf(code ErrorCode, format string, args ...any) error {
