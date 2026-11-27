@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"golang.org/x/text/language"
 )
 
 const ownerKey = "owner"
@@ -117,6 +118,11 @@ func ownerValueProblems(owner *Owner) error {
 	} {
 		if err := validateOwnerValue(field.path, field.value); err != nil {
 			problems = append(problems, err)
+		}
+	}
+	if owner.Language != "" {
+		if _, err := language.Parse(owner.Language); err != nil {
+			problems = append(problems, configkit.Invalid("language", `must be a BCP 47 language tag such as "id" or "en"`))
 		}
 	}
 	if owner.Timezone != "" {

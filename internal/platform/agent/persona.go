@@ -51,6 +51,9 @@ func (p RegistryPersonas) Message(agentID, key string) string {
 		if definition, ok := p.Registry.Lookup(agentID); ok {
 			return definition.Message(key)
 		}
+		if text, ok := p.Registry.bundle[key]; ok {
+			return text
+		}
 	}
 	return PersonaMessageDefaults()[key]
 }
@@ -58,6 +61,9 @@ func (p RegistryPersonas) Message(agentID, key string) string {
 func LogPersonas(ctx context.Context, logger *slog.Logger, registry *Registry) {
 	if logger == nil || registry == nil {
 		return
+	}
+	if registry.fallbackLanguage != "" {
+		logger.InfoContext(ctx, "persona messages use en", "component", "persona", "language", registry.fallbackLanguage)
 	}
 	definitions := registry.Definitions()
 	for i := range definitions {

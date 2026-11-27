@@ -443,7 +443,7 @@ func TestTrustedPrincipalsReachMCPToolsOnlyThroughPrincipalToolsAndTheOwner(t *t
 	registry, err := auraagent.BuildWithMCP([]auraagent.Persona{
 		{ID: "team", Description: "Team", Instructions: "Help.", Audience: auraagent.AudienceTrusted, Tools: []string{"mcp_docs"}, PrincipalTools: []string{"mcp_docs_ping"}},
 		{ID: "plain", Description: "Plain", Instructions: "Help.", Audience: auraagent.AudienceTrusted, Tools: []string{"mcp_docs"}},
-	}, []string{"read_file"}, appconfig.BuiltinToolDefinitions(), []string{"docs"}, []string{"primary"})
+	}, []string{"read_file"}, appconfig.BuiltinToolDefinitions(), []string{"docs"}, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("BuildWithMCP: %v", err)
 	}
@@ -815,7 +815,7 @@ func TestConfigsWithoutMCPServersAreUnchanged(t *testing.T) {
 			if err != nil {
 				t.Fatalf("buildAgentRegistry: %v", err)
 			}
-			baseline, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"})
+			baseline, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"}, "en")
 			if err != nil {
 				t.Fatalf("auraagent.Build: %v", err)
 			}

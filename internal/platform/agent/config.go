@@ -48,30 +48,6 @@ const (
 )
 
 const (
-	MessagePairingCode       = "pairing_code"
-	MessagePairingPending    = "pairing_pending"
-	MessagePairingLocked     = "pairing_locked"
-	MessageWaitingForOwner   = "waiting_for_owner"
-	MessageApprovalTimeout   = "approval_timeout"
-	MessageApprovalDenied    = "approval_denied"
-	MessageBudgetExhausted   = "budget_exhausted"
-	MessageRateLimited       = "rate_limited"
-	MessageNotPermitted      = "not_permitted"
-	MessageHandoffOpen       = "handoff_open"
-	MessageHandoffClosed     = "handoff_closed"
-	MessageForgetmeConfirm   = "forgetme_confirm"
-	MessageForgetmeDone      = "forgetme_done"
-	MessageForgetmeStopping  = "forgetme_stopping"
-	MessageUnavailable       = "unavailable"
-	MessageWorkflowSucceeded = "workflow_succeeded"
-	MessageWorkflowFailed    = "workflow_failed"
-	MessageWorkflowCancelled = "workflow_cancelled"
-	MessageTurnFailed        = "turn_failed"
-	MessageTurnTimeout       = "turn_timeout"
-	MessageTurnEmpty         = "turn_empty"
-)
-
-const (
 	KnowledgeCollectionIDPattern = `^[a-z][a-z0-9-]{1,47}$`
 	MaxPersonaCollections        = 32
 )
@@ -80,30 +56,6 @@ var (
 	knowledgeCollectionID = regexp.MustCompile(KnowledgeCollectionIDPattern)
 	pluginID              = regexp.MustCompile(`^[a-z][a-z0-9-]{1,47}$`)
 )
-
-var personaMessageDefaults = map[string]string{
-	MessagePairingCode:       "To talk with me, ask the owner to approve this pairing code: " + PairingCodePlaceholder,
-	MessagePairingPending:    "A pairing request is already pending. Please wait for the owner.",
-	MessagePairingLocked:     "Too many pairing attempts. Please try again later.",
-	MessageWaitingForOwner:   "One moment, I am checking with the owner.",
-	MessageApprovalTimeout:   "The owner did not respond in time, so the request was cancelled. Please try again later.",
-	MessageApprovalDenied:    "The owner declined this request.",
-	MessageBudgetExhausted:   "Your daily quota is used up. Please try again tomorrow.",
-	MessageRateLimited:       "You are sending messages too quickly. Please wait a moment.",
-	MessageNotPermitted:      "That is not available here.",
-	MessageHandoffOpen:       "I have passed this conversation to the owner, who will reply here.",
-	MessageHandoffClosed:     "The owner has handed the conversation back to me.",
-	MessageForgetmeConfirm:   "This erases your conversations and data with me. Send /forgetme confirm to proceed.",
-	MessageForgetmeDone:      "Your data has been erased.",
-	MessageForgetmeStopping:  "Your workflow runs are being stopped. Please send /forgetme confirm again in a minute.",
-	MessageUnavailable:       "This assistant is not available right now.",
-	MessageWorkflowSucceeded: "Done: " + WorkflowGoalPlaceholder,
-	MessageWorkflowFailed:    "Sorry, " + WorkflowGoalPlaceholder + " could not be completed.",
-	MessageWorkflowCancelled: WorkflowGoalPlaceholder + " was cancelled.",
-	MessageTurnFailed:        "Sorry, something went wrong and I could not finish this. Please try again.",
-	MessageTurnTimeout:       "Sorry, this took too long and I had to stop. Please try again, maybe with a smaller request.",
-	MessageTurnEmpty:         "Sorry, I could not put an answer together. Please try again or rephrase.",
-}
 
 type Config struct {
 	Definitions []Persona `json:"definitions"`
@@ -169,10 +121,6 @@ type Bindings []Binding
 
 func Default() Config {
 	return Config{}
-}
-
-func PersonaMessageDefaults() map[string]string {
-	return maps.Clone(personaMessageDefaults)
 }
 
 func ValidKnowledgeCollectionID(id string) bool {
@@ -264,23 +212,29 @@ func (c Config) validateAccess() error {
 }
 
 func validateMessages(field string, messages map[string]string) error {
+	defaults := messageBundles[DefaultMessageLanguage]
 	for _, key := range slices.Sorted(maps.Keys(messages)) {
-		if _, known := personaMessageDefaults[key]; !known {
+		if _, known := defaults[key]; !known {
 			return configkit.Field(field+".messages", fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("unknown key %q", key)))
 		}
-		value := messages[key]
-		switch {
-		case strings.TrimSpace(value) == "":
-			return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "must not be empty"))
-		case strings.ContainsFunc(value, unicode.IsControl):
-			return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "must be a single line without control characters"))
-		case utf8.RuneCountInString(value) > MaxPersonaMessageRunes:
-			return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("must be at most %d characters", MaxPersonaMessageRunes)))
-		case key == MessagePairingCode && !strings.Contains(value, PairingCodePlaceholder):
-			return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "must contain "+PairingCodePlaceholder))
+		if err := validateMessageValue(key, messages[key]); err != nil {
+			return configkit.Field(field+".messages."+key, err)
 		}
 	}
 	return nil
+}
+
+func validateMessageValue(key, value string) error {
+	switch {
+	case strings.TrimSpace(value) == "":
+		return fault.New(ErrorCodePersonaInvalid, "must not be empty")
+	case strings.ContainsFunc(value, unicode.IsControl):
+		return fault.New(ErrorCodePersonaInvalid, "must be a single line without control characters")
+	case utf8.RuneCountInString(value) > MaxPersonaMessageRunes:
+		return fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("must be at most %d characters", MaxPersonaMessageRunes))
+	default:
+		return validateMessagePlaceholders(key, value)
+	}
 }
 
 func validatePluginList(field string, plugins []string) error {

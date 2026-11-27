@@ -15,8 +15,10 @@ import (
 var validID = regexp.MustCompile(`^[a-z][a-z0-9_-]{0,63}$`)
 
 type Registry struct {
-	definitions []Definition
-	byID        map[string]int
+	definitions      []Definition
+	byID             map[string]int
+	bundle           map[string]string
+	fallbackLanguage string
 }
 
 func newRegistry() *Registry {
@@ -91,18 +93,22 @@ func (r *Registry) Resolve(required []string, preferID *string) (Definition, err
 	return r.definitions[best].clone(), nil
 }
 
-func Build(overrides []Persona, knownTools []string, catalog []tools.Definition, modelRoutes []string) (*Registry, error) {
-	return BuildWithMCP(overrides, knownTools, catalog, nil, modelRoutes)
+func Build(overrides []Persona, knownTools []string, catalog []tools.Definition, modelRoutes []string, deploymentLanguage string) (*Registry, error) {
+	return BuildWithMCP(overrides, knownTools, catalog, nil, modelRoutes, deploymentLanguage)
 }
 
-func BuildWithMCP(overrides []Persona, knownTools []string, catalog []tools.Definition, mcpServers, modelRoutes []string) (*Registry, error) {
+func BuildWithMCP(overrides []Persona, knownTools []string, catalog []tools.Definition, mcpServers, modelRoutes []string, deploymentLanguage string) (*Registry, error) {
+	bundle, fallback := selectMessageBundle(deploymentLanguage)
 	registry := newRegistry()
+	registry.bundle = bundle
+	registry.fallbackLanguage = fallback
 	for index := range builtins {
 		definition := builtins[index].clone()
 		definition.MemoryScope = MemoryScopePersona
 		definition.Name = cmp.Or(definition.Name, definition.ID)
 		definition.Audience = AudienceOwner
 		definition.GroupContext = GroupContextPerPrincipal
+		definition.bundle = bundle
 		registry.upsert(&definition)
 	}
 	seen := make(map[string]struct{}, len(overrides))
@@ -115,6 +121,7 @@ func BuildWithMCP(overrides []Persona, knownTools []string, catalog []tools.Defi
 			return nil, codedError(ErrorCodeDuplicateID, fmt.Sprintf("agents.definitions[%d].id: duplicate agent id %q", index, definition.ID))
 		}
 		seen[definition.ID] = struct{}{}
+		definition.bundle = bundle
 		registry.upsert(definition)
 	}
 	return registry, nil

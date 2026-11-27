@@ -24,7 +24,7 @@ func TestLoad_OwnerSection(t *testing.T) {
 	path := writeOwnerConfig(t, `version: 1
 owner:
   name: Angga
-  language: Indonesian
+  language: id
   timezone: Asia/Jakarta
   preferences:
     style: concise
@@ -38,7 +38,7 @@ owner:
 	if owner == nil {
 		t.Fatal("owner section dropped")
 	}
-	if owner.Name != "Angga" || owner.Language != "Indonesian" || owner.Timezone != "Asia/Jakarta" {
+	if owner.Name != "Angga" || owner.Language != "id" || owner.Timezone != "Asia/Jakarta" {
 		t.Errorf("owner = %+v", owner)
 	}
 	if owner.Preferences["style"] != "concise" || owner.Preferences["reminder"] != "senang: pagi" {

@@ -23,6 +23,7 @@ func presenceDeliveryRequest(req *turn.TurnRequest, deadline time.Time) *runtime
 		EffectID:       req.TurnID,
 		Channel:        string(req.Origin),
 		ConversationID: req.SessionID,
+		AgentID:        req.AgentID,
 		PrincipalClass: string(req.PrincipalClass),
 		ReplyContext:   req.ReplyContext,
 		IdempotencyKey: req.TurnID,

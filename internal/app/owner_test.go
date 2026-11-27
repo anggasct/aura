@@ -3,10 +3,15 @@ package app
 import (
 	"context"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 )
@@ -74,7 +79,7 @@ func TestOwnerContextOptionPopulatedOwner(t *testing.T) {
 	logger := newTestLogger(h)
 	owner := &principal.Owner{
 		Name:        "Angga",
-		Language:    "Indonesian",
+		Language:    "id",
 		Timezone:    "Asia/Jakarta",
 		Preferences: map[string]string{"style": "concise"},
 	}
@@ -131,4 +136,55 @@ func TestOwnerContextOptionOversizedBlock(t *testing.T) {
 	if h.records[1].Level != slog.LevelWarn {
 		t.Fatalf("second record level = %v, want Warn", h.records[1].Level)
 	}
+}
+
+func TestOwnerLanguageMustBeABCP47Tag(t *testing.T) {
+	writeCfg := func(t *testing.T, lang string) string {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "config.yaml")
+		body := "version: 1\nowner:\n  language: " + lang + "\n"
+		if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+			t.Fatalf("write config: %v", err)
+		}
+		return path
+	}
+
+	for _, tc := range []struct {
+		tag      string
+		wantLine string
+	}{
+		{tag: "id", wantLine: "language: Indonesian (id)"},
+		{tag: "en", wantLine: "language: English (en)"},
+		{tag: "id-ID", wantLine: "language: Indonesian (id-ID)"},
+	} {
+		t.Run("accepts "+tc.tag, func(t *testing.T) {
+			res, err := appconfig.Load(writeCfg(t, tc.tag))
+			if err != nil {
+				t.Fatalf("Load(%q): %v", tc.tag, err)
+			}
+			block := runtimeadk.RenderOwnerContext(&runtimeadk.OwnerContext{
+				Language: res.Config.Owner.Language,
+			})
+			if !strings.Contains(block, tc.wantLine) {
+				t.Fatalf("owner context =\n%s\nwant line %q", block, tc.wantLine)
+			}
+		})
+	}
+
+	t.Run("rejects free text without echoing", func(t *testing.T) {
+		_, err := appconfig.Load(writeCfg(t, "Indonesian"))
+		if err == nil {
+			t.Fatal("free-text language accepted")
+		}
+		if !fault.HasCode(err, configkit.ErrorCodeInvalid) {
+			t.Fatalf("err = %v, want code %s", err, configkit.ErrorCodeInvalid)
+		}
+		msg := err.Error()
+		if !strings.Contains(msg, "owner.language") || !strings.Contains(msg, `must be a BCP 47 language tag such as "id" or "en"`) {
+			t.Fatalf("err = %q, want owner.language BCP 47 message", msg)
+		}
+		if strings.Contains(msg, "Indonesian") {
+			t.Fatalf("err = %q echoes the invalid language value", msg)
+		}
+	})
 }

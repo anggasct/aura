@@ -6,6 +6,9 @@ import (
 	"maps"
 	"slices"
 	"strings"
+
+	"golang.org/x/text/language"
+	"golang.org/x/text/language/display"
 )
 
 const (
@@ -29,7 +32,7 @@ func RenderOwnerContext(owner *OwnerContext) string {
 		lines = append(lines, "name: "+owner.Name)
 	}
 	if owner.Language != "" {
-		lines = append(lines, "language: "+owner.Language)
+		lines = append(lines, "language: "+formatOwnerLanguage(owner.Language))
 	}
 	if owner.Timezone != "" {
 		lines = append(lines, "timezone: "+owner.Timezone)
@@ -45,6 +48,23 @@ func RenderOwnerContext(owner *OwnerContext) string {
 		return ""
 	}
 	return ownerContextHeader + "\n" + strings.Join(lines, "\n") + "\n" + ownerContextFooter
+}
+
+func formatOwnerLanguage(raw string) string {
+	tag, err := language.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	canonical := tag.String()
+	base, conf := tag.Base()
+	if conf != language.Exact {
+		return canonical
+	}
+	name := display.English.Languages().Name(base)
+	if name == "" {
+		return canonical
+	}
+	return name + " (" + canonical + ")"
 }
 
 func OwnerContextDigest(block string) string {

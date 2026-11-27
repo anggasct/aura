@@ -116,7 +116,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "kantor", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted,
 		Tools: []string{"read_file", "write_file", "exec"}, PrincipalTools: []string{"write_file"},
-	}}, []string{"read_file", "write_file", "exec"}, appconfig.BuiltinToolDefinitions(), nil)
+	}}, []string{"read_file", "write_file", "exec"}, appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

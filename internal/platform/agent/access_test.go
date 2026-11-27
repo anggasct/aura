@@ -26,7 +26,7 @@ func kantorOverride() Persona {
 }
 
 func TestBuildCarriesAccessFields(t *testing.T) {
-	registry, err := Build([]Persona{kantorOverride()}, validTools, validToolCatalog, []string{"primary"})
+	registry, err := Build([]Persona{kantorOverride()}, validTools, validToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -48,7 +48,7 @@ func TestBuildCarriesAccessFields(t *testing.T) {
 	}
 	custom := kantorOverride()
 	custom.Audience = ""
-	registry, err = Build([]Persona{custom}, validTools, validToolCatalog, []string{"primary"})
+	registry, err = Build([]Persona{custom}, validTools, validToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestDefinitionAdmitsByAudience(t *testing.T) {
 }
 
 func TestDefinitionToolCeilingPerClass(t *testing.T) {
-	registry, err := Build([]Persona{kantorOverride()}, validTools, validToolCatalog, []string{"primary"})
+	registry, err := Build([]Persona{kantorOverride()}, validTools, validToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -110,7 +110,7 @@ func TestBuildRejectsInvalidToolCeilings(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			override := kantorOverride()
 			mutate(&override)
-			_, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary"})
+			_, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary"}, "en")
 			if !fault.HasCode(err, ErrorCodePersonaInvalid) {
 				t.Fatalf("Build() error = %v, want code %s", err, ErrorCodePersonaInvalid)
 			}
@@ -120,7 +120,7 @@ func TestBuildRejectsInvalidToolCeilings(t *testing.T) {
 	unrestricted.Tools = nil
 	unrestricted.PrincipalTools = []string{"exec"}
 	unrestricted.PublicTools = []string{"list_dir"}
-	if _, err := Build([]Persona{unrestricted}, validTools, validToolCatalog, []string{"primary"}); err != nil {
+	if _, err := Build([]Persona{unrestricted}, validTools, validToolCatalog, []string{"primary"}, "en"); err != nil {
 		t.Fatalf("persona without a tools list accepts any read-tier ceiling: %v", err)
 	}
 }
@@ -129,7 +129,7 @@ func TestRouterServesPersonaByAccountDefaultOrBinding(t *testing.T) {
 	public := kantorOverride()
 	public.ID = "lobby"
 	public.Audience = AudiencePublic
-	registry, err := Build([]Persona{kantorOverride(), public}, validTools, validToolCatalog, []string{"primary"})
+	registry, err := Build([]Persona{kantorOverride(), public}, validTools, validToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestRouterServesPublicOnlyWhenAPublicPersonaIsReachable(t *testing.T) {
 	public := kantorOverride()
 	public.ID = "lobby"
 	public.Audience = AudiencePublic
-	registry, err := Build([]Persona{kantorOverride(), public}, validTools, validToolCatalog, []string{"primary"})
+	registry, err := Build([]Persona{kantorOverride(), public}, validTools, validToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestGroupContextDefaultsToPerPrincipal(t *testing.T) {
 	registry, err := Build([]Persona{
 		{ID: "crew", Description: "d", Instructions: "i", Audience: AudienceTrusted, GroupContext: GroupContextShared},
 		{ID: "lobby", Description: "d", Instructions: "i", Audience: AudiencePublic},
-	}, nil, validToolCatalog, nil)
+	}, nil, validToolCatalog, nil, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

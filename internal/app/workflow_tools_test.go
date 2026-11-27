@@ -35,7 +35,7 @@ func waitingSpec(id, goal string) *workflow.Spec {
 
 func builtinRegistry(t *testing.T) *auraagent.Registry {
 	t.Helper()
-	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
+	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func workflowFixtureFor(t *testing.T, options *workflow.Options, specs []*workfl
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"workflow_start"}, PublicTools: []string{"workflow_start"}, Workflows: allowlist,
-	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +177,7 @@ func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := mustWorkflowStore(t, db)
 	interpreter := mustWorkflowInterpreter(t, runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
+	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatal(err)
 	}

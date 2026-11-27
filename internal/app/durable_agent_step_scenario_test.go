@@ -96,7 +96,7 @@ func hostAgentStep(t *testing.T, life *runLife) {
 	t.Helper()
 	cfg := appconfig.Default()
 	persona := auraagent.Persona{ID: scenarioPersona, Description: "reads the note", Instructions: "read the note and report", Tools: []string{agentStepReadTool}}
-	registry, err := auraagent.Build([]auraagent.Persona{persona}, []string{agentStepReadTool}, appconfig.BuiltinToolDefinitions(), []string{"primary"})
+	registry, err := auraagent.Build([]auraagent.Persona{persona}, []string{agentStepReadTool}, appconfig.BuiltinToolDefinitions(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

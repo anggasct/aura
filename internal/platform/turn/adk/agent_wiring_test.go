@@ -187,7 +187,7 @@ func TestBuildAgentCarriesDefinitionSurface(t *testing.T) {
 }
 
 func TestRegistryBuiltinsResolvePerCapability(t *testing.T) {
-	registry, err := auraagent.Build(nil, []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, nil, []string{"primary"})
+	registry, err := auraagent.Build(nil, []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, nil, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent.Build: %v", err)
 	}

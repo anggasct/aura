@@ -118,7 +118,7 @@ func completionHarnessFor(t *testing.T, base *workflow.Controller, runs *workflo
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Name: "Lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Workflows: []string{"book_visit"}, Messages: map[string]string{auraagent.MessageWorkflowSucceeded: "Selesai: {goal}"},
-	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatal(err)
 	}

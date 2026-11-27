@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -84,15 +85,13 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
 	defaults := auraagent.PersonaMessageDefaults()
 	keys := slices.Sorted(maps.Keys(defaults))
-	if len(keys) != 21 {
-		t.Fatalf("message keys = %v, want the 21 fixed replies", keys)
+	if len(keys) != 25 {
+		t.Fatalf("message keys = %v, want the 25 fixed replies", keys)
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
-			value := "custom " + key
-			if key == auraagent.MessagePairingCode {
-				value += " " + auraagent.PairingCodePlaceholder
-			}
+			parts := append([]string{"custom " + key}, auraagent.MessagePlaceholders(key)...)
+			value := strings.Join(parts, " ")
 			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": " + value + "\n"
 			res, err := Load(writePersonaConfig(t, "", "", definition))
 			if err != nil {
@@ -105,6 +104,91 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 				t.Fatalf("default for %s is empty", key)
 			}
 		})
+	}
+}
+
+func TestPersonaOverrideMustKeepItsPlaceholders(t *testing.T) {
+	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
+	for name, tc := range map[string]struct {
+		key    string
+		value  string
+		wantOK bool
+		detail string
+	}{
+		"workflow_succeeded without goal": {
+			key:    auraagent.MessageWorkflowSucceeded,
+			value:  "All done!",
+			detail: "{goal}",
+		},
+		"workflow_failed without goal": {
+			key:    auraagent.MessageWorkflowFailed,
+			value:  "It failed.",
+			detail: "{goal}",
+		},
+		"workflow_cancelled without goal": {
+			key:    auraagent.MessageWorkflowCancelled,
+			value:  "Cancelled.",
+			detail: "{goal}",
+		},
+		"pairing_code without code": {
+			key:    auraagent.MessagePairingCode,
+			value:  "Ask the owner.",
+			detail: "{code}",
+		},
+		"unexpected placeholder on plain key": {
+			key:    auraagent.MessageUnavailable,
+			value:  "Unavailable {code}",
+			detail: "{code}",
+		},
+		"workflow_succeeded with goal": {
+			key:    auraagent.MessageWorkflowSucceeded,
+			value:  "Selesai: {goal}",
+			wantOK: true,
+		},
+		"status_working accepted": {
+			key:    auraagent.MessageStatusWorking,
+			value:  "Lagi dikerjakan…",
+			wantOK: true,
+		},
+		"status_still_working accepted": {
+			key:    auraagent.MessageStatusStillWorking,
+			value:  "Masih lanjut…",
+			wantOK: true,
+		},
+		"status_stopped accepted": {
+			key:    auraagent.MessageStatusStopped,
+			value:  "⏹ Berhenti",
+			wantOK: true,
+		},
+		"button_stop accepted": {
+			key:    auraagent.MessageButtonStop,
+			value:  "Berhenti",
+			wantOK: true,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + tc.key + ": " + strconv.Quote(tc.value) + "\n"
+			path := writePersonaConfig(t, "", "", definition)
+			_, err := Load(path)
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			if code, ok := codeOf(err); !ok || code != personaInvalidCode {
+				t.Fatalf("code = %q, %v (err %v), want %s", code, ok, err, personaInvalidCode)
+			}
+			if !strings.Contains(err.Error(), tc.detail) {
+				t.Fatalf("err = %q, want %q", err, tc.detail)
+			}
+		})
+	}
+
+	resolved := resolvedSchema(t)
+	doc := []byte("version: 1\nowner:\n  language: id\nagents:\n  definitions:\n    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        status_working: Lagi jalan\n        status_still_working: Masih jalan\n        status_stopped: Berhenti\n        button_stop: Stop\n")
+	if err := resolved.Validate(jsonInstance(t, doc)); err != nil {
+		t.Fatalf("schema refused new message keys: %v", err)
 	}
 }
 

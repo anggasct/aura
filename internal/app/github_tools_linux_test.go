@@ -299,7 +299,7 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 		{ID: "ops", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}},
 		{ID: "plain", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"read_file"}},
 		{ID: "lobby", Description: "d", Instructions: "i", Audience: auraagent.AudiencePublic, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}, PublicTools: []string{"read_file"}},
-	}, personaToolNames(&cfg), append(appconfig.BuiltinToolDefinitions(), github.Definitions()...), nil)
+	}, personaToolNames(&cfg), append(appconfig.BuiltinToolDefinitions(), github.Definitions()...), nil, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

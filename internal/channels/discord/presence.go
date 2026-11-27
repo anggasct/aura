@@ -2,6 +2,7 @@ package discord
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -27,6 +29,7 @@ type presenceSession struct {
 	channelID    string
 	guildID      string
 	authorID     string
+	agentID      string
 	conversation string
 	replyContext []byte
 	channelKey   string
@@ -89,13 +92,30 @@ func (a *Adapter) snapshot(session *presenceSession) presenceSnapshot {
 	}
 }
 
+func (a *Adapter) statusTexts(agentID string) status.Texts {
+	definition, ok := a.personaDefinition(agentID)
+	if !ok && agentID == "" && a.account != nil {
+		definition, ok = a.personaDefinition(a.account.Persona)
+	}
+	if !ok {
+		return status.DefaultTexts()
+	}
+	return status.Texts{
+		Working:      definition.Message(auraagent.MessageStatusWorking),
+		StillWorking: definition.Message(auraagent.MessageStatusStillWorking),
+		Stopped:      definition.Message(auraagent.MessageStatusStopped),
+		StopButton:   definition.Message(auraagent.MessageButtonStop),
+	}
+}
+
 func (a *Adapter) renderSession(session *presenceSession, now time.Time) (display string, version uint64) {
 	a.presenceMu.Lock()
 	steps := status.StepsOf(session.steps)
 	started := session.started
+	agentID := session.agentID
 	version = session.version
 	a.presenceMu.Unlock()
-	return status.Render(steps, now.Sub(started), status.DefaultTexts(), a.vaultOrNil()), version
+	return status.Render(steps, now.Sub(started), a.statusTexts(agentID), a.vaultOrNil()), version
 }
 
 func (a *Adapter) triggerTyping(ctx context.Context, channelID string) error {
@@ -196,28 +216,33 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 		a.presence = map[string]*presenceSession{}
 	}
 	session, ok := a.presence[req.EffectID]
-	if !ok {
-		now := time.Now()
-		cloned := *req
-		cloned.Parts = nil
-		if len(req.ReplyContext) > 0 {
-			cloned.ReplyContext = append([]byte(nil), req.ReplyContext...)
+	if ok {
+		if session.agentID == "" && req.AgentID != "" {
+			session.agentID = req.AgentID
 		}
-		session = &presenceSession{
-			channelID:    channelID,
-			guildID:      guildID,
-			authorID:     authorID,
-			conversation: req.ConversationID,
-			channelKey:   presenceKey(req.Channel, req.EffectID),
-			request:      &cloned,
-			started:      now,
-			wake:         make(chan struct{}, 1),
-		}
-		if len(req.ReplyContext) > 0 {
-			session.replyContext = append([]byte(nil), req.ReplyContext...)
-		}
-		a.presence[req.EffectID] = session
+		return session, channelID, nil
 	}
+	now := time.Now()
+	cloned := *req
+	cloned.Parts = nil
+	if len(req.ReplyContext) > 0 {
+		cloned.ReplyContext = append([]byte(nil), req.ReplyContext...)
+	}
+	session = &presenceSession{
+		channelID:    channelID,
+		guildID:      guildID,
+		authorID:     authorID,
+		agentID:      req.AgentID,
+		conversation: req.ConversationID,
+		channelKey:   presenceKey(req.Channel, req.EffectID),
+		request:      &cloned,
+		started:      now,
+		wake:         make(chan struct{}, 1),
+	}
+	if len(req.ReplyContext) > 0 {
+		session.replyContext = append([]byte(nil), req.ReplyContext...)
+	}
+	a.presence[req.EffectID] = session
 	return session, channelID, nil
 }
 
@@ -505,13 +530,14 @@ func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presence
 	shownText := session.shownText
 	request := session.request
 	channelID := session.channelID
+	agentID := session.agentID
 	a.presenceMu.Unlock()
 	if request == nil {
 		return fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	if statusID == "" {
 		tokenID, pending, callbackData, minted := a.mintStopToken(session)
-		id, postErr := a.postPresenceMessage(ctx, request, channelID, display, stopComponents(callbackData))
+		id, postErr := a.postPresenceMessage(ctx, request, channelID, display, stopComponents(callbackData, a.statusTexts(agentID).StopButton))
 		if postErr != nil || id == "" {
 			if minted {
 				a.stops.Drop(tokenID, pending)
@@ -579,7 +605,7 @@ func (a *Adapter) mintStopToken(session *presenceSession) (tokenID string, pendi
 	return tokenID, pending, a.stops.Callback(tokenID, approval.ActionStop, binding, session.request.Deadline), true
 }
 
-func stopComponents(customID string) []componentPayload {
+func stopComponents(customID, label string) []componentPayload {
 	if customID == "" {
 		return nil
 	}
@@ -588,7 +614,7 @@ func stopComponents(customID string) []componentPayload {
 		Components: []buttonPayload{{
 			Type:     componentButton,
 			Style:    buttonStyleSecondary,
-			Label:    status.DefaultTexts().StopButton,
+			Label:    cmp.Or(label, status.DefaultTexts().StopButton),
 			CustomID: customID,
 		}},
 	}}
@@ -663,6 +689,7 @@ func (a *Adapter) PresenceEnded(ctx context.Context, turnID string, end runtimec
 	a.presenceMu.Lock()
 	statusID := session.statusID
 	channelID := session.channelID
+	agentID := session.agentID
 	request := session.request
 	tokenID := session.stopTokenID
 	pending := session.stopPending
@@ -686,7 +713,7 @@ func (a *Adapter) PresenceEnded(ctx context.Context, turnID string, end runtimec
 	if time.Until(a.channelHeldUntil(channelID)) > 0 {
 		return nil
 	}
-	if err := a.patchPresenceMessage(context.WithoutCancel(ctx), request, channelID, statusID, status.DefaultTexts().Stopped, true); err != nil {
+	if err := a.patchPresenceMessage(context.WithoutCancel(ctx), request, channelID, statusID, a.statusTexts(agentID).Stopped, true); err != nil {
 		a.logger.WarnContext(ctx, "status stopped edit failed", "component", "discord")
 		if hadButton {
 			a.clearStatusComponents(ctx, channelID, statusID)

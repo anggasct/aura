@@ -320,7 +320,7 @@ func TestQuarantinedRoutineIsHiddenFromTheControllerTools(t *testing.T) {
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "desk", Description: "desk", Instructions: "You help.", Audience: auraagent.AudienceTrusted,
 		Tools: []string{"workflow_start"}, PrincipalTools: []string{"workflow_start"}, Workflows: []string{"book_visit", "broken_routine"},
-	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatal(err)
 	}

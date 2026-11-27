@@ -176,7 +176,7 @@ func newStepExecutorRig(t *testing.T, stubs map[string]bool, steps []agentScript
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	cfg := appconfig.Default()
-	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"})
+	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

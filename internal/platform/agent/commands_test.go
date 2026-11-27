@@ -40,7 +40,7 @@ func TestCommandsNilOpenerReturnsInvalidArgument(t *testing.T) {
 }
 
 func TestBindingsExplainExitsThreeWhenUnmatched(t *testing.T) {
-	registry, err := Build(nil, nil, nil, nil)
+	registry, err := Build(nil, nil, nil, nil, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

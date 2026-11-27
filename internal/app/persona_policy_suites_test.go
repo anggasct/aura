@@ -35,7 +35,7 @@ func TestPersonaPolicySuites(t *testing.T) {
 	if err := json.Unmarshal(encoded, &file); err != nil {
 		t.Fatal(err)
 	}
-	registry, err := auraagent.Build(file.Definitions, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
+	registry, err := auraagent.Build(file.Definitions, definitionNames(), appconfig.BuiltinToolDefinitions(), nil, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
