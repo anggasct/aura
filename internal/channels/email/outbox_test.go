@@ -18,11 +18,19 @@ type fakeRecoverer struct {
 	provider string
 	report   effect.RecoveryReport
 	err      error
+	retried  []string
+	retries  int
 }
 
 func (r *fakeRecoverer) RecoverProvider(_ context.Context, provider string) (effect.RecoveryReport, error) {
 	r.provider = provider
 	return r.report, r.err
+}
+
+func (r *fakeRecoverer) RecoverIntents(_ context.Context, ids []string) (effect.RecoveryReport, error) {
+	r.retries++
+	r.retried = ids
+	return effect.RecoveryReport{Scanned: len(ids), Claimed: len(ids)}, r.err
 }
 
 func TestAdaptersHealthChecks(t *testing.T) {
@@ -76,10 +84,11 @@ func TestOutboxRoutesAndSends(t *testing.T) {
 func TestRecoverEffects(t *testing.T) {
 	clock := durabletest.NewManualClock(fixedNow)
 	logger := slog.New(slog.DiscardHandler)
-	t.Run("a missing journal or clock is refused", func(t *testing.T) {
+	t.Run("a missing journal, logger or clock is refused", func(t *testing.T) {
 		for name, deps := range map[string]*RecoveryDeps{
 			"nil deps":   nil,
 			"no journal": {Logger: logger, Clock: clock},
+			"no logger":  {Journal: &fakeRecoverer{}, Clock: clock},
 			"no clock":   {Journal: &fakeRecoverer{}, Logger: logger},
 		} {
 			if _, err := RecoverEffects(t.Context(), deps); !fault.HasCode(err, ErrorCodeInvalidArgument) {
@@ -87,76 +96,81 @@ func TestRecoverEffects(t *testing.T) {
 			}
 		}
 	})
-	t.Run("one pass over the email provider reports when the next could claim more", func(t *testing.T) {
+	t.Run("one pass over the email provider reports the live leases it skipped", func(t *testing.T) {
 		retryAt := fixedNow.Add(time.Minute)
-		rec := &fakeRecoverer{report: effect.RecoveryReport{Scanned: 2, Claimed: 1, RetryAt: retryAt}}
+		rec := &fakeRecoverer{report: effect.RecoveryReport{Scanned: 2, Claimed: 1, RetryAt: retryAt, Pending: []string{"live-1"}}}
 		got, err := RecoverEffects(t.Context(), &RecoveryDeps{Journal: rec, Logger: logger, Clock: clock})
-		if err != nil || !got.Equal(retryAt) {
-			t.Fatalf("RecoverEffects = %v, %v; want %v", got, err, retryAt)
+		if err != nil || !got.At.Equal(retryAt) || len(got.IntentIDs) != 1 || got.IntentIDs[0] != "live-1" || !got.Pending() {
+			t.Fatalf("RecoverEffects = %+v, %v; want the retry time and the skipped intent", got, err)
 		}
 		if rec.provider != ProviderName {
 			t.Fatalf("provider = %q, want %q", rec.provider, ProviderName)
 		}
 	})
+	t.Run("a pass that skipped nothing has no retry", func(t *testing.T) {
+		rec := &fakeRecoverer{report: effect.RecoveryReport{Scanned: 1, Claimed: 1}}
+		got, err := RecoverEffects(t.Context(), &RecoveryDeps{Journal: rec, Logger: logger, Clock: clock})
+		if err != nil || got.Pending() {
+			t.Fatalf("RecoverEffects = %+v, %v; want no retry", got, err)
+		}
+	})
 	t.Run("a journal failure fails the pass", func(t *testing.T) {
 		wantErr := errors.New("db locked")
 		rec := &fakeRecoverer{err: wantErr}
-		if _, err := RecoverEffects(t.Context(), &RecoveryDeps{Journal: rec, Clock: clock}); !errors.Is(err, wantErr) {
+		if _, err := RecoverEffects(t.Context(), &RecoveryDeps{Journal: rec, Logger: logger, Clock: clock}); !errors.Is(err, wantErr) {
 			t.Fatalf("RecoverEffects(err) = %v, want %v", err, wantErr)
 		}
 	})
 }
 
-type timerSignalClock struct {
+type timerDurationClock struct {
 	*durabletest.ManualClock
-	timers chan struct{}
+	durations chan time.Duration
 }
 
-func (c *timerSignalClock) Timer(d time.Duration) <-chan time.Time {
+func (c *timerDurationClock) Timer(d time.Duration) <-chan time.Time {
 	fired := c.ManualClock.Timer(d)
-	c.timers <- struct{}{}
+	c.durations <- d
 	return fired
 }
 
-func newTimerSignalClock(start time.Time) *timerSignalClock {
-	return &timerSignalClock{ManualClock: durabletest.NewManualClock(start), timers: make(chan struct{}, 16)}
-}
-
-func TestRecoverEffectsAtWaitsForTheRetryTime(t *testing.T) {
-	clock := newTimerSignalClock(fixedNow)
+func TestRecoverEffectsAtWaitsUntilTheLeaseHasExpired(t *testing.T) {
+	clock := &timerDurationClock{ManualClock: durabletest.NewManualClock(fixedNow), durations: make(chan time.Duration, 4)}
 	rec := &fakeRecoverer{}
 	deps := &RecoveryDeps{Journal: rec, Logger: slog.New(slog.DiscardHandler), Clock: clock}
+	retry := RecoveryRetry{At: fixedNow.Add(45 * time.Second), IntentIDs: []string{"live-1", "live-2"}}
 	done := make(chan error, 1)
-	go func() { done <- RecoverEffectsAt(t.Context(), deps, fixedNow.Add(45*time.Second)) }()
-	<-clock.timers
+	go func() { done <- RecoverEffectsAt(t.Context(), deps, retry) }()
 
-	if rec.provider != "" {
-		t.Fatal("the second pass ran before the retry time")
+	if waited, want := <-clock.durations, 45*time.Second+time.Nanosecond; waited != want {
+		t.Fatalf("waited %v, want %v: a lease expiring at the retry time is claimable only after it", waited, want)
 	}
-	clock.Advance(45 * time.Second)
+	clock.Advance(45*time.Second + time.Nanosecond)
 	if err := <-done; err != nil {
 		t.Fatalf("RecoverEffectsAt: %v", err)
 	}
-	if rec.provider != ProviderName {
-		t.Fatalf("provider = %q, want the email provider recovered at the retry time", rec.provider)
+	if rec.retries != 1 || len(rec.retried) != 2 || rec.provider != "" {
+		t.Fatalf("retried %v in %d passes (provider scan %q), want one pass over exactly the skipped intents", rec.retried, rec.retries, rec.provider)
 	}
 }
 
 func TestRecoverEffectsAtStopsWithItsContext(t *testing.T) {
-	clock := newTimerSignalClock(fixedNow)
+	clock := durabletest.NewManualClock(fixedNow)
 	rec := &fakeRecoverer{}
-	deps := &RecoveryDeps{Journal: rec, Clock: clock}
+	deps := &RecoveryDeps{Journal: rec, Logger: slog.New(slog.DiscardHandler), Clock: clock}
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
-	go func() { done <- RecoverEffectsAt(ctx, deps, fixedNow.Add(time.Minute)) }()
-	<-clock.timers
+	go func() {
+		done <- RecoverEffectsAt(ctx, deps, RecoveryRetry{At: fixedNow.Add(time.Minute), IntentIDs: []string{"live-1"}})
+	}()
+	clock.AwaitArmed(t, 1)
 
 	cancel()
 
 	if err := <-done; !errors.Is(err, context.Canceled) {
 		t.Fatalf("RecoverEffectsAt = %v, want context.Canceled", err)
 	}
-	if rec.provider != "" {
+	if rec.retries != 0 {
 		t.Fatal("a cancelled wait still ran the pass")
 	}
 }
@@ -191,11 +205,11 @@ func intentState(t *testing.T, journal *effect.Journal, intent *effect.Intent) e
 	return current.State
 }
 
-func recoveryFixture(t *testing.T) (*deliveryFixture, *effect.Journal, *timerSignalClock) {
+func recoveryFixture(t *testing.T) (*deliveryFixture, *effect.Journal, *durabletest.ManualClock) {
 	t.Helper()
 	f := newDeliveryFixture(t)
 	f.request("ensure-session", defaultReply(), "x")
-	clock := newTimerSignalClock(fixedNow)
+	clock := durabletest.NewManualClock(fixedNow)
 	journal, err := effect.NewJournal(f.h.db, effect.Options{Clock: clock, Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
@@ -216,13 +230,13 @@ func TestEmailStartupRecoveryWaitsForLeases(t *testing.T) {
 	clock.Advance(30 * time.Second)
 	deps := &RecoveryDeps{Journal: journal, Logger: f.h.logger, Clock: clock}
 
-	retryAt, err := RecoverEffects(t.Context(), deps)
+	retry, err := RecoverEffects(t.Context(), deps)
 
 	if err != nil {
 		t.Fatalf("RecoverEffects: %v", err)
 	}
-	if want := fixedNow.Add(100 * time.Second); !retryAt.Equal(want) {
-		t.Fatalf("retry time = %v, want the live lease's expiry %v", retryAt, want)
+	if want := fixedNow.Add(100 * time.Second); !retry.At.Equal(want) || len(retry.IntentIDs) != 1 || retry.IntentIDs[0] != live.ID {
+		t.Fatalf("retry = %+v, want the live lease's expiry %v and only its intent", retry, want)
 	}
 	for intent, want := range map[*effect.Intent]effect.State{expired: effect.StateUnknown, legacy: effect.StateUnknown, live: effect.StateStarted, foreign: effect.StateStarted} {
 		if got := intentState(t, journal, intent); got != want {
@@ -230,17 +244,41 @@ func TestEmailStartupRecoveryWaitsForLeases(t *testing.T) {
 		}
 	}
 
+	own := startEmailIntent(t, f, journal, ProviderName, "own")
 	done := make(chan error, 1)
-	go func() { done <- RecoverEffectsAt(t.Context(), deps, retryAt) }()
-	<-clock.timers
-	clock.Advance(30*time.Second + time.Nanosecond)
+	go func() { done <- RecoverEffectsAt(t.Context(), deps, retry) }()
+	clock.AwaitArmed(t, 1)
+	clock.Advance(retry.At.Sub(clock.Now()) + time.Nanosecond)
 	if err := <-done; err != nil {
 		t.Fatalf("RecoverEffectsAt: %v", err)
 	}
-	for intent, want := range map[*effect.Intent]effect.State{live: effect.StateUnknown, foreign: effect.StateStarted} {
+	for intent, want := range map[*effect.Intent]effect.State{live: effect.StateUnknown, foreign: effect.StateStarted, own: effect.StateStarted} {
 		if got := intentState(t, journal, intent); got != want {
 			t.Errorf("%s after the second pass = %s, want %s", intent.IdempotencyKey, got, want)
 		}
+	}
+}
+
+func TestEmailStartupRecoveryLeavesTheRunningProcessSendsAlone(t *testing.T) {
+	f, journal, clock := recoveryFixture(t)
+	startEmailIntent(t, f, journal, ProviderName, "dead-process")
+	deps := &RecoveryDeps{Journal: journal, Logger: f.h.logger, Clock: clock}
+	retry, err := RecoverEffects(t.Context(), deps)
+	if err != nil || !retry.Pending() {
+		t.Fatalf("RecoverEffects = %+v, %v; want the dead process's live lease retried", retry, err)
+	}
+	own := startEmailIntent(t, f, journal, ProviderName, "running-process")
+	done := make(chan error, 1)
+	go func() { done <- RecoverEffectsAt(t.Context(), deps, retry) }()
+	clock.AwaitArmed(t, 1)
+
+	clock.Advance(10 * time.Minute)
+	if err := <-done; err != nil {
+		t.Fatalf("RecoverEffectsAt: %v", err)
+	}
+
+	if got := intentState(t, journal, own); got != effect.StateStarted {
+		t.Fatalf("a send of the running process with a lapsed lease = %s, want it left started", got)
 	}
 }
 
@@ -252,10 +290,10 @@ func TestEmailStartupRecoveryUnchanged(t *testing.T) {
 		t.Fatalf("clear leases: %v", err)
 	}
 
-	retryAt, err := RecoverEffects(t.Context(), &RecoveryDeps{Journal: journal, Logger: f.h.logger, Clock: clock})
+	retry, err := RecoverEffects(t.Context(), &RecoveryDeps{Journal: journal, Logger: f.h.logger, Clock: clock})
 
-	if err != nil || !retryAt.IsZero() {
-		t.Fatalf("RecoverEffects = %v, %v; want every leaseless intent claimed at once with nothing to retry", retryAt, err)
+	if err != nil || retry.Pending() {
+		t.Fatalf("RecoverEffects = %+v, %v; want every leaseless intent claimed at once with nothing to retry", retry, err)
 	}
 	if got := intentState(t, journal, mine); got != effect.StateUnknown {
 		t.Errorf("email intent = %s, want unknown", got)

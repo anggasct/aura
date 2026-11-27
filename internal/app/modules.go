@@ -1394,13 +1394,13 @@ func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute
 type emailRecoveryRetry struct {
 	deps   *email.RecoveryDeps
 	logger *slog.Logger
-	at     time.Time
+	retry  email.RecoveryRetry
 }
 
-func (r emailRecoveryRetry) pending() bool { return !r.at.IsZero() }
+func (r emailRecoveryRetry) pending() bool { return r.retry.Pending() }
 
 func (r emailRecoveryRetry) run(ctx context.Context) {
-	if err := email.RecoverEffectsAt(ctx, r.deps, r.at); err != nil && ctx.Err() == nil {
+	if err := email.RecoverEffectsAt(ctx, r.deps, r.retry); err != nil && ctx.Err() == nil {
 		r.logger.ErrorContext(ctx, "email effect recovery retry failed", "component", "email", "error", err)
 	}
 }
@@ -1417,11 +1417,11 @@ func recoverEmailEffects(ctx context.Context, cfg *appconfig.Config, db *sql.DB,
 		return emailRecoveryRetry{}, err
 	}
 	deps := &email.RecoveryDeps{Journal: executor.Journal(), Logger: logger, Clock: durable.RealClock()}
-	retryAt, err := email.RecoverEffects(ctx, deps)
+	retry, err := email.RecoverEffects(ctx, deps)
 	if err != nil {
 		return emailRecoveryRetry{}, err
 	}
-	return emailRecoveryRetry{deps: deps, logger: logger, at: retryAt}, nil
+	return emailRecoveryRetry{deps: deps, logger: logger, retry: retry}, nil
 }
 
 type apiKeyDirectory struct {

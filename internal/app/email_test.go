@@ -476,17 +476,22 @@ func startedIntent(t *testing.T, journal *effect.Journal, provider string) *effe
 	return started
 }
 
+var (
+	leasesExpiredAt = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	leasesLiveAt    = time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+)
+
 func TestRecoverEmailEffects(t *testing.T) {
 	cases := map[string]struct {
 		enabled      bool
-		startedAgo   time.Duration
+		startedAt    time.Time
 		wantEmail    effect.State
 		wantRetrying bool
 	}{
-		"email enabled, leases expired":  {enabled: true, startedAgo: time.Hour, wantEmail: effect.StateUnknown},
-		"email enabled, leases live":     {enabled: true, wantEmail: effect.StateStarted, wantRetrying: true},
-		"email disabled, leases expired": {enabled: false, startedAgo: time.Hour, wantEmail: effect.StateStarted},
-		"email disabled, leases live":    {enabled: false, wantEmail: effect.StateStarted},
+		"email enabled, leases expired":  {enabled: true, startedAt: leasesExpiredAt, wantEmail: effect.StateUnknown},
+		"email enabled, leases live":     {enabled: true, startedAt: leasesLiveAt, wantEmail: effect.StateStarted, wantRetrying: true},
+		"email disabled, leases expired": {enabled: false, startedAt: leasesExpiredAt, wantEmail: effect.StateStarted},
+		"email disabled, leases live":    {enabled: false, startedAt: leasesLiveAt, wantEmail: effect.StateStarted},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -499,7 +504,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 				t.Fatalf("EnsureSession: %v", err)
 			}
 			journal, err := effect.NewJournal(db, effect.Options{
-				Clock:  durabletest.NewManualClock(time.Now().Add(-tc.startedAgo)),
+				Clock:  durabletest.NewManualClock(tc.startedAt),
 				Logger: slog.New(slog.DiscardHandler),
 				Turns:  turnstore.NewTurnStore(db),
 			})
