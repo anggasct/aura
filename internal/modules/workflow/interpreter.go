@@ -33,8 +33,7 @@ type Options struct {
 	MaxConcurrentSteps int
 	HandlerName        string
 	Driver             Driver
-	AgentResolver      AgentResolver
-	Agents             AgentRunner
+	AgentSteps         AgentStepRunner
 	Tools              ToolRunner
 	Artifacts          ArtifactSink
 	Approvals          ApprovalRequester

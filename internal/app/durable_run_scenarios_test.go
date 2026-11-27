@@ -197,8 +197,7 @@ func (w *workflowShape) host(t *testing.T, life *runLife) {
 	interpreter := mustWorkflowInterpreter(t, life.workflows, life.runtime, &workflow.Options{
 		MaxConcurrentSteps: cfg.Workflows.MaxConcurrentSteps,
 		Logger:             slog.New(slog.DiscardHandler),
-		AgentResolver:      deps.Agents,
-		Agents:             okAgentRunner{},
+		AgentSteps:         okAgentRunner{},
 		Tools:              tools,
 		GeneratedBudget:    w.budget,
 	})
@@ -258,8 +257,8 @@ func crashResumeSpec(id string, source workflow.Source) *workflow.Spec {
 
 type okAgentRunner struct{}
 
-func (okAgentRunner) Run(context.Context, *auraagent.Definition, *workflow.ExecutionContext) (json.RawMessage, error) {
-	return json.RawMessage(`{"ok":true}`), nil
+func (okAgentRunner) RunStep(context.Context, *workflow.AgentStepCall) (workflow.AgentStepResult, error) {
+	return workflow.AgentStepResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 }
 
 func proofSpec(credential string) *workflow.Spec {

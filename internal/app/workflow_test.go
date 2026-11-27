@@ -490,8 +490,8 @@ func TestWorkflowToolRunnerExecutesCoveredEffectfulTool(t *testing.T) {
 	var result struct {
 		Path string `json:"path"`
 	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("decode tool result: %v (%s)", err, output)
+	if err := json.Unmarshal(output.Output, &result); err != nil {
+		t.Fatalf("decode tool result: %v (%s)", err, output.Output)
 	}
 	content, err := os.ReadFile(filepath.Join(workspace, "notes.txt"))
 	if err != nil {

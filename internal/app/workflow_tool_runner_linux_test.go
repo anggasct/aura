@@ -339,8 +339,8 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 		if err != nil {
 			t.Fatalf("retry Invoke with the same arguments: %v", err)
 		}
-		if !bytes.Equal(retried, first) {
-			t.Fatalf("retry Invoke output = %s, want the first output %s", retried, first)
+		if !bytes.Equal(retried.Output, first.Output) {
+			t.Fatalf("retry Invoke output = %s, want the first output %s", retried.Output, first.Output)
 		}
 		_, err = runner.Invoke(stepCallAt(t, db, "run-1", "step-a", 2), "write_file", writeFileArgs(t, "a.txt", "two"))
 		if !fault.HasCode(err, toolbroker.ResultInvalidArgument) {

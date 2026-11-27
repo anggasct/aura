@@ -111,7 +111,7 @@ type stepCallTools struct {
 	failing map[string]bool
 }
 
-func (s *stepCallTools) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
+func (s *stepCallTools) Invoke(ctx context.Context, toolID string, args json.RawMessage) (ToolStepResult, error) {
 	call, _ := StepCallFrom(ctx)
 	s.mu.Lock()
 	s.calls = append(s.calls, call)
@@ -119,9 +119,9 @@ func (s *stepCallTools) Invoke(ctx context.Context, toolID string, args json.Raw
 	delete(s.failing, call.StepID)
 	s.mu.Unlock()
 	if fail {
-		return nil, codedError(ErrorCodeStepFailed, "first attempt fails")
+		return ToolStepResult{}, codedError(ErrorCodeStepFailed, "first attempt fails")
 	}
-	return json.RawMessage(`{"ok":true}`), nil
+	return ToolStepResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 }
 
 func (s *stepCallTools) recorded() []StepCall {
@@ -133,13 +133,9 @@ func (s *stepCallTools) recorded() []StepCall {
 func TestToolStepCarriesItsStepCall(t *testing.T) {
 	ctx := t.Context()
 	tools := &stepCallTools{failing: map[string]bool{"second": true}}
-	registry, err := buildTestRegistry()
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
-	interpreter := mustNewInterpreter(t, disk, fake, &Options{AgentResolver: registry, Tools: tools})
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{Tools: tools})
 	spec := twoToolStepSpec("step-call")
 	spec.Steps[1].Retry = RetryPolicy{Attempts: 1, Backoff: time.Millisecond}
 	runID := startSerialRun(t, interpreter, disk, spec, nil)
@@ -172,13 +168,9 @@ func TestToolStepCarriesItsStepCall(t *testing.T) {
 func TestToolStepCarriesItsApproval(t *testing.T) {
 	ctx := t.Context()
 	tools := &stepCallTools{}
-	registry, err := buildTestRegistry()
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
-	interpreter := mustNewInterpreter(t, disk, fake, &Options{AgentResolver: registry, Tools: tools})
+	interpreter := mustNewInterpreter(t, disk, fake, &Options{Tools: tools})
 	spec := twoToolStepSpec("step-approval")
 	runID := startSerialRun(t, interpreter, disk, spec, nil)
 	inv, _ := holdInvocation(t, fake, "holder-step-approval")

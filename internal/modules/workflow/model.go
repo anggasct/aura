@@ -147,14 +147,6 @@ type ArtifactRef struct {
 	URI    string `json:"uri"`
 }
 
-type ExecutionContext struct {
-	Objective   string
-	Resources   []ResourceRef
-	Artifacts   []ArtifactRef
-	Permissions []string
-	Metadata    map[string]string
-}
-
 type RunOrigin struct {
 	PrincipalID    string
 	PrincipalClass string

@@ -65,13 +65,13 @@ type gatedToolRunner struct {
 	gate   string
 }
 
-func (r *gatedToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
+func (r *gatedToolRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (workflow.ToolStepResult, error) {
 	output, err := r.inner.Invoke(ctx, toolID, args)
 	if toolID != effectTool {
 		return output, err
 	}
 	if gateErr := r.ledger.gate(ctx, r.gate); gateErr != nil {
-		return nil, gateErr
+		return workflow.ToolStepResult{}, gateErr
 	}
 	return output, err
 }

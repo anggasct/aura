@@ -265,12 +265,12 @@ type scriptedTools struct {
 	respond func(ctx context.Context, call int) (json.RawMessage, error)
 }
 
-func (s *scriptedTools) Invoke(ctx context.Context, _ string, args json.RawMessage) (json.RawMessage, error) {
+func (s *scriptedTools) Invoke(ctx context.Context, _ string, args json.RawMessage) (ToolStepResult, error) {
 	var target struct {
 		Step string `json:"step"`
 	}
 	if err := json.Unmarshal(args, &target); err != nil {
-		return nil, err
+		return ToolStepResult{}, err
 	}
 	s.mu.Lock()
 	if s.calls == nil {
@@ -280,9 +280,10 @@ func (s *scriptedTools) Invoke(ctx context.Context, _ string, args json.RawMessa
 	call := s.calls[target.Step]
 	s.mu.Unlock()
 	if s.respond == nil {
-		return json.RawMessage(`{"ok":true}`), nil
+		return ToolStepResult{Output: json.RawMessage(`{"ok":true}`)}, nil
 	}
-	return s.respond(ctx, call)
+	output, err := s.respond(ctx, call)
+	return ToolStepResult{Output: output}, err
 }
 
 func (s *scriptedTools) callsOf(stepID string) int {
