@@ -1164,3 +1164,143 @@ func TestOptionsClockDrivesTheJournal(t *testing.T) {
 		t.Fatalf("lease_expires_at = %q, want %q", expiresAt, want)
 	}
 }
+
+type finishedAtLapseProvider struct {
+	*heldProvider
+	outcome     Outcome
+	beforeReply func()
+}
+
+func (p *finishedAtLapseProvider) SupportsTakeover() bool { return true }
+
+func (p *finishedAtLapseProvider) Invoke(ctx context.Context, _ *Invocation) (Outcome, error) {
+	p.entered <- struct{}{}
+	<-ctx.Done()
+	if p.beforeReply != nil {
+		p.beforeReply()
+	}
+	return p.outcome, nil
+}
+
+func TestSettleFunctionReceivesTheProviderContext(t *testing.T) {
+	j, db, clock := newClockedJournal(t)
+	executor, err := NewExecutor(j)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	started := mustStart(t, j, mustPrepare(t, j, validPrepare(1)).ID)
+	lapseLeases(clock)
+	reading := make(chan struct{})
+	settle := func(ctx context.Context, _ *Intent) (Outcome, bool, error) {
+		close(reading)
+		<-ctx.Done()
+		return Outcome{}, false, ctx.Err()
+	}
+	done := make(chan executeResult, 1)
+	go func() {
+		intent, err := executor.Resume(t.Context(), started.ID, &fakeProvider{}, settle)
+		done <- executeResult{intent: intent, err: err}
+	}()
+	<-reading
+	clock.AwaitArmed(t, 1)
+
+	setLease(t, db, started.ID, "another-holder", fmtLeaseTime(clock.Now().Add(time.Hour)))
+	clock.Advance(leaseRenewEvery)
+
+	result := <-done
+	assertCode(t, result.err, ErrorCodeLeaseLost)
+	if state, token, _ := leaseColumns(t, db, started.ID); state != StateStarted || token != "another-holder" {
+		t.Fatalf("after the revoked read: state %s token %q, want started under the other holder", state, token)
+	}
+}
+
+func TestLapseSettlesAFinishedCallWhoseTokenSurvived(t *testing.T) {
+	cases := []struct {
+		name      string
+		outcome   Outcome
+		wantState State
+	}{
+		{name: "a success", outcome: Outcome{Succeeded: true, Result: json.RawMessage(`{"done":true}`)}, wantState: StateSucceeded},
+		{name: "a definitive failure", outcome: Outcome{SafeErrorCode: "provider_4xx"}, wantState: StateFailed},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			executor, db, probe := newProbedExecutor(t)
+			blockRenewals(t, db)
+			provider := &finishedAtLapseProvider{heldProvider: newHeldProvider(Outcome{}), outcome: tc.outcome}
+			done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
+			<-provider.entered
+			probe.AwaitArmed(t, 2)
+
+			probe.Advance(61 * time.Second)
+
+			result := <-done
+			if result.err != nil || result.intent == nil || result.intent.State != tc.wantState {
+				t.Fatalf("Execute = %+v, %v; want %s settled by the holder whose token survived", result.intent, result.err, tc.wantState)
+			}
+		})
+	}
+}
+
+func TestLapseDoesNotSettleWhenTheTokenWasReplaced(t *testing.T) {
+	cases := []struct {
+		name    string
+		outcome Outcome
+	}{
+		{name: "a success", outcome: Outcome{Succeeded: true}},
+		{name: "an ambiguous outcome", outcome: Outcome{Ambiguous: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			executor, db, probe := newProbedExecutor(t)
+			blockRenewals(t, db)
+			provider := &finishedAtLapseProvider{heldProvider: newHeldProvider(Outcome{}), outcome: tc.outcome}
+			provider.beforeReply = func() {
+				setLease(t, db, firstIntentID(t, db), "another-holder", fmtLeaseTime(probe.Now().Add(time.Hour)))
+			}
+			done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
+			<-provider.entered
+			probe.AwaitArmed(t, 2)
+
+			probe.Advance(61 * time.Second)
+
+			result := <-done
+			assertCode(t, result.err, ErrorCodeLeaseLost)
+			if state, token, _ := leaseColumns(t, db, firstIntentID(t, db)); state != StateStarted || token != "another-holder" {
+				t.Fatalf("after the lapse: state %s token %q, want started under the other holder", state, token)
+			}
+		})
+	}
+}
+
+func firstIntentID(t *testing.T, db *sql.DB) string {
+	t.Helper()
+	var id string
+	if err := db.QueryRowContext(t.Context(), `SELECT id FROM effect_intent`).Scan(&id); err != nil {
+		t.Fatalf("read intent id: %v", err)
+	}
+	return id
+}
+
+func TestLapseLeavesAnAmbiguousCallForResume(t *testing.T) {
+	executor, db, probe := newProbedExecutor(t)
+	blockRenewals(t, db)
+	provider := &finishedAtLapseProvider{heldProvider: newHeldProvider(Outcome{}), outcome: Outcome{Ambiguous: true}}
+	done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
+	<-provider.entered
+	probe.AwaitArmed(t, 2)
+
+	probe.Advance(61 * time.Second)
+
+	result := <-done
+	assertCode(t, result.err, ErrorCodeLeaseLost)
+	id := firstIntentID(t, db)
+	if state, _, _ := leaseColumns(t, db, id); state != StateStarted {
+		t.Fatalf("state = %s, want started so Resume can take it over", state)
+	}
+	resumer := &fakeProvider{outcome: Outcome{Succeeded: true}}
+	resumed, err := executor.Resume(t.Context(), id, resumer, nil)
+	if err != nil || resumed.State != StateSucceeded || resumer.invokeCount != 1 {
+		t.Fatalf("Resume = %+v, %v with %d runs; want the intent taken over and run once", resumed, err, resumer.invokeCount)
+	}
+}
