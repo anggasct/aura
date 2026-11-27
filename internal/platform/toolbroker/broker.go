@@ -49,6 +49,7 @@ type ToolRequest struct {
 	EventAuthor     string
 	Knowledge       []string
 	Tainted         bool
+	Unattended      bool
 
 	AllocateEventSequence bool
 }
@@ -491,6 +492,14 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, mapApprovalError(err)
 		}
 	default:
+		if canonical.Unattended && decision.Outcome == approval.OutcomeRequireApproval {
+			approvalState = ApprovalMissing
+			err = unattendedRefusal(&canonical)
+			if fault.HasCode(err, ResultUntrustedInputNoApprover) {
+				policyOutcome = PolicyOutcomeDeny
+			}
+			return ToolResult{}, err
+		}
 		call := &authorization{canonical: &canonical, definition: definition, decision: decision, standingAllowed: definition.StandingGrantAllowed() && !guarded}
 		if decision.Outcome == approval.OutcomeRequireApproval && standingCovers(class, definition, guarded, canonical.Tainted) {
 			call.standing, err = b.standingGrant(ctx, slot, call)

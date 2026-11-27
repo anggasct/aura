@@ -76,6 +76,14 @@ func (b *Broker) decideAuthorization(ctx context.Context, call *authorization) (
 	return state, nil
 }
 
+func unattendedRefusal(request *ToolRequest) error {
+	key := toolKey(request)
+	if request.Tainted {
+		return errorf(ResultUntrustedInputNoApprover, "tool %q needs approval because this turn carries untrusted input, and an unattended call never asks", key)
+	}
+	return errorf(ResultApprovalRequired, "tool %q requires approval, and an unattended call never asks", key)
+}
+
 func (b *Broker) approvalAnswer(ctx context.Context, call *authorization) (string, error) {
 	if call.standing {
 		return ApprovalStanding, nil
