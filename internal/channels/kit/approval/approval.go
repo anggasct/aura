@@ -365,8 +365,11 @@ func RenderCard(prompt *Prompt, persona string, clean func(string) string) strin
 	if prompt.ToolVersion != "" {
 		card.WriteString("@" + header(prompt.ToolVersion))
 	}
-	if prompt.ReasonCode == policy.ReasonUntrustedInput {
+	switch prompt.ReasonCode {
+	case policy.ReasonUntrustedInput:
 		card.WriteString("\n" + policy.UntrustedInputNotice)
+	case policy.ReasonContentUnverified:
+		card.WriteString("\n" + policy.ContentUnverifiedNotice)
 	}
 	if persona != "" {
 		card.WriteString("\npersona: " + header(persona))

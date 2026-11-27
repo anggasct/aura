@@ -513,3 +513,11 @@ func TestApprovalCardStatesTheUntrustedInputReason(t *testing.T) {
 		})
 	}
 }
+
+func TestApprovalCardStatesTheContentUnverifiedReason(t *testing.T) {
+	rendered := renderApprovalCard(&ApprovalCard{ToolName: "aura_cron_add", ToolVersion: "v1", SessionID: "s", PrincipalID: "p", Arguments: "{}", ReasonCode: approval.ReasonContentUnverified}, 0)
+	lines := strings.Split(rendered, "\n")
+	if lines[1] != approval.ContentUnverifiedNotice || strings.Contains(rendered, approval.UntrustedInputNotice) {
+		t.Errorf("card does not state the unverified content reason on the line after its header: %q", lines[:3])
+	}
+}
