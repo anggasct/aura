@@ -2,6 +2,7 @@ package runtimeadk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -236,6 +237,102 @@ func TestToolsForOffersOptInToolsOnlyWhenListedForNonOwners(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			if got := names(executor.toolsFor(tc.definition, tc.class, "", nil)); !slices.Equal(got, tc.want) {
+				t.Fatalf("tools = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+var workflowToolNames = []string{"workflow_list", "workflow_start", "workflow_status", "workflow_cancel", "workflow_propose", "workflow_save_routine"}
+
+func toolNames(tools []tool.Tool) []string {
+	out := make([]string, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, t.Name())
+	}
+	return out
+}
+
+func ownerListableToolSet() (tools []tool.Tool, optIn, ownerOptIn map[string]bool) {
+	tools = []tool.Tool{namedToolStub{name: "read_file"}}
+	optIn = map[string]bool{}
+	ownerOptIn = map[string]bool{}
+	for _, name := range workflowToolNames {
+		tools = append(tools, namedToolStub{name: name})
+		optIn[name] = true
+		ownerOptIn[name] = true
+	}
+	for _, name := range []string{"workflow_future", "handoff_to_owner", "github_create_pr", "email_send"} {
+		tools = append(tools, namedToolStub{name: name})
+		optIn[name] = true
+	}
+	return tools, optIn, ownerOptIn
+}
+
+func TestToolsForOffersOwnerOptInToolsOnlyToListedOwnerServerTurns(t *testing.T) {
+	tools, optIn, ownerOptIn := ownerListableToolSet()
+	executor := &ADKExecutor{
+		tools:        tools,
+		optIn:        optIn,
+		ownerOptIn:   ownerOptIn,
+		channelTools: map[string]string{"email_send": "email"},
+	}
+	withRead := func(names ...string) []string { return append([]string{"read_file"}, names...) }
+	allSix := &auraagent.Definition{Tools: withRead(workflowToolNames...), PrincipalTools: withRead(), PublicTools: nil}
+	mixed := &auraagent.Definition{Tools: withRead(append(slices.Clone(workflowToolNames), "workflow_future", "handoff_to_owner", "github_create_pr", "email_send")...)}
+	cases := map[string]struct {
+		definition *auraagent.Definition
+		class      principal.Class
+		origin     turn.Origin
+		want       []string
+	}{
+		"owner on a discord turn gets the six listed workflow tools":    {allSix, principal.ClassOwner, "discord:main", withRead(workflowToolNames...)},
+		"owner on a telegram turn gets the six listed workflow tools":   {allSix, principal.ClassOwner, "telegram:pocket", withRead(workflowToolNames...)},
+		"owner gets only the workflow tools the persona lists":          {&auraagent.Definition{Tools: withRead("workflow_list", "workflow_status")}, principal.ClassOwner, "discord:main", withRead("workflow_list", "workflow_status")},
+		"owner with a mixed list never gets handoff, github or email":   {mixed, principal.ClassOwner, "discord:main", withRead(workflowToolNames...)},
+		"owner with a mixed list gets email_send only on an email turn": {mixed, principal.ClassOwner, "email:work", withRead(append(slices.Clone(workflowToolNames), "email_send")...)},
+		"owner with an implicit tool list gets no opt-in workflow tool": {&auraagent.Definition{}, principal.ClassOwner, "discord:main", withRead()},
+		"owner never gets an opt-in tool that is not owner opt-in":      {&auraagent.Definition{Tools: withRead("workflow_future")}, principal.ClassOwner, "discord:main", withRead()},
+		"unclassified turn never gets the listed workflow tools":        {allSix, "", "discord:main", withRead()},
+		"trusted turn whose ceiling omits the workflow tools gets none": {allSix, principal.ClassTrusted, "discord:main", withRead()},
+		"public turn whose ceiling omits the workflow tools gets none":  {allSix, principal.ClassPublic, "discord:main", nil},
+		"owner child turn never gets the listed workflow tools":         {allSix, principal.ClassOwner, turn.OriginChild, withRead()},
+		"owner on a terminal turn gets the six listed workflow tools":   {allSix, principal.ClassOwner, turn.OriginTerminal, withRead(workflowToolNames...)},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := toolNames(executor.toolsFor(tc.definition, tc.class, tc.origin, nil))
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("tools = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWithBuiltinToolExecutorOffersOwnerOptInDefinitionsToListedOwners(t *testing.T) {
+	schema := json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
+	builtin := &fakeBuiltinExecutor{definitions: []BuiltinToolDefinition{
+		{Name: "read_file", Version: "v1", Description: "read", Schema: schema},
+		{Name: "workflow_list", Version: "v1", Description: "list", Schema: schema, OptIn: true, OwnerOptIn: true},
+		{Name: "workflow_future", Version: "v1", Description: "future", Schema: schema, OptIn: true},
+		{Name: "handoff_to_owner", Version: "v1", Description: "handoff", Schema: schema, OptIn: true},
+	}}
+	modelName, models := fakeModelSet(&fakeADKModel{})
+	executor, _, _ := newAgentTestExecutor(t, modelName, models, WithBuiltinToolExecutor(builtin))
+	listed := &auraagent.Definition{Tools: []string{"read_file", "workflow_list", "workflow_future", "handoff_to_owner"}}
+	cases := map[string]struct {
+		class  principal.Class
+		origin turn.Origin
+		want   []string
+	}{
+		"owner on a discord turn gets the owner opt-in tool only": {principal.ClassOwner, "discord:main", []string{"read_file", "workflow_list"}},
+		"owner child turn gets none of the opt-in tools":          {principal.ClassOwner, turn.OriginChild, []string{"read_file"}},
+		"unclassified turn gets none of the opt-in tools":         {"", "discord:main", []string{"read_file"}},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			got := toolNames(executor.toolsFor(listed, tc.class, tc.origin, nil))
+			if !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})

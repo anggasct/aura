@@ -3,6 +3,7 @@ package runtimeadk
 import (
 	"context"
 	"encoding/json"
+	"maps"
 	"slices"
 	"testing"
 	"time"
@@ -110,6 +111,39 @@ func TestBrokerExecutorPropagatesChannelAndFiltersCapabilities(t *testing.T) {
 	}
 	if emailChannel != "email" {
 		t.Fatalf("email_send channel = %q, want email", emailChannel)
+	}
+}
+
+func TestBrokerExecutorDefinitionsCarryTheOwnerOptInFlag(t *testing.T) {
+	broker, err := toolbroker.New(&toolbroker.Options{})
+	if err != nil {
+		t.Fatalf("toolbroker.New: %v", err)
+	}
+	noop := func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+		return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+	}
+	defs := []auratools.Definition{
+		{Name: "workflow_list", Version: "v1", OptIn: true, OwnerOptIn: true, Schema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "handoff_to_owner", Version: "v1", OptIn: true, Schema: json.RawMessage(`{"type":"object"}`)},
+		{Name: "read_file", Version: "v1", Schema: json.RawMessage(`{"type":"object"}`)},
+	}
+	for i := range defs {
+		rule := toolbroker.DefaultRule(&defs[i])
+		if err := broker.RegisterTool(&defs[i], noop, &rule); err != nil {
+			t.Fatalf("RegisterTool(%s): %v", defs[i].Name, err)
+		}
+	}
+	executor, err := NewBrokerExecutor(broker, nil)
+	if err != nil {
+		t.Fatalf("NewBrokerExecutor: %v", err)
+	}
+	got := map[string]bool{}
+	for _, definition := range executor.Definitions() {
+		got[definition.Name] = definition.OwnerOptIn
+	}
+	want := map[string]bool{"workflow_list": true, "handoff_to_owner": false, "read_file": false}
+	if !maps.Equal(got, want) {
+		t.Fatalf("OwnerOptIn by tool = %v, want %v", got, want)
 	}
 }
 

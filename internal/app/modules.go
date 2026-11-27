@@ -2564,6 +2564,7 @@ func catalogDefinitions() []runtimeadk.BuiltinToolDefinition {
 			Schema:               builtins[i].Schema,
 			RequiredCapabilities: builtins[i].RequiredCapabilities,
 			OptIn:                builtins[i].OptIn,
+			OwnerOptIn:           builtins[i].OwnerOptIn,
 		})
 	}
 	return out

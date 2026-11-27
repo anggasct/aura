@@ -63,6 +63,7 @@ type catalogDefinition struct {
 	RequiresApproval     bool            `json:"requires_approval"`
 	Effectful            bool            `json:"effectful"`
 	OptIn                bool            `json:"opt_in"`
+	OwnerOptIn           bool            `json:"owner_opt_in"`
 	ExternalSink         bool            `json:"external_sink"`
 	NoStandingGrant      bool            `json:"no_standing_grant"`
 	ExactDisplay         bool            `json:"exact_display"`
@@ -164,6 +165,7 @@ func TestToolCatalogGolden(t *testing.T) {
 			RequiresApproval:     definition.RequiresApproval,
 			Effectful:            definition.Effectful,
 			OptIn:                definition.OptIn,
+			OwnerOptIn:           definition.OwnerOptIn,
 			ExternalSink:         definition.ExternalSink,
 			NoStandingGrant:      definition.NoStandingGrant,
 			ExactDisplay:         definition.ExactDisplay,
