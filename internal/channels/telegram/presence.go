@@ -1,6 +1,7 @@
 package telegram
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -32,6 +34,7 @@ type presenceSession struct {
 	chatID       int64
 	threadID     int64
 	fromID       int64
+	agentID      string
 	request      *runtimechannelhost.DeliveryRequest
 	started      time.Time
 	lastTyping   time.Time
@@ -77,13 +80,30 @@ func (a *Adapter) snapshot(session *presenceSession) presenceSnapshot {
 	}
 }
 
+func (a *Adapter) statusTexts(agentID string) status.Texts {
+	definition, ok := a.personaDefinition(agentID)
+	if !ok && agentID == "" && a.account != nil {
+		definition, ok = a.personaDefinition(a.account.Persona)
+	}
+	if !ok {
+		return status.DefaultTexts()
+	}
+	return status.Texts{
+		Working:      definition.Message(auraagent.MessageStatusWorking),
+		StillWorking: definition.Message(auraagent.MessageStatusStillWorking),
+		Stopped:      definition.Message(auraagent.MessageStatusStopped),
+		StopButton:   definition.Message(auraagent.MessageButtonStop),
+	}
+}
+
 func (a *Adapter) renderSession(session *presenceSession, now time.Time) (display string, version uint64) {
 	a.presenceMu.Lock()
 	steps := status.StepsOf(session.steps)
 	started := session.started
+	agentID := session.agentID
 	version = session.version
 	a.presenceMu.Unlock()
-	return status.Render(steps, now.Sub(started), status.DefaultTexts(), a.secretVault), version
+	return status.Render(steps, now.Sub(started), a.statusTexts(agentID), a.secretVault), version
 }
 
 func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*presenceSession, error) {
@@ -100,6 +120,9 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 	a.presenceMu.Lock()
 	defer a.presenceMu.Unlock()
 	if session, ok := a.presence[req.EffectID]; ok {
+		if session.agentID == "" && req.AgentID != "" {
+			session.agentID = req.AgentID
+		}
 		return session, nil
 	}
 	if len(a.presence) >= maxPresenceSessions {
@@ -112,6 +135,7 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 		chatID:   target.ChatID,
 		threadID: target.ThreadID,
 		fromID:   target.FromID,
+		agentID:  req.AgentID,
 		request:  &cloned,
 		started:  time.Now(),
 		wake:     make(chan struct{}, 1),
@@ -375,14 +399,16 @@ func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSess
 	statusID := session.statusID
 	shownText := session.shownText
 	stopCallback := session.stopCallback
+	agentID := session.agentID
 	attempt := session.attempts
 	if statusID == 0 || display != shownText {
 		session.attempts++
 	}
 	a.presenceMu.Unlock()
+	stopLabel := a.statusTexts(agentID).StopButton
 	if statusID == 0 {
 		tokenID, pending, callbackData, minted := a.mintStopToken(session)
-		id, err := a.postStatusMessage(ctx, session, attempt, display, stopKeyboard(callbackData))
+		id, err := a.postStatusMessage(ctx, session, attempt, display, stopKeyboard(callbackData, stopLabel))
 		if err != nil {
 			if minted {
 				a.stops.Drop(tokenID, pending)
@@ -404,7 +430,7 @@ func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSess
 		a.clearDirtyIfCurrent(session, renderedVersion)
 		return nil
 	}
-	if err := a.editStatusMessage(ctx, session, statusID, attempt, display, stopKeyboard(stopCallback)); err != nil {
+	if err := a.editStatusMessage(ctx, session, statusID, attempt, display, stopKeyboard(stopCallback, stopLabel)); err != nil {
 		a.logger.WarnContext(ctx, "status edit failed", "component", "telegram", "error", err)
 		return err
 	}
@@ -436,12 +462,12 @@ func (a *Adapter) mintStopToken(session *presenceSession) (tokenID string, pendi
 	return tokenID, pending, a.stops.Callback(tokenID, approval.ActionStop, binding, session.request.Deadline), true
 }
 
-func stopKeyboard(callbackData string) *inlineKeyboard {
+func stopKeyboard(callbackData, label string) *inlineKeyboard {
 	if callbackData == "" {
 		return nil
 	}
 	return &inlineKeyboard{Rows: [][]inlineButton{{{
-		Text:         status.DefaultTexts().StopButton,
+		Text:         cmp.Or(label, status.DefaultTexts().StopButton),
 		CallbackData: callbackData,
 	}}}}
 }
@@ -642,6 +668,7 @@ func (a *Adapter) PresenceEnded(ctx context.Context, turnID string, end runtimec
 	a.presenceMu.Lock()
 	statusID := session.statusID
 	chatID := session.chatID
+	agentID := session.agentID
 	tokenID := session.stopTokenID
 	pending := session.stopPending
 	hadButton := session.stopCallback != ""
@@ -668,7 +695,7 @@ func (a *Adapter) PresenceEnded(ctx context.Context, turnID string, end runtimec
 	if time.Until(a.chatHeldUntil(chatID)) > 0 {
 		return nil
 	}
-	if err := a.editStatusMessage(context.WithoutCancel(ctx), session, statusID, attempt, status.DefaultTexts().Stopped, nil); err != nil {
+	if err := a.editStatusMessage(context.WithoutCancel(ctx), session, statusID, attempt, a.statusTexts(agentID).Stopped, nil); err != nil {
 		a.logger.WarnContext(ctx, "status stopped edit failed", "component", "telegram", "error", err)
 		if hadButton {
 			a.clearStatusKeyboard(ctx, chatID, statusID)

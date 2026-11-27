@@ -19,6 +19,7 @@ type DeliveryRequest struct {
 	EffectID       string
 	Channel        string
 	ConversationID string
+	AgentID        string
 	PrincipalClass string
 	ReplyContext   json.RawMessage
 	Parts          []OutputPart

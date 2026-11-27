@@ -271,7 +271,7 @@ func discordChannelAccounts(cfg *Config) []auraagent.ChannelAccount {
 
 func testPersonaRouter(t *testing.T, cfg *Config, bindings []auraagent.Binding) *auraagent.Router {
 	t.Helper()
-	registry, err := auraagent.Build(trustedBuiltinPersonas(), []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, accessTestToolCatalog, []string{"primary"})
+	registry, err := auraagent.Build(trustedBuiltinPersonas(), []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, accessTestToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

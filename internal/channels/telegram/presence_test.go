@@ -11,8 +11,10 @@ import (
 	"testing/synctest"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -721,4 +723,112 @@ func TestInitialStatusDefersDuringTypingRateHold(t *testing.T) {
 		}
 		endPresence(t, adapter, "turn-typing-hold")
 	})
+}
+
+func TestStatusTextsComeFromThePersona(t *testing.T) {
+	registry, err := auraagent.Build([]auraagent.Persona{
+		{
+			ID:           "kantor",
+			Description:  "Office assistant",
+			Instructions: "Help.",
+			Messages: map[string]string{
+				auraagent.MessageStatusWorking:      "Lagi dicek…",
+				auraagent.MessageStatusStillWorking: "Masih dicek…",
+				auraagent.MessageStatusStopped:      "⏹ Batal",
+				auraagent.MessageButtonStop:         "Batal",
+			},
+		},
+	}, []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, nil, []string{"primary"}, "id")
+	if err != nil {
+		t.Fatalf("agent.Build: %v", err)
+	}
+	router, err := auraagent.NewRouter(registry, []auraagent.ChannelAccount{{
+		Channel: auraagent.BindingChannelTelegram,
+		Name:    "pocket",
+		Persona: "main",
+		Field:   "channels.telegram.accounts[0]",
+	}}, nil)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		agentID     string
+		wantWorking string
+		wantStill   string
+		wantButton  string
+		wantStopped string
+	}{
+		{
+			name:        "id bundle default",
+			agentID:     "main",
+			wantWorking: "Sedang mengerjakan…\n⏱ 0:10",
+			wantStill:   "Masih mengerjakan…\n⏱ 1:10",
+			wantButton:  "Hentikan",
+			wantStopped: "⏹ Dihentikan",
+		},
+		{
+			name:        "persona override wins",
+			agentID:     "kantor",
+			wantWorking: "Lagi dicek…\n⏱ 0:10",
+			wantStill:   "Masih dicek…\n⏱ 1:10",
+			wantButton:  "Batal",
+			wantStopped: "⏹ Batal",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			adapter := h.adapterWithDeps(t, nil, nil, func(d *Deps) {
+				d.PersonaRouter = router
+			})
+			useInMemoryBotAPI(adapter, h.api)
+			req := stopPresenceRequest(t, h, "turn-loc-"+tc.agentID, principal.ClassOwner, replyReference{
+				ChatID:    ownerUserID,
+				MessageID: 100,
+				FromID:    ownerUserID,
+			})
+			req.AgentID = tc.agentID
+
+			synctest.Test(t, func(t *testing.T) {
+				req.Deadline = time.Now().Add(5 * time.Minute)
+				if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+					t.Fatalf("PresenceStarted: %v", err)
+				}
+				time.Sleep(statusPostAfter)
+				synctest.Wait()
+
+				sends := h.api.sends()
+				if len(sends) != 1 {
+					t.Fatalf("sendMessage count = %d, want 1", len(sends))
+				}
+				if sends[0]["text"] != tc.wantWorking {
+					t.Fatalf("initial status = %q, want %q", sends[0]["text"], tc.wantWorking)
+				}
+				if label, _, ok := extractTelegramStopButton(sends[0]); !ok || label != tc.wantButton {
+					t.Fatalf("stop button = (%q, %v), want %q", label, ok, tc.wantButton)
+				}
+
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				edits := h.api.bodies("editMessageText")
+				if len(edits) < 2 || edits[len(edits)-1]["text"] != tc.wantStill {
+					t.Fatalf("still-working edits = %v, want last %q", edits, tc.wantStill)
+				}
+				if label, _, ok := extractTelegramStopButton(edits[len(edits)-1]); !ok || label != tc.wantButton {
+					t.Fatalf("edited stop button = (%q, %v), want %q", label, ok, tc.wantButton)
+				}
+
+				if err := adapter.PresenceEnded(t.Context(), req.EffectID, runtimechannelhost.PresenceEnd{Stopped: true}); err != nil {
+					t.Fatalf("PresenceEnded: %v", err)
+				}
+				edits = h.api.bodies("editMessageText")
+				if edits[len(edits)-1]["text"] != tc.wantStopped {
+					t.Fatalf("stopped status = %q, want %q", edits[len(edits)-1]["text"], tc.wantStopped)
+				}
+			})
+		})
+	}
 }

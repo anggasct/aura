@@ -163,7 +163,7 @@ func gateRegistry(t *testing.T, behavior *auraagent.PersonaEvalBehavior) *auraag
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"web_search"}, PublicTools: []string{"web_search"}, Evals: auraagent.PersonaEvals{Behavior: behavior},
-	}}, []string{"web_search"}, appconfig.BuiltinToolDefinitions(), []string{auraagent.DefaultEvalJudgeRoute})
+	}}, []string{"web_search"}, appconfig.BuiltinToolDefinitions(), []string{auraagent.DefaultEvalJudgeRoute}, "en")
 	if err != nil {
 		t.Fatal(err)
 	}

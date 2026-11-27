@@ -7,7 +7,7 @@ import (
 func TestRegistryPersonasMessage(t *testing.T) {
 	override := kantorOverride()
 	override.Messages = map[string]string{MessageTurnFailed: "Maaf, ada masalah."}
-	registry, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary"})
+	registry, err := Build([]Persona{override}, validTools, validToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

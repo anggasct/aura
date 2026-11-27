@@ -39,6 +39,8 @@ type Definition struct {
 	Knowledge          []string
 	PrincipalKnowledge []string
 	PublicKnowledge    []string
+
+	bundle map[string]string
 }
 
 const (
@@ -137,7 +139,18 @@ func (d *Definition) Message(key string) string {
 	if text, ok := d.Messages[key]; ok {
 		return text
 	}
-	return PersonaMessageDefaults()[key]
+	if text, ok := d.bundle[key]; ok {
+		return text
+	}
+	return messageBundles[DefaultMessageLanguage][key]
+}
+
+func (d *Definition) FormatMessage(key string, pairs ...string) string {
+	text := d.Message(key)
+	if len(pairs) == 0 {
+		return text
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
 }
 
 const (
@@ -249,6 +262,7 @@ func (d *Definition) clone() Definition {
 		Knowledge:          slices.Clone(d.Knowledge),
 		PrincipalKnowledge: slices.Clone(d.PrincipalKnowledge),
 		PublicKnowledge:    slices.Clone(d.PublicKnowledge),
+		bundle:             d.bundle,
 	}
 }
 

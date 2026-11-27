@@ -86,7 +86,7 @@ func newAccessAdapter(t *testing.T, persona string, owners []string, personas []
 	t.Setenv("AURA_DISCORD_BOT_TOKEN", testToken)
 	cfg := testAdapterConfig()
 	cfg.Accounts[0].Persona = persona
-	registry, err := auraagent.Build(personas, accessTestTools, accessTestToolCatalog, []string{"primary"})
+	registry, err := auraagent.Build(personas, accessTestTools, accessTestToolCatalog, []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

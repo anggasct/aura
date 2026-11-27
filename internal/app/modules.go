@@ -553,7 +553,11 @@ func buildAgentRegistry(cfg *appconfig.Config) (*auraagent.Registry, error) {
 		overrides = cfg.Agents.Definitions
 	}
 	catalog := append(appconfig.BuiltinToolDefinitions(), github.Definitions()...)
-	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), catalog, cfg.MCP.ServerNames(), modelRoutes)
+	deploymentLanguage := ""
+	if cfg.Owner != nil {
+		deploymentLanguage = cfg.Owner.Language
+	}
+	registry, err := auraagent.BuildWithMCP(overrides, personaToolNames(cfg), catalog, cfg.MCP.ServerNames(), modelRoutes, deploymentLanguage)
 	if err != nil {
 		return nil, err
 	}

@@ -54,7 +54,7 @@ func ceilingTestRegistry(t *testing.T) *auraagent.Registry {
 		{ID: "gh", Description: "lists github", Instructions: "work", Tools: []string{"github_comment"}},
 	}
 	known := []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search", "github_comment"}
-	registry, err := auraagent.Build(overrides, known, ceilingTestCatalog(), []string{"primary"})
+	registry, err := auraagent.Build(overrides, known, ceilingTestCatalog(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func agentCeilingRegistry(t *testing.T) *auraagent.Registry {
 		{ID: "inner", Description: "owner only", Instructions: "work", Audience: auraagent.AudienceOwner, Tools: listing},
 	}
 	known := []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search", "github_comment"}
-	registry, err := auraagent.Build(overrides, known, ceilingTestCatalog(), []string{"primary"})
+	registry, err := auraagent.Build(overrides, known, ceilingTestCatalog(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatal(err)
 	}

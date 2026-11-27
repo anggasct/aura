@@ -14,13 +14,13 @@ import (
 func TestRenderOwnerContext(t *testing.T) {
 	block := RenderOwnerContext(&OwnerContext{
 		Name:        "Angga",
-		Language:    "Indonesian",
+		Language:    "id",
 		Timezone:    "Asia/Jakarta",
 		Preferences: map[string]string{"style": "concise", "editor": "neovim"},
 	})
 	want := ownerContextHeader + "\n" +
 		"name: Angga\n" +
-		"language: Indonesian\n" +
+		"language: Indonesian (id)\n" +
 		"timezone: Asia/Jakarta\n" +
 		"editor: neovim\n" +
 		"style: concise\n" +
@@ -30,11 +30,15 @@ func TestRenderOwnerContext(t *testing.T) {
 	}
 	if again := RenderOwnerContext(&OwnerContext{
 		Name:        "Angga",
-		Language:    "Indonesian",
+		Language:    "id",
 		Timezone:    "Asia/Jakarta",
 		Preferences: map[string]string{"editor": "neovim", "style": "concise"},
 	}); again != block {
 		t.Fatalf("rendering not deterministic:\n%s\n%s", block, again)
+	}
+	region := RenderOwnerContext(&OwnerContext{Language: "id-ID"})
+	if !strings.Contains(region, "language: Indonesian (id-ID)") {
+		t.Fatalf("region block =\n%s\nwant language: Indonesian (id-ID)", region)
 	}
 }
 
@@ -68,7 +72,7 @@ func TestOwnerContextAttachOrder(t *testing.T) {
 			db, sessions, _ := newSessionTestDB(t)
 			t.Cleanup(func() { _ = db.Close() })
 			resolver := &stubResolver{definition: auraagent.Definition{ID: auraagent.DefaultID, Instructions: "SOUL: inspect before editing"}}
-			block := RenderOwnerContext(&OwnerContext{Name: "Angga", Language: "Indonesian"})
+			block := RenderOwnerContext(&OwnerContext{Name: "Angga", Language: "id"})
 			modelName, models := capturingModelSet(model)
 			executor, err := NewADKExecutor("aura", modelName, models, sessions, &fakeBroker{}, nil, nil,
 				WithAgentResolver(resolver, nil),
@@ -87,7 +91,7 @@ func TestOwnerContextAttachOrder(t *testing.T) {
 				t.Fatal("no system instruction reached the model")
 			}
 			system := strings.Join(model.systems, "\n")
-			if !strings.Contains(system, "name: Angga") || !strings.Contains(system, "language: Indonesian") {
+			if !strings.Contains(system, "name: Angga") || !strings.Contains(system, "language: Indonesian (id)") {
 				t.Fatalf("owner facts missing from system instruction:\n%s", system)
 			}
 			ownerAt := strings.Index(system, ownerContextHeader)

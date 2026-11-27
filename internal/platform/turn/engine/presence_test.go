@@ -430,3 +430,12 @@ func TestPreemptedDurableTurnEndsItsPresenceWithoutFailingIt(t *testing.T) {
 		t.Errorf("presence starts = %d, ends = %v; want two of each", started, ended)
 	}
 }
+
+func TestPresenceDeliveryRequestCarriesAgentID(t *testing.T) {
+	req := channelTurnRequest("channel:333", "turn-agent")
+	req.AgentID = "kantor"
+	delivery := presenceDeliveryRequest(req, req.Deadline)
+	if delivery == nil || delivery.AgentID != "kantor" {
+		t.Fatalf("presenceDeliveryRequest().AgentID = %v, want %q", delivery, "kantor")
+	}
+}

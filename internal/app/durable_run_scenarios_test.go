@@ -118,7 +118,7 @@ const scenarioPersona = "scenario"
 func (w *workflowShape) registry(t *testing.T) *auraagent.Registry {
 	t.Helper()
 	persona := auraagent.Persona{ID: scenarioPersona, Description: "runs the scenario tools", Instructions: "run the listed tools", Tools: w.known}
-	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, appconfig.BuiltinToolDefinitions(), []string{"primary"})
+	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, appconfig.BuiltinToolDefinitions(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

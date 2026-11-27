@@ -55,7 +55,7 @@ func TestScheduleRunnerLogsDistinctCronWarnings(t *testing.T) {
 		ID: "lobby", Description: "front desk", Instructions: "hi", Audience: auraagent.AudiencePublic,
 		Tools: []string{"web_search"}, PublicTools: []string{"web_search"},
 		Evals: auraagent.PersonaEvals{Behavior: &auraagent.PersonaEvalBehavior{Schedule: "0 3 * * 1"}},
-	}}, []string{"web_search"}, evalTestCatalog(), []string{auraagent.DefaultEvalJudgeRoute})
+	}}, []string{"web_search"}, evalTestCatalog(), []string{auraagent.DefaultEvalJudgeRoute}, "en")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +113,7 @@ func TestModuleImplementsHealthProviderAndRejectsNilDeps(t *testing.T) {
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "hi", Audience: auraagent.AudiencePublic,
 		Tools: []string{"web_search"}, PublicTools: []string{"web_search"},
-	}}, []string{"web_search"}, evalTestCatalog(), []string{auraagent.DefaultEvalJudgeRoute})
+	}}, []string{"web_search"}, evalTestCatalog(), []string{auraagent.DefaultEvalJudgeRoute}, "en")
 	if err != nil {
 		t.Fatal(err)
 	}

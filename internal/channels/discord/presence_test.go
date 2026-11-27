@@ -14,7 +14,9 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -1095,4 +1097,104 @@ func TestInitialStatusDefersDuringTypingRateHold(t *testing.T) {
 			t.Fatalf("PresenceEnded(): %v", err)
 		}
 	})
+}
+
+func TestStatusTextsComeFromThePersona(t *testing.T) {
+	registry, err := auraagent.Build([]auraagent.Persona{
+		{
+			ID:           "kantor",
+			Description:  "Office assistant",
+			Instructions: "Help.",
+			Messages: map[string]string{
+				auraagent.MessageStatusWorking:      "Lagi dicek…",
+				auraagent.MessageStatusStillWorking: "Masih dicek…",
+				auraagent.MessageStatusStopped:      "⏹ Batal",
+				auraagent.MessageButtonStop:         "Batal",
+			},
+		},
+	}, []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, accessTestToolCatalog, []string{"primary"}, "id")
+	if err != nil {
+		t.Fatalf("agent.Build: %v", err)
+	}
+
+	cases := []struct {
+		name        string
+		agentID     string
+		wantWorking string
+		wantStill   string
+		wantButton  string
+		wantStopped string
+	}{
+		{
+			name:        "id bundle default",
+			agentID:     "main",
+			wantWorking: "Sedang mengerjakan…\n⏱ 0:10",
+			wantStill:   "Masih mengerjakan…\n⏱ 1:10",
+			wantButton:  "Hentikan",
+			wantStopped: "⏹ Dihentikan",
+		},
+		{
+			name:        "persona override wins",
+			agentID:     "kantor",
+			wantWorking: "Lagi dicek…\n⏱ 0:10",
+			wantStill:   "Masih dicek…\n⏱ 1:10",
+			wantButton:  "Batal",
+			wantStopped: "⏹ Batal",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			adapter, api := newMemoryDiscordAdapter(t, nil)
+			router, routerErr := auraagent.NewRouter(registry, discordChannelAccounts(adapter.cfg), nil)
+			if routerErr != nil {
+				t.Fatalf("NewRouter: %v", routerErr)
+			}
+			adapter.router = router
+
+			synctest.Test(t, func(t *testing.T) {
+				req := discordStopRequest(t, "turn-loc-"+tc.agentID, principal.ClassOwner, replyReference{
+					ChannelID: "333",
+					MessageID: "999",
+					AuthorID:  "123456789012345678",
+				}, time.Now().Add(5*time.Minute))
+				req.AgentID = tc.agentID
+				if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+					t.Fatalf("PresenceStarted(): %v", err)
+				}
+				time.Sleep(statusPostAfter)
+				synctest.Wait()
+
+				posts := api.messagePosts()
+				if len(posts) != 1 {
+					t.Fatalf("status posts = %d, want 1", len(posts))
+				}
+				var posted map[string]any
+				if err := json.Unmarshal(posts[0].body, &posted); err != nil {
+					t.Fatalf("post body: %v", err)
+				}
+				if posted["content"] != tc.wantWorking {
+					t.Fatalf("initial status = %q, want %q", posted["content"], tc.wantWorking)
+				}
+				if label, _, _, ok := extractDiscordStopButton(posts[0].body); !ok || label != tc.wantButton {
+					t.Fatalf("stop button = (%q, %v), want %q", label, ok, tc.wantButton)
+				}
+
+				time.Sleep(time.Minute)
+				synctest.Wait()
+				patches := api.patchContents(t)
+				if len(patches) < 2 || patches[len(patches)-1] != tc.wantStill {
+					t.Fatalf("still-working patches = %q, want last %q", patches, tc.wantStill)
+				}
+
+				if err := adapter.PresenceEnded(t.Context(), req.EffectID, runtimechannelhost.PresenceEnd{Stopped: true}); err != nil {
+					t.Fatalf("PresenceEnded(): %v", err)
+				}
+				patches = api.patchContents(t)
+				if patches[len(patches)-1] != tc.wantStopped {
+					t.Fatalf("stopped status = %q, want %q", patches[len(patches)-1], tc.wantStopped)
+				}
+			})
+		})
+	}
 }

@@ -99,6 +99,33 @@ func TestRunAddsImplicitCasesAndTheAbuseCorpus(t *testing.T) {
 	}
 }
 
+func TestFixedReplyEvalUsesDeploymentBundle(t *testing.T) {
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID:           "lobby",
+		Description:  "Front desk",
+		Instructions: "Help visitors.",
+		Audience:     auraagent.AudiencePublic,
+		Tools:        []string{"web_search"},
+		PublicTools:  []string{"web_search"},
+	}}, []string{"web_search"}, evalTestCatalog(), []string{"primary"}, "id")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	definition, ok := registry.Lookup("lobby")
+	if !ok {
+		t.Fatal("lobby persona not found")
+	}
+	catalog := evalTestCatalog()
+	idCase := Case{Name: "id reply", Kind: KindFixedReply, Key: auraagent.MessageRateLimited, Text: "Pesannya terlalu cepat. Tunggu sebentar, ya."}
+	if got, err := runCaseWithCatalog(t.Context(), &definition, &idCase, map[principal.Class]*Capture{}, fakeCapturer(lobbyCaptures), catalog); err != nil || !got {
+		t.Fatalf("id fixed reply = %v, %v; want true", got, err)
+	}
+	enCase := Case{Name: "en reply", Kind: KindFixedReply, Key: auraagent.MessageRateLimited, Text: auraagent.PersonaMessageDefaults()[auraagent.MessageRateLimited]}
+	if got, err := runCaseWithCatalog(t.Context(), &definition, &enCase, map[principal.Class]*Capture{}, fakeCapturer(lobbyCaptures), catalog); err != nil || got {
+		t.Fatalf("en fixed reply on id deployment = %v, %v; want false", got, err)
+	}
+}
+
 func TestLoadCasesIsStrict(t *testing.T) {
 	dir := t.TempDir()
 	write := func(name, content string) {

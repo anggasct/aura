@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"strings"
 	"time"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -136,5 +135,5 @@ func completionMessage(definition *auraagent.Definition, run *RunSummary) string
 	case RunCancelled:
 		key = auraagent.MessageWorkflowCancelled
 	}
-	return strings.ReplaceAll(definition.Message(key), auraagent.WorkflowGoalPlaceholder, run.Goal)
+	return definition.FormatMessage(key, auraagent.WorkflowGoalPlaceholder, run.Goal)
 }

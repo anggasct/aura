@@ -15,7 +15,7 @@ const kumaSoul = "You are Kuma: casual, brief, and warm."
 func TestPersonaSoulSitsBetweenOwnerBlockAndCaveats(t *testing.T) {
 	registry, err := auraagent.Build([]auraagent.Persona{
 		{ID: "kuma", Description: "Casual assistant", SoulFile: "personas/kuma.md", Soul: kumaSoul},
-	}, []string{"read_file"}, nil, nil)
+	}, []string{"read_file"}, nil, nil, "en")
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

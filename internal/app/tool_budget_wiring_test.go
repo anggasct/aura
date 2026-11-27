@@ -41,7 +41,7 @@ func TestWorkflowAgentStepFailsOnExhaustion(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 
 	cfg := appconfig.Default()
-	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"})
+	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestAllWiringSitesPassToolBudget(t *testing.T) {
 		MaxToolErrorsPerTurn:     5,
 	}
 
-	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"})
+	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), []string{"primary"}, "en")
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}

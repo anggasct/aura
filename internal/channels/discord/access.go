@@ -110,7 +110,7 @@ func (a *Adapter) tryPairing(ctx context.Context, msg *messagePayload) bool {
 	var reply string
 	switch result.Outcome {
 	case PairingOutcomeIssued:
-		reply = strings.ReplaceAll(definition.Message(auraagent.MessagePairingCode), auraagent.PairingCodePlaceholder, result.Code)
+		reply = definition.FormatMessage(auraagent.MessagePairingCode, auraagent.PairingCodePlaceholder, result.Code)
 	case PairingOutcomeLocked:
 		reply = definition.Message(auraagent.MessagePairingLocked)
 	default:
