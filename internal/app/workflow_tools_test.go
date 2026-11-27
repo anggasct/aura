@@ -44,11 +44,17 @@ func builtinRegistry(t *testing.T) *auraagent.Registry {
 
 func workflowToolFixture(t *testing.T, allowlist ...string) (*workflow.Controller, *workflow.Store, *sql.DB) {
 	t.Helper()
+	specs := []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")}
+	return workflowFixtureFor(t, &workflow.Options{Logger: slog.New(slog.DiscardHandler)}, specs, allowlist...)
+}
+
+func workflowFixtureFor(t *testing.T, options *workflow.Options, specs []*workflow.Spec, allowlist ...string) (*workflow.Controller, *workflow.Store, *sql.DB) {
+	t.Helper()
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
 	runs := mustWorkflowStore(t, db)
 	fake := durabletest.NewFake()
 	t.Cleanup(fake.Close)
-	interpreter := mustWorkflowInterpreter(t, runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
+	interpreter := mustWorkflowInterpreter(t, runs, fake, options)
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"workflow_start"}, PublicTools: []string{"workflow_start"}, Workflows: allowlist,
@@ -57,7 +63,7 @@ func workflowToolFixture(t *testing.T, allowlist ...string) (*workflow.Controlle
 		t.Fatal(err)
 	}
 	deps := &workflow.ValidationDeps{Agents: registry, KnownTools: definitionNames(), EffectfulTools: effectfulToolNames(), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
-	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
+	for _, spec := range specs {
 		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 			t.Fatal(err)
 		}

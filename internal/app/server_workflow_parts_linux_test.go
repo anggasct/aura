@@ -298,14 +298,16 @@ func (p *completionPosts) recorded() []string {
 	return slices.Clone(p.posts)
 }
 
+const readNoteResult = "\n\n" + `{"content":"first.txt","truncated":false}`
+
 func TestServerOffersAProposalCardOnTheDefaultConfiguration(t *testing.T) {
 	cases := []struct {
 		name   string
 		target access.HandoffTarget
 		want   string
 	}{
-		{"discord port", access.HandoffTarget{Channel: principal.ChannelDiscord, Account: "front", ChannelID: "333"}, "333||Done: Read the note"},
-		{"telegram port", access.HandoffTarget{Channel: principal.ChannelTelegram, Account: "pocket", ChannelID: "-1001234567890", ThreadID: "7"}, "-1001234567890|7|Done: Read the note"},
+		{"discord port", access.HandoffTarget{Channel: principal.ChannelDiscord, Account: "front", ChannelID: "333"}, "333||Done: Read the note" + readNoteResult},
+		{"telegram port", access.HandoffTarget{Channel: principal.ChannelTelegram, Account: "pocket", ChannelID: "-1001234567890", ThreadID: "7"}, "-1001234567890|7|Done: Read the note" + readNoteResult},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

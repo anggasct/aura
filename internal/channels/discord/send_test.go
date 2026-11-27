@@ -568,3 +568,62 @@ func TestBroadcastSuppressesEmbeds(t *testing.T) {
 		t.Errorf("flags = %v (present %t), want %d", flags, present, suppressEmbedsFlags)
 	}
 }
+
+func TestSendTextSplitsALongMessageIntoConsecutiveMessages(t *testing.T) {
+	cases := []struct {
+		name       string
+		text       string
+		wantChunks int
+	}{
+		{name: "a short message is one send", text: "short", wantChunks: 1},
+		{name: "a message at the limit is one send", text: strings.Repeat("a", discordMessageLimit), wantChunks: 1},
+		{name: "a message over the limit is two sends", text: strings.Repeat("a", discordMessageLimit+1), wantChunks: 2},
+		{name: "multi-byte text splits by characters", text: strings.Repeat("日", 2*discordMessageLimit+1), wantChunks: 3},
+		{name: "a long result keeps its line breaks", text: strings.Repeat(strings.Repeat("b", 99)+"\n", 60), wantChunks: 3},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newRestStub(t, func(_ int, w http.ResponseWriter, _ *http.Request) { writeMessage(t, w, "9") })
+			if err := sendText(t.Context(), stub.srv.Client(), stub.srv.URL, "token", "333", tc.text); err != nil {
+				t.Fatalf("sendText: %v", err)
+			}
+			sends := stub.messageSends(0)
+			if len(sends) != tc.wantChunks {
+				t.Fatalf("sends = %d, want %d", len(sends), tc.wantChunks)
+			}
+			var joined strings.Builder
+			for _, send := range sends {
+				var body struct {
+					Content string `json:"content"`
+				}
+				if err := json.Unmarshal(send.body, &body); err != nil {
+					t.Fatal(err)
+				}
+				if runes := len([]rune(body.Content)); runes > discordMessageLimit {
+					t.Errorf("a send carries %d characters, Discord accepts %d", runes, discordMessageLimit)
+				}
+				joined.WriteString(body.Content)
+			}
+			if joined.String() != tc.text {
+				t.Fatal("the sends in order do not add up to the message")
+			}
+		})
+	}
+}
+
+func TestSendTextStopsAtTheFirstFailedSend(t *testing.T) {
+	stub := newRestStub(t, func(call int, w http.ResponseWriter, _ *http.Request) {
+		if call == 2 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		writeMessage(t, w, "9")
+	})
+	err := sendText(t.Context(), stub.srv.Client(), stub.srv.URL, "token", "333", strings.Repeat("a", 3*discordMessageLimit))
+	if !fault.HasCode(err, ErrorCodeConnectionFailed) {
+		t.Fatalf("sendText = %v, want %s", err, ErrorCodeConnectionFailed)
+	}
+	if sends := len(stub.messageSends(0)); sends != 2 {
+		t.Fatalf("sends = %d, want 2: a failed send must not be followed by the next chunk", sends)
+	}
+}

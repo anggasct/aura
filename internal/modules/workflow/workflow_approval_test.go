@@ -25,8 +25,8 @@ func TestWorkflowApprovalBaselineConstraints(t *testing.T) {
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
-	if err != nil || applied != personaPinsStepVersion || latest != personaPinsStepVersion {
-		t.Fatalf("schema = applied %d latest %d %v, want %d", applied, latest, err, personaPinsStepVersion)
+	if err != nil || applied != stepLabelsStepVersion || latest != stepLabelsStepVersion {
+		t.Fatalf("schema = applied %d latest %d %v, want %d", applied, latest, err, stepLabelsStepVersion)
 	}
 	seedMigrationSession(t, db, "sess-1", "owner-1")
 	for version := 1; version <= 12; version++ {

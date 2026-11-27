@@ -297,8 +297,17 @@ func sendText(ctx context.Context, client *http.Client, base, token, channelID, 
 	if channelID == "" || text == "" {
 		return nil
 	}
+	for _, chunk := range splitMessage(neutralizeMentions(text)) {
+		if err := sendChunk(ctx, client, base, token, channelID, chunk); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func sendChunk(ctx context.Context, client *http.Client, base, token, channelID, content string) error {
 	payload, err := json.Marshal(map[string]any{
-		"content":          neutralizeMentions(text),
+		"content":          content,
 		"flags":            suppressEmbedsFlags,
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
