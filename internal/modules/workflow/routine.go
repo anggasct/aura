@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"maps"
 	"regexp"
 	"slices"
 	"strings"
@@ -56,7 +57,7 @@ func (i *Interpreter) SaveRoutine(ctx context.Context, runID, name string) (*Spe
 	routine := &Spec{ID: id, Name: strings.TrimSpace(name), Goal: source.Goal, Version: version, Source: SourceGenerated, Steps: slices.Clone(source.Steps)}
 	approval := &Approval{
 		Kind: ApprovalRoutine, AgentID: sourceApproval.AgentID, ApproverID: principal.OwnerID,
-		SourceDefinitionID: source.ID, SourceDefinitionVersion: source.Version,
+		SourceDefinitionID: source.ID, SourceDefinitionVersion: source.Version, PersonaPins: maps.Clone(sourceApproval.PersonaPins),
 	}
 	if err := i.load(ctx, []*Spec{routine}, i.ValidationDeps(), approval); err != nil {
 		return nil, err

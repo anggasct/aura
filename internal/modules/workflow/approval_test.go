@@ -3,6 +3,7 @@ package workflow
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -72,7 +73,7 @@ func TestInstalledDefinitionIsRecordedAtLoad(t *testing.T) {
 		t.Fatalf("second Install: %v", err)
 	}
 	again, err := disk.Approval(t.Context(), "installed_file", 1)
-	if err != nil || *again != *first || approvalCount(t, disk) != 2 {
+	if err != nil || !reflect.DeepEqual(again, first) || approvalCount(t, disk) != 2 {
 		t.Fatalf("second Install changed the record: %+v then %+v, %v, %d records", first, again, err, approvalCount(t, disk))
 	}
 	generated := NormalizeProposal(toolSpec("x"), "prop_loaded")
@@ -323,7 +324,7 @@ func TestRoutineCarriesItsSourceApproval(t *testing.T) {
 			SourceDefinitionID: generated.ID, SourceDefinitionVersion: generated.Version,
 		}
 		record.ApprovedAt = time.Time{}
-		if *record != want {
+		if !reflect.DeepEqual(*record, want) {
 			t.Fatalf("routine record = %+v, want %+v", *record, want)
 		}
 		if started, err := interpreter.Start(t.Context(), routine.ID, &RunInput{}, ownerOrigin()); err != nil || started.DefinitionVersion != routine.Version {

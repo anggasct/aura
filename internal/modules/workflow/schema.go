@@ -126,10 +126,24 @@ ALTER TABLE workflow_proposal ADD COLUMN reply_thread_id TEXT CHECK ((reply_chan
 
 const replyTargetStepVersion = 23
 
+const personaPinsStepSQL = `
+ALTER TABLE workflow_approval ADD COLUMN persona_pins TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(persona_pins));
+CREATE TRIGGER workflow_approval_persona_pins_immutable
+BEFORE UPDATE OF persona_pins ON workflow_approval
+BEGIN
+    SELECT RAISE(ABORT, 'workflow_approval.persona_pins is immutable');
+END;
+`
+
+const personaPinsStepVersion = 24
+
 func Schema() sqlite.SchemaOwner {
 	return sqlite.StaticSchema{
-		Name:  "workflow",
-		SQL:   schemaSQL,
-		Steps: []sqlite.Step{{Version: replyTargetStepVersion, SQL: replyTargetStepSQL}},
+		Name: "workflow",
+		SQL:  schemaSQL,
+		Steps: []sqlite.Step{
+			{Version: replyTargetStepVersion, SQL: replyTargetStepSQL},
+			{Version: personaPinsStepVersion, SQL: personaPinsStepSQL},
+		},
 	}
 }

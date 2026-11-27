@@ -143,7 +143,7 @@ table webhook_execution on webhook_execution
 CREATE TABLE webhook_execution ( id TEXT PRIMARY KEY, key_id TEXT NOT NULL, event_id TEXT NOT NULL, nonce TEXT NOT NULL, body_digest TEXT NOT NULL, turn_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL CHECK (state IN ('accepted','running','completed','failed','cancelled')), result_event_id TEXT REFERENCES runtime_event(id) ON DELETE SET NULL, error_code TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, expires_at TEXT NOT NULL, session_id TEXT NOT NULL DEFAULT '', UNIQUE (key_id, nonce), UNIQUE (key_id, event_id) )
 
 table workflow_approval on workflow_approval
-CREATE TABLE workflow_approval ( definition_id TEXT NOT NULL, definition_version INTEGER NOT NULL, spec_sha256 TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('installed','proposal','routine')), agent_id TEXT, approver_id TEXT NOT NULL, proposal_id TEXT REFERENCES workflow_proposal(id), source_definition_id TEXT, source_definition_version INTEGER, tainted INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1)), approved_at TEXT NOT NULL, PRIMARY KEY (definition_id, definition_version), FOREIGN KEY (definition_id, definition_version) REFERENCES workflow_definition(id, version) ON DELETE RESTRICT, CHECK ((kind = 'proposal') = (proposal_id IS NOT NULL)), CHECK ((kind = 'routine') = (source_definition_id IS NOT NULL AND source_definition_version IS NOT NULL)) )
+CREATE TABLE workflow_approval ( definition_id TEXT NOT NULL, definition_version INTEGER NOT NULL, spec_sha256 TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('installed','proposal','routine')), agent_id TEXT, approver_id TEXT NOT NULL, proposal_id TEXT REFERENCES workflow_proposal(id), source_definition_id TEXT, source_definition_version INTEGER, tainted INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1)), approved_at TEXT NOT NULL, persona_pins TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(persona_pins)), PRIMARY KEY (definition_id, definition_version), FOREIGN KEY (definition_id, definition_version) REFERENCES workflow_definition(id, version) ON DELETE RESTRICT, CHECK ((kind = 'proposal') = (proposal_id IS NOT NULL)), CHECK ((kind = 'routine') = (source_definition_id IS NOT NULL AND source_definition_version IS NOT NULL)) )
 
 table workflow_correlation on workflow_correlation
 CREATE TABLE workflow_correlation ( source TEXT NOT NULL, event_type TEXT NOT NULL, external_id TEXT NOT NULL, run_id TEXT NOT NULL REFERENCES workflow_run(id) ON DELETE CASCADE, signal_name TEXT NOT NULL, dedupe_key TEXT NOT NULL, created_at TEXT NOT NULL, PRIMARY KEY (source, event_type, external_id, dedupe_key) )
@@ -276,6 +276,9 @@ CREATE TRIGGER profile_fact_fts_insert AFTER INSERT ON profile_fact BEGIN INSERT
 
 trigger profile_fact_fts_update on profile_fact
 CREATE TRIGGER profile_fact_fts_update AFTER UPDATE OF fact_key, fact_value ON profile_fact BEGIN INSERT INTO profile_fact_fts(profile_fact_fts, rowid, fact_key, fact_value) VALUES ('delete', old.rowid, old.fact_key, old.fact_value); INSERT INTO profile_fact_fts(rowid, fact_key, fact_value) VALUES (new.rowid, new.fact_key, new.fact_value); END
+
+trigger workflow_approval_persona_pins_immutable on workflow_approval
+CREATE TRIGGER workflow_approval_persona_pins_immutable BEFORE UPDATE OF persona_pins ON workflow_approval BEGIN SELECT RAISE(ABORT, 'workflow_approval.persona_pins is immutable'); END
 
 trigger workflow_proposal_plan_text_immutable on workflow_proposal
 CREATE TRIGGER workflow_proposal_plan_text_immutable BEFORE UPDATE OF plan_text ON workflow_proposal WHEN NEW.plan_text IS NOT OLD.plan_text BEGIN SELECT RAISE(ABORT, 'workflow_proposal.plan_text is immutable'); END

@@ -40,8 +40,8 @@ func TestStoreRunsOnTheBaselinePlusItsSteps(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	if len(versions) != 2 || versions[1] != replyTargetStepVersion {
-		t.Fatalf("workflow ledger versions = %v, want its baseline then %d", versions, replyTargetStepVersion)
+	if len(versions) != 3 || versions[1] != replyTargetStepVersion || versions[2] != personaPinsStepVersion {
+		t.Fatalf("workflow ledger versions = %v, want its baseline then %d and %d", versions, replyTargetStepVersion, personaPinsStepVersion)
 	}
 
 	store, spec := replyTargetFixture(t)
