@@ -3,6 +3,7 @@ package operation_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -115,33 +116,83 @@ func TestResumeRereadsAnIntentThatMovedBeforeTheTakeover(t *testing.T) {
 	})
 }
 
-func TestSecondCommitDoesNotFailAnAppliedChange(t *testing.T) {
-	rig := operationtest.NewRig(t, nil)
+func TestSecondCommitReturnsTheFirstCommitsResult(t *testing.T) {
+	const recorded = `{"done":true,"operation":"stub.change"}`
+	observed := newObservedInvocations(t)
+	rig := observed.rig
 	var secondErr error
 	rig.Stubs.AfterCommit(operationtest.Change, func(ctx context.Context, c *operation.Call) error {
 		_, secondErr = c.Commit(ctx, func(context.Context) (operation.Result, error) { return operation.Result{}, nil })
 		return nil
 	})
-	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), "a")
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), sensitiveSubject)
 
 	outcome := rig.Execute(t.Context(), request)
 
 	if !fault.HasCode(secondErr, operation.ErrorCodeUncommitted) {
-		t.Fatalf("second Commit = %v, want operation_uncommitted", secondErr)
+		t.Fatalf("second Commit = %v, want operation_uncommitted for the handler", secondErr)
 	}
-	if outcome.Class != toolbroker.ResultExecutionFailed {
-		t.Fatalf("outcome = %+v, want the contract violation reported", outcome)
+	if outcome.Class != toolbroker.ResultOK || outcome.Output != recorded {
+		t.Fatalf("outcome = %+v, want the first commit's result as success", outcome)
 	}
-	if failed := intentsIn(t, rig, effect.StateFailed); len(failed) != 0 {
-		t.Fatalf("failed intents = %+v, want none: the change was applied", failed)
+	if got := len(intentsIn(t, rig, effect.StateSucceeded)); got != 1 {
+		t.Fatalf("succeeded intents = %d, want 1", got)
 	}
 	if ledger, _ := rig.Stubs.Ledger(t.Context(), operationtest.Change); ledger != 1 {
 		t.Errorf("ledger rows = %d, want the first commit's one", ledger)
 	}
 	rig.Stubs.AfterCommit(operationtest.Change, nil)
-	replayed := rig.Execute(t.Context(), request)
-	if replayed.Class != toolbroker.ResultOK || rig.Stubs.Handled(operationtest.Change) != 1 {
-		t.Errorf("replay = %+v with %d handler runs; want the receipt's result without a rerun", replayed, rig.Stubs.Handled(operationtest.Change))
+	if replayed := rig.Execute(t.Context(), request); replayed != outcome || rig.Stubs.Handled(operationtest.Change) != 1 {
+		t.Errorf("replay = %+v with %d handler runs; want the same result without a rerun", replayed, rig.Stubs.Handled(operationtest.Change))
+	}
+	assertBrokenContractIsVisible(t, observed)
+}
+
+func TestHandlerErrorAfterItsCommitReturnsTheCommittedResult(t *testing.T) {
+	const recorded = `{"done":true,"operation":"stub.change"}`
+	observed := newObservedInvocations(t)
+	rig := observed.rig
+	rig.Stubs.AfterCommit(operationtest.Change, func(context.Context, *operation.Call) error { return errBoom })
+	request := operationtest.Request(t, operationtest.ToolOf(operationtest.Change), sensitiveSubject)
+
+	outcome := rig.Execute(t.Context(), request)
+
+	if outcome.Class != toolbroker.ResultOK || outcome.Output != recorded {
+		t.Fatalf("outcome = %+v, want the committed result: the change was applied", outcome)
+	}
+	if got := len(intentsIn(t, rig, effect.StateSucceeded)); got != 1 {
+		t.Fatalf("succeeded intents = %d, want 1", got)
+	}
+	if ledger, _ := rig.Stubs.Ledger(t.Context(), operationtest.Change); ledger != 1 {
+		t.Errorf("ledger rows = %d, want 1", ledger)
+	}
+	assertBrokenContractIsVisible(t, observed)
+}
+
+func assertBrokenContractIsVisible(t *testing.T, observed *observedInvocations) {
+	t.Helper()
+	counts := observed.counts(t)
+	if got := counts[invocationAttributes(operationtest.Change, "agent", "change", "failed")]; got != 1 {
+		t.Errorf("failed invocations = %d, want the broken handler counted once (%v)", got, counts)
+	}
+	var records []string
+	for _, line := range strings.Split(strings.TrimSpace(observed.logs.String()), "\n") {
+		if strings.Contains(line, `"component":"operation"`) {
+			records = append(records, line)
+		}
+	}
+	if len(records) != 1 {
+		t.Fatalf("operation records = %d, want one: %s", len(records), observed.logs.String())
+	}
+	var record map[string]any
+	if err := json.Unmarshal([]byte(records[0]), &record); err != nil {
+		t.Fatalf("decode the record: %v", err)
+	}
+	if record["level"] != "ERROR" || record["msg"] != "operation invoked" || record["status"] != "failed" {
+		t.Errorf("record = %v, want the operation invoked record at error level with status failed", record)
+	}
+	if strings.Contains(records[0], sensitiveSubject) || strings.Contains(records[0], "boom") {
+		t.Errorf("the record carries an input or an error text: %s", records[0])
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync/atomic"
 	"time"
 
@@ -27,6 +28,8 @@ type invocation struct {
 	entry     *entry
 	commits   atomic.Int32
 	committed atomic.Bool
+	first     atomic.Pointer[Result]
+	misused   atomic.Bool
 }
 
 type runInfo struct {
@@ -90,6 +93,7 @@ func (r *Registry) Preview(ctx context.Context, id string, call *Call) (Preview,
 }
 
 type observation struct {
+	misused bool
 	id      string
 	surface Surface
 	risk    Risk
@@ -102,14 +106,20 @@ func (r *Registry) observe(ctx context.Context, seen *observation) {
 	r.recorder.Record(ctx, &telemetry.OperationObservation{
 		ID: seen.id, Surface: string(seen.surface), Risk: string(seen.risk), Outcome: seen.outcome, Duration: elapsed,
 	})
-	r.logger.InfoContext(ctx, "operation invoked",
+	level := slog.LevelInfo
+	attrs := []any{
 		"component", "operation",
 		"operation", seen.id,
 		"surface", string(seen.surface),
 		"risk", string(seen.risk),
 		"status", seen.outcome,
 		"latency_ms", elapsed.Milliseconds(),
-	)
+	}
+	if seen.misused {
+		level = slog.LevelError
+		attrs = append(attrs, "reason", "handler_broke_commit_contract")
+	}
+	r.logger.Log(ctx, level, "operation invoked", attrs...)
 }
 
 func (r *Registry) admit(found *entry, call *Call) (*Call, error) {
@@ -169,13 +179,18 @@ func (r *Registry) run(ctx context.Context, found *entry, call *Call) (result Re
 	if call != nil {
 		seen.surface = call.Caller.Surface
 	}
+	var prepared *Call
 	defer func() {
 		if err == nil {
 			seen.outcome = outcomeOK
 		}
+		if prepared != nil && prepared.run.misused.Load() {
+			seen.outcome = outcomeFailed
+			seen.misused = true
+		}
 		r.observe(ctx, seen)
 	}()
-	prepared, err := r.admit(found, call)
+	prepared, err = r.admit(found, call)
 	if err != nil {
 		seen.outcome = outcomeRefused
 		return Result{}, refusal(err), err
@@ -194,6 +209,10 @@ func (r *Registry) run(ctx context.Context, found *entry, call *Call) (result Re
 func (r *Registry) finish(found *entry, prepared *Call, handled Result, handlerErr error) (Result, runInfo, error) {
 	transactional := found.descriptor.Commit == CommitTransactional
 	committed := prepared.run.committed.Load()
+	if transactional && committed && prepared.run.brokeCommitContract(handlerErr) {
+		prepared.run.misused.Store(true)
+		return *prepared.run.first.Load(), runInfo{}, nil
+	}
 	if handlerErr != nil {
 		wrapped := asOperationError(handlerErr)
 		return Result{}, failure(found, committed, handlerErr, wrapped), wrapped
@@ -248,15 +267,28 @@ func (n *invocation) commit(ctx context.Context, call *Call, apply func(ctx cont
 	if surface == SurfaceCLI || call.IdempotencyKey == "" {
 		result, err := n.applyOnly(ctx, descriptor, apply)
 		if err == nil {
-			n.committed.Store(true)
+			n.recordFirst(&result)
 		}
 		return result, err
 	}
 	result, err := n.applyWithReceipt(ctx, call, apply)
 	if err == nil {
-		n.committed.Store(true)
+		n.recordFirst(&result)
 	}
 	return result, err
+}
+
+func (n *invocation) brokeCommitContract(handlerErr error) bool {
+	if handlerErr != nil {
+		return !interrupted(handlerErr)
+	}
+	return n.commits.Load() > 1
+}
+
+func (n *invocation) recordFirst(result *Result) {
+	recorded := *result
+	n.first.Store(&recorded)
+	n.committed.Store(true)
 }
 
 func (n *invocation) applyOnly(ctx context.Context, descriptor *Descriptor, apply func(ctx context.Context) (Result, error)) (Result, error) {
