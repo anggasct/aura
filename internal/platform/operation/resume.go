@@ -9,42 +9,61 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
+type resumedKey struct{}
+
+type resumedProvider struct {
+	effect.TakeoverProvider
+}
+
+func (p resumedProvider) Invoke(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
+	return p.TakeoverProvider.Invoke(context.WithValue(ctx, resumedKey{}, true), invocation)
+}
+
+func resumedRun(ctx context.Context) bool {
+	resumed, _ := ctx.Value(resumedKey{}).(bool)
+	return resumed
+}
+
 func (r *Registry) recovery(found *entry) toolbroker.Recovery {
 	return func(ctx context.Context, request *toolbroker.ToolRequest, intent *effect.Intent, run *toolbroker.RecoveryRun) error {
 		if request == nil {
 			return nilArgument("tool request")
 		}
-		call := agentCall(request)
-		call.recovery = run
-		_, err := r.resume(ctx, found, intent, call)
+		_, err := r.resume(ctx, found, intent, agentCall(request), run)
 		return err
 	}
 }
 
-func (r *Registry) Resume(ctx context.Context, intent *effect.Intent, call *Call) (Result, error) {
-	if intent == nil || call == nil {
-		return Result{}, nilArgument("intent or call")
+func (r *Registry) Resume(ctx context.Context, intent *effect.Intent, call *Call, run *toolbroker.RecoveryRun) (Result, error) {
+	if intent == nil || call == nil || run == nil {
+		return Result{}, nilArgument("intent, call or recovery run")
 	}
 	found, ok := r.byTool[intent.Operation]
 	if !ok {
 		found, ok = r.entries[intent.Operation]
 	}
 	if !ok {
-		return Result{}, newError(ErrorCodeUnknown, "operation: no such operation")
+		return Result{}, NewError(ErrorCodeUnknown, "operation: no such operation")
 	}
-	return r.resume(ctx, found, intent, call)
+	return r.resume(ctx, found, intent, call, run)
 }
 
-func (r *Registry) resume(ctx context.Context, found *entry, intent *effect.Intent, call *Call) (Result, error) {
-	if call.recovery == nil || call.recovery.Provider == nil || call.recovery.Settle == nil {
-		return Result{}, newError(ErrorCodeInvalidArgument, "operation: a resumed call needs the caller's recovery hooks")
+func (r *Registry) resume(ctx context.Context, found *entry, intent *effect.Intent, call *Call, run *toolbroker.RecoveryRun) (Result, error) {
+	if run == nil || run.Provider == nil || run.Settle == nil {
+		return Result{}, NewError(ErrorCodeInvalidArgument, "operation: a resumed call needs the caller's recovery hooks")
 	}
-	switch intent.State {
+	current, err := r.effects.Journal().Get(ctx, intent.ID)
+	if err != nil {
+		return Result{}, err
+	}
+	switch current.State {
 	case effect.StateStarted:
-		return r.resumeStarted(ctx, found, intent, call)
+		return r.resumeStarted(ctx, found, current, call, run)
 	case effect.StateUnknown:
-		return r.resolveUnknown(ctx, found, intent, call)
-	case effect.StatePrepared, effect.StateSucceeded, effect.StateFailed:
+		return r.resolveUnknown(ctx, found, current, call, run)
+	case effect.StateSucceeded, effect.StateFailed:
+		return r.settledResult(ctx, current)
+	case effect.StatePrepared:
 		return Result{}, fault.New(effect.ErrorCodeTransitionInvalid, "operation: only started and unknown intents resume")
 	}
 	return Result{}, fault.New(effect.ErrorCodeTransitionInvalid, "operation: only started and unknown intents resume")
@@ -54,11 +73,11 @@ func (r *Registry) expired(intent *effect.Intent) bool {
 	return intent.PreparedAt.Before(r.clock.Now().Add(-ReceiptRetention))
 }
 
-func (r *Registry) settler(found *entry, call *Call) effect.Settler {
+func (r *Registry) settler(found *entry, call *Call, run *toolbroker.RecoveryRun) effect.Settler {
 	return func(ctx context.Context, taken *effect.Intent) (effect.Outcome, bool, error) {
 		switch found.descriptor.Commit {
 		case CommitTransactional:
-			return r.settleFromReceipt(ctx, taken, call)
+			return r.settleFromReceipt(ctx, taken, call, run)
 		case CommitExternalIdempotent:
 			return effect.Outcome{}, false, nil
 		case CommitExternal, CommitNone:
@@ -68,7 +87,7 @@ func (r *Registry) settler(found *entry, call *Call) effect.Settler {
 	}
 }
 
-func (r *Registry) settleFromReceipt(ctx context.Context, taken *effect.Intent, call *Call) (effect.Outcome, bool, error) {
+func (r *Registry) settleFromReceipt(ctx context.Context, taken *effect.Intent, call *Call, run *toolbroker.RecoveryRun) (effect.Outcome, bool, error) {
 	stored, present, err := r.receipts.lookup(ctx, taken.IdempotencyKey)
 	if err != nil {
 		return effect.Outcome{}, false, err
@@ -78,7 +97,7 @@ func (r *Registry) settleFromReceipt(ctx context.Context, taken *effect.Intent, 
 		if err != nil {
 			return effect.Outcome{}, false, err
 		}
-		outcome, err := call.recovery.Settle(ctx, recorded.Data)
+		outcome, err := run.Settle(ctx, recorded.Data)
 		if err != nil {
 			return effect.Outcome{}, false, err
 		}
@@ -90,8 +109,8 @@ func (r *Registry) settleFromReceipt(ctx context.Context, taken *effect.Intent, 
 	return effect.Outcome{}, false, nil
 }
 
-func (r *Registry) resumeStarted(ctx context.Context, found *entry, intent *effect.Intent, call *Call) (Result, error) {
-	settled, err := r.effects.Resume(ctx, intent.ID, call.recovery.Provider, r.settler(found, call))
+func (r *Registry) resumeStarted(ctx context.Context, found *entry, intent *effect.Intent, call *Call, run *toolbroker.RecoveryRun) (Result, error) {
+	settled, err := r.effects.Resume(ctx, intent.ID, resumedProvider{TakeoverProvider: run.Provider}, r.settler(found, call, run))
 	if err != nil {
 		return Result{}, err
 	}
@@ -112,9 +131,9 @@ func (r *Registry) settledResult(ctx context.Context, settled *effect.Intent) (R
 
 func failedIntentError(settled *effect.Intent) error {
 	if settled.SafeErrorCode == string(ErrorCodeNotCommitted) {
-		return newError(ErrorCodeNotCommitted, "operation: the call did not commit")
+		return NewError(ErrorCodeNotCommitted, "operation: the call did not commit")
 	}
-	return newError(ErrorCodeFailed, "operation: the call failed")
+	return NewError(ErrorCodeFailed, "operation: the call failed")
 }
 
 func (r *Registry) recordedData(ctx context.Context, settled *effect.Intent) (Result, error) {
@@ -129,7 +148,7 @@ func (r *Registry) recordedData(ctx context.Context, settled *effect.Intent) (Re
 	return Result{Data: decoded.Output}, nil
 }
 
-func (r *Registry) resolveUnknown(ctx context.Context, found *entry, intent *effect.Intent, call *Call) (Result, error) {
+func (r *Registry) resolveUnknown(ctx context.Context, found *entry, intent *effect.Intent, call *Call, run *toolbroker.RecoveryRun) (Result, error) {
 	if found.descriptor.Commit != CommitTransactional {
 		return Result{}, fault.New(effect.ErrorCodeUnknown, "operation: the call is left unknown for the owner")
 	}
@@ -144,7 +163,7 @@ func (r *Registry) resolveUnknown(ctx context.Context, found *entry, intent *eff
 		if err != nil {
 			return Result{}, err
 		}
-		outcome, err := call.recovery.Settle(ctx, recorded.Data)
+		outcome, err := run.Settle(ctx, recorded.Data)
 		if err != nil {
 			return Result{}, err
 		}
@@ -170,7 +189,7 @@ func (r *Registry) afterLostResolution(ctx context.Context, id string) (Result, 
 		return Result{}, err
 	}
 	if current.State == effect.StateUnknown || current.State == effect.StateStarted {
-		return Result{}, newError(ErrorCodeFailed, "operation: the intent changed state while it was resolved")
+		return Result{}, NewError(ErrorCodeFailed, "operation: the intent changed state while it was resolved")
 	}
 	return r.settledResult(ctx, current)
 }

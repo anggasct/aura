@@ -9,6 +9,7 @@ import (
 	"math"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
@@ -33,10 +34,6 @@ type receiptStore struct {
 	db *sql.DB
 }
 
-func fmtReceiptTime(t time.Time) string {
-	return t.UTC().Format(time.RFC3339Nano)
-}
-
 func (s *receiptStore) lookup(ctx context.Context, key string) (receipt, bool, error) {
 	var found receipt
 	var surface, result, createdAt string
@@ -51,7 +48,7 @@ func (s *receiptStore) lookup(ctx context.Context, key string) (receipt, bool, e
 	if err != nil {
 		return receipt{}, false, fmt.Errorf("operation: read receipt: %w", err)
 	}
-	created, err := time.Parse(time.RFC3339Nano, createdAt)
+	created, err := effect.ParseLeaseTime(createdAt)
 	if err != nil {
 		return receipt{}, false, wrapError(ErrorCodeFailed, "a receipt has an unreadable time", err)
 	}
@@ -66,18 +63,18 @@ func (s *receiptStore) insert(ctx context.Context, row *receipt) error {
 		return nilArgument("receipt")
 	}
 	if row.key == "" || len(row.key) > maxKeyLength {
-		return newError(ErrorCodeInvalidArgument, "operation: the idempotency key must be 1 to 256 bytes")
+		return NewError(ErrorCodeInvalidArgument, "operation: the idempotency key must be 1 to 256 bytes")
 	}
 	if row.surface != SurfaceChat && row.surface != SurfaceAgent {
-		return newError(ErrorCodeInvalidArgument, "operation: a receipt belongs to the chat or agent path")
+		return NewError(ErrorCodeInvalidArgument, "operation: a receipt belongs to the chat or agent path")
 	}
 	if !json.Valid(row.result) {
-		return newError(ErrorCodeInvalidArgument, "operation: a receipt result must be valid JSON")
+		return NewError(ErrorCodeInvalidArgument, "operation: a receipt result must be valid JSON")
 	}
 	res, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 		INSERT INTO operation_receipt (idempotency_key, operation_id, request_digest, surface, result_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		row.key, row.operation, row.digest, string(row.surface), string(row.result), fmtReceiptTime(row.createdAt),
+		row.key, row.operation, row.digest, string(row.surface), string(row.result), effect.FormatLeaseTime(row.createdAt),
 	)
 	if err != nil {
 		if fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintUnique) || fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintPrimaryKey) {
@@ -90,7 +87,7 @@ func (s *receiptStore) insert(ctx context.Context, row *receipt) error {
 		return fmt.Errorf("operation: read receipt rows affected: %w", err)
 	}
 	if affected != 1 {
-		return newError(ErrorCodeFailed, "operation: a receipt insert changed no row")
+		return NewError(ErrorCodeFailed, "operation: a receipt insert changed no row")
 	}
 	return nil
 }
@@ -100,10 +97,10 @@ func PruneReceipts(ctx context.Context, db *sql.DB, before time.Time) (int, erro
 		return 0, nilArgument("database")
 	}
 	if before.IsZero() {
-		return 0, newError(ErrorCodeInvalidArgument, "operation: the retention cutoff must not be zero")
+		return 0, NewError(ErrorCodeInvalidArgument, "operation: the retention cutoff must not be zero")
 	}
 	res, err := sqlite.Conn(ctx, db).ExecContext(ctx,
-		`DELETE FROM operation_receipt WHERE created_at < ?`, fmtReceiptTime(before))
+		`DELETE FROM operation_receipt WHERE created_at < ?`, effect.FormatLeaseTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("operation: prune receipts: %w", err)
 	}
@@ -112,7 +109,7 @@ func PruneReceipts(ctx context.Context, db *sql.DB, before time.Time) (int, erro
 		return 0, fmt.Errorf("operation: read pruned receipts: %w", err)
 	}
 	if deleted > math.MaxInt {
-		return 0, newError(ErrorCodeFailed, "operation: the pruned receipt count overflows")
+		return 0, NewError(ErrorCodeFailed, "operation: the pruned receipt count overflows")
 	}
 	return int(deleted), nil
 }

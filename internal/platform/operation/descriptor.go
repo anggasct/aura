@@ -6,7 +6,6 @@ import (
 	"io"
 
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/toolbroker"
 )
 
 type Exposure string
@@ -154,8 +153,7 @@ type Call struct {
 	Files          FileAuthority
 	Terminal       *Terminal
 
-	run      *invocation
-	recovery *toolbroker.RecoveryRun
+	run *invocation
 }
 
 type Result struct {

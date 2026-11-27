@@ -70,7 +70,7 @@ func NewInput(descriptor *Descriptor, surface Surface) (*Input, error) {
 		return nil, nilArgument("descriptor")
 	}
 	if !surface.valid() {
-		return nil, newError(ErrorCodeInvalidArgument, "operation: surface is unknown")
+		return nil, NewError(ErrorCodeInvalidArgument, "operation: surface is unknown")
 	}
 	return &Input{descriptor: descriptor, surface: surface, values: map[string][]string{}}, nil
 }
@@ -81,7 +81,7 @@ func (in *Input) Set(param string, values ...string) error {
 	}
 	found := slices.ContainsFunc(in.descriptor.paramsOn(in.surface), func(candidate *Param) bool { return candidate.Name == param })
 	if !found {
-		return newError(ErrorCodeInputInvalid, "parameter "+param+" does not exist on this surface")
+		return NewError(ErrorCodeInputInvalid, "parameter "+param+" does not exist on this surface")
 	}
 	in.values[param] = append(in.values[param], values...)
 	return nil

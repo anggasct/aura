@@ -39,11 +39,11 @@ func receiptCount(t *testing.T, rig *operationtest.Rig) int {
 func TestOperationReceiptsGiveExactlyOnce(t *testing.T) {
 	t.Run("the same key twice applies once and returns the recorded result", func(t *testing.T) {
 		rig := operationtest.NewRig(t, nil)
-		first, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-1", "a"))
+		first, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-1", "a"))
 		if err != nil {
 			t.Fatalf("first Invoke: %v", err)
 		}
-		second, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-1", "a"))
+		second, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-1", "a"))
 		if err != nil {
 			t.Fatalf("second Invoke: %v", err)
 		}
@@ -59,10 +59,10 @@ func TestOperationReceiptsGiveExactlyOnce(t *testing.T) {
 	})
 	t.Run("the same key with another request fails closed", func(t *testing.T) {
 		rig := operationtest.NewRig(t, nil)
-		if _, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-1", "a")); err != nil {
+		if _, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-1", "a")); err != nil {
 			t.Fatalf("first Invoke: %v", err)
 		}
-		_, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-2", "b"))
+		_, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-2", "b"))
 		if !fault.HasCode(err, operation.ErrorCodeKeyReused) {
 			t.Fatalf("second Invoke = %v, want operation_key_reused", err)
 		}
@@ -94,7 +94,7 @@ func TestOperationReceiptsGiveExactlyOnce(t *testing.T) {
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				result, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-1", "a"))
+				result, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-1", "a"))
 				results[i], errs[i] = string(result.Data), err
 			}()
 		}
@@ -117,7 +117,7 @@ func TestChangeHandlerMustCommit(t *testing.T) {
 	t.Run("a handler that skips Commit fails and leaves no row", func(t *testing.T) {
 		rig := operationtest.NewRig(t, nil)
 		rig.Stubs.SkipCommit(operationtest.Change)
-		_, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-1", "a"))
+		_, err := rig.Registry.Invoke(t.Context(), operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-1", "a"))
 		if !fault.HasCode(err, operation.ErrorCodeUncommitted) {
 			t.Fatalf("Invoke = %v, want operation_uncommitted", err)
 		}
@@ -173,7 +173,7 @@ func TestCommitOutsideATransactionalOperationIsRefused(t *testing.T) {
 		_, err := c.Commit(ctx, func(context.Context) (operation.Result, error) { return operation.Result{}, nil })
 		return err
 	})
-	_, err := rig.Registry.Invoke(t.Context(), operationtest.External, call(operation.SurfaceAgent, "key-1", "digest-1", "a"))
+	_, err := rig.Registry.Invoke(t.Context(), operationtest.External, call(operation.SurfaceChat, "key-1", "digest-1", "a"))
 	if !fault.HasCode(err, operation.ErrorCodeInvalid) {
 		t.Fatalf("Invoke = %v, want operation_invalid", err)
 	}

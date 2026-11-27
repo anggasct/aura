@@ -267,7 +267,7 @@ func TestResumeRefusesWhatItCannotSettle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := rig.Registry.Resume(t.Context(), tc.intent, tc.call); !fault.HasCode(err, tc.want) {
+			if _, err := rig.Registry.Resume(t.Context(), tc.intent, tc.call, &toolbroker.RecoveryRun{}); !fault.HasCode(err, tc.want) {
 				t.Fatalf("Resume = %v, want %s", err, tc.want)
 			}
 		})

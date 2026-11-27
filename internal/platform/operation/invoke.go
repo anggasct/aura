@@ -31,23 +31,60 @@ type invocation struct {
 
 type runInfo struct {
 	notPerformed bool
+	code         string
+}
+
+func refusal(err error) runInfo {
+	if interrupted(err) {
+		return runInfo{}
+	}
+	code, _ := fault.CodeOf[ErrorCode](err)
+	return runInfo{notPerformed: true, code: string(code)}
+}
+
+func failure(found *entry, committed bool, cause, wrapped error) runInfo {
+	if committed || interrupted(cause) {
+		return runInfo{}
+	}
+	if code, ok := definitiveRefusal(cause); ok {
+		return runInfo{notPerformed: true, code: code}
+	}
+	if found.descriptor.Commit == CommitTransactional {
+		return refusal(wrapped)
+	}
+	return runInfo{}
+}
+
+func agentSurface(call *Call) bool {
+	return call != nil && call.Caller.Surface == SurfaceAgent
 }
 
 func (r *Registry) Invoke(ctx context.Context, id string, call *Call) (Result, error) {
 	found, ok := r.entries[id]
 	if !ok {
 		r.observe(ctx, &observation{id: unknownLabel, outcome: outcomeRefused, started: time.Now()})
-		return Result{}, newError(ErrorCodeUnknown, "operation: no such operation")
+		return Result{}, NewError(ErrorCodeUnknown, "operation: no such operation")
+	}
+	if agentSurface(call) {
+		return Result{}, r.refuseAgentSurface(ctx, found, call)
 	}
 	result, _, err := r.run(ctx, found, call)
 	return result, err
+}
+
+func (r *Registry) refuseAgentSurface(ctx context.Context, found *entry, call *Call) error {
+	r.observe(ctx, &observation{id: found.descriptor.ID, surface: call.Caller.Surface, risk: found.descriptor.Risk, outcome: outcomeRefused, started: time.Now()})
+	return NewError(ErrorCodeNotExposed, "operation: the agent surface runs only through the tool broker")
 }
 
 func (r *Registry) Preview(ctx context.Context, id string, call *Call) (Preview, error) {
 	found, ok := r.entries[id]
 	if !ok {
 		r.observe(ctx, &observation{id: unknownLabel, outcome: outcomeRefused, started: time.Now()})
-		return Preview{}, newError(ErrorCodeUnknown, "operation: no such operation")
+		return Preview{}, NewError(ErrorCodeUnknown, "operation: no such operation")
+	}
+	if agentSurface(call) {
+		return Preview{}, r.refuseAgentSurface(ctx, found, call)
 	}
 	return r.preview(ctx, found, call)
 }
@@ -82,13 +119,13 @@ func (r *Registry) admit(found *entry, call *Call) (*Call, error) {
 	descriptor := found.descriptor
 	surface := call.Caller.Surface
 	if !surface.valid() {
-		return nil, newError(ErrorCodeInvalidArgument, "operation: the call has no known surface")
+		return nil, NewError(ErrorCodeInvalidArgument, "operation: the call has no known surface")
 	}
 	if !descriptor.Projects(surface) {
-		return nil, newError(ErrorCodeNotExposed, "operation: the surface is not a projection of the operation")
+		return nil, NewError(ErrorCodeNotExposed, "operation: the surface is not a projection of the operation")
 	}
 	if surface != SurfaceCLI && call.Caller.Class != principal.ClassOwner {
-		return nil, newError(ErrorCodeDenied, "operation: the caller is not the owner")
+		return nil, NewError(ErrorCodeDenied, "operation: the caller is not the owner")
 	}
 	canonical, err := descriptor.Validate(surface, call.Input)
 	if err != nil {
@@ -118,7 +155,7 @@ func (r *Registry) preview(ctx context.Context, found *entry, call *Call) (previ
 	}
 	if found.binding.Preview == nil {
 		seen.outcome = outcomeRefused
-		return Preview{}, newError(ErrorCodeNotExposed, "operation: the operation has no preview")
+		return Preview{}, NewError(ErrorCodeNotExposed, "operation: the operation has no preview")
 	}
 	preview, err = found.binding.Preview(ctx, prepared)
 	if err != nil {
@@ -141,12 +178,13 @@ func (r *Registry) run(ctx context.Context, found *entry, call *Call) (result Re
 	prepared, err := r.admit(found, call)
 	if err != nil {
 		seen.outcome = outcomeRefused
-		return Result{}, runInfo{notPerformed: true}, err
+		return Result{}, refusal(err), err
 	}
-	if limit := found.binding.RateLimit; limit != nil {
+	if limit := found.binding.RateLimit; limit != nil && prepared.Caller.Surface == SurfaceAgent && !resumedRun(ctx) {
 		if err := limit(ctx, prepared); err != nil {
 			seen.outcome = outcomeRefused
-			return Result{}, runInfo{notPerformed: true}, asOperationError(err)
+			limited := asOperationError(err)
+			return Result{}, refusal(limited), limited
 		}
 	}
 	handled, err := found.binding.Handle(ctx, prepared)
@@ -157,14 +195,15 @@ func (r *Registry) finish(found *entry, prepared *Call, handled Result, handlerE
 	transactional := found.descriptor.Commit == CommitTransactional
 	committed := prepared.run.committed.Load()
 	if handlerErr != nil {
-		return Result{}, runInfo{notPerformed: transactional && !committed}, asOperationError(handlerErr)
+		wrapped := asOperationError(handlerErr)
+		return Result{}, failure(found, committed, handlerErr, wrapped), wrapped
 	}
 	if transactional && prepared.run.commits.Load() != 1 {
-		return Result{}, runInfo{notPerformed: true}, newError(ErrorCodeUncommitted, "operation: the handler did not commit exactly once")
+		return Result{}, runInfo{notPerformed: !committed, code: string(ErrorCodeUncommitted)}, NewError(ErrorCodeUncommitted, "operation: the handler did not commit exactly once")
 	}
 	data, err := normalizeResult(handled.Data)
 	if err != nil {
-		return Result{}, runInfo{notPerformed: transactional && !committed}, err
+		return Result{}, runInfo{notPerformed: transactional && !committed, code: string(ErrorCodeFailed)}, err
 	}
 	return Result{Data: data}, runInfo{}, nil
 }
@@ -185,7 +224,7 @@ func normalizeResult(data json.RawMessage) (json.RawMessage, error) {
 		return json.RawMessage("{}"), nil
 	}
 	if trimmed[0] != '{' || !json.Valid(trimmed) {
-		return nil, newError(ErrorCodeFailed, "the result is not a JSON object")
+		return nil, NewError(ErrorCodeFailed, "the result is not a JSON object")
 	}
 	return trimmed, nil
 }
@@ -200,10 +239,10 @@ func (c *Call) Commit(ctx context.Context, apply func(ctx context.Context) (Resu
 func (n *invocation) commit(ctx context.Context, call *Call, apply func(ctx context.Context) (Result, error)) (Result, error) {
 	descriptor := n.entry.descriptor
 	if descriptor.Commit != CommitTransactional {
-		return Result{}, newError(ErrorCodeInvalid, "operation: only a transactional operation commits")
+		return Result{}, NewError(ErrorCodeInvalid, "operation: only a transactional operation commits")
 	}
 	if n.commits.Add(1) != 1 {
-		return Result{}, newError(ErrorCodeUncommitted, "operation: the handler committed more than once")
+		return Result{}, NewError(ErrorCodeUncommitted, "operation: the handler committed more than once")
 	}
 	surface := call.Caller.Surface
 	if surface == SurfaceCLI || call.IdempotencyKey == "" {
@@ -247,7 +286,7 @@ func (n *invocation) applyWithReceipt(ctx context.Context, call *Call, apply fun
 	registry := n.registry
 	descriptor := n.entry.descriptor
 	if call.RequestDigest == "" {
-		return Result{}, newError(ErrorCodeInvalidArgument, "operation: a receipt needs the request digest")
+		return Result{}, NewError(ErrorCodeInvalidArgument, "operation: a receipt needs the request digest")
 	}
 	var result Result
 	err := sqlite.RunInTx(ctx, registry.receipts.db, func(ctx context.Context) error {
@@ -293,7 +332,7 @@ func (n *invocation) applyWithReceipt(ctx context.Context, call *Call, apply fun
 
 func recordedResult(found *receipt, digest string) (Result, error) {
 	if found.digest != digest {
-		return Result{}, newError(ErrorCodeKeyReused, "operation: the idempotency key belongs to another request")
+		return Result{}, NewError(ErrorCodeKeyReused, "operation: the idempotency key belongs to another request")
 	}
 	return Result{Data: found.result}, nil
 }
@@ -304,7 +343,7 @@ func (r *Registry) winner(ctx context.Context, call *Call) (Result, error) {
 		return Result{}, err
 	}
 	if !ok {
-		return Result{}, newError(ErrorCodeFailed, "operation: the receipt that won the key is missing")
+		return Result{}, NewError(ErrorCodeFailed, "operation: the receipt that won the key is missing")
 	}
 	return recordedResult(&found, call.RequestDigest)
 }

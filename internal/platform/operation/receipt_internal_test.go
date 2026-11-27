@@ -174,3 +174,37 @@ func TestWinnerReturnsTheReceiptThatTookTheKey(t *testing.T) {
 		t.Fatalf("winner with another digest = %v, want operation_key_reused", err)
 	}
 }
+
+func TestPruneComparesReceiptTimesAcrossFractions(t *testing.T) {
+	db := sqlitetest.OpenMigrated(t, Schema())
+	store := &receiptStore{db: db}
+	base := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
+	rows := map[string]time.Time{
+		"whole":    base,
+		"tenth":    base.Add(100 * time.Millisecond),
+		"half":     base.Add(500 * time.Millisecond),
+		"nanos":    base.Add(500*time.Millisecond + 1),
+		"next":     base.Add(time.Second),
+		"previous": base.Add(-time.Nanosecond),
+	}
+	for key, at := range rows {
+		if err := store.insert(t.Context(), sampleReceipt(key, at)); err != nil {
+			t.Fatalf("insert %s: %v", key, err)
+		}
+	}
+
+	deleted, err := PruneReceipts(t.Context(), db, base.Add(500*time.Millisecond))
+
+	if err != nil || deleted != 3 {
+		t.Fatalf("PruneReceipts = %d, %v; want the three receipts before the cutoff", deleted, err)
+	}
+	for _, key := range []string{"half", "nanos", "next"} {
+		if _, ok, _ := store.lookup(t.Context(), key); !ok {
+			t.Errorf("the receipt %s at or after the cutoff was deleted", key)
+		}
+	}
+	found, ok, err := store.lookup(t.Context(), "half")
+	if err != nil || !ok || !found.createdAt.Equal(base.Add(500*time.Millisecond)) {
+		t.Fatalf("lookup = %+v, %v, %v; want the stored time back with its fraction", found, ok, err)
+	}
+}

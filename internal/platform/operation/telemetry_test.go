@@ -80,21 +80,21 @@ func TestOperationTelemetry(t *testing.T) {
 	invoke := func(id string, c *operation.Call) { _, _ = rig.Registry.Invoke(ctx, id, c) }
 
 	invoke(operationtest.Read, call(operation.SurfaceCLI, "", "", sensitiveSubject))
-	invoke(operationtest.Change, call(operation.SurfaceAgent, "key-1", "digest-1", sensitiveSubject))
-	invoke(operationtest.Host, call(operation.SurfaceAgent, "key-2", "digest-2", sensitiveSubject))
-	invoke(operationtest.External, call(operation.SurfaceAgent, "key-3", "digest-3", sensitiveSubject))
+	invoke(operationtest.Change, call(operation.SurfaceChat, "key-1", "digest-1", sensitiveSubject))
+	invoke(operationtest.Host, call(operation.SurfaceChat, "key-2", "digest-2", sensitiveSubject))
+	invoke(operationtest.External, call(operation.SurfaceChat, "key-3", "digest-3", sensitiveSubject))
 	invoke("stub.ghost", call(operation.SurfaceCLI, "", "", sensitiveSubject))
-	if _, err := rig.Registry.Preview(ctx, operationtest.Delete, call(operation.SurfaceAgent, "key-4", "digest-4", sensitiveSubject)); err != nil {
+	if _, err := rig.Registry.Preview(ctx, operationtest.Delete, call(operation.SurfaceChat, "key-4", "digest-4", sensitiveSubject)); err != nil {
 		t.Fatalf("Preview: %v", err)
 	}
 
 	want := map[attribute.Set]int64{
-		invocationAttributes(operationtest.Read, "cli", "read", "ok"):                   1,
-		invocationAttributes(operationtest.Change, "agent", "change", "ok"):             1,
-		invocationAttributes(operationtest.Host, "agent", "change", "refused"):          1,
-		invocationAttributes(operationtest.External, "agent", "change", "failed"):       1,
-		invocationAttributes("unknown", "", "", "refused"):                              1,
-		invocationAttributes(operationtest.Delete, "agent", "destructive", "previewed"): 1,
+		invocationAttributes(operationtest.Read, "cli", "read", "ok"):                  1,
+		invocationAttributes(operationtest.Change, "chat", "change", "ok"):             1,
+		invocationAttributes(operationtest.Host, "chat", "change", "refused"):          1,
+		invocationAttributes(operationtest.External, "chat", "change", "failed"):       1,
+		invocationAttributes("unknown", "", "", "refused"):                             1,
+		invocationAttributes(operationtest.Delete, "chat", "destructive", "previewed"): 1,
 	}
 	got := observed.counts(t)
 	if len(got) != len(want) {

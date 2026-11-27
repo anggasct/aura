@@ -134,7 +134,7 @@ func (p *Param) propertyJSON(surface Surface) (json.RawMessage, error) {
 			err = firstError(put("type", "array"), writer.put("items", items.bytes()), put("maxItems", maxStringsItems))
 		}
 	default:
-		return nil, newError(ErrorCodeInvalid, "parameter "+p.Name+" has an unknown kind")
+		return nil, NewError(ErrorCodeInvalid, "parameter "+p.Name+" has an unknown kind")
 	}
 	if err == nil && p.Summary != "" {
 		err = put("description", p.Summary)
@@ -229,7 +229,7 @@ func (d *Descriptor) Validate(surface Surface, raw json.RawMessage) (json.RawMes
 		return nil, nilArgument("descriptor")
 	}
 	if !surface.valid() {
-		return nil, newError(ErrorCodeInvalidArgument, "operation: surface is unknown")
+		return nil, NewError(ErrorCodeInvalidArgument, "operation: surface is unknown")
 	}
 	object, err := tools.DecodeObject(raw)
 	if err != nil {
@@ -257,7 +257,7 @@ func (d *Descriptor) Validate(surface Surface, raw json.RawMessage) (json.RawMes
 				}
 				value, present = decoded, true
 			} else if param.Required {
-				return nil, newError(ErrorCodeInputInvalid, "parameter "+param.Name+" is required")
+				return nil, NewError(ErrorCodeInputInvalid, "parameter "+param.Name+" is required")
 			}
 		}
 		if !present {
@@ -275,7 +275,7 @@ func (d *Descriptor) Validate(surface Surface, raw json.RawMessage) (json.RawMes
 }
 
 func (p *Param) refusal(detail string) error {
-	return newError(ErrorCodeInputInvalid, "parameter "+p.Name+" "+detail)
+	return NewError(ErrorCodeInputInvalid, "parameter "+p.Name+" "+detail)
 }
 
 func (p *Param) canonicalValue(surface Surface, value any) ([]byte, error) {
@@ -305,7 +305,7 @@ func (p *Param) canonicalValue(surface Surface, value any) ([]byte, error) {
 	case KindJSON:
 		return p.canonicalJSON(value)
 	}
-	return nil, newError(ErrorCodeInvalid, "parameter "+p.Name+" has an unknown kind")
+	return nil, NewError(ErrorCodeInvalid, "parameter "+p.Name+" has an unknown kind")
 }
 
 func (p *Param) canonicalString(value any, minimum, maximum int) ([]byte, error) {

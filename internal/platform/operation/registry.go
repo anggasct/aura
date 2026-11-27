@@ -41,8 +41,8 @@ type Registry struct {
 }
 
 func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry, error) {
-	if deps == nil || deps.DB == nil || deps.Effects == nil {
-		return nil, newError(ErrorCodeInvalidArgument, "operation: the registry needs a database and an effect executor")
+	if deps == nil || deps.DB == nil || deps.Effects == nil || deps.Tools == nil {
+		return nil, NewError(ErrorCodeInvalidArgument, "operation: the registry needs a database, an effect executor and the tool lookup")
 	}
 	bound := make(map[string]*Binding, len(bindings))
 	v := &validation{tools: deps.Tools, checked: true, bindings: bound}
@@ -138,13 +138,15 @@ func (r *Registry) Descriptor(id string) (*Descriptor, bool) {
 	if !ok {
 		return nil, false
 	}
-	return found.descriptor, true
+	copied := found.descriptor.clone()
+	return &copied, true
 }
 
 func (r *Registry) Descriptors() []*Descriptor {
 	descriptors := make([]*Descriptor, 0, len(r.ids))
 	for _, id := range r.ids {
-		descriptors = append(descriptors, r.entries[id].descriptor)
+		copied := r.entries[id].descriptor.clone()
+		descriptors = append(descriptors, &copied)
 	}
 	return descriptors
 }

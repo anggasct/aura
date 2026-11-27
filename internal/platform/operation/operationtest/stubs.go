@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -22,15 +23,15 @@ CREATE TABLE operation_stub_ledger (
 type Hook func(ctx context.Context, call *operation.Call) error
 
 type Stubs struct {
-	db       *sql.DB
-	mu       sync.Mutex
-	handled  map[string]int
-	previews atomic.Int32
-	limited  atomic.Int32
-	before   map[string]Hook
-	after    map[string]Hook
-	failWith map[string]error
-	skipped  map[string]bool
+	db          *sql.DB
+	mu          sync.Mutex
+	handled     map[string]int
+	previews    atomic.Int32
+	limitedKeys []string
+	before      map[string]Hook
+	after       map[string]Hook
+	failWith    map[string]error
+	skipped     map[string]bool
 }
 
 func NewStubs(db *sql.DB) *Stubs {
@@ -79,7 +80,15 @@ func (s *Stubs) Previews() int {
 }
 
 func (s *Stubs) RateLimited() int {
-	return int(s.limited.Load())
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.limitedKeys)
+}
+
+func (s *Stubs) RateLimitedKeys() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.limitedKeys)
 }
 
 func (s *Stubs) Ledger(ctx context.Context, id string) (int, error) {
@@ -107,8 +116,10 @@ func (s *Stubs) Bindings() []operation.Binding {
 	return bindings
 }
 
-func (s *Stubs) rateLimit(context.Context, *operation.Call) error {
-	s.limited.Add(1)
+func (s *Stubs) rateLimit(_ context.Context, call *operation.Call) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.limitedKeys = append(s.limitedKeys, call.IdempotencyKey)
 	return nil
 }
 

@@ -237,6 +237,94 @@ func TestRegistryNeedsItsDependencies(t *testing.T) {
 	if _, err := operation.NewRegistry(nil, nil, &operation.Deps{}); !fault.HasCode(err, operation.ErrorCodeInvalidArgument) {
 		t.Errorf("NewRegistry without a database = %v, want invalid_argument", err)
 	}
+	rig := operationtest.NewRig(t, nil)
+	deps := operation.Deps{DB: rig.DB, Effects: rig.Executor}
+	if _, err := operation.NewRegistry(nil, nil, &deps); !fault.HasCode(err, operation.ErrorCodeInvalidArgument) {
+		t.Errorf("NewRegistry without the tool lookup = %v, want invalid_argument", err)
+	}
+}
+
+func TestRegistryRejectsTwoOperationsGeneratingOneToolName(t *testing.T) {
+	catalog := operationtest.Catalog()
+	first := *descriptorNamed(&catalog, operationtest.Read)
+	first.ID = "stub.run-now"
+	second := first
+	second.ID = "stub.run.now"
+	catalog.Descriptors = append(catalog.Descriptors, first, second)
+
+	err := operation.ValidateCatalogs([]operation.Catalog{catalog})
+
+	if !fault.HasCode(err, operation.ErrorCodeInvalid) || defectCount(err) != 1 {
+		t.Fatalf("ValidateCatalogs = %v, want one operation_invalid defect for the shared tool name", err)
+	}
+}
+
+func TestRegistryRejectsARequiredPathParameterThatChatProjects(t *testing.T) {
+	path := operation.Param{Name: "file", Kind: operation.KindPath, Required: true, Position: 2}
+	cases := []struct {
+		name   string
+		mutate func(d *operation.Descriptor)
+		want   int
+	}{
+		{name: "an operation that projects to chat", mutate: func(d *operation.Descriptor) { d.Params = append(d.Params, path) }, want: 1},
+		{name: "an operation that does not project to chat", mutate: func(d *operation.Descriptor) {
+			d.Params = append(d.Params, path)
+			d.Surfaces, d.SurfaceReason = []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}, "files are not chat input"
+		}},
+		{name: "an optional path parameter", mutate: func(d *operation.Descriptor) {
+			optional := path
+			optional.Required = false
+			d.Params = append(d.Params, optional)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			catalog := operationtest.Catalog()
+			tc.mutate(descriptorNamed(&catalog, operationtest.Read))
+
+			err := operation.ValidateCatalogs([]operation.Catalog{catalog})
+
+			if got := defectCount(err); got != tc.want {
+				t.Fatalf("defects = %d, want %d: %v", got, tc.want, err)
+			}
+		})
+	}
+}
+
+func TestRegisteredDescriptorsCannotBeChangedAfterwards(t *testing.T) {
+	rig := operationtest.NewRig(t, nil)
+	before, _ := rig.Registry.Descriptor(operationtest.Read)
+	wantSchema, err := before.SchemaFor(operation.SurfaceAgent)
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+
+	changed, _ := rig.Registry.Descriptor(operationtest.Read)
+	changed.Summary = "changed"
+	changed.Risk = operation.RiskDestructive
+	changed.Params[0].Name = "renamed"
+	changed.Params[0].MaxLength = 1
+	changed.Output.Fields[0].Name = "renamed"
+	for _, listed := range rig.Registry.Descriptors() {
+		listed.Params = nil
+		listed.Display = []string{"changed"}
+	}
+
+	after, _ := rig.Registry.Descriptor(operationtest.Read)
+	gotSchema, err := after.SchemaFor(operation.SurfaceAgent)
+	if err != nil {
+		t.Fatalf("SchemaFor: %v", err)
+	}
+	if after.Summary != operationtest.DefaultNote || after.Risk != operation.RiskRead || len(after.Params) == 0 || string(gotSchema) != string(wantSchema) {
+		t.Fatalf("the registry's descriptor changed through a returned copy: %+v", after)
+	}
+	for _, definition := range rig.Broker.Definitions() {
+		if definition.Name == operationtest.ToolOf(operationtest.Read) {
+			if _, err := rig.Broker.Execute(t.Context(), operationtest.Request(t, definition.Name, "a")); err != nil {
+				t.Fatalf("the generated tool no longer validates its original input: %v", err)
+			}
+		}
+	}
 }
 
 func TestRegistryRejectsAToolNameThatIsAlreadyRegistered(t *testing.T) {

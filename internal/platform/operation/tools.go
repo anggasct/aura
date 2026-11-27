@@ -114,7 +114,7 @@ func (r *Registry) adapter(found *entry) toolbroker.Adapter {
 		}
 		result, info, err := r.run(ctx, found, agentCall(request))
 		if err != nil {
-			return toolbroker.ToolResult{}, brokerError(err, info.notPerformed)
+			return toolbroker.ToolResult{}, brokerError(err, info)
 		}
 		return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: result.Data}, nil
 	}
@@ -127,7 +127,7 @@ func (r *Registry) previewer(found *entry) toolbroker.Previewer {
 		}
 		preview, err := r.preview(ctx, found, agentCall(request))
 		if err != nil {
-			return toolbroker.Preview{}, brokerError(err, false)
+			return toolbroker.Preview{}, brokerError(err, runInfo{})
 		}
 		return toolbroker.Preview{Lines: preview.Lines, Digest: preview.Digest, Empty: preview.Empty}, nil
 	}
@@ -137,20 +137,21 @@ func deniedAtTier(code ErrorCode) bool {
 	return code == ErrorCodeNotExposed || code == ErrorCodeDenied || code == ErrorCodeUnknown
 }
 
-func brokerError(err error, notPerformed bool) error {
+func brokerError(err error, info runInfo) error {
 	mapped := mapToBroker(err)
-	if !notPerformed {
+	if !info.notPerformed || interrupted(err) {
 		return mapped
 	}
-	code, _ := fault.CodeOf[ErrorCode](err)
-	return toolbroker.NotPerformed(string(code), mapped)
+	code := info.code
+	if code == "" {
+		own, _ := fault.CodeOf[ErrorCode](err)
+		code = string(own)
+	}
+	return toolbroker.NotPerformed(code, mapped)
 }
 
 func mapToBroker(err error) error {
-	if _, coded := fault.CodeOf[toolbroker.ResultClass](err); coded {
-		return err
-	}
-	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if interrupted(err) {
 		return err
 	}
 	var failure *fault.Error[ErrorCode]
