@@ -52,6 +52,18 @@ func (b *runBudget) spend(tokens int64) bool {
 	return b.limits.MaxTokens <= 0 || b.tokens <= b.limits.MaxTokens
 }
 
+func (b *runBudget) tokensLeft() (left int64, bounded bool) {
+	if b == nil {
+		return 0, false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.limits.MaxTokens <= 0 {
+		return 0, false
+	}
+	return b.limits.MaxTokens - b.tokens, true
+}
+
 func (e *stepExecution) exhaustBudget(ctx context.Context, step *StepSpec, attempt int, limit string) {
 	detail := "generated run exceeded workflows.generated." + limit
 	if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepFailed, Attempt: attempt, ErrorCode: string(ErrorCodeBudgetExhausted), Detail: detail, EndedAt: nowPtr()}); err != nil {

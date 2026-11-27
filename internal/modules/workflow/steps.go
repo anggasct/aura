@@ -208,11 +208,15 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec, attemp
 	if runner == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no agent runner is wired", EndedAt: nowPtr()}
 	}
+	left, bounded := e.budget.tokensLeft()
+	if bounded && left <= 0 {
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeBudgetExhausted), Detail: "generated run exceeded workflows.generated.max_tokens", EndedAt: nowPtr()}
+	}
 	origin := e.originFor(step.ID)
 	call := &AgentStepCall{
 		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: origin,
 		DefinitionID: e.spec.ID, DefinitionVersion: e.spec.Version, DefinitionDigest: e.definitionDigest,
-		Executor: step.Executor, Input: *e.input, Invocation: e.invocation,
+		Executor: step.Executor, Input: *e.input, Inputs: e.agentInputs(step), RunTokensLeft: left, Invocation: e.invocation,
 	}
 	result, err := runner.RunStep(ctx, call)
 	if err != nil {
@@ -220,6 +224,16 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec, attemp
 	}
 	tainted, private := e.labels.outputOf(step, e.origin.Tainted, reportedLabels{tainted: result.Tainted, private: result.Private})
 	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr(), Tokens: result.Tokens, Tainted: tainted, Private: private}
+}
+
+func (e *stepExecution) agentInputs(step *StepSpec) []AgentStepInput {
+	var inputs []AgentStepInput
+	for _, dependency := range step.DependsOn {
+		if output, ok := e.resolvedOutput(dependency); ok && len(output) > 0 {
+			inputs = append(inputs, AgentStepInput{StepID: dependency, Output: output, Private: e.labels.privateOutput(dependency)})
+		}
+	}
+	return inputs
 }
 
 func (e *stepExecution) originFor(stepID string) RunOrigin {
@@ -566,7 +580,7 @@ func finalFailure(code string) bool {
 	switch ErrorCode(code) {
 	case ErrorCodeApprovalRejected, ErrorCodeApprovalMissing, ErrorCodeApprovalSpent, ErrorCodePlanUnshowable,
 		ErrorCodeCapabilityExceeded, ErrorCodePersonaMissing, ErrorCodeSessionInvalid, ErrorCodeExecutorInvalid,
-		ErrorCodeNotPermitted, ErrorCodeBudgetExhausted:
+		ErrorCodeNotPermitted, ErrorCodeBudgetExhausted, ErrorCodeToolUnavailable:
 		return true
 	default:
 		return false

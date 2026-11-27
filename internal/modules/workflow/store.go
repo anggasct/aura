@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -39,6 +40,10 @@ func NewStore(db *sql.DB, sessions SessionCreator) (*Store, error) {
 
 func RunSessionID(runID string) string {
 	return "wf-" + runID
+}
+
+func StepSessionID(runID, stepID string, attempt int) string {
+	return RunSessionID(runID) + "-" + stepID + "-" + strconv.Itoa(attempt)
 }
 
 func newID(prefix string) string {
@@ -237,6 +242,21 @@ func (s *Store) createRun(ctx context.Context, create *runCreate) (*RunSummary, 
 		return nil, err
 	}
 	return summary, nil
+}
+
+type stepSession struct {
+	ID        string
+	OwnerID   string
+	PersonaID string
+}
+
+func (s *Store) createStepSession(ctx context.Context, session *stepSession) error {
+	now := time.Now().UTC()
+	err := s.sessions.CreateSession(ctx, &turn.Session{ID: session.ID, OwnerID: session.OwnerID, AgentID: session.PersonaID, CreatedAt: now, UpdatedAt: now})
+	if err != nil && !fault.HasCode(err, turnstore.ErrorCodeSessionIDConflict) {
+		return sqlite.Classify(fmt.Errorf("create step session: %w", err))
+	}
+	return nil
 }
 
 func claimProposalRun(ctx context.Context, q sqlite.Querier, proposalID, runID string) error {
