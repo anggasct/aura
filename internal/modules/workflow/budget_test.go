@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
@@ -77,11 +76,11 @@ type flakyTools struct {
 	calls int
 }
 
-func (f *flakyTools) Invoke(context.Context, string, json.RawMessage) (json.RawMessage, error) {
+func (f *flakyTools) Invoke(context.Context, string, json.RawMessage) (ToolStepResult, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls++
-	return nil, errors.New("still failing")
+	return ToolStepResult{}, errors.New("still failing")
 }
 
 func TestRetriesAndChildStepsCountTowardTheParentBudget(t *testing.T) {
@@ -117,12 +116,8 @@ func TestRetriesAndChildStepsCountTowardTheParentBudget(t *testing.T) {
 
 type meteredAgents struct{ tokens int64 }
 
-func (meteredAgents) Run(context.Context, *auraagent.Definition, *ExecutionContext) (json.RawMessage, error) {
-	return nil, errors.New("the unmetered path must not be used")
-}
-
-func (m meteredAgents) RunMetered(context.Context, *auraagent.Definition, *ExecutionContext) (json.RawMessage, int64, error) {
-	return json.RawMessage(`{"ok":true}`), m.tokens, nil
+func (m meteredAgents) RunStep(context.Context, *AgentStepCall) (AgentStepResult, error) {
+	return AgentStepResult{Output: json.RawMessage(`{"ok":true}`), Tokens: m.tokens}, nil
 }
 
 func agentSteps(id string) *Spec {
@@ -138,11 +133,7 @@ func agentSteps(id string) *Spec {
 }
 
 func TestMeteredAgentTokensStopTheRunInBothDrivers(t *testing.T) {
-	registry, err := buildTestRegistry()
-	if err != nil {
-		t.Fatal(err)
-	}
-	interpreter, disk, fake := budgetInterpreter(t, Budget{MaxSteps: 10, MaxTokens: 250}, &Options{Agents: meteredAgents{tokens: 150}, AgentResolver: registry})
+	interpreter, disk, fake := budgetInterpreter(t, Budget{MaxSteps: 10, MaxTokens: 250}, &Options{AgentSteps: meteredAgents{tokens: 150}})
 	installAll(t, interpreter, agentSteps("gen_prop_tokens"), agentSteps("gen_prop_serial"))
 	run, err := interpreter.Start(context.Background(), "gen_prop_tokens", nil, ownerOrigin())
 	if err != nil {

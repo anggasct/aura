@@ -238,8 +238,8 @@ func TestSerialCompositionJournalsTheChildAndPropagatesCancel(t *testing.T) {
 
 type failingTools struct{}
 
-func (failingTools) Invoke(context.Context, string, json.RawMessage) (json.RawMessage, error) {
-	return nil, errors.New("tool exploded")
+func (failingTools) Invoke(context.Context, string, json.RawMessage) (ToolStepResult, error) {
+	return ToolStepResult{}, errors.New("tool exploded")
 }
 
 func specOf(t *testing.T, interpreter *Interpreter, id string) *Spec {

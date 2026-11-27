@@ -173,7 +173,7 @@ func (e *stepExecution) executeAttempt(ctx context.Context, step *StepSpec, atte
 func (e *stepExecution) invokeExecutor(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
 	switch step.Executor.Kind {
 	case KindAgent:
-		return e.runAgentStep(ctx, step)
+		return e.runAgentStep(ctx, step, attempt)
 	case KindTool:
 		return e.runToolStep(ctx, step, attempt)
 	case KindWait:
@@ -187,35 +187,21 @@ func (e *stepExecution) invokeExecutor(ctx context.Context, step *StepSpec, atte
 	}
 }
 
-func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec) *stepUpdate {
-	runner := e.interpreter.options.Agents
-	resolver := e.interpreter.options.AgentResolver
-	if runner == nil || resolver == nil {
+func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
+	runner := e.interpreter.options.AgentSteps
+	if runner == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no agent runner is wired", EndedAt: nowPtr()}
 	}
-	prefer := deref(step.Executor.AgentID)
-	resolved, err := resolver.Resolve(nil, &prefer)
+	call := &AgentStepCall{
+		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: e.origin,
+		DefinitionID: e.spec.ID, DefinitionVersion: e.spec.Version, DefinitionDigest: e.definitionDigest,
+		Executor: step.Executor, Input: *e.input, Invocation: e.invocation,
+	}
+	result, err := runner.RunStep(ctx, call)
 	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: err.Error(), EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr(), Tokens: result.Tokens}
 	}
-	execution := &ExecutionContext{
-		Objective:   e.input.Objective,
-		Resources:   e.input.Resources,
-		Artifacts:   e.input.Artifacts,
-		Permissions: e.input.Permissions,
-		Metadata:    e.input.Metadata,
-	}
-	var output json.RawMessage
-	var tokens int64
-	if metered, ok := runner.(MeteredAgentRunner); ok {
-		output, tokens, err = metered.RunMetered(ctx, &resolved, execution)
-	} else {
-		output, err = runner.Run(ctx, &resolved, execution)
-	}
-	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr(), Tokens: tokens}
-	}
-	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr(), Tokens: tokens}
+	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr(), Tokens: result.Tokens}
 }
 
 func toolArguments(step *StepSpec) json.RawMessage {
@@ -247,7 +233,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: origin, DefinitionDigest: e.definitionDigest,
 		DefinitionID: e.spec.ID, DefinitionVersion: e.spec.Version, Approval: *approval,
 	}
-	output, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
+	result, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
 		code := ErrorCodeStepFailed
 		if coded, ok := fault.CodeOf[ErrorCode](err); ok {
@@ -255,7 +241,7 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 		}
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
 	}
-	return &stepUpdate{Status: StepSucceeded, Output: []byte(output), EndedAt: nowPtr()}
+	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr()}
 }
 
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {

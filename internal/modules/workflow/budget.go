@@ -2,20 +2,13 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"sync"
-
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 )
 
 type Budget struct {
 	MaxSteps  int
 	MaxTokens int64
-}
-
-type MeteredAgentRunner interface {
-	RunMetered(ctx context.Context, definition *auraagent.Definition, input *ExecutionContext) (json.RawMessage, int64, error)
 }
 
 type runBudget struct {

@@ -282,26 +282,26 @@ func (r *ToolStepRunner) prepare(ctx context.Context, call *StepCall, toolID str
 	return request, nil
 }
 
-func (r *ToolStepRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (json.RawMessage, error) {
+func (r *ToolStepRunner) Invoke(ctx context.Context, toolID string, args json.RawMessage) (ToolStepResult, error) {
 	call, ok := StepCallFrom(ctx)
 	if len(args) == 0 || string(args) == "{}" || string(args) == "null" {
-		return nil, r.refused(ctx, &call, toolID, codedError(
+		return ToolStepResult{}, r.refused(ctx, &call, toolID, codedError(
 			ErrorCodeStepFailed,
 			"tool step has no arguments: the workflow-core step model does not carry tool arguments, so no canned or placeholder payload is executed; real tool-step arguments ship with the durable-workflows feature",
 		))
 	}
 	if !ok {
-		return nil, r.refused(ctx, &call, toolID, codedError(ErrorCodeExecutorInvalid, "tool step has no step call"))
+		return ToolStepResult{}, r.refused(ctx, &call, toolID, codedError(ErrorCodeExecutorInvalid, "tool step has no step call"))
 	}
 	request, err := r.prepare(ctx, &call, toolID, args)
 	if err != nil {
-		return nil, r.refused(ctx, &call, toolID, err)
+		return ToolStepResult{}, r.refused(ctx, &call, toolID, err)
 	}
 	result, err := r.execute(ctx, request)
 	if err != nil {
-		return nil, workflowToolError(toolID, err)
+		return ToolStepResult{}, workflowToolError(toolID, err)
 	}
-	return result.Output, nil
+	return ToolStepResult{Output: result.Output}, nil
 }
 
 func (r *ToolStepRunner) execute(ctx context.Context, request *toolbroker.ToolRequest) (toolbroker.ToolResult, error) {

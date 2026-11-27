@@ -15,17 +15,12 @@ func runScriptedWorkflow(t *testing.T, script []struct {
 }) map[string]string {
 	t.Helper()
 	ctx := context.Background()
-	registry, err := buildTestRegistry()
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		Driver:             DriverConcurrent,
 		MaxConcurrentSteps: 2,
-		AgentResolver:      registry,
-		Agents:             &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
+		AgentSteps:         &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
 		Tools: &fakeToolRunner{output: func(toolID string) json.RawMessage {
 			return json.RawMessage(`{"pr":123}`)
 		}},

@@ -20,16 +20,11 @@ func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durabl
 
 func driverTestSetup(t *testing.T, tools ToolRunner, driver Driver) (*Interpreter, *durabletest.Fake, *Store) {
 	t.Helper()
-	registry, err := buildTestRegistry()
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		MaxConcurrentSteps: 2,
-		AgentResolver:      registry,
-		Agents:             &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
+		AgentSteps:         &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
 		Tools:              tools,
 		Driver:             driver,
 	})
@@ -302,17 +297,12 @@ func (k *keyRecordingInvocation) approvalRequestKeys() []string {
 
 func TestDriveSerialApprovalRequestRetryUsesDistinctKeys(t *testing.T) {
 	ctx := context.Background()
-	registry, err := buildTestRegistry()
-	if err != nil {
-		t.Fatalf("registry: %v", err)
-	}
 	fake := durabletest.NewFake()
 	disk := newTestStore(t)
 	requester := &flakyApprovalRequester{}
 	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		MaxConcurrentSteps: 2,
-		AgentResolver:      registry,
-		Agents:             &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
+		AgentSteps:         &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
 		Tools:              &fakeToolRunner{},
 		Approvals:          requester,
 	})
