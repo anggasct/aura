@@ -121,3 +121,53 @@ func TestReplacingAnOperationToolDropsItsPreviewer(t *testing.T) {
 		t.Errorf("previewer runs = %d, want none after the previewer was replaced away", previews)
 	}
 }
+
+func TestOperationHelpersRefuseNilArguments(t *testing.T) {
+	broker := newProbeBroker(t)
+	definition := changeStub.definition()
+	request := operationRequest(changeStub.name, "x")
+	decision := approval.PolicyDecision{Outcome: approval.OutcomeAllow}
+	rule := DefaultRule(&definition)
+	cases := []struct {
+		name string
+		call func() error
+	}{
+		{name: "owner only without a request", call: func() error { return operationOwnerOnly(nil, "owner", &definition) }},
+		{name: "owner only without a definition", call: func() error { return operationOwnerOnly(request, "owner", nil) }},
+		{name: "refusal without a request", call: func() error { return operationRefusal(nil, &definition) }},
+		{name: "refusal without a definition", call: func() error { return operationRefusal(request, nil) }},
+		{name: "approval without a decision", call: func() error { return operationApproval(nil, request, &definition) }},
+		{name: "approval without a request", call: func() error { return operationApproval(&decision, nil, &definition) }},
+		{name: "approval without a definition", call: func() error { return operationApproval(&decision, request, nil) }},
+		{name: "no approver without a request", call: func() error { return operationNoApprover(nil, &definition) }},
+		{name: "no approver without a definition", call: func() error { return operationNoApprover(request, nil) }},
+		{name: "registration without a definition", call: func() error { return checkOperationRegistration(nil, &rule, nil) }},
+		{name: "registration without a rule", call: func() error { return checkOperationRegistration(&definition, nil, nil) }},
+		{name: "admission without a call", call: func() error { _, err := broker.admitOperation(t.Context(), nil, nil); return err }},
+		{name: "admission without a request", call: func() error {
+			_, err := broker.admitOperation(t.Context(), nil, &operationCall{definition: &definition})
+			return err
+		}},
+		{name: "preview without a previewer", call: func() error {
+			_, err := broker.runPreview(t.Context(), nil, &operationCall{canonical: request, definition: &definition}, nil)
+			return err
+		}},
+		{name: "preview action without a call", call: func() error { _, err := broker.previewAction(t.Context(), nil, defaultPreview); return err }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.call(); !fault.HasCode(err, ResultInvalidArgument) {
+				t.Fatalf("error = %v, want %s", err, ResultInvalidArgument)
+			}
+		})
+	}
+	if !unattendedRequest(nil, &definition) || !unattendedRequest(request, nil) {
+		t.Error("a missing request or definition is not treated as unattended")
+	}
+	if !needsPreview(nil) {
+		t.Error("a missing definition does not need a preview")
+	}
+	if providerFor(nil) != operationProvider {
+		t.Errorf("a missing definition uses %s, want %s", providerFor(nil), operationProvider)
+	}
+}

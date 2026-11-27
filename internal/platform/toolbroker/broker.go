@@ -508,7 +508,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		policyOutcome = decision.Outcome
 	}
 	if definition.Operation != "" {
-		operationApproval(&decision, &canonical, definition)
+		if err := operationApproval(&decision, &canonical, definition); err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
 		policyOutcome = decision.Outcome
 	}
 	if canonical.Tainted && decision.Outcome == approval.OutcomeRequireApproval {
@@ -538,7 +541,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, mapApprovalError(err)
 		}
 	default:
-		if canonical.Unattended && decision.Outcome == approval.OutcomeRequireApproval {
+		if unattendedRequest(&canonical, definition) && decision.Outcome == approval.OutcomeRequireApproval {
 			approvalState = ApprovalMissing
 			err = unattendedRefusal(&canonical, definition)
 			if fault.HasCode(err, ResultUntrustedInputNoApprover) {
@@ -1090,6 +1093,7 @@ func (b *Broker) validatedRequest(request *ToolRequest) (ToolRequest, error) {
 	validated.Capabilities = slices.Clone(request.Capabilities)
 	slices.Sort(validated.Capabilities)
 	validated.Approval = request.Approval
+	validated.PreviewDigest = ""
 	return validated, nil
 }
 

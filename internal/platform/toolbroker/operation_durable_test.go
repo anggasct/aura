@@ -116,6 +116,8 @@ func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
 		{name: "a tainted trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Tainted = true }, class: ResultUntrustedInputTrustGrant, journal: "call-1-0/policy"},
 		{name: "an unattended trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an unattended deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
+		{name: "a scheduled deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginSchedule }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
+		{name: "an http trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginHTTP }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an unattended fresh approval change", stub: freshStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an attached grant on a deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Approval = &approval.ApprovalGrant{GrantID: "g"} }, class: ResultToolTierDenied, journal: "call-1-0/policy"},
 		{name: "an attached grant on a fresh approval change", stub: freshStub, mutate: func(r *ToolRequest) { r.Approval = &approval.ApprovalGrant{GrantID: "g"} }, class: ResultFreshApprovalRequired, journal: "call-1-0/policy"},

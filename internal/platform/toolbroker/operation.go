@@ -34,13 +34,20 @@ type operationAdmission struct {
 }
 
 func providerFor(definition *tools.Definition) string {
-	if definition.Operation != "" {
+	if definition == nil || definition.Operation != "" {
 		return operationProvider
 	}
 	return effectProvider
 }
 
+func nilOperationArguments() error {
+	return errorf(ResultInvalidArgument, "operation request, definition and call must not be nil")
+}
+
 func checkOperationRegistration(definition *tools.Definition, rule *approval.Rule, previewer Previewer) error {
+	if definition == nil || rule == nil {
+		return nilOperationArguments()
+	}
 	if err := definition.ValidateOperation(); err != nil {
 		return err
 	}
@@ -63,10 +70,13 @@ func checkOperationRegistration(definition *tools.Definition, rule *approval.Rul
 }
 
 func needsPreview(definition *tools.Definition) bool {
-	return definition.Risk == tools.RiskTrustGrant || definition.Risk == tools.RiskDestructive
+	return definition == nil || definition.Risk == tools.RiskTrustGrant || definition.Risk == tools.RiskDestructive
 }
 
 func operationOwnerOnly(request *ToolRequest, class principal.Class, definition *tools.Definition) error {
+	if request == nil || definition == nil {
+		return nilOperationArguments()
+	}
 	if _, known := tools.FlagsFor(definition.Risk, definition.FreshApproval); !known {
 		return errorf(ResultPolicyDenied, "tool %q has no known risk", toolKey(request))
 	}
@@ -77,11 +87,14 @@ func operationOwnerOnly(request *ToolRequest, class principal.Class, definition 
 }
 
 func operationRefusal(request *ToolRequest, definition *tools.Definition) error {
+	if request == nil || definition == nil {
+		return nilOperationArguments()
+	}
 	key := toolKey(request)
 	if definition.Risk == tools.RiskTrustGrant && request.Tainted {
 		return errorf(ResultUntrustedInputTrustGrant, "tool %q grants trust and this turn carries untrusted input", key)
 	}
-	if definition.Privileged() && request.Unattended {
+	if definition.Privileged() && unattendedRequest(request, definition) {
 		return errorf(ResultOwnerTurnRequired, "tool %q needs an answer from the owner, and an unattended call never asks", key)
 	}
 	if request.Approval != nil {
@@ -93,9 +106,19 @@ func operationRefusal(request *ToolRequest, definition *tools.Definition) error 
 	return nil
 }
 
-func operationApproval(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) {
+func unattendedRequest(request *ToolRequest, definition *tools.Definition) bool {
+	if request == nil || definition == nil || request.Unattended {
+		return true
+	}
+	return definition.Operation != "" && (request.Origin == turn.OriginSchedule || request.Origin == turn.OriginHTTP)
+}
+
+func operationApproval(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {
+	if decision == nil || request == nil || definition == nil {
+		return nilOperationArguments()
+	}
 	if decision.Outcome != approval.OutcomeAllow {
-		return
+		return nil
 	}
 	switch {
 	case definition.Privileged():
@@ -105,9 +128,13 @@ func operationApproval(decision *approval.PolicyDecision, request *ToolRequest, 
 		decision.Outcome = approval.OutcomeRequireApproval
 		decision.ReasonCode = approval.ReasonContentUnverified
 	}
+	return nil
 }
 
 func operationNoApprover(request *ToolRequest, definition *tools.Definition) error {
+	if request == nil || definition == nil {
+		return nilOperationArguments()
+	}
 	key := toolKey(request)
 	if request.Tainted && !definition.Privileged() {
 		return errorf(ResultUntrustedInputNoApprover, "tool %q needs approval because this turn carries untrusted input, and nobody can be asked", key)
@@ -116,6 +143,9 @@ func operationNoApprover(request *ToolRequest, definition *tools.Definition) err
 }
 
 func (b *Broker) admitOperation(ctx context.Context, slot *toolcall.Slot, call *operationCall) (operationAdmission, error) {
+	if call == nil || call.canonical == nil || call.definition == nil {
+		return operationAdmission{}, nilOperationArguments()
+	}
 	b.mu.RLock()
 	previewer := b.previewers[call.definition.Key()]
 	b.mu.RUnlock()
@@ -146,6 +176,9 @@ func (b *Broker) admitOperation(ctx context.Context, slot *toolcall.Slot, call *
 }
 
 func (b *Broker) runPreview(ctx context.Context, slot *toolcall.Slot, call *operationCall, previewer Previewer) (Preview, error) {
+	if call == nil || call.canonical == nil || call.definition == nil || previewer == nil {
+		return Preview{}, nilOperationArguments()
+	}
 	scope, scoped := durable.TurnScopeFrom(ctx)
 	if !scoped {
 		return b.previewAction(ctx, call, previewer)
@@ -172,6 +205,9 @@ func (b *Broker) runPreview(ctx context.Context, slot *toolcall.Slot, call *oper
 }
 
 func (b *Broker) previewAction(ctx context.Context, call *operationCall, previewer Previewer) (Preview, error) {
+	if call == nil || call.canonical == nil || call.definition == nil || previewer == nil {
+		return Preview{}, nilOperationArguments()
+	}
 	if err := contextError(ctx, call.canonical.Deadline); err != nil {
 		return Preview{}, err
 	}

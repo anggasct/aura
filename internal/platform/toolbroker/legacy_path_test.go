@@ -48,6 +48,24 @@ func legacyPrompt(tool, arguments, reason string) ApprovalPrompt {
 	}
 }
 
+func TestACallerCannotSetThePreviewDigest(t *testing.T) {
+	rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: true}, readStub)
+	plain := operationRequest(readStub.name, "x")
+	preset := operationRequest(readStub.name, "x")
+	preset.PreviewDigest = "chosen-by-the-caller"
+	first, err := rig.broker.canonicalRequest(plain)
+	if err != nil {
+		t.Fatalf("canonical request: %v", err)
+	}
+	second, err := rig.broker.canonicalRequest(preset)
+	if err != nil {
+		t.Fatalf("canonical request: %v", err)
+	}
+	if first.RequestDigest != second.RequestDigest || second.PreviewDigest != "" {
+		t.Errorf("a preview digest set by the caller survived: %+v", second)
+	}
+}
+
 type legacyCall struct {
 	name         string
 	tool         string

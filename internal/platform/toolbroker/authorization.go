@@ -94,7 +94,7 @@ func (b *Broker) decideAuthorizationWith(turnCtx, callCtx context.Context, call 
 
 func unattendedRefusal(request *ToolRequest, definition *tools.Definition) error {
 	key := toolKey(request)
-	if definition.Operation != "" {
+	if definition != nil && definition.Operation != "" {
 		return operationNoApprover(request, definition)
 	}
 	if request.Tainted {

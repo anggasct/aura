@@ -166,16 +166,24 @@ func boolText(value bool) string {
 }
 
 func TestPrivilegedOperationNeedsAttendedOwnerTurn(t *testing.T) {
-	origins := []turn.Origin{turn.OriginSchedule, turn.OriginHTTP, turn.OriginTerminal}
 	for _, stub := range []operationStub{trustGrantStub, destructiveStub, freshStub} {
-		for _, origin := range origins {
-			t.Run(stub.name+" on "+string(origin)+" with no approver holding the session", func(t *testing.T) {
-				rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{}, stub)
-				request := operationRequest(stub.name, "x")
-				request.Origin = origin
-				requireOperationOutcome(t, rig, rig.execute(t, request), operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing})
-			})
+		for _, origin := range []turn.Origin{turn.OriginSchedule, turn.OriginHTTP} {
+			for _, reachable := range []bool{false, true} {
+				t.Run(stub.name+" on "+string(origin)+" reachable="+boolText(reachable), func(t *testing.T) {
+					rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: reachable}, stub)
+					request := operationRequest(stub.name, "x")
+					request.Origin = origin
+					requireOperationOutcome(t, rig, rig.execute(t, request), operationExpectation{class: ResultOwnerTurnRequired})
+					if rig.previewed.Load() != 0 {
+						t.Errorf("previewer runs = %d, want none for a turn nobody attends", rig.previewed.Load())
+					}
+				})
+			}
 		}
+		t.Run(stub.name+" on a terminal no approver holds", func(t *testing.T) {
+			rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{}, stub)
+			requireOperationOutcome(t, rig, rig.execute(t, operationRequest(stub.name, "x")), operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing})
+		})
 		t.Run(stub.name+" on an unattended request even when an approver is reachable", func(t *testing.T) {
 			rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: true}, stub)
 			request := operationRequest(stub.name, "x")
@@ -192,6 +200,29 @@ func TestPrivilegedOperationNeedsAttendedOwnerTurn(t *testing.T) {
 			request := operationRequest(stub.name, "x")
 			request.Tainted = true
 			requireOperationOutcome(t, rig, rig.execute(t, request), operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing})
+		})
+	}
+}
+
+func TestChangeOperationIsRefusedOnTurnsNobodyAttends(t *testing.T) {
+	cases := []struct {
+		name    string
+		origin  turn.Origin
+		tracked bool
+		tainted bool
+		want    operationExpectation
+	}{
+		{name: "a scheduled turn", origin: turn.OriginSchedule, want: operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing}},
+		{name: "an http turn", origin: turn.OriginHTTP, want: operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing}},
+		{name: "a tainted scheduled turn", origin: turn.OriginSchedule, tainted: true, want: operationExpectation{class: ResultUntrustedInputNoApprover, state: ApprovalMissing}},
+		{name: "a scheduled turn that tracks content taint runs an untainted change", origin: turn.OriginSchedule, tracked: true, want: operationExpectation{class: ResultOK, handled: 1, state: ApprovalAuto}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: true}, changeStub)
+			request := operationRequest(changeStub.name, "x")
+			request.Origin, request.ContentTaintTracked, request.Tainted = tc.origin, tc.tracked, tc.tainted
+			requireOperationOutcome(t, rig, rig.execute(t, request), tc.want)
 		})
 	}
 }
