@@ -404,12 +404,12 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 
 	gotTables := listSchemaObjectsByType(t, gotDB, "table")
 	wantTables := listSchemaObjectsByType(t, wantDB, "table")
-	if len(gotTables) != 54 || !slices.Equal(gotTables, wantTables) {
+	if len(gotTables) != 55 || !slices.Equal(gotTables, wantTables) {
 		t.Fatalf("tables (%d vs %d): got=%v want=%v", len(gotTables), len(wantTables), gotTables, wantTables)
 	}
 	gotIndexes := listSchemaObjectsByType(t, gotDB, "index")
 	wantIndexes := listSchemaObjectsByType(t, wantDB, "index")
-	if len(gotIndexes) != 31 || !slices.Equal(gotIndexes, wantIndexes) {
+	if len(gotIndexes) != 32 || !slices.Equal(gotIndexes, wantIndexes) {
 		t.Fatalf("indexes (%d vs %d): got=%v want=%v", len(gotIndexes), len(wantIndexes), gotIndexes, wantIndexes)
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
@@ -532,8 +532,8 @@ func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
 			}
 		}
 	}
-	if len(tableOwners) != 54 {
-		t.Fatalf("owned tables = %d, want 54", len(tableOwners))
+	if len(tableOwners) != 55 {
+		t.Fatalf("owned tables = %d, want 55", len(tableOwners))
 	}
 	finalTables := listSchemaObjectsByType(t, db, "table")
 	for _, tbl := range finalTables {
@@ -900,7 +900,12 @@ func TestIncrementalStepsAreUniqueAndContiguous(t *testing.T) {
 	if len(steps) < 1 {
 		t.Fatal("no owner declares an incremental step")
 	}
-	baselines := len(Schemas())
+	baselines := 0
+	for _, owner := range Schemas() {
+		if strings.TrimSpace(owner.SchemaSQL()) != "" {
+			baselines++
+		}
+	}
 	for i, step := range steps {
 		if want := baselines + 1 + i; step.Version != want {
 			t.Fatalf("step %d (%s) has version %d, want %d: pinned versions must be unique and contiguous from %d", i, step.Owner, step.Version, want, baselines+1)
