@@ -16,7 +16,7 @@ import (
 
 const baselineDir = "scripts/archcheck"
 
-var checkNames = []string{"layout", "app-layout", "stdnames", "layers", "fakes", "setters", "codederrors", "modulemap"}
+var checkNames = []string{"layout", "app-layout", "stdnames", "layers", "fakes", "setters", "codederrors", "operation-definitions", "modulemap"}
 
 type runDeps struct {
 	allowDir      string

@@ -416,7 +416,7 @@ func TestCodedErrorsExemptsPluginWireProtocolBoundary(t *testing.T) {
 
 func TestAllowListAntiResurrection(t *testing.T) {
 	t.Parallel()
-	for _, check := range []string{"layers", "fakes", "setters", "codederrors"} {
+	for _, check := range []string{"layers", "fakes", "setters", "codederrors", "operation-definitions"} {
 		t.Run(check+" fails when allow-list file exists", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
@@ -444,6 +444,90 @@ func TestAllowListAntiResurrection(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
+	t.Parallel()
+	const imports = "import \"github.com/anggasct/aura/internal/platform/tools\"\n"
+	cases := []struct {
+		name   string
+		dir    string
+		source string
+		want   []string
+	}{
+		{
+			name:   "a literal with an operation outside the operation package",
+			dir:    "internal/modules/widget",
+			source: imports + "var d = tools.Definition{Name: \"x\", Operation: \"widget.run\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a pointer literal with an owner notice",
+			dir:    "internal/modules/widget",
+			source: imports + "var d = &tools.Definition{OwnerNotice: true}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation"},
+		},
+		{
+			name:   "a slice of definitions with elided types",
+			dir:    "internal/modules/widget",
+			source: imports + "var d = []tools.Definition{{Name: \"x\"}, {Operation: \"a.b\"}}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "an assignment after construction",
+			dir:    "internal/modules/widget",
+			source: imports + "func set(d *tools.Definition) { d.OwnerNotice = true }\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation"},
+		},
+		{
+			name:   "a renamed import",
+			dir:    "internal/channels/widget",
+			source: "import tl \"github.com/anggasct/aura/internal/platform/tools\"\nvar d = tl.Definition{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/channels/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "the tools package itself",
+			dir:    "internal/platform/tools",
+			source: "var d = Definition{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/platform/tools sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "the operation package",
+			dir:    "internal/platform/operation",
+			source: imports + "var d = tools.Definition{Operation: \"a.b\", OwnerNotice: true}\n",
+		},
+		{
+			name:   "another type with an Operation field",
+			dir:    "internal/modules/widget",
+			source: imports + "type request struct{ Operation string }\nvar _ = tools.Version\nvar r = request{Operation: \"x\"}\n",
+		},
+		{
+			name:   "a file that does not import the tools package",
+			dir:    "internal/platform/effect",
+			source: "type request struct{ Operation string }\nfunc set(r *request) { r.Operation = \"x\" }\n",
+		},
+		{
+			name:   "a definition that sets neither field",
+			dir:    "internal/modules/widget",
+			source: imports + "var d = tools.Definition{Name: \"x\", Risk: tools.RiskRead}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := findOperationDefinitions([]sourcePackage{sourceFixture(t, tc.dir, tc.source)})
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("findOperationDefinitions = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	t.Run("a test kit may build definitions", func(t *testing.T) {
+		t.Parallel()
+		got := findOperationDefinitions([]sourcePackage{sourceFixture(t, "internal/modules/widget/widgettest", imports+"var d = tools.Definition{Operation: \"a.b\"}\n")})
+		if len(got) != 0 {
+			t.Fatalf("findOperationDefinitions = %q, want none", got)
+		}
+	})
 }
 
 func TestModuleMap(t *testing.T) {
