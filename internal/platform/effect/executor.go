@@ -37,30 +37,92 @@ func (e *Executor) Execute(ctx context.Context, req *PrepareRequest, p Provider)
 	if err != nil {
 		return nil, err
 	}
+	return e.run(ctx, started, p, nil)
+}
 
-	outcome, err := p.Invoke(ctx, &Invocation{
-		IntentID:       started.ID,
-		IdempotencyKey: started.IdempotencyKey,
-		Provider:       started.Provider,
-		Operation:      started.Operation,
-		Classification: started.Classification,
-		Request:        started.RequestJSON,
-	})
+type Settler func(ctx context.Context, taken *Intent) (outcome Outcome, settled bool, err error)
+
+func (e *Executor) Resume(ctx context.Context, id string, p Provider, settle Settler) (*Intent, error) {
+	if p == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: provider must not be nil", nil)
+	}
+	taken, err := e.journal.takeOver(ctx, id)
 	if err != nil {
-		resolved, markErr := e.journal.MarkUnknown(ctx, started.ID)
+		return nil, err
+	}
+	return e.run(ctx, taken, p, settle)
+}
+
+func (e *Executor) run(ctx context.Context, held *Intent, p Provider, settle Settler) (*Intent, error) {
+	if held == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: held intent must not be nil", nil)
+	}
+	providerCtx, revoke := context.WithCancelCause(ctx)
+	stopLease, err := e.journal.keepLease(ctx, held, revoke, p)
+	if err != nil {
+		revoke(nil)
+		return nil, err
+	}
+	defer func() {
+		stopLease()
+		revoke(nil)
+	}()
+
+	if settle != nil {
+		outcome, settled, settleErr := settle(ctx, held)
+		if settleErr != nil {
+			return nil, settleErr
+		}
+		if settled {
+			stopLease()
+			return e.settleOutcome(ctx, held, &outcome)
+		}
+	}
+	invocation, err := invocationOf(held)
+	if err != nil {
+		return nil, err
+	}
+	outcome, err := p.Invoke(providerCtx, invocation)
+	stopLease()
+	if errors.Is(context.Cause(providerCtx), errLeaseRevoked) {
+		return nil, leaseLostError(held.ID)
+	}
+	if err != nil {
+		resolved, markErr := e.journal.MarkUnknown(ctx, held.ID, held.LeaseToken)
 		if markErr != nil {
 			return nil, fmt.Errorf("effect: mark unknown after invoke error: %w", errors.Join(err, markErr))
 		}
 		return resolved, err
 	}
+	return e.settleOutcome(ctx, held, &outcome)
+}
 
-	if outcome.Ambiguous {
-		return e.journal.MarkUnknown(ctx, started.ID)
+func (e *Executor) settleOutcome(ctx context.Context, held *Intent, outcome *Outcome) (*Intent, error) {
+	if held == nil || outcome == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: held intent and outcome must not be nil", nil)
 	}
-	if outcome.Succeeded {
-		return e.journal.succeedWith(ctx, started, &outcome)
+	switch {
+	case outcome.Ambiguous:
+		return e.journal.MarkUnknown(ctx, held.ID, held.LeaseToken)
+	case outcome.Succeeded:
+		return e.journal.succeedWith(ctx, held, outcome)
+	default:
+		return e.journal.Fail(ctx, held.ID, held.LeaseToken, outcome.SafeErrorCode)
 	}
-	return e.journal.Fail(ctx, started.ID, outcome.SafeErrorCode)
+}
+
+func invocationOf(intent *Intent) (*Invocation, error) {
+	if intent == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: intent must not be nil", nil)
+	}
+	return &Invocation{
+		IntentID:       intent.ID,
+		IdempotencyKey: intent.IdempotencyKey,
+		Provider:       intent.Provider,
+		Operation:      intent.Operation,
+		Classification: intent.Classification,
+		Request:        intent.RequestJSON,
+	}, nil
 }
 
 func (e *Executor) Reconcile(ctx context.Context, id string, p Provider, r Reconciler) (*Intent, error) {
@@ -103,14 +165,11 @@ func (e *Executor) Reconcile(ctx context.Context, id string, p Provider, r Recon
 }
 
 func (e *Executor) retryByReinvoke(ctx context.Context, intent *Intent, p Provider) (*Intent, error) {
-	outcome, err := p.Invoke(ctx, &Invocation{
-		IntentID:       intent.ID,
-		IdempotencyKey: intent.IdempotencyKey,
-		Provider:       intent.Provider,
-		Operation:      intent.Operation,
-		Classification: intent.Classification,
-		Request:        intent.RequestJSON,
-	})
+	invocation, err := invocationOf(intent)
+	if err != nil {
+		return nil, err
+	}
+	outcome, err := p.Invoke(ctx, invocation)
 	if err != nil {
 		return intent, err
 	}

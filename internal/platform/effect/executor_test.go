@@ -222,8 +222,8 @@ func TestReconcile_DefinitiveEvidenceResolves(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
 	intent := mustPrepare(t, exec.Journal(), validPrepare(1))
-	mustStart(t, exec.Journal(), intent.ID)
-	if _, err := exec.Journal().MarkUnknown(context.Background(), intent.ID); err != nil {
+	intent = mustStart(t, exec.Journal(), intent.ID)
+	if _, err := exec.Journal().MarkUnknown(context.Background(), intent.ID, intent.LeaseToken); err != nil {
 		t.Fatalf("mark unknown: %v", err)
 	}
 
@@ -248,8 +248,8 @@ func TestReconcile_NonDefinitiveEvidenceStaysUnknown(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
 	intent := mustPrepare(t, exec.Journal(), validPrepare(1))
-	mustStart(t, exec.Journal(), intent.ID)
-	if _, err := exec.Journal().MarkUnknown(context.Background(), intent.ID); err != nil {
+	intent = mustStart(t, exec.Journal(), intent.ID)
+	if _, err := exec.Journal().MarkUnknown(context.Background(), intent.ID, intent.LeaseToken); err != nil {
 		t.Fatalf("mark unknown: %v", err)
 	}
 
@@ -267,8 +267,8 @@ func TestReconcile_ReconcilerFailureIsTyped(t *testing.T) {
 	t.Parallel()
 	exec, _ := newExecutor(t)
 	intent := mustPrepare(t, exec.Journal(), validPrepare(1))
-	mustStart(t, exec.Journal(), intent.ID)
-	if _, err := exec.Journal().MarkUnknown(context.Background(), intent.ID); err != nil {
+	intent = mustStart(t, exec.Journal(), intent.ID)
+	if _, err := exec.Journal().MarkUnknown(context.Background(), intent.ID, intent.LeaseToken); err != nil {
 		t.Fatalf("mark unknown: %v", err)
 	}
 
@@ -315,21 +315,21 @@ func TestRecover_MixedClassifications(t *testing.T) {
 	exec, _ := newExecutor(t)
 
 	idem1 := mustPrepare(t, exec.Journal(), validPrepare(1))
-	mustStart(t, exec.Journal(), idem1.ID)
-	if _, err := exec.Journal().MarkUnknown(context.Background(), idem1.ID); err != nil {
+	idem1 = mustStart(t, exec.Journal(), idem1.ID)
+	if _, err := exec.Journal().MarkUnknown(context.Background(), idem1.ID, idem1.LeaseToken); err != nil {
 		t.Fatal(err)
 	}
 	idem2Req := validPrepare(2)
 	idem2 := mustPrepare(t, exec.Journal(), idem2Req)
-	mustStart(t, exec.Journal(), idem2.ID)
-	if _, err := exec.Journal().MarkUnknown(context.Background(), idem2.ID); err != nil {
+	idem2 = mustStart(t, exec.Journal(), idem2.ID)
+	if _, err := exec.Journal().MarkUnknown(context.Background(), idem2.ID, idem2.LeaseToken); err != nil {
 		t.Fatal(err)
 	}
 	irrReq := validPrepare(3)
 	irrReq.Classification = ClassificationIrreversible
 	irr := mustPrepare(t, exec.Journal(), irrReq)
-	mustStart(t, exec.Journal(), irr.ID)
-	if _, err := exec.Journal().MarkUnknown(context.Background(), irr.ID); err != nil {
+	irr = mustStart(t, exec.Journal(), irr.ID)
+	if _, err := exec.Journal().MarkUnknown(context.Background(), irr.ID, irr.LeaseToken); err != nil {
 		t.Fatal(err)
 	}
 

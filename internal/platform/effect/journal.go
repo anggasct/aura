@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
@@ -101,6 +102,8 @@ type Intent struct {
 	FinishedAt      *time.Time
 	ReconciledAt    *time.Time
 	UpdatedAt       time.Time
+	LeaseToken      string
+	leaseExpiresAt  time.Time
 }
 
 type PrepareRequest struct {
@@ -124,7 +127,7 @@ type PrepareRequest struct {
 
 type Journal struct {
 	db       *sql.DB
-	now      func() time.Time
+	clock    durable.Clock
 	logger   *slog.Logger
 	observer Observer
 	events   EventPublisher
@@ -142,7 +145,7 @@ type TurnStore interface {
 }
 
 type Options struct {
-	Now      func() time.Time
+	Clock    durable.Clock
 	Logger   *slog.Logger
 	Observer Observer
 	Events   EventPublisher
@@ -156,8 +159,8 @@ func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if opts.Turns == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: turn store must not be nil", nil)
 	}
-	if opts.Now == nil {
-		opts.Now = func() time.Time { return time.Now().UTC() }
+	if opts.Clock == nil {
+		opts.Clock = durable.RealClock()
 	}
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -165,7 +168,7 @@ func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if opts.Observer == nil {
 		opts.Observer = observerFunc(noopObserver)
 	}
-	return &Journal{db: db, now: opts.Now, logger: opts.Logger, observer: opts.Observer, events: opts.Events, turns: opts.Turns}, nil
+	return &Journal{db: db, clock: opts.Clock, logger: opts.Logger, observer: opts.Observer, events: opts.Events, turns: opts.Turns}, nil
 }
 
 const insertIntentSQL = `
@@ -227,7 +230,7 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 			return nil
 		}
 
-		now := j.now()
+		now := j.clock.Now()
 		intentID, idErr := randomID()
 		if idErr != nil {
 			return idErr
@@ -448,15 +451,25 @@ func digestRequest(req json.RawMessage) string {
 }
 
 func (j *Journal) Start(ctx context.Context, id string) (*Intent, error) {
-	return j.transition(ctx, id, &transitionSpec{
-		from:         []State{StatePrepared},
-		to:           StateStarted,
-		setStartedAt: true,
-		invalidCode:  ErrorCodeTransitionInvalid,
+	token := newLeaseToken()
+	expiresAt := j.clock.Now().Add(leaseDuration)
+	intent, err := j.transition(ctx, id, &transitionSpec{
+		from:           []State{StatePrepared},
+		to:             StateStarted,
+		setStartedAt:   true,
+		leaseToken:     token,
+		leaseExpiresAt: expiresAt,
+		invalidCode:    ErrorCodeTransitionInvalid,
 	})
+	if err != nil {
+		return nil, err
+	}
+	intent.LeaseToken = token
+	intent.leaseExpiresAt = expiresAt
+	return intent, nil
 }
 
-func (j *Journal) Succeed(ctx context.Context, id string, receipt json.RawMessage) (*Intent, error) {
+func (j *Journal) Succeed(ctx context.Context, id, token string, receipt json.RawMessage) (*Intent, error) {
 	if len(receipt) > 0 && !json.Valid(receipt) {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: receipt must be valid JSON", nil)
 	}
@@ -465,6 +478,8 @@ func (j *Journal) Succeed(ctx context.Context, id string, receipt json.RawMessag
 		to:            StateSucceeded,
 		receipt:       receipt,
 		setFinishedAt: true,
+		fenced:        true,
+		fenceToken:    token,
 		invalidCode:   ErrorCodeTransitionInvalid,
 	})
 }
@@ -484,13 +499,12 @@ func (j *Journal) succeedWith(ctx context.Context, started *Intent, outcome *Out
 		to:            StateSucceeded,
 		receipt:       outcome.Receipt,
 		setFinishedAt: true,
+		fenced:        true,
+		fenceToken:    started.LeaseToken,
 		invalidCode:   ErrorCodeTransitionInvalid,
 	}
 	offered := outcome.Result != nil
-	if offered && recordable(outcome.Result) {
-		spec.result = outcome.Result
-		spec.resultDigest = resultDigest(started.ID, started.RequestDigest, outcome.Result)
-	}
+	spec.recordResult(started.ID, started.RequestDigest, outcome.Result)
 	intent, err := j.transition(ctx, started.ID, spec)
 	if err != nil {
 		return nil, err
@@ -501,20 +515,24 @@ func (j *Journal) succeedWith(ctx context.Context, started *Intent, outcome *Out
 	return intent, nil
 }
 
-func (j *Journal) Fail(ctx context.Context, id, safeErrorCode string) (*Intent, error) {
+func (j *Journal) Fail(ctx context.Context, id, token, safeErrorCode string) (*Intent, error) {
 	return j.transition(ctx, id, &transitionSpec{
 		from:          []State{StatePrepared, StateStarted},
 		to:            StateFailed,
 		safeErrorCode: safeErrorCode,
 		setFinishedAt: true,
+		fenced:        true,
+		fenceToken:    token,
 		invalidCode:   ErrorCodeTransitionInvalid,
 	})
 }
 
-func (j *Journal) MarkUnknown(ctx context.Context, id string) (*Intent, error) {
+func (j *Journal) MarkUnknown(ctx context.Context, id, token string) (*Intent, error) {
 	return j.transition(ctx, id, &transitionSpec{
 		from:        []State{StateStarted},
 		to:          StateUnknown,
+		fenced:      true,
+		fenceToken:  token,
 		invalidCode: ErrorCodeTransitionInvalid,
 	})
 }
@@ -522,6 +540,7 @@ func (j *Journal) MarkUnknown(ctx context.Context, id string) (*Intent, error) {
 type Resolution struct {
 	Succeeded     bool
 	Receipt       json.RawMessage
+	Result        json.RawMessage
 	SafeErrorCode string
 }
 
@@ -530,14 +549,29 @@ func (j *Journal) Resolve(ctx context.Context, id string, res Resolution) (*Inte
 		if len(res.Receipt) > 0 && !json.Valid(res.Receipt) {
 			return nil, codedError(ErrorCodeInvalidArgument, "effect: receipt must be valid JSON", nil)
 		}
-		return j.transition(ctx, id, &transitionSpec{
+		spec := &transitionSpec{
 			from:            []State{StateUnknown},
 			to:              StateSucceeded,
 			receipt:         res.Receipt,
 			setFinishedAt:   true,
 			setReconciledAt: true,
 			invalidCode:     ErrorCodeTransitionInvalid,
-		})
+		}
+		if res.Result != nil {
+			unknown, err := j.Get(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			spec.recordResult(id, unknown.RequestDigest, res.Result)
+		}
+		intent, err := j.transition(ctx, id, spec)
+		if err != nil {
+			return nil, err
+		}
+		if res.Result != nil && spec.result == nil {
+			j.observe(ctx, intent, observationResultNotRecorded)
+		}
+		return intent, nil
 	}
 	return j.transition(ctx, id, &transitionSpec{
 		from:            []State{StateUnknown},
@@ -559,7 +593,19 @@ type transitionSpec struct {
 	setStartedAt    bool
 	setFinishedAt   bool
 	setReconciledAt bool
+	leaseToken      string
+	leaseExpiresAt  time.Time
+	fenced          bool
+	fenceToken      string
 	invalidCode     ErrorCode
+}
+
+func (s *transitionSpec) recordResult(id, requestDigest string, result json.RawMessage) {
+	if result == nil || !recordable(result) {
+		return
+	}
+	s.result = result
+	s.resultDigest = resultDigest(id, requestDigest, result)
 }
 
 func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpec) (*Intent, error) {
@@ -569,19 +615,26 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	err := sqlite.RunInTx(ctx, j.db, func(ctx context.Context) error {
 		q := sqlite.Conn(ctx, j.db)
 		var currentState State
-		err := q.QueryRowContext(ctx, `SELECT state FROM effect_intent WHERE id = ?`, id).Scan(&currentState)
+		var storedToken sql.NullString
+		err := q.QueryRowContext(ctx, `SELECT state, lease_token FROM effect_intent WHERE id = ?`, id).Scan(&currentState, &storedToken)
 		if errors.Is(err, sql.ErrNoRows) {
 			return codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", id), nil)
 		}
 		if err != nil {
 			return fmt.Errorf("effect: read intent %s state: %w", id, err)
 		}
+		if spec.fenced && currentState == StateStarted && spec.fenceToken == "" {
+			return codedError(ErrorCodeInvalidArgument, "effect: a started intent is settled only with its lease token", nil)
+		}
 		if !stateIn(currentState, spec.from) {
+			if spec.fenced && currentState != StatePrepared && storedToken.String != spec.fenceToken {
+				return leaseLostError(id)
+			}
 			return codedError(spec.invalidCode,
 				fmt.Sprintf("effect: intent %s is %s, cannot transition to %s", id, currentState, spec.to), nil)
 		}
 
-		now := j.now()
+		now := j.clock.Now()
 		var receiptArg any
 		if spec.receipt != nil {
 			receiptArg = string(spec.receipt)
@@ -589,6 +642,10 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		var resultArg any
 		if spec.result != nil {
 			resultArg = string(spec.result)
+		}
+		var leaseExpiresArg any
+		if !spec.leaseExpiresAt.IsZero() {
+			leaseExpiresArg = fmtLeaseTime(spec.leaseExpiresAt)
 		}
 		res, err := q.ExecContext(ctx, `
 		UPDATE effect_intent
@@ -600,14 +657,17 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		    provider_receipt_json = ?,
 		    result_json = ?,
 		    result_digest = ?,
-		    safe_error_code = ?
-		WHERE id = ? AND state = ?`,
+		    safe_error_code = ?,
+		    lease_token = COALESCE(?, lease_token),
+		    lease_expires_at = COALESCE(?, lease_expires_at)
+		WHERE id = ? AND state = ? AND (? OR lease_token IS ?)`,
 			string(spec.to), fmtTime(now),
 			boolToInt(spec.setStartedAt), fmtTime(now),
 			boolToInt(spec.setFinishedAt), fmtTime(now),
 			boolToInt(spec.setReconciledAt), fmtTime(now),
 			receiptArg, resultArg, nullableString(spec.resultDigest), nullableString(spec.safeErrorCode),
-			id, string(currentState),
+			nullableString(spec.leaseToken), leaseExpiresArg,
+			id, string(currentState), boolToInt(!spec.fenced), nullableString(spec.fenceToken),
 		)
 		if err != nil {
 			return fmt.Errorf("effect: transition intent %s to %s: %w", id, spec.to, err)
@@ -615,6 +675,9 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		affected, err := res.RowsAffected()
 		if err != nil {
 			return fmt.Errorf("effect: read transition rows affected: %w", err)
+		}
+		if affected == 0 && spec.fenced {
+			return leaseLostError(id)
 		}
 		if affected == 0 {
 			return codedError(spec.invalidCode,
@@ -772,6 +835,18 @@ type queryer interface {
 
 func fmtTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
+}
+
+func fmtLeaseTime(t time.Time) string {
+	return t.UTC().Format(leaseTimeLayout)
+}
+
+func parseLeaseTime(raw string) (time.Time, error) {
+	t, err := time.Parse(leaseTimeLayout, raw)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("effect: parse lease_expires_at: %w", err)
+	}
+	return t, nil
 }
 
 func parseTime(raw, what string) (time.Time, error) {

@@ -31,7 +31,7 @@ func (j *Journal) observe(ctx context.Context, intent *Intent, outcome string) {
 	if intent == nil {
 		return
 	}
-	age := j.now().UTC().Sub(intent.PreparedAt)
+	age := j.clock.Now().UTC().Sub(intent.PreparedAt)
 	if age < 0 {
 		age = 0
 	}

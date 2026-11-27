@@ -5,15 +5,19 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
 )
 
+const armedTimerBuffer = 1024
+
 type ManualClock struct {
 	mu      sync.Mutex
 	current time.Time
 	waiters []manualWaiter
+	armed   chan struct{}
 }
 
 type manualWaiter struct {
@@ -22,7 +26,18 @@ type manualWaiter struct {
 }
 
 func NewManualClock(start time.Time) *ManualClock {
-	return &ManualClock{current: start.UTC()}
+	return &ManualClock{current: start.UTC(), armed: make(chan struct{}, armedTimerBuffer)}
+}
+
+func (c *ManualClock) AwaitArmed(t testing.TB, timers int) {
+	t.Helper()
+	for range timers {
+		select {
+		case <-c.armed:
+		case <-t.Context().Done():
+			t.Fatal("test ended while waiting for a timer to be armed")
+		}
+	}
 }
 
 func (c *ManualClock) Now() time.Time {
@@ -54,9 +69,13 @@ func (c *ManualClock) Advance(d time.Duration) {
 
 func (c *ManualClock) Timer(d time.Duration) <-chan time.Time {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	ch := make(chan time.Time, 1)
 	c.waiters = append(c.waiters, manualWaiter{at: c.current.Add(d), ch: ch})
+	c.mu.Unlock()
+	select {
+	case c.armed <- struct{}{}:
+	default:
+	}
 	return ch
 }
 

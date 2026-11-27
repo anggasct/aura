@@ -9,8 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
@@ -201,8 +201,8 @@ func TestTransition_FullHappyPath(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	succeeded, err := j.Succeed(context.Background(), intent.ID, json.RawMessage(`{"message_id":42}`))
+	intent = mustStart(t, j, intent.ID)
+	succeeded, err := j.Succeed(context.Background(), intent.ID, intent.LeaseToken, json.RawMessage(`{"message_id":42}`))
 	if err != nil {
 		t.Fatalf("succeed: %v", err)
 	}
@@ -222,7 +222,7 @@ func TestFail_FromPrepared(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	failed, err := j.Fail(context.Background(), intent.ID, "policy_denied")
+	failed, err := j.Fail(context.Background(), intent.ID, intent.LeaseToken, "policy_denied")
 	if err != nil {
 		t.Fatalf("fail from prepared: %v", err)
 	}
@@ -236,8 +236,8 @@ func TestFail_FromStarted(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	failed, err := j.Fail(context.Background(), intent.ID, "provider_4xx")
+	intent = mustStart(t, j, intent.ID)
+	failed, err := j.Fail(context.Background(), intent.ID, intent.LeaseToken, "provider_4xx")
 	if err != nil {
 		t.Fatalf("fail from started: %v", err)
 	}
@@ -251,8 +251,8 @@ func TestMarkUnknown_FromStarted(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	unknown, err := j.MarkUnknown(context.Background(), intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	unknown, err := j.MarkUnknown(context.Background(), intent.ID, intent.LeaseToken)
 	if err != nil {
 		t.Fatalf("mark unknown: %v", err)
 	}
@@ -266,18 +266,18 @@ func TestTransition_TerminalImmutable(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	if _, err := j.Succeed(context.Background(), intent.ID, json.RawMessage(`{}`)); err != nil {
+	intent = mustStart(t, j, intent.ID)
+	if _, err := j.Succeed(context.Background(), intent.ID, intent.LeaseToken, json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("succeed: %v", err)
 	}
 
 	if _, err := j.Start(context.Background(), intent.ID); err == nil {
 		t.Fatal("Start on succeeded must fail")
 	}
-	if _, err := j.Succeed(context.Background(), intent.ID, nil); err == nil {
+	if _, err := j.Succeed(context.Background(), intent.ID, intent.LeaseToken, nil); err == nil {
 		t.Fatal("Succeed on succeeded must fail")
 	}
-	if _, err := j.MarkUnknown(context.Background(), intent.ID); err == nil {
+	if _, err := j.MarkUnknown(context.Background(), intent.ID, intent.LeaseToken); err == nil {
 		t.Fatal("MarkUnknown on succeeded must fail")
 	}
 }
@@ -287,7 +287,7 @@ func TestTransition_StartRejectsNonPrepared(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
 	_, err := j.Start(context.Background(), intent.ID)
 	assertCode(t, err, ErrorCodeTransitionInvalid)
 }
@@ -297,7 +297,7 @@ func TestTransition_SucceedRejectsNonStarted(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	_, err := j.Succeed(context.Background(), intent.ID, nil)
+	_, err := j.Succeed(context.Background(), intent.ID, intent.LeaseToken, nil)
 	assertCode(t, err, ErrorCodeTransitionInvalid)
 }
 
@@ -306,7 +306,7 @@ func TestTransition_MarkUnknownRejectsNonStarted(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	_, err := j.MarkUnknown(context.Background(), intent.ID)
+	_, err := j.MarkUnknown(context.Background(), intent.ID, intent.LeaseToken)
 	assertCode(t, err, ErrorCodeTransitionInvalid)
 }
 
@@ -336,10 +336,11 @@ func TestListByState_NegativeLimitRejected(t *testing.T) {
 
 func TestClaim_ConcurrentExactlyOnce(t *testing.T) {
 	t.Parallel()
-	j, _ := newTestJournal(t)
+	j, _, clock := newClockedJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	lapseLeases(clock)
 
 	const workers = 16
 	var won int64
@@ -377,7 +378,7 @@ func TestClaim_ConcurrentExactlyOnce(t *testing.T) {
 
 func TestRecover_ConcurrentNoDoubleClaim(t *testing.T) {
 	t.Parallel()
-	j, db := newTestJournal(t)
+	j, db, clock := newClockedJournal(t)
 
 	const intents = 40
 	for n := 1; n <= intents; n++ {
@@ -386,6 +387,8 @@ func TestRecover_ConcurrentNoDoubleClaim(t *testing.T) {
 		intent := mustPrepare(t, j, req)
 		mustStart(t, j, intent.ID)
 	}
+
+	lapseLeases(clock)
 
 	const workers = 8
 	var totalClaimed int64
@@ -420,12 +423,14 @@ func TestRecover_ConcurrentNoDoubleClaim(t *testing.T) {
 
 func TestRecover_LeavesOtherStatesAlone(t *testing.T) {
 	t.Parallel()
-	j, db := newTestJournal(t)
+	j, db, clock := newClockedJournal(t)
 
 	preparedOnly := mustPrepare(t, j, validPrepare(1))
 
 	started := mustPrepare(t, j, validPrepare(2))
 	mustStart(t, j, started.ID)
+
+	lapseLeases(clock)
 
 	report, err := j.Recover(context.Background())
 	if err != nil {
@@ -458,8 +463,8 @@ func TestSucceed_InvalidReceiptRejected(t *testing.T) {
 	j, _ := newTestJournal(t)
 
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	_, err := j.Succeed(context.Background(), intent.ID, json.RawMessage(`{bad`))
+	intent = mustStart(t, j, intent.ID)
+	_, err := j.Succeed(context.Background(), intent.ID, intent.LeaseToken, json.RawMessage(`{bad`))
 	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
@@ -512,7 +517,7 @@ func TestJournalPrepareLeavesNoIntentWhenItsEventCannotBeWritten(t *testing.T) {
 	}
 	appendErr := errors.New("append failed")
 	j, err := NewJournal(db, Options{
-		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
+		Clock:  durabletest.NewManualClock(testEpoch),
 		Logger: slog.New(slog.DiscardHandler),
 		Turns:  failingEventTurnStore{TurnStore: turnstore.NewTurnStore(db), appendErr: appendErr},
 	})
@@ -650,8 +655,11 @@ func TestTransition_ConcurrentStartSucceedSerializes(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			_, _ = j.Start(context.Background(), intent.ID)
-			_, _ = j.Succeed(context.Background(), intent.ID, receipt)
+			started, err := j.Start(context.Background(), intent.ID)
+			if err != nil {
+				return
+			}
+			_, _ = j.Succeed(context.Background(), intent.ID, started.LeaseToken, receipt)
 		}()
 	}
 	close(start)
@@ -682,7 +690,7 @@ func TestTransition_ConcurrentStartSucceedSerializes(t *testing.T) {
 }
 
 func TestRecoverProvider_ClaimsOnlyThatProvider(t *testing.T) {
-	j, _ := newTestJournal(t)
+	j, _, clock := newClockedJournal(t)
 	ctx := context.Background()
 	mine := validPrepare(1)
 	mine.Provider = "email"
@@ -692,6 +700,8 @@ func TestRecoverProvider_ClaimsOnlyThatProvider(t *testing.T) {
 	prepared := validPrepare(3)
 	prepared.Provider = "email"
 	mustPrepare(t, j, prepared)
+
+	lapseLeases(clock)
 
 	report, err := j.RecoverProvider(ctx, "email")
 	if err != nil {

@@ -7,9 +7,10 @@ import (
 )
 
 func TestValidateResumeEffectsClaimsStartedAndRejectsAmbiguous(t *testing.T) {
-	j, _ := newTestJournal(t)
+	j, _, clock := newClockedJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	lapseLeases(clock)
 
 	if err := j.ValidateResumeEffects(context.Background(), "sess-1", "turn-1", []string{intent.ToolCallID}); err == nil {
 		t.Fatal("ValidateResumeEffects accepted an ambiguous effect")
@@ -33,18 +34,18 @@ func TestValidateResumeEffectsClaimsStartedAndRejectsAmbiguous(t *testing.T) {
 func TestValidateResumeEffectsRejectsTerminalPendingEffects(t *testing.T) {
 	j, _ := newTestJournal(t)
 	succeeded := mustPrepare(t, j, validPrepare(2))
-	mustStart(t, j, succeeded.ID)
-	if _, err := j.Succeed(context.Background(), succeeded.ID, nil); err != nil {
+	succeeded = mustStart(t, j, succeeded.ID)
+	if _, err := j.Succeed(context.Background(), succeeded.ID, succeeded.LeaseToken, nil); err != nil {
 		t.Fatalf("Succeed: %v", err)
 	}
 	failed := mustPrepare(t, j, validPrepare(3))
-	mustStart(t, j, failed.ID)
-	if _, err := j.Fail(context.Background(), failed.ID, "provider_failed"); err != nil {
+	failed = mustStart(t, j, failed.ID)
+	if _, err := j.Fail(context.Background(), failed.ID, failed.LeaseToken, "provider_failed"); err != nil {
 		t.Fatalf("Fail: %v", err)
 	}
 	unknown := mustPrepare(t, j, validPrepare(4))
-	mustStart(t, j, unknown.ID)
-	if _, err := j.MarkUnknown(context.Background(), unknown.ID); err != nil {
+	unknown = mustStart(t, j, unknown.ID)
+	if _, err := j.MarkUnknown(context.Background(), unknown.ID, unknown.LeaseToken); err != nil {
 		t.Fatalf("MarkUnknown: %v", err)
 	}
 

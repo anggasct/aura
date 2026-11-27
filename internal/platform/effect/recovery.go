@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
@@ -12,11 +14,12 @@ func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 	if id == "" {
 		return false, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
+	now := j.clock.Now()
 	res, err := sqlite.Conn(ctx, j.db).ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?, updated_at = ?
-		WHERE id = ? AND state = ?`,
-		string(StateUnknown), fmtTime(j.now()), id, string(StateStarted),
+		WHERE id = ? AND state = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
+		string(StateUnknown), fmtTime(now), id, string(StateStarted), fmtLeaseTime(now),
 	)
 	if err != nil {
 		return false, fmt.Errorf("effect: claim intent %s: %w", id, err)
@@ -39,6 +42,8 @@ func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 type RecoveryReport struct {
 	Scanned int
 	Claimed int
+	RetryAt time.Time
+	Pending []string
 }
 
 func (j *Journal) Recover(ctx context.Context) (RecoveryReport, error) {
@@ -52,23 +57,48 @@ func (j *Journal) RecoverProvider(ctx context.Context, provider string) (Recover
 	return j.recoverStarted(ctx, provider)
 }
 
+func (j *Journal) RecoverIntents(ctx context.Context, ids []string) (RecoveryReport, error) {
+	if slices.Contains(ids, "") {
+		return RecoveryReport{}, codedError(ErrorCodeInvalidArgument, "effect: intent id must not be empty", nil)
+	}
+	return j.claimExpired(ctx, ids)
+}
+
 func (j *Journal) recoverStarted(ctx context.Context, provider string) (RecoveryReport, error) {
 	started, err := j.ListByState(ctx, StateStarted, 0)
 	if err != nil {
 		return RecoveryReport{}, err
 	}
-	var report RecoveryReport
+	ids := make([]string, 0, len(started))
 	for i := range started {
-		if provider != "" && started[i].Provider != provider {
-			continue
+		if provider == "" || started[i].Provider == provider {
+			ids = append(ids, started[i].ID)
 		}
-		report.Scanned++
-		claimed, err := j.Claim(ctx, started[i].ID)
+	}
+	return j.claimExpired(ctx, ids)
+}
+
+func (j *Journal) claimExpired(ctx context.Context, ids []string) (RecoveryReport, error) {
+	report := RecoveryReport{Scanned: len(ids)}
+	for _, id := range ids {
+		claimed, err := j.Claim(ctx, id)
 		if err != nil {
 			return report, err
 		}
 		if claimed {
 			report.Claimed++
+			continue
+		}
+		expiresAt, live, err := j.liveLeaseExpiry(ctx, id)
+		if err != nil {
+			return report, err
+		}
+		if !live {
+			continue
+		}
+		report.Pending = append(report.Pending, id)
+		if expiresAt.After(report.RetryAt) {
+			report.RetryAt = expiresAt
 		}
 	}
 	return report, nil
@@ -149,6 +179,9 @@ func (j *Journal) ValidateResumeEffects(ctx context.Context, sessionID, turnID s
 			}
 			if current.State == StateUnknown {
 				return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
+			}
+			if current.State == StateStarted {
+				return codedError(ErrorCodeInProgress, fmt.Sprintf("effect: pending tool call %s is held under a live lease", intents[i].ToolCallID), nil)
 			}
 			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s changed to %s during recovery", intents[i].ToolCallID, current.State), nil)
 		case StateSucceeded, StateFailed:

@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -74,19 +76,64 @@ func (o *Outbox) Send(ctx context.Context, outgoing *Outgoing) (string, error) {
 
 type EffectRecoverer interface {
 	RecoverProvider(ctx context.Context, provider string) (effect.RecoveryReport, error)
+	RecoverIntents(ctx context.Context, ids []string) (effect.RecoveryReport, error)
 }
 
-func RecoverEffects(ctx context.Context, journal EffectRecoverer, logger *slog.Logger) error {
-	if journal == nil {
+type RecoveryDeps struct {
+	Journal EffectRecoverer
+	Logger  *slog.Logger
+	Clock   durable.Clock
+}
+
+type RecoveryRetry struct {
+	At        time.Time
+	IntentIDs []string
+}
+
+func (r RecoveryRetry) Pending() bool { return !r.At.IsZero() && len(r.IntentIDs) > 0 }
+
+func (d *RecoveryDeps) validate() error {
+	if d == nil || d.Journal == nil {
 		return fault.New(ErrorCodeInvalidArgument, "effect journal must not be nil")
 	}
-	if logger == nil {
-		logger = slog.Default()
+	if d.Logger == nil {
+		return fault.New(ErrorCodeInvalidArgument, "recovery logger must not be nil")
 	}
-	report, err := journal.RecoverProvider(ctx, ProviderName)
+	if d.Clock == nil {
+		return fault.New(ErrorCodeInvalidArgument, "recovery clock must not be nil")
+	}
+	return nil
+}
+
+func (d *RecoveryDeps) logPass(ctx context.Context, report *effect.RecoveryReport) {
+	d.Logger.InfoContext(ctx, "email effects recovered", "component", "email", "scanned", report.Scanned, "claimed", report.Claimed)
+}
+
+func RecoverEffects(ctx context.Context, deps *RecoveryDeps) (RecoveryRetry, error) {
+	if err := deps.validate(); err != nil {
+		return RecoveryRetry{}, err
+	}
+	report, err := deps.Journal.RecoverProvider(ctx, ProviderName)
+	if err != nil {
+		return RecoveryRetry{}, fmt.Errorf("recover email effects: %w", err)
+	}
+	deps.logPass(ctx, &report)
+	return RecoveryRetry{At: report.RetryAt, IntentIDs: report.Pending}, nil
+}
+
+func RecoverEffectsAt(ctx context.Context, deps *RecoveryDeps, retry RecoveryRetry) error {
+	if err := deps.validate(); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-deps.Clock.Timer(retry.At.Sub(deps.Clock.Now()) + time.Nanosecond):
+	}
+	report, err := deps.Journal.RecoverIntents(ctx, retry.IntentIDs)
 	if err != nil {
 		return fmt.Errorf("recover email effects: %w", err)
 	}
-	logger.InfoContext(ctx, "email effects recovered", "component", "email", "scanned", report.Scanned, "claimed", report.Claimed)
+	deps.logPass(ctx, &report)
 	return nil
 }

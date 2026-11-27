@@ -26,6 +26,8 @@ const (
 	ErrorCodeApprovalInvalid           ErrorCode = "effect_approval_invalid"
 	ErrorCodeApprovalExpired           ErrorCode = "effect_approval_expired"
 	ErrorCodeApprovalConsumed          ErrorCode = "effect_approval_consumed"
+	ErrorCodeLeaseLost                 ErrorCode = "effect_lease_lost"
+	ErrorCodeInProgress                ErrorCode = "effect_in_progress"
 )
 
 func codedError(code ErrorCode, detail string, cause error) error {

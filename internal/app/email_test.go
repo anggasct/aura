@@ -21,6 +21,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/email"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -475,13 +476,22 @@ func startedIntent(t *testing.T, journal *effect.Journal, provider string) *effe
 	return started
 }
 
+var (
+	leasesExpiredAt = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	leasesLiveAt    = time.Date(2100, time.January, 1, 0, 0, 0, 0, time.UTC)
+)
+
 func TestRecoverEmailEffects(t *testing.T) {
 	cases := map[string]struct {
-		enabled   bool
-		wantEmail effect.State
+		enabled      bool
+		startedAt    time.Time
+		wantEmail    effect.State
+		wantRetrying bool
 	}{
-		"email enabled":  {enabled: true, wantEmail: effect.StateUnknown},
-		"email disabled": {enabled: false, wantEmail: effect.StateStarted},
+		"email enabled, leases expired":  {enabled: true, startedAt: leasesExpiredAt, wantEmail: effect.StateUnknown},
+		"email enabled, leases live":     {enabled: true, startedAt: leasesLiveAt, wantEmail: effect.StateStarted, wantRetrying: true},
+		"email disabled, leases expired": {enabled: false, startedAt: leasesExpiredAt, wantEmail: effect.StateStarted},
+		"email disabled, leases live":    {enabled: false, startedAt: leasesLiveAt, wantEmail: effect.StateStarted},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -493,7 +503,11 @@ func TestRecoverEmailEffects(t *testing.T) {
 			if err := ensurer.EnsureSession(t.Context(), "desk/email:work/thread:recover", principal.OwnerID, "desk"); err != nil {
 				t.Fatalf("EnsureSession: %v", err)
 			}
-			journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
+			journal, err := effect.NewJournal(db, effect.Options{
+				Clock:  durabletest.NewManualClock(tc.startedAt),
+				Logger: slog.New(slog.DiscardHandler),
+				Turns:  turnstore.NewTurnStore(db),
+			})
 			if err != nil {
 				t.Fatalf("NewJournal: %v", err)
 			}
@@ -501,8 +515,12 @@ func TestRecoverEmailEffects(t *testing.T) {
 			foreign := startedIntent(t, journal, "telegram")
 			cfg := appconfig.Default()
 			cfg.Channels.Email.Enabled = tc.enabled
-			if err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err != nil {
+			retry, err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler))
+			if err != nil {
 				t.Fatalf("recoverEmailEffects: %v", err)
+			}
+			if retry.pending() != tc.wantRetrying {
+				t.Errorf("retry pending = %v, want %v", retry.pending(), tc.wantRetrying)
 			}
 			for intent, want := range map[*effect.Intent]effect.State{mine: tc.wantEmail, foreign: effect.StateStarted} {
 				got, err := journal.Get(t.Context(), intent.ID)
@@ -521,7 +539,7 @@ func TestRecoverEmailEffects_FailsClosedWhenTheJournalIsUnreadable(t *testing.T)
 	}
 	cfg := appconfig.Default()
 	cfg.Channels.Email.Enabled = true
-	if err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err == nil {
+	if _, err := recoverEmailEffects(t.Context(), &cfg, db, slog.New(slog.DiscardHandler)); err == nil {
 		t.Fatal("recoverEmailEffects succeeded against an unreadable journal")
 	}
 }

@@ -94,7 +94,7 @@ func (j *Journal) Approve(ctx context.Context, req *ApprovalRequest) (*Approval,
 		if err != nil {
 			return err
 		}
-		now := j.now().UTC()
+		now := j.clock.Now().UTC()
 		expiresAt := now.Add(request.ExpiresIn)
 		approvalID, err := randomID()
 		if err != nil {
@@ -185,7 +185,7 @@ func (j *Journal) consumeApproval(ctx context.Context, id string, action Approva
 		if approval.IntentID != intent.ID || approval.Action != action || approval.RequestDigest != intent.RequestDigest || approval.OwnerID != ownerID {
 			return codedError(ErrorCodeApprovalInvalid, "effect: approval token binding does not match intent", nil)
 		}
-		now := j.now().UTC()
+		now := j.clock.Now().UTC()
 		if !now.Before(approval.ExpiresAt) {
 			return codedError(ErrorCodeApprovalExpired, "effect: approval token has expired", nil)
 		}

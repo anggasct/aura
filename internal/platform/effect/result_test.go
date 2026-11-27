@@ -154,8 +154,8 @@ func TestRecordedResultIsServedOnlyWhenRecordedAndIntact(t *testing.T) {
 		executor, _, observed := newObservedExecutor(t)
 		journal := executor.Journal()
 		prepared := mustPrepare(t, journal, validPrepare(1))
-		mustStart(t, journal, prepared.ID)
-		intent, err := journal.Succeed(context.Background(), prepared.ID, json.RawMessage(`{}`))
+		prepared = mustStart(t, journal, prepared.ID)
+		intent, err := journal.Succeed(context.Background(), prepared.ID, prepared.LeaseToken, json.RawMessage(`{}`))
 		if err != nil {
 			t.Fatalf("Succeed: %v", err)
 		}
@@ -203,8 +203,8 @@ func TestRecordedResultIsServedOnlyWhenRecordedAndIntact(t *testing.T) {
 		_, err := journal.RecordedResult(context.Background(), prepared)
 		wantResultCode(t, err, ErrorCodeResultUnavailable)
 		unknown := mustPrepare(t, journal, validPrepare(2))
-		mustStart(t, journal, unknown.ID)
-		settled, err := journal.MarkUnknown(context.Background(), unknown.ID)
+		unknown = mustStart(t, journal, unknown.ID)
+		settled, err := journal.MarkUnknown(context.Background(), unknown.ID, unknown.LeaseToken)
 		if err != nil {
 			t.Fatalf("MarkUnknown: %v", err)
 		}
@@ -225,7 +225,7 @@ func TestRecordedResultColumnsRefuseAPartialRecord(t *testing.T) {
 	executor, db, _ := newObservedExecutor(t)
 	journal := executor.Journal()
 	started := mustPrepare(t, journal, validPrepare(1))
-	mustStart(t, journal, started.ID)
+	started = mustStart(t, journal, started.ID)
 	unrecorded := succeedWithOutcome(t, executor, 2, Outcome{})
 	recorded := succeedWithOutcome(t, executor, 3, Outcome{Result: json.RawMessage(`{"ok":true}`)})
 	atTheCap := `"` + strings.Repeat("a", MaxResultBytes-2) + `"`
