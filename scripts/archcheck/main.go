@@ -16,7 +16,7 @@ import (
 
 const baselineDir = "scripts/archcheck"
 
-var checkNames = []string{"layout", "app-layout", "stdnames", "layers", "fakes", "setters", "codederrors", "modulemap"}
+var checkNames = []string{"layout", "app-layout", "stdnames", "layers", "fakes", "setters", "codederrors", operationDefinitionsCheck, "modulemap"}
 
 type runDeps struct {
 	allowDir      string
@@ -24,6 +24,7 @@ type runDeps struct {
 	readGroups    func() (map[string][]dirEntry, error)
 	readApp       func() ([]dirEntry, error)
 	loadRepo      func(context.Context) (repository, error)
+	loadExports   exportLoader
 }
 
 func defaultRunDeps() runDeps {
@@ -33,6 +34,7 @@ func defaultRunDeps() runDeps {
 		readGroups:    readGroupDirs,
 		readApp:       readAppEntries,
 		loadRepo:      loadRepository,
+		loadExports:   listExports,
 	}
 }
 
@@ -118,7 +120,7 @@ func collect(ctx context.Context, selected []string, deps runDeps) ([]string, er
 		violations = append(violations, checkLayers(repo.packages)...)
 	}
 	if hasSourceCheck(selected) {
-		found, err := checkSources(selected, repo.packages, deps.allowDir)
+		found, err := checkSources(ctx, selected, repo.packages, deps)
 		if err != nil {
 			return nil, err
 		}

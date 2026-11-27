@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"os"
 	"path"
 	"path/filepath"
@@ -244,11 +246,25 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 	}
 	t.Run("test files are not production sources", func(t *testing.T) {
 		t.Parallel()
-		listed := listedPackage{Dir: "/repo/pkg", GoFiles: []string{"a.go"}, IgnoredGoFiles: []string{"b_windows.go", "a_test.go"}}
+		listed := listedPackage{Dir: "/repo/pkg", GoFiles: []string{"a.go", "a_test.go"}, CgoFiles: []string{"c.go"}, IgnoredGoFiles: []string{"b_windows.go", "a_test.go"}}
 		got := productionFiles(&listed)
-		want := []string{"/repo/pkg/a.go", "/repo/pkg/b_windows.go"}
+		want := []packageFile{{path: "/repo/pkg/a.go", built: true}, {path: "/repo/pkg/c.go", built: true}, {path: "/repo/pkg/b_windows.go"}}
 		if !slices.Equal(got, want) {
-			t.Fatalf("productionFiles = %q, want %q", got, want)
+			t.Fatalf("productionFiles = %v, want %v", got, want)
+		}
+	})
+	t.Run("only built files are type-checkable", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		built, other := filepath.Join(dir, "a.go"), filepath.Join(dir, "a_other.go")
+		for _, name := range []string{built, other} {
+			if err := os.WriteFile(name, []byte("package a\n"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+		}
+		sources, err := parseSources([]repoPackage{{path: "internal/a", files: []packageFile{{path: built, built: true}, {path: other}}}})
+		if err != nil || len(sources) != 1 || len(sources[0].files) != 2 || len(sources[0].current) != 1 {
+			t.Fatalf("parseSources = %+v, %v; want two files of which one is current", sources, err)
 		}
 	})
 	t.Run("an unparsable file fails with its path", func(t *testing.T) {
@@ -257,7 +273,7 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 		if err := os.WriteFile(broken, []byte("package broken\nfunc ("), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		_, err := parseSources([]repoPackage{{path: "internal/broken", files: []string{broken}}})
+		_, err := parseSources([]repoPackage{{path: "internal/broken", files: []packageFile{{path: broken}}}})
 		if err == nil || !strings.Contains(err.Error(), broken) {
 			t.Fatalf("parseSources error = %v, want one naming %s", err, broken)
 		}
@@ -416,7 +432,7 @@ func TestCodedErrorsExemptsPluginWireProtocolBoundary(t *testing.T) {
 
 func TestAllowListAntiResurrection(t *testing.T) {
 	t.Parallel()
-	for _, check := range []string{"layers", "fakes", "setters", "codederrors"} {
+	for _, check := range []string{"layers", "fakes", "setters", "codederrors", "operation-definitions"} {
 		t.Run(check+" fails when allow-list file exists", func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
@@ -444,6 +460,270 @@ func TestAllowListAntiResurrection(t *testing.T) {
 			}
 		})
 	}
+}
+
+type typedFixture struct {
+	dir     string
+	source  string
+	foreign string
+}
+
+type fixtureImporter map[string]*types.Package
+
+func (f fixtureImporter) Import(importPath string) (*types.Package, error) {
+	if pkg, ok := f[importPath]; ok {
+		return pkg, nil
+	}
+	return nil, fmt.Errorf("fixture package %s is not declared", importPath)
+}
+
+func typedSources(t *testing.T, fixtures ...typedFixture) []sourcePackage {
+	t.Helper()
+	fset := token.NewFileSet()
+	imp := fixtureImporter{}
+	sources := make([]sourcePackage, 0, len(fixtures))
+	for _, fixture := range fixtures {
+		name := path.Base(fixture.dir)
+		file, err := parser.ParseFile(fset, name+".go", "package "+name+"\n"+fixture.source, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse fixture %s: %v", fixture.dir, err)
+		}
+		source := sourcePackage{path: fixture.dir, name: name, files: []*ast.File{file}, current: []*ast.File{file}, fset: fset}
+		for _, spec := range file.Imports {
+			source.imports = append(source.imports, relativePath(strings.Trim(spec.Path.Value, `"`)))
+		}
+		checked, err := typeCheck(&source, imp)
+		if err != nil {
+			t.Fatalf("type-check fixture %s: %v", fixture.dir, err)
+		}
+		imp[modulePath+"/"+fixture.dir] = checked
+		if fixture.foreign != "" {
+			other, err := parser.ParseFile(fset, name+"_other.go", "package "+name+"\n"+fixture.foreign, parser.SkipObjectResolution)
+			if err != nil {
+				t.Fatalf("parse the other-platform file of %s: %v", fixture.dir, err)
+			}
+			source.files = append(source.files, other)
+		}
+		sources = append(sources, source)
+	}
+	return sources
+}
+
+func TestOperationDefinitionsAreOwnedByTheOperationPackage(t *testing.T) {
+	t.Parallel()
+	const toolsImport = "github.com/anggasct/aura/internal/platform/tools"
+	toolsFixture := typedFixture{dir: toolsPackage, source: "type Definition struct{ Name string; Operation string; OwnerNotice bool }\ntype Other struct{ Operation string }\n"}
+	aliasFixture := typedFixture{dir: "internal/platform/shapes", source: "import \"" + toolsImport + "\"\ntype Tool = tools.Definition\n"}
+	const shapesImport = "github.com/anggasct/aura/internal/platform/shapes"
+	cases := []struct {
+		name   string
+		dir    string
+		source string
+		extra  []typedFixture
+		alone  bool
+		other  string
+		want   []string
+	}{
+		{
+			name:   "an other-platform file importing a package this platform cannot resolve",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+			other:  "import _ \"example.invalid/only/on/another/os\"\n",
+		},
+		{
+			name:   "an other-platform file that sets an owned field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+			other:  "import \"example.invalid/only/on/another/os\"\nvar d = os.Definition{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Operation in a file for another platform outside internal/platform/operation"},
+		},
+		{
+			name:   "an other-platform file that sets no owned field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+			other:  "var name = \"windows\"\n",
+		},
+		{
+			name:   "a literal with an operation outside the operation package",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\", Operation: \"widget.run\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a pointer literal with an owner notice",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = &tools.Definition{OwnerNotice: true}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation"},
+		},
+		{
+			name:   "a slice of definitions with elided types",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = []tools.Definition{{Name: \"x\"}, {Operation: \"a.b\"}}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a slice of definition pointers with elided types",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = []*tools.Definition{{Operation: \"a.b\"}}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a map of definitions with elided types",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = map[string]*tools.Definition{\"k\": {OwnerNotice: true}}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation"},
+		},
+		{
+			name:   "an assignment through a pointer parameter",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nfunc set(d *tools.Definition) { d.OwnerNotice = true }\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation"},
+		},
+		{
+			name:   "an assignment through a slice element and a struct field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\ntype holder struct{ def tools.Definition }\nfunc set(ds []tools.Definition, h *holder) { ds[0].Operation = \"a.b\"; h.def.OwnerNotice = true }\n",
+			want: []string{
+				"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation",
+				"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation",
+			},
+		},
+		{
+			name:   "an address taken from the field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nfunc take(d *tools.Definition) *string { return &d.Operation }\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a dot import",
+			dir:    "internal/modules/widget",
+			source: "import . \"" + toolsImport + "\"\nvar d = Definition{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a renamed import",
+			dir:    "internal/modules/widget",
+			source: "import tl \"" + toolsImport + "\"\nvar d = tl.Definition{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "a local type alias",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\ntype D = tools.Definition\nvar d = D{Operation: \"a.b\"}\n",
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "an alias declared in another package",
+			dir:    "internal/modules/widget",
+			source: "import \"" + shapesImport + "\"\nvar d = shapes.Tool{OwnerNotice: true}\n",
+			extra:  []typedFixture{aliasFixture},
+			want:   []string{"operation-definitions: internal/modules/widget sets Definition.OwnerNotice outside internal/platform/operation"},
+		},
+		{
+			name:   "a literal without field names",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{\"x\", \"a.b\", true}\n",
+			want:   []string{"operation-definitions: internal/modules/widget builds a Definition without field names outside internal/platform/operation"},
+		},
+		{
+			name:   "the tools package itself",
+			dir:    "internal/platform/tools",
+			source: "type Definition struct{ Name string; Operation string }\nvar d = Definition{Operation: \"a.b\"}\n",
+			alone:  true,
+			want:   []string{"operation-definitions: internal/platform/tools sets Definition.Operation outside internal/platform/operation"},
+		},
+		{
+			name:   "the operation package",
+			dir:    "internal/platform/operation",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Operation: \"a.b\", OwnerNotice: true}\n",
+		},
+		{
+			name:   "another type with an Operation field in a package that imports tools",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\ntype request struct{ Operation string }\nvar _ tools.Definition\nvar r = request{Operation: \"x\"}\nfunc set(r *request) { r.Operation = \"y\" }\n",
+		},
+		{
+			name:   "the other struct of the tools package",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar o = tools.Other{Operation: \"x\"}\nfunc set(o *tools.Other) { o.Operation = \"y\" }\n",
+		},
+		{
+			name:   "reading the fields",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nfunc read(d *tools.Definition) (string, bool) { return d.Operation, d.OwnerNotice }\n",
+		},
+		{
+			name:   "a definition that sets neither field",
+			dir:    "internal/modules/widget",
+			source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Name: \"x\"}\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			fixtures := []typedFixture{{dir: tc.dir, source: tc.source, foreign: tc.other}}
+			if !tc.alone {
+				fixtures = append(append([]typedFixture{toolsFixture}, tc.extra...), fixtures...)
+			}
+			subject := typedSources(t, fixtures...)
+			got := findOperationDefinitions(subject[len(subject)-1:])
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("findOperationDefinitions = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	t.Run("a test kit may build definitions", func(t *testing.T) {
+		t.Parallel()
+		subject := typedSources(t, toolsFixture, typedFixture{dir: "internal/modules/widget/widgettest", source: "import \"" + toolsImport + "\"\nvar d = tools.Definition{Operation: \"a.b\"}\n"})
+		if got := findOperationDefinitions(subject[1:]); len(got) != 0 {
+			t.Fatalf("findOperationDefinitions = %q, want none", got)
+		}
+	})
+	t.Run("a package that was not type-checked is not skipped silently", func(t *testing.T) {
+		t.Parallel()
+		subject := sourcePackage{path: "internal/modules/widget", name: "widget", imports: []string{toolsPackage}}
+		if !isOperationCandidate(&subject) {
+			t.Fatal("a package importing the tools package is not a candidate for type-checking")
+		}
+		plain := sourcePackage{path: "internal/modules/plain", name: "plain"}
+		if isOperationCandidate(&plain) {
+			t.Fatal("a package with no tools import and no Operation identifier is a candidate")
+		}
+		named := sourceFixture(t, "internal/modules/named", "type request struct{ Operation string }\n")
+		if !isOperationCandidate(&named) {
+			t.Fatal("a package that names an Operation field is not a candidate")
+		}
+	})
+	t.Run("a file for another platform is not type-checked", func(t *testing.T) {
+		t.Parallel()
+		fset := token.NewFileSet()
+		built, err := parser.ParseFile(fset, "widget.go", "package widget\nvar d = 1\n", parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		other, err := parser.ParseFile(fset, "widget_other.go", "package widget\nimport _ \"example.invalid/only/on/another/os\"\n", parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		source := sourcePackage{path: "internal/modules/widget", name: "widget", imports: []string{toolsPackage}, files: []*ast.File{built, other}, current: []*ast.File{built}, fset: fset}
+		load := func(context.Context) (map[string]string, error) { return map[string]string{}, nil }
+		if err := typeOperationCandidates(t.Context(), []sourcePackage{source}, load); err != nil {
+			t.Fatalf("typeOperationCandidates = %v, want the other-platform import ignored", err)
+		}
+	})
+	t.Run("an export that cannot be imported fails the run", func(t *testing.T) {
+		t.Parallel()
+		fset := token.NewFileSet()
+		file, err := parser.ParseFile(fset, "widget.go", "package widget\nimport \"github.com/anggasct/aura/internal/platform/tools\"\nvar d = tools.Definition{}\n", parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse: %v", err)
+		}
+		source := sourcePackage{path: "internal/modules/widget", name: "widget", imports: []string{toolsPackage}, files: []*ast.File{file}, current: []*ast.File{file}, fset: fset}
+		load := func(context.Context) (map[string]string, error) { return map[string]string{}, nil }
+		if err := typeOperationCandidates(t.Context(), []sourcePackage{source}, load); err == nil {
+			t.Fatal("typeOperationCandidates accepted a package whose imports have no export data")
+		}
+	})
 }
 
 func TestModuleMap(t *testing.T) {

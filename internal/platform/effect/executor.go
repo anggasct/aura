@@ -69,8 +69,11 @@ func (e *Executor) run(ctx context.Context, held *Intent, p Provider, settle Set
 	}()
 
 	if settle != nil {
-		outcome, settled, settleErr := settle(ctx, held)
+		outcome, settled, settleErr := settle(providerCtx, held)
 		if settleErr != nil {
+			if errors.Is(context.Cause(providerCtx), errLeaseRevoked) {
+				return nil, leaseLostError(held.ID)
+			}
 			return nil, settleErr
 		}
 		if settled {
@@ -85,6 +88,11 @@ func (e *Executor) run(ctx context.Context, held *Intent, p Provider, settle Set
 	outcome, err := p.Invoke(providerCtx, invocation)
 	stopLease()
 	if errors.Is(context.Cause(providerCtx), errLeaseRevoked) {
+		if err == nil && outcome.Succeeded {
+			if settled, settleErr := e.settleOutcome(ctx, held, &outcome); settleErr == nil {
+				return settled, nil
+			}
+		}
 		return nil, leaseLostError(held.ID)
 	}
 	if err != nil {

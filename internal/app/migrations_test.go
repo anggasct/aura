@@ -404,12 +404,12 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 
 	gotTables := listSchemaObjectsByType(t, gotDB, "table")
 	wantTables := listSchemaObjectsByType(t, wantDB, "table")
-	if len(gotTables) != 54 || !slices.Equal(gotTables, wantTables) {
+	if len(gotTables) != 55 || !slices.Equal(gotTables, wantTables) {
 		t.Fatalf("tables (%d vs %d): got=%v want=%v", len(gotTables), len(wantTables), gotTables, wantTables)
 	}
 	gotIndexes := listSchemaObjectsByType(t, gotDB, "index")
 	wantIndexes := listSchemaObjectsByType(t, wantDB, "index")
-	if len(gotIndexes) != 31 || !slices.Equal(gotIndexes, wantIndexes) {
+	if len(gotIndexes) != 32 || !slices.Equal(gotIndexes, wantIndexes) {
 		t.Fatalf("indexes (%d vs %d): got=%v want=%v", len(gotIndexes), len(wantIndexes), gotIndexes, wantIndexes)
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
@@ -487,11 +487,11 @@ func assertTableFKParentsExist(t *testing.T, db *sql.DB, version int, owner, tab
 	}
 }
 
-func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
+func TestSchemaOwnersRegisteredAndForeignKeysValid(t *testing.T) {
 	owners := Schemas()
 	wantOwners := []string{
 		"turn", "durable", "effect", "usage", "principal", "model", "storage", "webhook", "knowledge", "memory", "profile",
-		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email",
+		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email", "operation",
 	}
 	gotOwners := make([]string, 0, len(owners))
 	for _, owner := range owners {
@@ -501,7 +501,13 @@ func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
 		t.Fatalf("Schemas() owners = %v, want %v", gotOwners, wantOwners)
 	}
 	migrations := Migrations()
-	if want := len(wantOwners) + len(incrementalSteps(t)); len(migrations) != want {
+	baselines := 0
+	for _, owner := range owners {
+		if strings.TrimSpace(owner.SchemaSQL()) != "" {
+			baselines++
+		}
+	}
+	if want := baselines + len(incrementalSteps(t)); len(migrations) != want {
 		t.Fatalf("len(Migrations()) = %d, want %d", len(migrations), want)
 	}
 
@@ -532,8 +538,8 @@ func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
 			}
 		}
 	}
-	if len(tableOwners) != 54 {
-		t.Fatalf("owned tables = %d, want 54", len(tableOwners))
+	if len(tableOwners) != 55 {
+		t.Fatalf("owned tables = %d, want 55", len(tableOwners))
 	}
 	finalTables := listSchemaObjectsByType(t, db, "table")
 	for _, tbl := range finalTables {
@@ -900,7 +906,12 @@ func TestIncrementalStepsAreUniqueAndContiguous(t *testing.T) {
 	if len(steps) < 1 {
 		t.Fatal("no owner declares an incremental step")
 	}
-	baselines := len(Schemas())
+	baselines := 0
+	for _, owner := range Schemas() {
+		if strings.TrimSpace(owner.SchemaSQL()) != "" {
+			baselines++
+		}
+	}
 	for i, step := range steps {
 		if want := baselines + 1 + i; step.Version != want {
 			t.Fatalf("step %d (%s) has version %d, want %d: pinned versions must be unique and contiguous from %d", i, step.Owner, step.Version, want, baselines+1)

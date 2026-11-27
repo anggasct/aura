@@ -99,6 +99,7 @@ type journaledTool struct {
 	adapter     Adapter
 	effectful   bool
 	provider    string
+	recovery    Recovery
 }
 
 func (b *Broker) runJournaledTool(ctx context.Context, call *journaledTool) ([]byte, error) {

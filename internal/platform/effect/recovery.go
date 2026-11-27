@@ -19,7 +19,7 @@ func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 		UPDATE effect_intent
 		SET state = ?, updated_at = ?
 		WHERE id = ? AND state = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
-		string(StateUnknown), fmtTime(now), id, string(StateStarted), fmtLeaseTime(now),
+		string(StateUnknown), fmtTime(now), id, string(StateStarted), FormatFixedWidthTime(now),
 	)
 	if err != nil {
 		return false, fmt.Errorf("effect: claim intent %s: %w", id, err)

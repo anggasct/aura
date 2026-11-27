@@ -27,6 +27,8 @@ internal/platform/
   internal/platform/health
   internal/platform/logging
   internal/platform/model
+  internal/platform/operation
+  internal/platform/operation/operationtest
   internal/platform/principal
   internal/platform/sandbox
   internal/platform/secret

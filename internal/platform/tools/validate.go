@@ -96,3 +96,7 @@ func ValidateOptionalInteger(value map[string]any, key string, minimum int64) er
 	}
 	return nil
 }
+
+func RejectAmbiguousKeys(raw json.RawMessage) error {
+	return rejectAmbiguousKeys(raw)
+}

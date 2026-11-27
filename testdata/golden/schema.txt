@@ -82,6 +82,9 @@ CREATE VIRTUAL TABLE memory_document_fts USING fts5( content, content='memory_do
 table model_circuit_checkpoint on model_circuit_checkpoint
 CREATE TABLE model_circuit_checkpoint ( circuit_key TEXT PRIMARY KEY, config_digest TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('closed','open','half_open')), consecutive_failures INTEGER NOT NULL CHECK (consecutive_failures >= 0), open_until TEXT, updated_at TEXT NOT NULL )
 
+table operation_receipt on operation_receipt
+CREATE TABLE operation_receipt ( idempotency_key TEXT PRIMARY KEY CHECK (length(idempotency_key) BETWEEN 1 AND 256), operation_id TEXT NOT NULL, request_digest TEXT NOT NULL, surface TEXT NOT NULL CHECK (surface IN ('chat','agent')), result_json TEXT NOT NULL CHECK (json_valid(result_json)), created_at TEXT NOT NULL )
+
 table pairing_request on pairing_request
 CREATE TABLE pairing_request ( code_sha256 TEXT PRIMARY KEY, principal_id TEXT NOT NULL, account TEXT NOT NULL, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, failed_attempts INTEGER NOT NULL DEFAULT 0 )
 
@@ -198,6 +201,9 @@ CREATE INDEX memory_document_owner_agent_idx ON memory_document(owner_id, agent_
 
 index memory_document_source_idx on memory_document
 CREATE INDEX memory_document_source_idx ON memory_document(session_id, source_from_sequence, source_to_sequence)
+
+index operation_receipt_created_idx on operation_receipt
+CREATE INDEX operation_receipt_created_idx ON operation_receipt(created_at)
 
 index pairing_request_account_idx on pairing_request
 CREATE INDEX pairing_request_account_idx ON pairing_request(account, expires_at)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
 	"path/filepath"
@@ -31,6 +32,7 @@ var sourceChecks = []sourceCheck{
 	{name: "fakes", find: findFakes},
 	{name: "setters", find: findSetters},
 	{name: "codederrors", find: findCodedErrors},
+	{name: operationDefinitionsCheck, find: findOperationDefinitions},
 }
 
 func findFakes(packages []sourcePackage) []string {
@@ -170,11 +172,17 @@ func findCodedErrors(packages []sourcePackage) []string {
 	return uniqueSorted(violations)
 }
 
-func checkSources(selected []string, packages []repoPackage, allowDir string) ([]string, error) {
+func checkSources(ctx context.Context, selected []string, packages []repoPackage, deps runDeps) ([]string, error) {
 	sources, err := parseSources(packages)
 	if err != nil {
 		return nil, err
 	}
+	if slices.Contains(selected, operationDefinitionsCheck) {
+		if err := typeOperationCandidates(ctx, sources, deps.loadExports); err != nil {
+			return nil, err
+		}
+	}
+	allowDir := deps.allowDir
 	var violations []string
 	for _, check := range sourceChecks {
 		if !slices.Contains(selected, check.name) {

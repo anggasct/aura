@@ -20,6 +20,7 @@ import (
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/storage"
@@ -52,6 +53,7 @@ func Schemas() []sqlite.SchemaOwner {
 		discord.Schema(),
 		telegram.Schema(),
 		email.Schema(),
+		operation.Schema(),
 	}
 }
 

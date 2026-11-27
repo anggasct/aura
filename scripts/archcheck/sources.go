@@ -5,6 +5,7 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"go/types"
 	"slices"
 	"strings"
 )
@@ -14,6 +15,9 @@ type sourcePackage struct {
 	name    string
 	imports []string
 	files   []*ast.File
+	current []*ast.File
+	fset    *token.FileSet
+	info    *types.Info
 }
 
 func isTestKit(name string) bool {
@@ -25,13 +29,16 @@ func parseSources(packages []repoPackage) ([]sourcePackage, error) {
 	sources := make([]sourcePackage, 0, len(packages))
 	for index := range packages {
 		pkg := &packages[index]
-		source := sourcePackage{path: pkg.path, name: pkg.name, imports: pkg.productionImports}
-		for _, path := range pkg.files {
-			file, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		source := sourcePackage{path: pkg.path, name: pkg.name, imports: pkg.productionImports, fset: fset}
+		for _, listed := range pkg.files {
+			file, err := parser.ParseFile(fset, listed.path, nil, parser.SkipObjectResolution)
 			if err != nil {
-				return nil, fmt.Errorf("parse %s: %w", path, err)
+				return nil, fmt.Errorf("parse %s: %w", listed.path, err)
 			}
 			source.files = append(source.files, file)
+			if listed.built {
+				source.current = append(source.current, file)
+			}
 		}
 		if source.name == "" && len(source.files) > 0 {
 			source.name = source.files[0].Name.Name
