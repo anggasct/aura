@@ -26,6 +26,7 @@ func (a *Adapter) commandInvocation(text string) (command.Invocation, bool) {
 	if self, known := a.selfIdentity(); known {
 		text = stripCommandSuffix(text, self.Username)
 	}
+	text = restoreCommandName(text)
 	inv, ok := command.Parse(text)
 	if !ok {
 		return command.Invocation{}, false

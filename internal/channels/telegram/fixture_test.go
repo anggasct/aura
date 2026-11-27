@@ -158,7 +158,7 @@ func (f *fakeBotAPI) serve(w http.ResponseWriter, r *http.Request) {
 	case "editMessageText":
 		id, _ := body["message_id"].(float64)
 		writeOK(w, map[string]any{"message_id": int64(id)})
-	case "sendChatAction", "answerCallbackQuery", "editMessageReplyMarkup":
+	case "sendChatAction", "answerCallbackQuery", "editMessageReplyMarkup", "setMyCommands":
 		writeOK(w, true)
 	case "setWebhook", "getWebhookInfo":
 		f.serveWebhookCall(w, method)
