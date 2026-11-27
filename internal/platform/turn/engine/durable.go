@@ -1047,11 +1047,14 @@ func (e *Engine) failDurableStart(ctx context.Context, t *turnState, cause error
 		Payload:       failedPayload(turn.ErrorCodeStorageUnavailable, "durable turn did not start", cause, e.agentID(&t.req)),
 		CreatedAt:     time.Now().UTC(),
 	}
-	if _, _, err := e.events.UpsertEvent(context.WithoutCancel(ctx), terminal); err != nil {
+	_, ended, err := e.events.UpsertEvent(context.WithoutCancel(ctx), terminal)
+	if err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist turn start failure", "error", err, "turn_id", t.turnID)
 	}
-	failure := e.startFailureMessage(&t.req, turn.ErrorCodeStorageUnavailable, "durable turn did not start")
-	e.deliverOnce(context.WithoutCancel(ctx), &t.req, &failure)
+	if !ended {
+		failure := e.startFailureMessage(&t.req, turn.ErrorCodeStorageUnavailable, "durable turn did not start")
+		e.deliverOnce(context.WithoutCancel(ctx), &t.req, &failure)
+	}
 	e.broadcast(t, &t.accepted)
 	e.broadcast(t, terminal)
 	e.closeSubscribers(t)

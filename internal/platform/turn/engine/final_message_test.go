@@ -631,12 +631,17 @@ func TestStartFailureSendsTheFallbackOnce(t *testing.T) {
 		return capture
 	}
 	t.Run("a channel turn", func(t *testing.T) {
-		capture := failStart(t, turn.Origin("discord:test"), 2)
-		if got := capture.texts(); !slices.Equal(got, []string{defaultMessage(agent.MessageTurnFailed), defaultMessage(agent.MessageTurnFailed)}) {
-			t.Fatalf("delivered texts = %q, want the same turn_failed text for each attempt", got)
+		capture := failStart(t, turn.Origin("discord:test"), 1)
+		if got := capture.texts(); !slices.Equal(got, []string{defaultMessage(agent.MessageTurnFailed)}) {
+			t.Fatalf("delivered texts = %q, want one turn_failed text", got)
 		}
-		if got := distinct([]string{capture.requests[0].EffectID, capture.requests[1].EffectID}); !slices.Equal(got, []string{"turn-1"}) {
-			t.Fatalf("effect ids = %q, want the turn id for each attempt", got)
+		if got := capture.requests[0].EffectID; got != "turn-1" {
+			t.Fatalf("effect id = %q, want the turn id", got)
+		}
+	})
+	t.Run("a turn that already ended", func(t *testing.T) {
+		if got := failStart(t, turn.Origin("discord:test"), 2).count(); got != 1 {
+			t.Fatalf("Deliver calls = %d, want 1: a second failure of an ended turn sends nothing", got)
 		}
 	})
 	t.Run("a turn without a channel destination", func(t *testing.T) {
