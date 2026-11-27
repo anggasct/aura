@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -42,6 +43,7 @@ type RecoveryReport struct {
 	Scanned int
 	Claimed int
 	RetryAt time.Time
+	Pending []string
 }
 
 func (j *Journal) Recover(ctx context.Context) (RecoveryReport, error) {
@@ -55,18 +57,31 @@ func (j *Journal) RecoverProvider(ctx context.Context, provider string) (Recover
 	return j.recoverStarted(ctx, provider)
 }
 
+func (j *Journal) RecoverIntents(ctx context.Context, ids []string) (RecoveryReport, error) {
+	if slices.Contains(ids, "") {
+		return RecoveryReport{}, codedError(ErrorCodeInvalidArgument, "effect: intent id must not be empty", nil)
+	}
+	return j.claimExpired(ctx, ids)
+}
+
 func (j *Journal) recoverStarted(ctx context.Context, provider string) (RecoveryReport, error) {
 	started, err := j.ListByState(ctx, StateStarted, 0)
 	if err != nil {
 		return RecoveryReport{}, err
 	}
-	var report RecoveryReport
+	ids := make([]string, 0, len(started))
 	for i := range started {
-		if provider != "" && started[i].Provider != provider {
-			continue
+		if provider == "" || started[i].Provider == provider {
+			ids = append(ids, started[i].ID)
 		}
-		report.Scanned++
-		claimed, err := j.Claim(ctx, started[i].ID)
+	}
+	return j.claimExpired(ctx, ids)
+}
+
+func (j *Journal) claimExpired(ctx context.Context, ids []string) (RecoveryReport, error) {
+	report := RecoveryReport{Scanned: len(ids)}
+	for _, id := range ids {
+		claimed, err := j.Claim(ctx, id)
 		if err != nil {
 			return report, err
 		}
@@ -74,11 +89,15 @@ func (j *Journal) recoverStarted(ctx context.Context, provider string) (Recovery
 			report.Claimed++
 			continue
 		}
-		expiresAt, live, err := j.liveLeaseExpiry(ctx, started[i].ID)
+		expiresAt, live, err := j.liveLeaseExpiry(ctx, id)
 		if err != nil {
 			return report, err
 		}
-		if live && expiresAt.After(report.RetryAt) {
+		if !live {
+			continue
+		}
+		report.Pending = append(report.Pending, id)
+		if expiresAt.After(report.RetryAt) {
 			report.RetryAt = expiresAt
 		}
 	}

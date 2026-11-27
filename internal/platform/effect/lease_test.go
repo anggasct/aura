@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"runtime"
 	"strings"
 	"sync"
@@ -15,32 +16,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
-
-type timerProbe struct {
-	*durabletest.ManualClock
-	timers chan struct{}
-}
-
-func newTimerProbe() *timerProbe {
-	return &timerProbe{ManualClock: durabletest.NewManualClock(testEpoch), timers: make(chan struct{}, 1024)}
-}
-
-func (p *timerProbe) Timer(d time.Duration) <-chan time.Time {
-	fired := p.ManualClock.Timer(d)
-	p.timers <- struct{}{}
-	return fired
-}
-
-func (p *timerProbe) awaitTimers(t *testing.T, n int) {
-	t.Helper()
-	for range n {
-		select {
-		case <-p.timers:
-		case <-t.Context().Done():
-			t.Fatal("test ended while waiting for a lease timer")
-		}
-	}
-}
 
 type heldProvider struct {
 	entered chan struct{}
@@ -132,9 +107,9 @@ END`); err != nil {
 	}
 }
 
-func newProbedExecutor(t *testing.T) (*Executor, *sql.DB, *timerProbe) {
+func newProbedExecutor(t *testing.T) (*Executor, *sql.DB, *durabletest.ManualClock) {
 	t.Helper()
-	probe := newTimerProbe()
+	probe := durabletest.NewManualClock(testEpoch)
 	journal, db := newJournalOnClock(t, probe, nil)
 	executor, err := NewExecutor(journal)
 	if err != nil {
@@ -186,7 +161,7 @@ func TestLeaseIsRenewedWhileProviderRuns(t *testing.T) {
 	provider := newHeldProvider(Outcome{Succeeded: true, Receipt: json.RawMessage(`{}`)})
 	done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
 	<-provider.entered
-	probe.awaitTimers(t, 1)
+	probe.AwaitArmed(t, 1)
 
 	var id string
 	if err := db.QueryRowContext(t.Context(), `SELECT id FROM effect_intent`).Scan(&id); err != nil {
@@ -194,7 +169,7 @@ func TestLeaseIsRenewedWhileProviderRuns(t *testing.T) {
 	}
 	for range 5 {
 		probe.Advance(20 * time.Second)
-		probe.awaitTimers(t, 1)
+		probe.AwaitArmed(t, 1)
 		state, _, expiresAt := leaseColumns(t, db, id)
 		if want := fmtLeaseTime(probe.Now().Add(60 * time.Second)); state != StateStarted || expiresAt != want {
 			t.Fatalf("after renewal: state %s lease %q, want started and %q", state, expiresAt, want)
@@ -234,7 +209,7 @@ func TestRenewalStopsWhenExecuteReturns(t *testing.T) {
 				_, _ = executor.Execute(t.Context(), validPrepare(1), provider)
 			}()
 			<-provider.entered
-			probe.awaitTimers(t, 1)
+			probe.AwaitArmed(t, 1)
 			if got := keeperGoroutines(); got != 1 {
 				t.Fatalf("renewal goroutines while the provider runs = %d, want 1", got)
 			}
@@ -302,21 +277,16 @@ func TestStaleHolderCannotSettleAfterLosingLease(t *testing.T) {
 }
 
 func TestLeaseLossCancelsProvider(t *testing.T) {
-	t.Parallel()
 	executor, db, probe := newProbedExecutor(t)
 	provider := newHeldProvider(Outcome{Succeeded: true})
 	done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
 	<-provider.entered
-	probe.awaitTimers(t, 1)
+	probe.AwaitArmed(t, 1)
 	var id string
 	if err := db.QueryRowContext(t.Context(), `SELECT id FROM effect_intent`).Scan(&id); err != nil {
 		t.Fatalf("read intent id: %v", err)
 	}
 	setLease(t, db, id, "replaced-holder", fmtLeaseTime(testEpoch.Add(-time.Hour)))
-	_, token, _ := leaseColumns(t, db, id)
-	if token != "replaced-holder" {
-		t.Fatalf("token = %q", token)
-	}
 
 	probe.Advance(20 * time.Second)
 	result := <-done
@@ -329,6 +299,9 @@ func TestLeaseLossCancelsProvider(t *testing.T) {
 	if state != StateStarted || token != "replaced-holder" {
 		t.Fatalf("after the lost lease: state %s token %q, want the new holder's record untouched", state, token)
 	}
+	if got := keeperGoroutines(); got != 0 {
+		t.Fatalf("renewal goroutines after the lease was lost = %d, want 0", got)
+	}
 }
 
 func TestLapsedLeaseSettlesNormally(t *testing.T) {
@@ -338,10 +311,10 @@ func TestLapsedLeaseSettlesNormally(t *testing.T) {
 	provider := newHeldProvider(Outcome{Succeeded: true, Receipt: json.RawMessage(`{"id":1}`)})
 	done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
 	<-provider.entered
-	probe.awaitTimers(t, 1)
+	probe.AwaitArmed(t, 1)
 
 	probe.Advance(61 * time.Second)
-	probe.awaitTimers(t, 1)
+	probe.AwaitArmed(t, 1)
 	if provider.wasCancelled() {
 		t.Fatal("a lapsed but untaken lease cancelled a provider that never opted into takeover")
 	}
@@ -357,12 +330,13 @@ func TestLapseCancelsOnlyTakeoverProviders(t *testing.T) {
 	cases := []struct {
 		name          string
 		wrap          func(*heldProvider) Provider
+		timers        int
 		wantCancelled bool
 		wantState     State
 	}{
-		{name: "a plain provider", wrap: func(h *heldProvider) Provider { return h }, wantState: StateSucceeded},
-		{name: "a takeover provider", wrap: func(h *heldProvider) Provider { return &takeoverHeldProvider{heldProvider: h, takeover: true} }, wantCancelled: true, wantState: StateUnknown},
-		{name: "a provider that declines takeover", wrap: func(h *heldProvider) Provider { return &takeoverHeldProvider{heldProvider: h} }, wantState: StateSucceeded},
+		{name: "a plain provider", wrap: func(h *heldProvider) Provider { return h }, timers: 1, wantState: StateSucceeded},
+		{name: "a takeover provider", wrap: func(h *heldProvider) Provider { return &takeoverHeldProvider{heldProvider: h, takeover: true} }, timers: 2, wantCancelled: true, wantState: StateStarted},
+		{name: "a provider that declines takeover", wrap: func(h *heldProvider) Provider { return &takeoverHeldProvider{heldProvider: h} }, timers: 1, wantState: StateSucceeded},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -371,19 +345,17 @@ func TestLapseCancelsOnlyTakeoverProviders(t *testing.T) {
 			held := newHeldProvider(Outcome{Succeeded: true})
 			done := executeInBackground(t.Context(), executor, validPrepare(1), tc.wrap(held))
 			<-held.entered
-			probe.awaitTimers(t, 1)
+			probe.AwaitArmed(t, tc.timers)
 
 			probe.Advance(61 * time.Second)
 			if tc.wantCancelled {
 				result := <-done
-				if result.err == nil {
-					t.Fatal("Execute reported success for a cancelled takeover provider")
-				}
+				assertCode(t, result.err, ErrorCodeLeaseLost)
 				if !held.wasCancelled() {
 					t.Fatal("the takeover provider kept running past the lapse")
 				}
 			} else {
-				probe.awaitTimers(t, 1)
+				probe.AwaitArmed(t, 1)
 				if held.wasCancelled() {
 					t.Fatal("the lapse cancelled a provider that cannot be taken over")
 				}
@@ -400,8 +372,269 @@ func TestLapseCancelsOnlyTakeoverProviders(t *testing.T) {
 			if state, _, _ := leaseColumns(t, db, id); state != tc.wantState {
 				t.Fatalf("state = %s, want %s", state, tc.wantState)
 			}
+			if tc.wantCancelled {
+				resumer := &fakeProvider{outcome: Outcome{Succeeded: true}}
+				resumed, err := executor.Resume(t.Context(), id, resumer, nil)
+				if err != nil || resumed.State != StateSucceeded || resumer.invokeCount != 1 {
+					t.Fatalf("Resume after the lapse cancel = %+v, %v with %d runs; want the intent taken over and run", resumed, err, resumer.invokeCount)
+				}
+			}
 		})
 	}
+}
+
+func TestLapseCancelLandsAtTheStoredExpiry(t *testing.T) {
+	j, db, clock := newClockedJournal(t)
+	blockRenewals(t, db)
+	started := mustStart(t, j, mustPrepare(t, j, validPrepare(1)).ID)
+	clock.Advance(30 * time.Second)
+	providerCtx, revoke := context.WithCancelCause(t.Context())
+	defer revoke(nil)
+	provider := &takeoverHeldProvider{heldProvider: newHeldProvider(Outcome{}), takeover: true}
+	stop, err := j.keepLease(t.Context(), started, revoke, provider)
+	if err != nil {
+		t.Fatalf("keepLease: %v", err)
+	}
+	defer stop()
+	clock.AwaitArmed(t, 2)
+
+	clock.Advance(25 * time.Second)
+	clock.AwaitArmed(t, 2)
+	if providerCtx.Err() != nil {
+		t.Fatal("the provider was cancelled before the stored expiry")
+	}
+	clock.Advance(5 * time.Second)
+
+	select {
+	case <-providerCtx.Done():
+	case <-t.Context().Done():
+		t.Fatal("the provider was not cancelled at the stored expiry")
+	}
+	if cause := context.Cause(providerCtx); !errors.Is(cause, errLeaseRevoked) {
+		t.Fatalf("cancel cause = %v, want the lease revoked", cause)
+	}
+}
+
+func TestLeaseStaysLiveWhileTheSettlerReadsEvidence(t *testing.T) {
+	j, db, clock := newClockedJournal(t)
+	executor, err := NewExecutor(j)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	started := mustStart(t, j, mustPrepare(t, j, validPrepare(1)).ID)
+	lapseLeases(clock)
+	entered := make(chan *Intent, 1)
+	release := make(chan struct{})
+	settle := func(_ context.Context, taken *Intent) (Outcome, bool, error) {
+		entered <- taken
+		<-release
+		return Outcome{Succeeded: true}, true, nil
+	}
+	done := make(chan executeResult, 1)
+	go func() {
+		intent, err := executor.Resume(t.Context(), started.ID, &fakeProvider{}, settle)
+		done <- executeResult{intent: intent, err: err}
+	}()
+	taken := <-entered
+	clock.AwaitArmed(t, 1)
+
+	for range 4 {
+		clock.Advance(20 * time.Second)
+		clock.AwaitArmed(t, 1)
+		_, token, expiresAt := leaseColumns(t, db, started.ID)
+		if want := fmtLeaseTime(clock.Now().Add(leaseDuration)); token != taken.LeaseToken || expiresAt != want {
+			t.Fatalf("while the settler runs: token %q lease %q, want the resumer's token and %q", token, expiresAt, want)
+		}
+	}
+	claimed, err := j.Claim(t.Context(), started.ID)
+	if err != nil || claimed {
+		t.Fatalf("Claim during a slow settler = %v, %v; want the lease live", claimed, err)
+	}
+
+	close(release)
+	result := <-done
+	if result.err != nil || result.intent.State != StateSucceeded {
+		t.Fatalf("Resume = %+v, %v; want succeeded", result.intent, result.err)
+	}
+	if got := keeperGoroutines(); got != 0 {
+		t.Fatalf("renewal goroutines after Resume = %d, want 0", got)
+	}
+}
+
+type logSignal struct {
+	slog.Handler
+	message string
+	seen    chan string
+}
+
+func (h *logSignal) Enabled(context.Context, slog.Level) bool { return true }
+
+func (h *logSignal) Handle(ctx context.Context, record slog.Record) error {
+	if record.Message == h.message {
+		record.Attrs(func(attr slog.Attr) bool {
+			if attr.Key == "status" {
+				h.seen <- attr.Value.String()
+			}
+			return true
+		})
+	}
+	return h.Handler.Handle(ctx, record)
+}
+
+func TestRenewalStopsWithoutCancellingWhenTheRowLeftStarted(t *testing.T) {
+	clock := durabletest.NewManualClock(testEpoch)
+	signal := &logSignal{Handler: slog.DiscardHandler, message: "effect lease renewal stopped", seen: make(chan string, 1)}
+	journal, db := newJournalOnClockLogging(t, clock, nil, slog.New(signal))
+	executor, err := NewExecutor(journal)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	provider := newHeldProvider(Outcome{Succeeded: true})
+	done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
+	<-provider.entered
+	clock.AwaitArmed(t, 1)
+	var id string
+	if err := db.QueryRowContext(t.Context(), `SELECT id FROM effect_intent`).Scan(&id); err != nil {
+		t.Fatalf("read intent id: %v", err)
+	}
+	_, token, _ := leaseColumns(t, db, id)
+	setLease(t, db, id, token, fmtLeaseTime(testEpoch.Add(-time.Hour)))
+	if claimed, err := journal.Claim(t.Context(), id); err != nil || !claimed {
+		t.Fatalf("Claim = %v, %v", claimed, err)
+	}
+
+	clock.Advance(20 * time.Second)
+	if status := <-signal.seen; status != "not_started" {
+		t.Fatalf("renewal stopped with status %q, want not_started", status)
+	}
+	if provider.wasCancelled() {
+		t.Fatal("a renewal that found the row settled by recovery, under the same token, cancelled the provider")
+	}
+	close(provider.release)
+	result := <-done
+
+	assertCode(t, result.err, ErrorCodeTransitionInvalid)
+	if state, _, _ := leaseColumns(t, db, id); state != StateUnknown {
+		t.Fatalf("state = %s, want the recovered unknown record untouched", state)
+	}
+}
+
+func TestRenewalStopsWhenTheCallerContextIsCancelled(t *testing.T) {
+	executor, _, probe := newProbedExecutor(t)
+	provider := newHeldProvider(Outcome{Succeeded: true})
+	ctx, cancel := context.WithCancel(t.Context())
+	done := executeInBackground(ctx, executor, validPrepare(1), provider)
+	<-provider.entered
+	probe.AwaitArmed(t, 1)
+
+	cancel()
+	result := <-done
+
+	if result.err == nil {
+		t.Fatal("Execute reported success after its context was cancelled")
+	}
+	if got := keeperGoroutines(); got != 0 {
+		t.Fatalf("renewal goroutines after the caller context was cancelled = %d, want 0", got)
+	}
+}
+
+func TestEmptyTokenCannotSettleAStartedIntent(t *testing.T) {
+	cases := []struct {
+		name   string
+		settle func(ctx context.Context, j *Journal, id string) error
+	}{
+		{name: "succeed", settle: func(ctx context.Context, j *Journal, id string) error {
+			_, err := j.Succeed(ctx, id, "", nil)
+			return err
+		}},
+		{name: "fail", settle: func(ctx context.Context, j *Journal, id string) error {
+			_, err := j.Fail(ctx, id, "", "provider_4xx")
+			return err
+		}},
+		{name: "mark unknown", settle: func(ctx context.Context, j *Journal, id string) error {
+			_, err := j.MarkUnknown(ctx, id, "")
+			return err
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			j, db, clock := newClockedJournal(t)
+			started := mustStart(t, j, mustPrepare(t, j, validPrepare(1)).ID)
+			setLease(t, db, started.ID, nil, nil)
+
+			assertCode(t, tc.settle(t.Context(), j, started.ID), ErrorCodeInvalidArgument)
+
+			if state, _, _ := leaseColumns(t, db, started.ID); state != StateStarted {
+				t.Fatalf("state = %s, a legacy intent must stay started until it is claimed or taken over", state)
+			}
+			lapseLeases(clock)
+			taken, err := j.takeOver(t.Context(), started.ID)
+			if err != nil {
+				t.Fatalf("takeOver: %v", err)
+			}
+			if _, err := j.Succeed(t.Context(), taken.ID, taken.LeaseToken, nil); err != nil {
+				t.Fatalf("the new holder could not settle: %v", err)
+			}
+		})
+	}
+
+	t.Run("a renewal without a token", func(t *testing.T) {
+		j, _ := newTestJournal(t)
+		_, err := j.renewLease(t.Context(), &Intent{ID: "x"})
+		assertCode(t, err, ErrorCodeInvalidArgument)
+		_, err = j.renewLease(t.Context(), nil)
+		assertCode(t, err, ErrorCodeInvalidArgument)
+	})
+}
+
+func TestResumeRefusesANilProviderBeforeTakingOver(t *testing.T) {
+	j, db, clock := newClockedJournal(t)
+	executor, err := NewExecutor(j)
+	if err != nil {
+		t.Fatalf("NewExecutor: %v", err)
+	}
+	started := mustStart(t, j, mustPrepare(t, j, validPrepare(1)).ID)
+	lapseLeases(clock)
+
+	_, err = executor.Resume(t.Context(), started.ID, nil, nil)
+
+	assertCode(t, err, ErrorCodeInvalidArgument)
+	if _, token, _ := leaseColumns(t, db, started.ID); token != started.LeaseToken {
+		t.Fatal("a refused resume replaced the lease token")
+	}
+}
+
+func TestRecoverIntentsClaimsOnlyTheNamedIntents(t *testing.T) {
+	j, _, clock := newClockedJournal(t)
+	first := validPrepare(1)
+	first.Provider = "email"
+	second := validPrepare(2)
+	second.Provider = "email"
+	early := mustStart(t, j, mustPrepare(t, j, first).ID)
+	clock.Advance(30 * time.Second)
+	late := mustStart(t, j, mustPrepare(t, j, second).ID)
+
+	report, err := j.RecoverProvider(t.Context(), "email")
+	if err != nil || report.Claimed != 0 || len(report.Pending) != 2 {
+		t.Fatalf("first pass = %+v, %v; want both leases live and pending", report, err)
+	}
+	lapseLeases(clock)
+	clock.Advance(leaseDuration)
+	own := validPrepare(3)
+	own.Provider = "email"
+	ownStarted := mustStart(t, j, mustPrepare(t, j, own).ID)
+	clock.Advance(leaseDuration + time.Second)
+
+	retried, err := j.RecoverIntents(t.Context(), []string{early.ID, late.ID})
+
+	if err != nil || retried.Scanned != 2 || retried.Claimed != 2 {
+		t.Fatalf("RecoverIntents = %+v, %v; want the two named intents claimed", retried, err)
+	}
+	if current, err := j.Get(t.Context(), ownStarted.ID); err != nil || current.State != StateStarted {
+		t.Fatalf("an intent that was not named = %+v (%v), want it left started", current, err)
+	}
+	_, err = j.RecoverIntents(t.Context(), []string{""})
+	assertCode(t, err, ErrorCodeInvalidArgument)
 }
 
 func TestResumeTakesOverOnlyExpiredLeases(t *testing.T) {
@@ -587,6 +820,9 @@ func TestResumeSettlesFromEvidenceBeforeRunningTheProvider(t *testing.T) {
 		if state, _, _ := leaseColumns(t, db, started.ID); state != StateStarted {
 			t.Fatalf("state = %s, want started", state)
 		}
+		if got := keeperGoroutines(); got != 0 {
+			t.Fatalf("renewal goroutines after a failed settler = %d, want 0", got)
+		}
 		_, err = executor.Resume(t.Context(), started.ID, provider, nil)
 		assertCode(t, err, ErrorCodeInProgress)
 	})
@@ -756,6 +992,24 @@ func TestEffectStateMachineUnchanged(t *testing.T) {
 			u := unknownIt(t, j, p)
 			_, err := j.Resolve(t.Context(), u.ID, Resolution{SafeErrorCode: "not_delivered"})
 			return err
+		}},
+		{name: "unknown to a linked retry", do: func(t *testing.T, j *Journal, p *Intent) error {
+			u := unknownIt(t, j, p)
+			approval, err := j.Approve(t.Context(), &ApprovalRequest{IntentID: u.ID, Action: ApprovalActionRetry, Reason: "owner approved a fresh attempt", ExpiresIn: time.Minute})
+			if err != nil {
+				t.Fatalf("Approve: %v", err)
+			}
+			retry, err := j.RetryWithApproval(t.Context(), u.ID, approval.Token)
+			if err != nil {
+				return err
+			}
+			if retry.State != StatePrepared || retry.RetryOf != u.ID || retry.LeaseToken != "" {
+				t.Fatalf("retry = %+v, want a new prepared intent linked to the origin", retry)
+			}
+			if origin, err := j.Get(t.Context(), u.ID); err != nil || origin.State != StateUnknown {
+				t.Fatalf("origin = %+v (%v), want it left unknown", origin, err)
+			}
+			return nil
 		}},
 		{name: "unknown to succeeded by a holder write", do: func(t *testing.T, j *Journal, p *Intent) error {
 			s := startIt(t, j, p)

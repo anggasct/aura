@@ -43,10 +43,15 @@ func newTestJournalWithEvents(t *testing.T, events EventPublisher) (*Journal, *s
 
 func newJournalOnClock(t *testing.T, clock durable.Clock, events EventPublisher) (*Journal, *sql.DB) {
 	t.Helper()
+	return newJournalOnClockLogging(t, clock, events, slog.New(slog.DiscardHandler))
+}
+
+func newJournalOnClockLogging(t *testing.T, clock durable.Clock, events EventPublisher, logger *slog.Logger) (*Journal, *sql.DB) {
+	t.Helper()
 	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	j, err := NewJournal(db, Options{
 		Clock:  clock,
-		Logger: slog.New(slog.DiscardHandler),
+		Logger: logger,
 		Events: events,
 		Turns:  turnstore.NewTurnStore(db),
 	})

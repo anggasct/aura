@@ -103,6 +103,7 @@ type Intent struct {
 	ReconciledAt    *time.Time
 	UpdatedAt       time.Time
 	LeaseToken      string
+	leaseExpiresAt  time.Time
 }
 
 type PrepareRequest struct {
@@ -451,17 +452,20 @@ func digestRequest(req json.RawMessage) string {
 
 func (j *Journal) Start(ctx context.Context, id string) (*Intent, error) {
 	token := newLeaseToken()
+	expiresAt := j.clock.Now().Add(leaseDuration)
 	intent, err := j.transition(ctx, id, &transitionSpec{
-		from:         []State{StatePrepared},
-		to:           StateStarted,
-		setStartedAt: true,
-		leaseToken:   token,
-		invalidCode:  ErrorCodeTransitionInvalid,
+		from:           []State{StatePrepared},
+		to:             StateStarted,
+		setStartedAt:   true,
+		leaseToken:     token,
+		leaseExpiresAt: expiresAt,
+		invalidCode:    ErrorCodeTransitionInvalid,
 	})
 	if err != nil {
 		return nil, err
 	}
 	intent.LeaseToken = token
+	intent.leaseExpiresAt = expiresAt
 	return intent, nil
 }
 
@@ -590,6 +594,7 @@ type transitionSpec struct {
 	setFinishedAt   bool
 	setReconciledAt bool
 	leaseToken      string
+	leaseExpiresAt  time.Time
 	fenced          bool
 	fenceToken      string
 	invalidCode     ErrorCode
@@ -618,6 +623,9 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		if err != nil {
 			return fmt.Errorf("effect: read intent %s state: %w", id, err)
 		}
+		if spec.fenced && currentState == StateStarted && spec.fenceToken == "" {
+			return codedError(ErrorCodeInvalidArgument, "effect: a started intent is settled only with its lease token", nil)
+		}
 		if !stateIn(currentState, spec.from) {
 			if spec.fenced && currentState != StatePrepared && storedToken.String != spec.fenceToken {
 				return leaseLostError(id)
@@ -636,8 +644,8 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 			resultArg = string(spec.result)
 		}
 		var leaseExpiresArg any
-		if spec.leaseToken != "" {
-			leaseExpiresArg = fmtLeaseTime(now.Add(leaseDuration))
+		if !spec.leaseExpiresAt.IsZero() {
+			leaseExpiresArg = fmtLeaseTime(spec.leaseExpiresAt)
 		}
 		res, err := q.ExecContext(ctx, `
 		UPDATE effect_intent
