@@ -180,8 +180,10 @@ type Adapter struct {
 	typingRefresh time.Duration
 	statusAfter   time.Duration
 	elapsedTick   time.Duration
+	deleteTimeout time.Duration
 	holdMu        sync.Mutex
 	holds         map[int64]time.Time
+	latestPrivate latestInbound
 }
 
 func New(deps *Deps) (*Adapter, error) {

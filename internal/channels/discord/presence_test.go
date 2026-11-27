@@ -701,17 +701,17 @@ func TestPresenceDeliveryStopsClockBeforeAnswer(t *testing.T) {
 		t.Fatal("Deliver did not finish")
 	}
 	time.Sleep(20 * time.Millisecond)
-	if got := messagePostCount(stub); got != 1 {
-		t.Fatalf("message posts = %d, want 1 (status edited into answer)", got)
+	if got := messagePostCount(stub); got != 2 {
+		t.Fatalf("message posts = %d, want 2 (status and final answer)", got)
 	}
-	patches := stub.patchBodies()
-	if len(patches) == 0 {
-		t.Fatal("final delivery produced no edit")
+	if patches := stub.patchBodies(); len(patches) != 0 {
+		t.Fatalf("patches = %d, want 0 (status is deleted, not edited)", len(patches))
 	}
+	sends := stub.messageSends(0)
 	var payload map[string]any
-	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	_ = json.Unmarshal(sends[len(sends)-1].body, &payload)
 	if content, _ := payload["content"].(string); !strings.Contains(content, "final answer") {
-		t.Fatalf("final edit = %q, want answer replacing status", content)
+		t.Fatalf("final post = %q, want final answer", content)
 	}
 	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
@@ -720,7 +720,7 @@ func TestPresenceDeliveryStopsClockBeforeAnswer(t *testing.T) {
 
 func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
-		if strings.HasSuffix(r.URL.Path, "/typing") {
+		if strings.HasSuffix(r.URL.Path, "/typing") || r.Method == http.MethodDelete {
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -751,18 +751,18 @@ func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	if _, err := adapter.Deliver(t.Context(), deliverReq); err != nil {
 		t.Fatalf("Deliver(): %v", err)
 	}
-	if messagePostCount(stub) != 1 {
-		t.Fatalf("message posts = %d, want still 1 (final edits status)", messagePostCount(stub))
+	if messagePostCount(stub) != 2 {
+		t.Fatalf("message posts = %d, want 2 (status and final answer)", messagePostCount(stub))
 	}
-	patches := stub.patchBodies()
-	if len(patches) == 0 {
-		t.Fatal("final delivery produced no edit")
+	if patches := stub.patchBodies(); len(patches) != 0 {
+		t.Fatalf("patches = %d, want 0", len(patches))
 	}
+	sends := stub.messageSends(0)
 	var payload map[string]any
-	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	_ = json.Unmarshal(sends[len(sends)-1].body, &payload)
 	content, _ := payload["content"].(string)
 	if !strings.Contains(content, "final answer") {
-		t.Errorf("final content = %q, want answer replacing status", content)
+		t.Errorf("final content = %q, want final answer", content)
 	}
 	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
@@ -858,10 +858,13 @@ func TestPresenceSingleSlowToolStaysAlive(t *testing.T) {
 	if _, err := adapter.Deliver(t.Context(), deliverReq); err != nil {
 		t.Fatalf("Deliver(): %v", err)
 	}
-	patches = stub.patchBodies()
-	_ = json.Unmarshal(patches[len(patches)-1], &payload)
+	sends := stub.messageSends(0)
+	if len(sends) != 2 {
+		t.Fatalf("posts = %d, want status and final answer", len(sends))
+	}
+	_ = json.Unmarshal(sends[len(sends)-1].body, &payload)
 	if content, _ := payload["content"].(string); !strings.Contains(content, "final answer") {
-		t.Fatalf("final edit = %q, want answer replacing status", content)
+		t.Fatalf("final post = %q, want final answer", content)
 	}
 	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)

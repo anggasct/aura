@@ -29,7 +29,6 @@ type presenceSession struct {
 	authorID     string
 	conversation string
 	replyContext []byte
-	channelKey   string
 	request      *runtimechannelhost.DeliveryRequest
 	started      time.Time
 	lastTyping   time.Time
@@ -60,10 +59,6 @@ type presenceSnapshot struct {
 	started    time.Time
 	dirty      bool
 	stopped    bool
-}
-
-func presenceKey(channel, effectID string) string {
-	return channel + "|" + effectID
 }
 
 func (a *Adapter) vaultOrNil() *secret.Vault {
@@ -208,7 +203,6 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 			guildID:      guildID,
 			authorID:     authorID,
 			conversation: req.ConversationID,
-			channelKey:   presenceKey(req.Channel, req.EffectID),
 			request:      &cloned,
 			started:      now,
 			wake:         make(chan struct{}, 1),
@@ -532,7 +526,6 @@ func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presence
 		session.lastTick = now
 		session.dirty = session.version != renderedVersion
 		a.presenceMu.Unlock()
-		a.rememberPosted(session.channelKey, []string{id})
 		wakeClock(session)
 		return nil
 	}
@@ -619,6 +612,26 @@ func (a *Adapter) clearPresenceStop(ctx context.Context, turnID string) {
 	if statusID != "" && hadButton {
 		a.clearStatusComponents(ctx, channelID, statusID)
 	}
+}
+
+func (a *Adapter) takeStatusToDelete(turnID string) (channelID, statusID string, ok bool) {
+	a.presenceMu.Lock()
+	session := a.presence[turnID]
+	a.presenceMu.Unlock()
+	if session == nil {
+		return "", "", false
+	}
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	defer a.presenceMu.Unlock()
+	if session.statusID == "" {
+		return "", "", false
+	}
+	channelID = session.channelID
+	statusID = session.statusID
+	session.statusID = ""
+	return channelID, statusID, true
 }
 
 func (a *Adapter) clearStatusComponents(ctx context.Context, channelID, messageID string) {

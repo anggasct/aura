@@ -20,8 +20,11 @@ import (
 )
 
 const (
-	OpSendMessage = "send_message"
-	opEditMessage = "edit_message"
+	OpSendMessage             = "send_message"
+	opEditMessage             = "edit_message"
+	opDeleteMessage           = "delete_message"
+	discordCodeUnknownMessage = 10008
+	defaultDeleteTimeout      = restTimeout
 )
 
 const (
@@ -51,6 +54,15 @@ type editOperation struct {
 	MessageID       string `json:"message_id"`
 	Text            string `json:"text"`
 	ClearComponents bool   `json:"clear_components,omitempty"`
+}
+
+type deleteOperation struct {
+	ChannelID string `json:"channel_id"`
+	MessageID string `json:"message_id"`
+}
+
+type discordAPIError struct {
+	Code int `json:"code"`
 }
 
 type messageReceipt struct {
@@ -103,6 +115,11 @@ func idempotencyKey(effectID, channelID, chunk, text string) string {
 	return "discord:" + effectID + ":" + chunk + ":" + hex.EncodeToString(sum[:])[:16]
 }
 
+func deleteKey(turnID, messageID string) string {
+	sum := sha256.Sum256([]byte(messageID))
+	return "discord:" + turnID + ":d:" + hex.EncodeToString(sum[:])[:16]
+}
+
 func (a *Adapter) SupportsIdempotency() bool {
 	return false
 }
@@ -116,6 +133,8 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 		return a.invokeSend(ctx, invocation)
 	case opEditMessage:
 		return a.invokeEdit(ctx, invocation)
+	case opDeleteMessage:
+		return a.invokeDelete(ctx, invocation)
 	case OpCreateThread:
 		return a.invokeCreateThread(ctx, invocation)
 	default:
@@ -177,6 +196,79 @@ func (a *Adapter) invokeEdit(ctx context.Context, invocation *effect.Invocation)
 	return outcome, nil
 }
 
+func (a *Adapter) invokeDelete(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
+	var operation deleteOperation
+	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "delete request is not decodable")
+	}
+	if !isChannelID(operation.ChannelID) || operation.MessageID == "" {
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "delete request is missing channel or message")
+	}
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		return effect.Outcome{}, fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
+	}
+	outcome, err := a.deleteMessage(ctx, token, &operation)
+	if err != nil {
+		return effect.Outcome{}, err
+	}
+	if !outcome.Succeeded {
+		return outcome, nil
+	}
+	receipt, err := json.Marshal(messageReceipt{MessageID: operation.MessageID, ChannelID: operation.ChannelID})
+	if err != nil {
+		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "receipt is not serializable")
+	}
+	outcome.Receipt = receipt
+	return outcome, nil
+}
+
+func (a *Adapter) deleteTimeoutOrDefault() time.Duration {
+	if a.deleteTimeout > 0 {
+		return a.deleteTimeout
+	}
+	return defaultDeleteTimeout
+}
+
+func (a *Adapter) deleteMessage(ctx context.Context, token string, operation *deleteOperation) (effect.Outcome, error) {
+	endpoint := a.restBase + "/channels/" + operation.ChannelID + "/messages/" + operation.MessageID
+	timeout := a.deleteTimeoutOrDefault()
+	for range sendMaxAttempts {
+		status, response, retryAfter, err := a.restCallWithTimeout(ctx, timeout, http.MethodDelete, endpoint, token, nil, "")
+		if err != nil {
+			if ctx.Err() != nil {
+				return effect.Outcome{}, ctx.Err()
+			}
+			if isDialError(err) {
+				continue
+			}
+			return effect.Outcome{Ambiguous: true}, nil
+		}
+		switch {
+		case status >= 200 && status < 300:
+			return effect.Outcome{Succeeded: true}, nil
+		case status == http.StatusNotFound:
+			var apiErr discordAPIError
+			if json.Unmarshal(response, &apiErr) == nil && apiErr.Code == discordCodeUnknownMessage {
+				return effect.Outcome{Succeeded: true}, nil
+			}
+			return effect.Outcome{Succeeded: false, SafeErrorCode: "discord_not_found"}, nil
+		case status == http.StatusTooManyRequests:
+			if retryAfter > 0 {
+				a.holdChannel(operation.ChannelID, min(retryAfter, a.rateCap))
+			}
+			return effect.Outcome{Succeeded: false, SafeErrorCode: "discord_rate_limited"}, nil
+		case status == http.StatusUnauthorized || status == http.StatusForbidden:
+			return effect.Outcome{Succeeded: false, SafeErrorCode: "discord_unauthorized"}, nil
+		case status >= 400 && status < 500:
+			return effect.Outcome{Succeeded: false, SafeErrorCode: "discord_rejected"}, nil
+		default:
+			return effect.Outcome{Ambiguous: true}, nil
+		}
+	}
+	return effect.Outcome{Ambiguous: true}, nil
+}
+
 func (a *Adapter) invokeCreateThread(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	var operation createThreadOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
@@ -204,14 +296,6 @@ func (a *Adapter) invokeCreateThread(ctx context.Context, invocation *effect.Inv
 		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "receipt is not serializable")
 	}
 	return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
-}
-
-func restDeadline(ctx context.Context, deadline time.Time) (context.Context, context.CancelFunc) {
-	timeout := time.Now().Add(sendTimeout)
-	if !deadline.IsZero() && deadline.Before(timeout) {
-		timeout = deadline
-	}
-	return context.WithDeadline(ctx, timeout)
 }
 
 func (a *Adapter) postMessage(ctx context.Context, token string, operation *SendOperation) (string, effect.Outcome, error) {
@@ -343,14 +427,24 @@ func sendBody(operation *SendOperation, linkPreviews bool) (body []byte, content
 }
 
 func (a *Adapter) restCall(ctx context.Context, method, endpoint, token string, body []byte, contentType string) (status int, response []byte, retryAfter time.Duration, err error) {
-	call, cancel := restDeadline(ctx, time.Time{})
+	return a.restCallWithTimeout(ctx, sendTimeout, method, endpoint, token, body, contentType)
+}
+
+func (a *Adapter) restCallWithTimeout(ctx context.Context, timeout time.Duration, method, endpoint, token string, body []byte, contentType string) (status int, response []byte, retryAfter time.Duration, err error) {
+	call, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(call, method, endpoint, bytes.NewReader(body))
+	var reader io.Reader = http.NoBody
+	if len(body) > 0 {
+		reader = bytes.NewReader(body)
+	}
+	req, err := http.NewRequestWithContext(call, method, endpoint, reader)
 	if err != nil {
 		return 0, nil, 0, err
 	}
 	req.Header.Set("Authorization", "Bot "+token)
-	req.Header.Set("Content-Type", contentType)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	resp, err := a.httpClient.Do(req)
 	if err != nil {
 		return 0, nil, 0, err
@@ -392,25 +486,39 @@ func splitUploads(chunks []string, fileCap int64) ([]string, []uploadChunk, erro
 	return texts, []uploadChunk{{name: "message.txt", text: remainder}}, nil
 }
 
-func parseDeliveryContext(raw json.RawMessage, channel string) (target, parent, messageID string, err error) {
+type deliveryDestination struct {
+	target    string
+	parent    string
+	messageID string
+	guildID   string
+	authorID  string
+}
+
+func parseDeliveryContext(raw json.RawMessage, channel string) (deliveryDestination, error) {
 	if len(raw) == 0 {
 		if !isChannelID(channel) {
-			return "", "", "", fault.New(ErrorCodeInvalidArgument, "delivery channel is not a discord channel id")
+			return deliveryDestination{}, fault.New(ErrorCodeInvalidArgument, "delivery channel is not a discord channel id")
 		}
-		return channel, "", "", nil
+		return deliveryDestination{target: channel}, nil
 	}
 	var reference replyReference
 	if err := json.Unmarshal(raw, &reference); err != nil {
-		return "", "", "", fault.New(ErrorCodeInvalidArgument, "reply context is not decodable")
+		return deliveryDestination{}, fault.New(ErrorCodeInvalidArgument, "reply context is not decodable")
 	}
 	if !isChannelID(reference.ChannelID) {
-		return "", "", "", fault.New(ErrorCodeInvalidArgument, "reply context carries no channel id")
+		return deliveryDestination{}, fault.New(ErrorCodeInvalidArgument, "reply context carries no channel id")
 	}
 	if reference.ThreadID != "" && !isChannelID(reference.ThreadID) {
-		return "", "", "", fault.New(ErrorCodeInvalidArgument, "reply context carries no thread id")
+		return deliveryDestination{}, fault.New(ErrorCodeInvalidArgument, "reply context carries no thread id")
 	}
 	target, parent, message := deliveryTarget(&reference)
-	return target, parent, message, nil
+	return deliveryDestination{
+		target:    target,
+		parent:    parent,
+		messageID: message,
+		guildID:   reference.GuildID,
+		authorID:  reference.AuthorID,
+	}, nil
 }
 
 func isChannelID(id string) bool {

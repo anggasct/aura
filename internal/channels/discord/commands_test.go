@@ -277,9 +277,9 @@ func TestDiscordCommandsInDMReplyWithoutATurn(t *testing.T) {
 	f.admit(t, dmMessage("8003", "111", "/cancel"))
 	key := testSessionKey("dm:111")
 	want := []sentReply{
-		{channel: "555", replyTo: "8001", content: "session " + key + "\npersona main\nevents 4\nturn running turn-9 queued 2"},
-		{channel: "555", replyTo: "8002", content: "session " + key},
-		{channel: "555", replyTo: "8003", content: "cancelled turn turn-9"},
+		{channel: "555", content: "session " + key + "\npersona main\nevents 4\nturn running turn-9 queued 2"},
+		{channel: "555", content: "session " + key},
+		{channel: "555", content: "cancelled turn turn-9"},
 	}
 	if got := f.replies(t); !slices.Equal(got, want) {
 		t.Fatalf("replies =\n%+v\nwant\n%+v", got, want)
@@ -343,16 +343,13 @@ func TestDiscordCommandsInBotThreadUseTheThreadSession(t *testing.T) {
 	f.admit(t, threadTrigger("9200", "<@999> start a thread", []string{"999"}))
 	f.admit(t, threadFollowUp("9201", "777", "/session"))
 	f.admit(t, threadFollowUp("9202", "777", "<@999> /status"))
-	replies := f.replies(t)
-	var commandReplies []sentReply
-	for _, reply := range replies {
-		if reply.replyTo == "9201" || reply.replyTo == "9202" {
-			commandReplies = append(commandReplies, reply)
-		}
-	}
+	commandReplies := f.replies(t)
 	key := testSessionKey("thread:777")
 	if len(commandReplies) != 2 || commandReplies[0].content != "session "+key || !strings.HasPrefix(commandReplies[1].content, "session "+key+"\npersona main") {
 		t.Fatalf("thread replies = %+v", commandReplies)
+	}
+	if commandReplies[0].replyTo != "" || commandReplies[1].replyTo != "" {
+		t.Errorf("thread command replies unexpectedly quoted: %+v", commandReplies)
 	}
 	if commandReplies[0].channel != "777" {
 		t.Errorf("thread reply channel = %s, want 777", commandReplies[0].channel)

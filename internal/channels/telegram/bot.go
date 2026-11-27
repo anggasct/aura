@@ -17,8 +17,9 @@ import (
 )
 
 const (
-	botAPIBase       = "https://api.telegram.org"
-	maxResponseBytes = 4 << 20
+	botAPIBase                = "https://api.telegram.org"
+	maxResponseBytes          = 4 << 20
+	deleteNotFoundDescription = "message to delete not found"
 )
 
 type apiResponse struct {
@@ -32,9 +33,10 @@ type apiResponse struct {
 }
 
 type APIError struct {
-	Method     string
-	Status     int
-	RetryAfter time.Duration
+	Method         string
+	Status         int
+	RetryAfter     time.Duration
+	DeleteNotFound bool
 }
 
 func (e *APIError) Error() string {
@@ -100,7 +102,11 @@ func (c *botClient) call(ctx context.Context, token, method string, payload, res
 		return fault.New(ErrorCodeProtocolInvalid, fmt.Sprintf("bot api %s response is not decodable", method))
 	}
 	if !envelope.OK || resp.StatusCode != http.StatusOK {
-		apiErr := &APIError{Method: method, Status: envelope.ErrorCode}
+		apiErr := &APIError{
+			Method:         method,
+			Status:         envelope.ErrorCode,
+			DeleteNotFound: strings.Contains(strings.ToLower(envelope.Description), deleteNotFoundDescription),
+		}
 		if apiErr.Status == 0 {
 			apiErr.Status = resp.StatusCode
 		}
@@ -352,6 +358,15 @@ func (c *botClient) sendChatAction(ctx context.Context, token string, target des
 
 func (c *botClient) answerCallbackQuery(ctx context.Context, token, callbackQueryID string) error {
 	return c.call(ctx, token, "answerCallbackQuery", answerCallbackRequest{CallbackQueryID: callbackQueryID}, nil)
+}
+
+type deleteMessageRequest struct {
+	ChatID    int64 `json:"chat_id"`
+	MessageID int64 `json:"message_id"`
+}
+
+func (c *botClient) deleteMessage(ctx context.Context, token string, chatID, messageID int64) error {
+	return c.call(ctx, token, "deleteMessage", deleteMessageRequest{ChatID: chatID, MessageID: messageID}, nil)
 }
 
 func (c *botClient) clearKeyboard(ctx context.Context, token string, chatID, messageID int64) error {

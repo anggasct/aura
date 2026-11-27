@@ -27,6 +27,7 @@ const chatTypePrivate = "private"
 type replyReference struct {
 	ChatID    int64                   `json:"chat_id"`
 	MessageID int64                   `json:"message_id"`
+	ChatType  string                  `json:"chat_type,omitempty"`
 	ThreadID  int64                   `json:"message_thread_id,omitempty"`
 	FromID    int64                   `json:"from_id,omitempty"`
 	Artifacts []media.ArtifactSummary `json:"artifacts,omitempty"`
@@ -238,7 +239,10 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		a.drop(ctx, scope, dropPersonaEvalMissing, true)
 		return nil, nil, false
 	}
-	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID, ThreadID: msg.topicID(), FromID: msg.From.ID})
+	if msg.Chat.Type == chatTypePrivate {
+		a.latestPrivate.record(msg.Chat.ID, msg.From.ID, msg.MessageID)
+	}
+	reference, err := json.Marshal(replyReference{ChatID: msg.Chat.ID, MessageID: msg.MessageID, ChatType: msg.Chat.Type, ThreadID: msg.topicID(), FromID: msg.From.ID})
 	if err != nil {
 		return nil, nil, false
 	}

@@ -593,6 +593,26 @@ func (a *Adapter) clearPresenceStop(ctx context.Context, turnID string) {
 	}
 }
 
+func (a *Adapter) takeStatusToDelete(turnID string) (chatID, statusID int64, ok bool) {
+	a.presenceMu.Lock()
+	session := a.presence[turnID]
+	a.presenceMu.Unlock()
+	if session == nil {
+		return 0, 0, false
+	}
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	defer a.presenceMu.Unlock()
+	if session.statusID == 0 {
+		return 0, 0, false
+	}
+	chatID = session.chatID
+	statusID = session.statusID
+	session.statusID = 0
+	return chatID, statusID, true
+}
+
 func (a *Adapter) clearStatusKeyboard(ctx context.Context, chatID, messageID int64) {
 	token, ok := a.botToken()
 	if !ok {
