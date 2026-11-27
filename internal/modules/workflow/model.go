@@ -76,6 +76,16 @@ const (
 	MaxAgentMaxTokens     = 200_000
 )
 
+func (e *ExecutorSpec) applyAgentDefaults() {
+	if e.Output == "" {
+		e.Output = OutputText
+	}
+	if e.MaxTokens == nil {
+		budget := DefaultAgentMaxTokens
+		e.MaxTokens = &budget
+	}
+}
+
 func (e *ExecutorSpec) TokenBudget() int {
 	if e.MaxTokens == nil {
 		return DefaultAgentMaxTokens

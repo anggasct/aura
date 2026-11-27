@@ -271,16 +271,11 @@ func validateAgentExecutor(step *StepSpec, deps *ValidationDeps, field string) e
 		return err
 	}
 	switch executor.Output {
-	case "":
-		executor.Output = OutputText
-	case OutputText, OutputJSON:
+	case "", OutputText, OutputJSON:
 	default:
 		return codedError(ErrorCodeExecutorInvalid, field+" output must be text or json")
 	}
-	if executor.MaxTokens == nil {
-		budget := DefaultAgentMaxTokens
-		executor.MaxTokens = &budget
-	}
+	executor.applyAgentDefaults()
 	if *executor.MaxTokens < 1 || *executor.MaxTokens > MaxAgentMaxTokens {
 		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("%s max_tokens %d must be in [1, %d]", field, *executor.MaxTokens, MaxAgentMaxTokens))
 	}

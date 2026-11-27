@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"slices"
 	"strings"
@@ -714,3 +715,96 @@ func TestValidateAgentStepFamilies(t *testing.T) {
 }
 
 func intPtr(value int) *int { return &value }
+
+func rawAgentDefaultsSpec() *Spec {
+	return &Spec{ID: "demo", Goal: "Demonstrate", Version: 1, Source: SourceDefined, Steps: []StepSpec{
+		{ID: "think", Executor: agentExecutor("engineer"), Timeout: time.Minute},
+		{ID: "again", DependsOn: []string{"think"}, Executor: agentExecutor("engineer"), Timeout: time.Minute},
+	}}
+}
+
+func TestAgentStepDefaultsDigestIdenticallyOnEveryPath(t *testing.T) {
+	digestOf := func(t *testing.T, spec *Spec) string {
+		t.Helper()
+		digest, err := Digest(spec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return digest
+	}
+	want := digestOf(t, rawAgentDefaultsSpec())
+	t.Run("a raw spec and its validated copy", func(t *testing.T) {
+		validated := rawAgentDefaultsSpec()
+		if err := Validate(validated, agentGraphDeps()); err != nil {
+			t.Fatal(err)
+		}
+		if got := digestOf(t, validated); got != want {
+			t.Fatalf("validated digest = %s, want %s", got, want)
+		}
+	})
+	t.Run("a spec that writes the defaults out", func(t *testing.T) {
+		explicit := rawAgentDefaultsSpec()
+		for index := range explicit.Steps {
+			explicit.Steps[index].Executor.Output = OutputText
+			explicit.Steps[index].Executor.MaxTokens = intPtr(DefaultAgentMaxTokens)
+		}
+		if got := digestOf(t, explicit); got != want {
+			t.Fatalf("explicit digest = %s, want %s", got, want)
+		}
+	})
+	t.Run("a different budget changes the digest", func(t *testing.T) {
+		other := rawAgentDefaultsSpec()
+		other.Steps[0].Executor.MaxTokens = intPtr(DefaultAgentMaxTokens + 1)
+		if got := digestOf(t, other); got == want {
+			t.Fatal("a different max_tokens left the digest unchanged")
+		}
+	})
+	t.Run("the effective budget is in the stored definition", func(t *testing.T) {
+		encoded, err := specJSON(rawAgentDefaultsSpec())
+		if err != nil || !strings.Contains(string(encoded), `"max_tokens":50000`) || !strings.Contains(string(encoded), `"output":"text"`) {
+			t.Fatalf("specJSON = %s, %v, want the effective budget and output", encoded, err)
+		}
+	})
+	t.Run("loading the same definition twice", func(t *testing.T) {
+		interpreter := freshInterpreter(t)
+		for range 2 {
+			if err := interpreter.Install(t.Context(), []*Spec{rawAgentDefaultsSpec()}, agentGraphDeps()); err != nil {
+				t.Fatalf("Install = %v", err)
+			}
+		}
+	})
+	t.Run("saving a raw definition before and after a load", func(t *testing.T) {
+		for _, saveFirst := range []bool{true, false} {
+			disk := newTestStore(t)
+			interpreter := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{})
+			if saveFirst {
+				if err := disk.SaveDefinition(t.Context(), rawAgentDefaultsSpec()); err != nil {
+					t.Fatalf("SaveDefinition = %v", err)
+				}
+			}
+			if err := interpreter.Install(t.Context(), []*Spec{rawAgentDefaultsSpec()}, agentGraphDeps()); err != nil {
+				t.Fatalf("Install after SaveDefinition=%t = %v", saveFirst, err)
+			}
+			if !saveFirst {
+				if err := disk.SaveDefinition(t.Context(), rawAgentDefaultsSpec()); err != nil {
+					t.Fatalf("SaveDefinition after Install = %v", err)
+				}
+			}
+		}
+	})
+	t.Run("a proposal before and after compilation", func(t *testing.T) {
+		interpreter := freshInterpreter(t)
+		if err := interpreter.LoadAll(t.Context(), nil, agentGraphDeps()); err != nil {
+			t.Fatal(err)
+		}
+		proposal := func() *Spec { return NormalizeProposal(rawAgentDefaultsSpec(), "prop_defaults") }
+		before := digestOf(t, proposal())
+		compiled := proposal()
+		if _, err := interpreter.CompileProposal(compiled, "main"); err != nil {
+			t.Fatalf("CompileProposal = %v", err)
+		}
+		if after := digestOf(t, compiled); after != before {
+			t.Fatalf("digest after compile = %s, want %s", after, before)
+		}
+	})
+}

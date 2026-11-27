@@ -3,9 +3,7 @@ package workflow
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,12 +56,11 @@ func NormalizeProposal(spec *Spec, proposalID string) *Spec {
 }
 
 func Digest(spec *Spec) (string, error) {
-	encoded, err := json.Marshal(spec)
+	encoded, err := specJSON(spec)
 	if err != nil {
-		return "", codedError(ErrorCodeSpecInvalid, "encode spec: "+err.Error())
+		return "", err
 	}
-	sum := sha256.Sum256(encoded)
-	return hex.EncodeToString(sum[:]), nil
+	return sha256Hex(encoded), nil
 }
 
 func CheckCeiling(spec *Spec, agentID string, class principal.Class, deps *ValidationDeps) error {
@@ -204,9 +201,9 @@ func (s *Store) CreateProposal(ctx context.Context, proposal *Proposal) error {
 	if err := proposal.Reply.Validate(); err != nil {
 		return err
 	}
-	encoded, err := json.Marshal(proposal.Spec)
+	encoded, err := specJSON(proposal.Spec)
 	if err != nil {
-		return codedError(ErrorCodeSpecInvalid, "encode proposal spec: "+err.Error())
+		return err
 	}
 	_, err = sqlite.Conn(ctx, s.db).ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted, plan_text, reply_channel, reply_account, reply_channel_id, reply_thread_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted, proposal.PlanText,
