@@ -18,6 +18,7 @@ const maxInlineOutputBytes = 64 << 10
 func (e *stepExecution) run(ctx context.Context) error {
 	e.outputs = map[string]json.RawMessage{}
 	e.statuses = map[string]string{}
+	e.labels = newLabelLedger()
 	e.failedStep = ""
 	done := make(map[string]chan struct{}, len(e.graph.Order))
 	for _, stepID := range e.graph.Order {
@@ -65,26 +66,8 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 	if e.isFailed() {
 		return
 	}
-	for _, dependency := range step.DependsOn {
-		if e.statusFor(dependency) == StepSkipped {
-			if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
-				e.failRun(ctx, step.ID, err)
-			}
-			return
-		}
-	}
-	if step.Condition != nil {
-		parsed, err := parseCondition(*step.Condition)
-		if err != nil {
-			e.failRun(ctx, step.ID, err)
-			return
-		}
-		if !e.evaluate(parsed) {
-			if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
-				e.failRun(ctx, step.ID, err)
-			}
-			return
-		}
+	if !e.gate(ctx, step) {
+		return
 	}
 
 	attempt := 0
@@ -113,7 +96,7 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 				e.failRun(ctx, step.ID, err)
 				return
 			}
-			e.recordSuccess(step.ID, update.Output)
+			e.recordSuccess(step.ID, update)
 			return
 		}
 		if attempt >= step.Retry.Attempts || finalFailure(update.ErrorCode) {
@@ -132,6 +115,39 @@ func (e *stepExecution) runStep(ctx context.Context, step *StepSpec, done map[st
 			return
 		}
 		attempt++
+	}
+}
+
+func (e *stepExecution) gate(ctx context.Context, step *StepSpec) bool {
+	var parsed *condition
+	var parseErr error
+	if step.Condition != nil {
+		parsed, parseErr = parseCondition(*step.Condition)
+	}
+	e.labels.steer(step, parsed)
+	for _, dependency := range step.DependsOn {
+		if e.statusFor(dependency) == StepSkipped {
+			e.skip(ctx, step)
+			return false
+		}
+	}
+	if step.Condition == nil {
+		return true
+	}
+	if parseErr != nil {
+		e.failRun(ctx, step.ID, parseErr)
+		return false
+	}
+	if !e.evaluate(parsed) {
+		e.skip(ctx, step)
+		return false
+	}
+	return true
+}
+
+func (e *stepExecution) skip(ctx context.Context, step *StepSpec) {
+	if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
+		e.failRun(ctx, step.ID, err)
 	}
 }
 
@@ -192,16 +208,31 @@ func (e *stepExecution) runAgentStep(ctx context.Context, step *StepSpec, attemp
 	if runner == nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeExecutorInvalid), Detail: "no agent runner is wired", EndedAt: nowPtr()}
 	}
+	origin := e.originFor(step.ID)
 	call := &AgentStepCall{
-		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: e.origin,
+		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: origin,
 		DefinitionID: e.spec.ID, DefinitionVersion: e.spec.Version, DefinitionDigest: e.definitionDigest,
 		Executor: step.Executor, Input: *e.input, Invocation: e.invocation,
 	}
 	result, err := runner.RunStep(ctx, call)
 	if err != nil {
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeStepFailed), Detail: err.Error(), EndedAt: nowPtr(), Tokens: result.Tokens}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(failureCode(err)), Detail: err.Error(), EndedAt: nowPtr(), Tokens: result.Tokens}
 	}
-	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr(), Tokens: result.Tokens}
+	tainted, private := e.labels.outputOf(step, e.origin.Tainted, reportedLabels{tainted: result.Tainted, private: result.Private})
+	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr(), Tokens: result.Tokens, Tainted: tainted, Private: private}
+}
+
+func (e *stepExecution) originFor(stepID string) RunOrigin {
+	origin := e.origin
+	origin.Tainted = e.origin.Tainted || e.labels.isSteered(stepID)
+	return origin
+}
+
+func failureCode(err error) ErrorCode {
+	if coded, ok := fault.CodeOf[ErrorCode](err); ok {
+		return coded
+	}
+	return ErrorCodeStepFailed
 }
 
 func toolArguments(step *StepSpec) json.RawMessage {
@@ -221,27 +252,20 @@ func (e *stepExecution) runToolStep(ctx context.Context, step *StepSpec, attempt
 	}
 	approval, err := e.interpreter.requireApproval(ctx, e.spec.ID, e.spec.Version, e.definitionDigest)
 	if err != nil {
-		code := ErrorCodeStepFailed
-		if coded, ok := fault.CodeOf[ErrorCode](err); ok {
-			code = coded
-		}
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(failureCode(err)), Detail: err.Error(), EndedAt: nowPtr()}
 	}
-	origin := e.origin
-	origin.Tainted = e.origin.Tainted || approval.Tainted
+	origin := e.originFor(step.ID)
+	origin.Tainted = origin.Tainted || approval.Tainted
 	call := &StepCall{
 		RunID: e.runID, StepID: step.ID, Attempt: attempt, Origin: origin, DefinitionDigest: e.definitionDigest,
 		DefinitionID: e.spec.ID, DefinitionVersion: e.spec.Version, Approval: *approval,
 	}
 	result, err := runner.Invoke(WithStepCall(ctx, call), *step.Executor.ToolID, toolArguments(step))
 	if err != nil {
-		code := ErrorCodeStepFailed
-		if coded, ok := fault.CodeOf[ErrorCode](err); ok {
-			code = coded
-		}
-		return &stepUpdate{Status: StepFailed, ErrorCode: string(code), Detail: err.Error(), EndedAt: nowPtr()}
+		return &stepUpdate{Status: StepFailed, ErrorCode: string(failureCode(err)), Detail: err.Error(), EndedAt: nowPtr()}
 	}
-	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr()}
+	tainted, private := e.labels.outputOf(step, origin.Tainted, reportedLabels{tainted: result.Tainted})
+	return &stepUpdate{Status: StepSucceeded, Output: []byte(result.Output), EndedAt: nowPtr(), Tainted: tainted, Private: private}
 }
 
 func (e *stepExecution) runWaitStep(ctx context.Context, step *StepSpec, attempt int) *stepUpdate {
@@ -395,11 +419,12 @@ func (e *stepExecution) isFailed() bool {
 	return e.failedStep != ""
 }
 
-func (e *stepExecution) recordSuccess(stepID string, output json.RawMessage) {
+func (e *stepExecution) recordSuccess(stepID string, update *stepUpdate) {
+	e.labels.record(stepID, update.Tainted, update.Private)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.statuses[stepID] = StepSucceeded
-	e.outputs[stepID] = output
+	e.outputs[stepID] = update.Output
 }
 
 func (e *stepExecution) resolvedStatus(stepID string) (string, bool) {
@@ -540,7 +565,8 @@ func (i *Interpreter) release() {
 func finalFailure(code string) bool {
 	switch ErrorCode(code) {
 	case ErrorCodeApprovalRejected, ErrorCodeApprovalMissing, ErrorCodeApprovalSpent, ErrorCodePlanUnshowable,
-		ErrorCodeCapabilityExceeded, ErrorCodePersonaMissing, ErrorCodeSessionInvalid, ErrorCodeExecutorInvalid:
+		ErrorCodeCapabilityExceeded, ErrorCodePersonaMissing, ErrorCodeSessionInvalid, ErrorCodeExecutorInvalid,
+		ErrorCodeNotPermitted, ErrorCodeBudgetExhausted:
 		return true
 	default:
 		return false

@@ -82,7 +82,8 @@ func childUpdate(childID, status string, err error) *stepUpdate {
 }
 
 func (e *stepExecution) runWorkflowStep(ctx context.Context, step *StepSpec) *stepUpdate {
-	child, err := e.interpreter.createChildRun(ctx, *step.Executor.WorkflowID, e.input, e.runID, &e.origin)
+	origin := e.originFor(step.ID)
+	child, err := e.interpreter.createChildRun(ctx, *step.Executor.WorkflowID, e.input, e.runID, &origin)
 	if err != nil {
 		return &stepUpdate{Status: StepFailed, ErrorCode: string(ErrorCodeChildFailed), Detail: err.Error(), EndedAt: nowPtr()}
 	}
@@ -97,7 +98,8 @@ func (e *stepExecution) runWorkflowStepSerial(ctx context.Context, step *StepSpe
 	}
 	key := "run/" + e.runID + "/step/" + step.ID + "/attempt/" + strconv.Itoa(attempt) + "/child"
 	raw, err := e.invocation.RunAction(ctx, key, func(actionCtx context.Context) ([]byte, error) {
-		child, err := e.interpreter.createChildRun(actionCtx, *step.Executor.WorkflowID, e.input, e.runID, &e.origin)
+		origin := e.originFor(step.ID)
+		child, err := e.interpreter.createChildRun(actionCtx, *step.Executor.WorkflowID, e.input, e.runID, &origin)
 		if err != nil {
 			return nil, err
 		}
