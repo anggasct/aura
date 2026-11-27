@@ -13,7 +13,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -69,12 +72,12 @@ type hostedRun struct {
 
 func newWorkflowHost(t *testing.T, options *Options) *workflowHost {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
-	disk := NewStore(db)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), sqlite.Schema(), effect.Schema(), storage.Schema(), Schema())
+	disk := mustNewStore(t, db)
 	warnings := &warningLog{}
 	options.Logger = warnings
 	options.Driver = DriverConcurrent
-	host := &workflowHost{t: t, db: db, disk: disk, interpreter: NewInterpreter(disk, durabletest.NewFake(), options), warnings: warnings}
+	host := &workflowHost{t: t, db: db, disk: disk, interpreter: mustNewInterpreter(t, disk, durabletest.NewFake(), options), warnings: warnings}
 	host.startHost()
 	t.Cleanup(host.stopHost)
 	return host

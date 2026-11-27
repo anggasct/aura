@@ -15,11 +15,11 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/modules/broadcast"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeBroadcastCLIConfig(t *testing.T, dataDir string) string {
@@ -35,7 +35,7 @@ func writeBroadcastCLIConfig(t *testing.T, dataDir string) string {
 func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 	t.Helper()
 	if _, err := os.Stat(dbPath); errors.Is(err, fs.ErrNotExist) {
-		storetest.Seed(t, dbPath)
+		sqlitetest.Seed(t, dbPath, Schemas()...)
 	}
 	db, err := sqlite.Open(t.Context(), dbPath, sqlite.Options{})
 	if err != nil {
@@ -49,13 +49,14 @@ func seedBroadcastCLIItem(t *testing.T, dbPath, id, state, content string) {
 	}
 }
 
-func runBroadcastCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func runBroadcastCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := newBroadcastCmd(gf)
+	cmd := broadcast.Commands(broadcastOpener(gf))[0]
 	out := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errBuf)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -64,7 +65,7 @@ func runBroadcastCommand(t *testing.T, gf *globalFlags, args ...string) (string,
 func TestBroadcastStatusHidesContentByDefault(t *testing.T) {
 	dataDir := t.TempDir()
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-1", "scheduled", `{"text":"secret plans"}`)
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "status")
 	if err != nil {
@@ -92,7 +93,7 @@ func TestBroadcastStatusFiltersState(t *testing.T) {
 	dataDir := t.TempDir()
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-1", "scheduled", `{"text":"a"}`)
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-2", "held", `{"text":"b"}`)
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "status", "--state", "held")
 	if err != nil {
@@ -110,7 +111,7 @@ func TestBroadcastReconcileReportsNoop(t *testing.T) {
 	dataDir := t.TempDir()
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-1", "scheduled", `{"text":"a"}`)
 	seedBroadcastCLIItem(t, filepath.Join(dataDir, "aura.db"), "bcst-9", "unknown", `{"text":"b"}`)
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "reconcile", "bcst-9")
 	if err != nil {
@@ -138,7 +139,7 @@ func TestBroadcastReconcileRestartsAnEndedRun(t *testing.T) {
 		"bcst-1", "send", []byte("{}"), now); err != nil {
 		t.Fatalf("seed the journal: %v", err)
 	}
-	gf := &globalFlags{configPath: writeBroadcastCLIConfig(t, dataDir)}
+	gf := &GlobalFlags{ConfigPath: writeBroadcastCLIConfig(t, dataDir)}
 
 	out, err := runBroadcastCommand(t, gf, "reconcile", "bcst-1")
 	if err != nil {
@@ -172,13 +173,13 @@ func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
-			sessions := store.NewSessionService(db)
+			db := sqlitetest.OpenMigrated(t, Schemas()...)
+			sessions := turnstore.NewSessionService(db)
 			now := time.Now().UTC()
-			if err := sessions.Create(t.Context(), &store.Session{ID: "broadcast:default", OwnerID: "broadcast", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+			if err := sessions.Create(t.Context(), &turn.Session{ID: "broadcast:default", OwnerID: "broadcast", Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 				t.Fatalf("Create session: %v", err)
 			}
-			effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+			effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 			if err != nil {
 				t.Fatalf("NewChannelEffects: %v", err)
 			}

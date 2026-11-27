@@ -26,7 +26,7 @@ func TestReadFileRejectsWorkspaceEscapes(t *testing.T) {
 	if err := os.Symlink(filepath.Join(outside, "secret"), filepath.Join(workspace, "link")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestReadFileRejectsWorkspaceEscapes(t *testing.T) {
 
 func TestWriteFileIsAtomicAndRejectsHardLinks(t *testing.T) {
 	workspace := t.TempDir()
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestListDirDoesNotFollowSymlink(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(workspace, "outside")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestListDirDoesNotFollowSymlink(t *testing.T) {
 
 func TestWriteFileFsyncsFileAndParentDirectoryOnBothPaths(t *testing.T) {
 	workspace := t.TempDir()
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestWriteFileFsyncsFileAndParentDirectoryOnBothPaths(t *testing.T) {
 
 func TestWriteFileCreateNewPropagatesCloseError(t *testing.T) {
 	workspace := t.TempDir()
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestWriteFileCreateNewPropagatesCloseError(t *testing.T) {
 
 func TestWriteFilePropagatesParentSyncError(t *testing.T) {
 	workspace := t.TempDir()
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 10})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -203,7 +203,7 @@ func TestListDirBoundsLargeDirectoryWithoutFullListing(t *testing.T) {
 			t.Fatalf("seed file: %v", err)
 		}
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: limit})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: limit})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestListDirExactFitIsNotTruncated(t *testing.T) {
 			t.Fatalf("seed file: %v", err)
 		}
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 3})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 3})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestListDirRecursiveSharesBudgetAcrossDirectories(t *testing.T) {
 			t.Fatalf("seed file: %v", err)
 		}
 	}
-	adapters, err := New(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 3})
+	adapters, err := NewAdapters(Options{Workspace: workspace, MaxFileBytes: 1024, MaxDirEntries: 3})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -27,7 +27,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -326,12 +326,12 @@ func leftTurnDescriptor() runtimesessions.Descriptor {
 func admitLeftTurn(t *testing.T, db *sql.DB) {
 	t.Helper()
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: leftSessionID, OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)
 	}
-	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db})
+	sessions, err := sqlite.NewSessionStore(&sqlite.SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}
@@ -487,7 +487,7 @@ func TestServerScheduleRunCompletesItsTurn(t *testing.T) {
 	restoreDefaultLogger(t)
 	model := newStubModel(t, stubAnswers)
 	cfg := writeTurnServerConfig(t, model, serverTurnShutdownTimeout)
-	gf := &globalFlags{configPath: cfg.path}
+	gf := &GlobalFlags{ConfigPath: cfg.path}
 	jobID := addScheduleJob(t, gf)
 	srv := buildTurnServer(t, cfg.path)
 	srv.run(t)

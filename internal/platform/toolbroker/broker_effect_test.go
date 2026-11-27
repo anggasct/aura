@@ -9,22 +9,26 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func newBrokerEffectExecutor(t *testing.T) *effect.Executor {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema())
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(context.Background(), &store.Session{
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
@@ -38,7 +42,7 @@ func newBrokerEffectExecutor(t *testing.T) *effect.Executor {
 func TestBrokerEffectfulToolUsesDurableLifecycle(t *testing.T) {
 	executor := newBrokerEffectExecutor(t)
 	calls := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor,
 		Adapters: map[string]Adapter{
 			"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -86,7 +90,7 @@ func TestBrokerEffectfulFailureSettlesByWhetherTheEffectWasPerformed(t *testing.
 		t.Run(tc.name, func(t *testing.T) {
 			executor := newBrokerEffectExecutor(t)
 			calls := 0
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t), Effects: executor,
 				Adapters: map[string]Adapter{
 					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
@@ -139,7 +143,7 @@ func TestBrokerEffectReceiptCarriesTheAdapterAudit(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			executor := newBrokerEffectExecutor(t)
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t), Effects: executor,
 				Adapters: map[string]Adapter{
 					"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {

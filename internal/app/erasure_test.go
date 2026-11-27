@@ -8,12 +8,13 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func seedIdleSession(t *testing.T, sessions store.SessionService, id, owner string, at time.Time) {
+func seedIdleSession(t *testing.T, sessions turnstore.SessionService, id, owner string, at time.Time) {
 	t.Helper()
-	if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: owner, CreatedAt: at, UpdatedAt: at, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, CreatedAt: at, UpdatedAt: at, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session %s: %v", id, err)
 	}
 }
@@ -31,7 +32,7 @@ func TestPrincipalForgetDryRunThenApply(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	db := openAccessDB(t, cfg)
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/discord:office/dm:9", "discord:9", now)
 	seedIdleSession(t, sessions, "main/discord:office/dm:777", principal.OwnerID, now)
 	if _, err := newPairingService(db, nil).Request(t.Context(), "discord:9", "office"); err != nil {
@@ -72,7 +73,7 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/discord:office/dm:21", "discord:21", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/discord:office/dm:22", "discord:22", now.Add(-719*time.Hour))
 	seedIdleSession(t, sessions, "main/discord:office/dm:5", "discord:5", now.Add(-721*time.Hour))
@@ -99,7 +100,7 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 			t.Errorf("session %s exists = %v, want %v", id, exists, want)
 		}
 	}
-	if granted, _ := store.NewPrincipalGrantStore(db).Active(t.Context(), "discord:23", "office"); !granted {
+	if granted, _ := principal.NewPrincipalGrantStore(db).Active(t.Context(), "discord:23", "office"); !granted {
 		t.Fatal("retention removed the pairing grant")
 	}
 	again, err := sweepRetention(t.Context(), loaded.Config, db, "", now)
@@ -109,7 +110,14 @@ func TestRetentionSweepErasesIdlePrincipalsByClass(t *testing.T) {
 }
 
 func TestErasureLinesPrintRunSessionsAfterSessions(t *testing.T) {
-	lines := erasureLines(&store.ErasureCounts{Sessions: 2, RunSessions: 5})
+	report, err := principal.NewErasureReport(map[string]int{
+		principal.ErasureLineSessions:    2,
+		principal.ErasureLineRunSessions: 5,
+	})
+	if err != nil {
+		t.Fatalf("NewErasureReport: %v", err)
+	}
+	lines := report.Lines()
 	if len(lines) < 2 || lines[0] != "sessions: 2" || lines[1] != "run_sessions: 5" {
 		t.Fatalf("erasure lines = %v, want sessions then run_sessions", lines)
 	}

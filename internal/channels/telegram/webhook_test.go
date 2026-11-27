@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
@@ -310,7 +309,7 @@ func TestWebhookIntakeFailureSurfacesInHealthUntilRecovery(t *testing.T) {
 
 func TestWebhookConcurrentDuplicatesCreateOneTurnPerUpdate(t *testing.T) {
 	const updates, copies = 12, 5
-	rig := newWebhookRig(t, func(cfg *config.Telegram, _ *config.TelegramAccount) {
+	rig := newWebhookRig(t, func(cfg *Config, _ *Account) {
 		cfg.Webhook.MaxConnections = updates * copies
 	})
 	sink := newMemorySink()
@@ -349,7 +348,7 @@ func TestWebhookConcurrentDuplicatesCreateOneTurnPerUpdate(t *testing.T) {
 
 func TestWebhookNeverExceedsMaxConnections(t *testing.T) {
 	const limit = 2
-	rig := newWebhookRig(t, func(cfg *config.Telegram, _ *config.TelegramAccount) { cfg.Webhook.MaxConnections = limit })
+	rig := newWebhookRig(t, func(cfg *Config, _ *Account) { cfg.Webhook.MaxConnections = limit })
 	gate := newGateSink()
 	stop := rig.start(t, gate)
 	defer stop()
@@ -465,24 +464,24 @@ func (r *webhookRig) rejectedRequests(t *testing.T) {
 }
 
 func TestNewRejectsIncompleteWebhookAccounts(t *testing.T) {
-	cases := map[string]func(*config.Telegram, *config.TelegramAccount){
-		"unknown mode":        func(_ *config.Telegram, a *config.TelegramAccount) { a.Mode = "carrier-pigeon" },
-		"missing secret ref":  func(_ *config.Telegram, a *config.TelegramAccount) { a.WebhookSecretRef = secret.Ref{} },
-		"missing public url":  func(c *config.Telegram, _ *config.TelegramAccount) { c.Webhook.PublicBaseURL = "" },
-		"zero body bound":     func(c *config.Telegram, _ *config.TelegramAccount) { c.Webhook.MaxBodyBytes = 0 },
-		"zero connection cap": func(c *config.Telegram, _ *config.TelegramAccount) { c.Webhook.MaxConnections = 0 },
+	cases := map[string]func(*Config, *Account){
+		"unknown mode":        func(_ *Config, a *Account) { a.Mode = "carrier-pigeon" },
+		"missing secret ref":  func(_ *Config, a *Account) { a.WebhookSecretRef = secret.Ref{} },
+		"missing public url":  func(c *Config, _ *Account) { c.Webhook.PublicBaseURL = "" },
+		"zero body bound":     func(c *Config, _ *Account) { c.Webhook.MaxBodyBytes = 0 },
+		"zero connection cap": func(c *Config, _ *Account) { c.Webhook.MaxConnections = 0 },
 	}
 	h := newHarness(t)
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
-			cfg := &config.Telegram{
-				Polling: config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
-				Webhook: config.TelegramWebhook{PublicBaseURL: testPublicBase, MaxBodyBytes: 1024, MaxConnections: 2},
+			cfg := &Config{
+				Polling: PollingConfig{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
+				Webhook: WebhookConfig{PublicBaseURL: testPublicBase, MaxBodyBytes: 1024, MaxConnections: 2},
 			}
-			account := &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv), Mode: config.TelegramModeWebhook, WebhookSecretRef: secrettest.Ref("env://" + testWebhookSecretEnv)}
+			account := &Account{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv), Mode: ModeWebhook, WebhookSecretRef: secrettest.Ref("env://" + testWebhookSecretEnv)}
 			mutate(cfg, account)
-			_, err := New(cfg, account, h.cursors, h.effects, h.sessions, nil)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			_, err := New(&Deps{Config: cfg, Account: account, Cursors: h.cursors, Effects: h.effects, Sessions: h.sessions})
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Fatalf("New error = %v, want invalid_argument", err)
 			}
 		})
@@ -502,7 +501,7 @@ func TestNewWebhookHandlerRequiresWebhookAccounts(t *testing.T) {
 	for name, adapters := range cases {
 		t.Run(name, func(t *testing.T) {
 			handler, err := NewWebhookHandler(adapters)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument || handler != nil {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) || handler != nil {
 				t.Fatalf("NewWebhookHandler = %v, %v; want invalid_argument and no handler", handler, err)
 			}
 		})
@@ -523,7 +522,7 @@ func TestNewWebhookServerValidatesArguments(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			server, err := NewWebhookServer(tc.handler, tc.listen, tc.grace)
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument || server != nil {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) || server != nil {
 				t.Fatalf("NewWebhookServer = %v, %v; want invalid_argument and no server", server, err)
 			}
 		})
@@ -655,7 +654,7 @@ func TestWebhookServerCancelsStuckDeliveryAfterGrace(t *testing.T) {
 		t.Errorf("cancelled delivery = %d, want 500 so Telegram retries", code)
 	}
 	err := awaitServed(t, served.done)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
+	if !fault.HasCode(err, ErrorCodeConnectionFailed) {
 		t.Errorf("Serve() = %v, want connection_failed after a forced drain", err)
 	}
 	if got := rig.adapter.Health(t.Context()); got.Status != runtimechannelhost.ChannelHealthy {
@@ -679,7 +678,7 @@ func TestWebhookServerBindFailureIsCoded(t *testing.T) {
 		t.Errorf("Name() = %q", server.Name())
 	}
 	err = server.Start(t.Context())
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeConnectionFailed {
+	if !fault.HasCode(err, ErrorCodeConnectionFailed) {
 		t.Fatalf("Start() = %v, want connection_failed", err)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -52,7 +51,7 @@ func TestServerCheckerReportsPerServerFindings(t *testing.T) {
 }
 
 func TestServerCheckerHealthyAndLegacyFindings(t *testing.T) {
-	servers := []config.MCPServer{{Name: "old", Transport: config.MCPTransportLegacySSE}}
+	servers := []ServerConfig{{Name: "old", Transport: TransportLegacySSE}}
 	checker := NewServerChecker(servers, func() []ServerStatus {
 		return []ServerStatus{{Name: "old", Connected: true}}
 	})

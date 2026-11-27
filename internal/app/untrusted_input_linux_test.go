@@ -14,7 +14,9 @@ import (
 	"testing"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
@@ -24,7 +26,7 @@ import (
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const untrustedInputSearchPath = "/search"
@@ -102,19 +104,26 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	if err != nil {
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
-	rig.reachable = channelApprovalReachable(approvalChannels(approvers, route))
+	rig.reachable = approval.Reachable(approvalChannels(approvers, route))
 	decider := func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 		rig.asked.Add(1)
 		return false, nil
 	}
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, rig.access, toolsbuiltin.WithApprovalReachable(rig.reachable), toolsbuiltin.WithLiveEvents(liveEvents))
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: cfg, CapabilityReport: capabilitytest.All(t)},
+		db:           db,
+		artifactRoot: artifacts,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring:       &toolWiring{decider: decider, access: rig.access, reachable: rig.reachable},
+		events:       liveEvents,
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	name := "untrusted-input"
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, store.NewSessionService(db), builtin, nil, nil,
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: rig.model}, turnstore.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -123,11 +132,11 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 	}
 	rig.engine, err = runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		LiveEvents:     liveEvents,
 	})
 	if err != nil {
@@ -146,8 +155,8 @@ func newUntrustedInputRig(t *testing.T, principalTools, searchEndpoint string) *
 func (r *untrustedInputRig) grant(principalID, tool string) {
 	r.t.Helper()
 	now := time.Now().UTC()
-	grant := store.StandingGrant{PrincipalID: principalID, AgentID: auraagent.DefaultID, ToolName: tool, GrantedBy: principal.OwnerID, GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
-	if _, err := store.NewStandingGrantStore(r.db).Grant(r.t.Context(), &grant); err != nil {
+	grant := principal.StandingGrant{PrincipalID: principalID, AgentID: auraagent.DefaultID, ToolName: tool, GrantedBy: principal.OwnerID, GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if _, err := principal.NewStandingGrantStore(r.db).Grant(r.t.Context(), &grant); err != nil {
 		r.t.Fatalf("Grant: %v", err)
 	}
 }
@@ -155,7 +164,7 @@ func (r *untrustedInputRig) grant(principalID, tool string) {
 func (r *untrustedInputRig) run(req *turn.TurnRequest) {
 	r.t.Helper()
 	now := time.Now().UTC()
-	err := store.NewSessionService(r.db).Create(r.t.Context(), &store.Session{ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
+	err := turnstore.NewSessionService(r.db).Create(r.t.Context(), &turn.Session{ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now})
 	if err != nil {
 		r.t.Fatalf("create session: %v", err)
 	}
@@ -171,7 +180,7 @@ func (r *untrustedInputRig) webhookTurn(call string) *turn.TurnRequest {
 	event := webhookTestEvent()
 	event.Envelope.EventID = fmt.Sprintf("evt-%d", r.turns)
 	event.Envelope.Subject = callMarker + call + "\n"
-	return webhookTurnRequest(fmt.Sprintf("sess_hook_%d", r.turns), fmt.Sprintf("turn-hook-%d", r.turns), event)
+	return gatewaywebhook.TurnRequest(fmt.Sprintf("sess_hook_%d", r.turns), fmt.Sprintf("turn-hook-%d", r.turns), event)
 }
 
 func (r *untrustedInputRig) discordTurn(principalID, call string) *turn.TurnRequest {
@@ -272,5 +281,5 @@ func serverApprovalReachable(t *testing.T) func(sessionID string) bool {
 	if err != nil {
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
-	return channelApprovalReachable(approvalChannels(approvers, route))
+	return approval.Reachable(approvalChannels(approvers, route))
 }

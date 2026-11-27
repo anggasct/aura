@@ -19,7 +19,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
@@ -320,6 +319,9 @@ func (s *fakeSMTP) serve(raw net.Conn, behavior *smtpBehavior, connection *smtpC
 				continue
 			}
 			s.update(connection, func(c *smtpConnection) { c.dataStarted = true })
+			if behavior.afterData == "drop_during_body" {
+				return
+			}
 			data, err := readData(reader)
 			if err != nil {
 				return
@@ -388,14 +390,14 @@ func readData(reader *bufio.Reader) (string, error) {
 	}
 }
 
-func smtpAccount(server *fakeSMTP) *config.EmailAccount {
-	return &config.EmailAccount{
+func smtpAccount(server *fakeSMTP) *Account {
+	return &Account{
 		Name:       testAccount,
 		Persona:    testPersona,
 		Address:    testAddress,
 		AuthservID: testAuthserv,
-		IMAP:       config.EmailIMAP{Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: secrettest.Ref("env://AURA_TEST_EMAIL_PASSWORD")},
-		SMTP: config.EmailSMTP{
+		IMAP:       IMAPConfig{Host: "imap.example.com", Port: 993, Username: testAddress, PasswordRef: secrettest.Ref("env://AURA_TEST_EMAIL_PASSWORD")},
+		SMTP: SMTPConfig{
 			Host:        "127.0.0.1",
 			Port:        server.port(),
 			Username:    smtpUsername,

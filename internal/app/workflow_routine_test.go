@@ -2,30 +2,32 @@ package app
 
 import (
 	"database/sql"
-	"errors"
 	"strings"
 	"testing"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/spf13/cobra"
+
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func succeededGeneratedRun(t *testing.T, controller *workflowToolController, runs *workflow.Store, db *sql.DB) string {
+func succeededGeneratedRun(t *testing.T, controller *workflow.Controller, runs *workflow.Store, db *sql.DB) string {
 	t.Helper()
 	event := "done"
 	generated := workflow.NormalizeProposal(&workflow.Spec{Goal: "Weekly report", Steps: []workflow.StepSpec{
 		{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
 	}}, "prop_weekly")
-	if err := controller.interpreter.LoadAll(t.Context(), []*workflow.Spec{generated}, controller.interpreter.ValidationDeps()); err != nil {
+	if err := controller.Interpreter().LoadAll(t.Context(), []*workflow.Spec{generated}, controller.Interpreter().ValidationDeps()); err != nil {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
 	sessionID := "main/terminal:owner"
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	digest, err := workflow.Digest(generated)
@@ -40,7 +42,7 @@ func succeededGeneratedRun(t *testing.T, controller *workflowToolController, run
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := controller.interpreter.StartConfigured(t.Context(), generated.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	run, err := controller.Interpreter().StartConfigured(t.Context(), generated.ID, nil, principal.OwnerID, principal.ClassOwner, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,18 +54,17 @@ func TestOwnerSavesRoutinesThatTheSchedulerStartsOncePerFire(t *testing.T) {
 	controller, runs, db := workflowToolFixture(t, "book_visit")
 	runID := succeededGeneratedRun(t, controller, runs, db)
 	owner := caller(principal.ClassOwner, principal.OwnerID)
-	if _, err := controller.SaveRoutine(t.Context(), caller(principal.ClassTrusted, "discord:111"), runID, "Weekly report"); !errors.Is(err, toolsbuiltin.ErrWorkflowNotPermitted) {
+	if _, err := controller.SaveRoutine(t.Context(), caller(principal.ClassTrusted, "discord:111"), runID, "Weekly report"); !fault.HasCode(err, workflow.ErrorCodeNotPermitted) {
 		t.Fatalf("trusted save = %v", err)
 	}
-	if _, err := controller.SaveRoutine(t.Context(), owner, "run_missing", "Weekly report"); !errors.Is(err, toolsbuiltin.ErrWorkflowRunNotFound) {
+	if _, err := controller.SaveRoutine(t.Context(), owner, "run_missing", "Weekly report"); !fault.HasCode(err, workflow.ErrorCodeRunNotFound) {
 		t.Fatalf("save of a missing run = %v", err)
 	}
-	var rejection *toolsbuiltin.WorkflowRejection
-	if _, err := controller.SaveRoutine(t.Context(), owner, runID, "bad/name"); !errors.As(err, &rejection) || rejection.Code != string(workflow.ErrorCodeRoutineInvalid) {
+	if _, err := controller.SaveRoutine(t.Context(), owner, runID, "bad/name"); !fault.HasCode(err, workflow.ErrorCodeRoutineInvalid) {
 		t.Fatalf("save with a bad name = %v", err)
 	}
 	first, err := controller.SaveRoutine(t.Context(), owner, runID, "Weekly report")
-	if err != nil || first != (toolsbuiltin.WorkflowRoutine{ID: "routine_weekly_report", Version: 1}) {
+	if err != nil || first != (workflow.RoutineSummary{ID: "routine_weekly_report", Version: 1}) {
 		t.Fatalf("first save = %+v, %v", first, err)
 	}
 	if second, err := controller.SaveRoutine(t.Context(), owner, runID, "Weekly report"); err != nil || second.Version != 2 {
@@ -89,7 +90,7 @@ func TestOwnerSavesRoutinesThatTheSchedulerStartsOncePerFire(t *testing.T) {
 	if _, err := turns.RunTurn(t.Context(), request); err == nil || !strings.Contains(err.Error(), "no workflow interpreter") {
 		t.Fatalf("scheduled workflow without a runtime = %v", err)
 	}
-	workflows.set(controller.interpreter)
+	workflows.set(controller.Interpreter())
 	fired, err := turns.RunTurn(t.Context(), request)
 	if err != nil || !fired.Succeeded || !strings.Contains(fired.Text, "started workflow routine_weekly_report") {
 		t.Fatalf("fire = %+v, %v", fired, err)
@@ -121,7 +122,7 @@ func TestScheduleAddNeedsOneKnownTarget(t *testing.T) {
 		"bad input":        {args: []string{"--workflow", "ghost", "--input", `{"permissions":["exec"]}`}, want: "--input must be a JSON object"},
 	} {
 		args := append([]string{"add", "--name", "n", "--schedule", "0 3 * * 1", "--channel", "discord", "--destination", "default"}, tc.args...)
-		_, err := runAccessCommand(t, newScheduleCmd, cfg, args...)
+		_, err := runAccessCommand(t, func(gf *GlobalFlags) *cobra.Command { return schedule.Commands(scheduleOpener(gf))[0] }, cfg, args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", label, err, tc.want)
 		}

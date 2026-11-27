@@ -9,8 +9,6 @@ import (
 	"slices"
 	"sync"
 	"time"
-
-	"github.com/anggasct/aura/internal/config"
 )
 
 type DiscoveredTool struct {
@@ -44,8 +42,8 @@ type TrustRestart struct {
 }
 
 type TrustAuth struct {
-	OAuthClientIDEnv     string `json:"oauth_client_id_env,omitempty"`
-	OAuthClientSecretEnv string `json:"oauth_client_secret_env,omitempty"`
+	OAuthClientIDRef     string `json:"oauth_client_id_ref,omitempty"`
+	OAuthClientSecretRef string `json:"oauth_client_secret_ref,omitempty"`
 	OAuthTokenStore      string `json:"oauth_token_store,omitempty"`
 	StaticHeader         string `json:"static_header,omitempty"`
 	StaticCredentialRef  string `json:"static_credential_ref,omitempty"`
@@ -57,7 +55,7 @@ type ToolTrustInfo struct {
 	SchemaHash  string `json:"schema_hash"`
 }
 
-func ComputeTrustDigest(serverCfg *config.MCPServer, tools []DiscoveredTool) (string, error) {
+func ComputeTrustDigest(serverCfg *ServerConfig, tools []DiscoveredTool) (string, error) {
 	if serverCfg == nil {
 		return "", Errorf(ErrConfigInvalid, "server configuration is required")
 	}
@@ -101,13 +99,13 @@ func ComputeTrustDigest(serverCfg *config.MCPServer, tools []DiscoveredTool) (st
 	if serverCfg.Auth != nil {
 		auth = &TrustAuth{}
 		if serverCfg.Auth.OAuth != nil {
-			auth.OAuthClientIDEnv = serverCfg.Auth.OAuth.ClientIDEnv
-			auth.OAuthClientSecretEnv = serverCfg.Auth.OAuth.ClientSecretEnv
+			auth.OAuthClientIDRef = serverCfg.Auth.OAuth.ClientIDRef.String()
+			auth.OAuthClientSecretRef = serverCfg.Auth.OAuth.ClientSecretRef.String()
 			auth.OAuthTokenStore = serverCfg.Auth.OAuth.TokenStore
 		}
 		if serverCfg.Auth.Static != nil {
 			auth.StaticHeader = serverCfg.Auth.Static.Header
-			auth.StaticCredentialRef = serverCfg.Auth.Static.CredentialRef
+			auth.StaticCredentialRef = serverCfg.Auth.Static.CredentialRef.String()
 		}
 	}
 
@@ -122,7 +120,7 @@ func ComputeTrustDigest(serverCfg *config.MCPServer, tools []DiscoveredTool) (st
 		URL:              serverCfg.URL,
 		StartupTimeout:   int64(serverCfg.StartupTimeout),
 		RequestTimeout:   int64(serverCfg.RequestTimeout),
-		ConnectTimeout:   int64(serverCfg.ConnectTimeout),
+		ConnectTimeout:   int64(serverCfg.EffectiveConnectTimeout()),
 		MaxMessageSize:   int64(serverCfg.MaxMessageSize),
 		Restart:          restart,
 		Auth:             auth,
@@ -152,7 +150,7 @@ func copyStringMap(src map[string]string) map[string]string {
 	return dst
 }
 
-func ComputeConfigDigest(serverCfg *config.MCPServer) (string, error) {
+func ComputeConfigDigest(serverCfg *ServerConfig) (string, error) {
 	return ComputeTrustDigest(serverCfg, nil)
 }
 

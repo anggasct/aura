@@ -5,8 +5,14 @@ import (
 	"database/sql"
 	"testing"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func durableRowsOf(t *testing.T, db *sql.DB, turnID string) (runs, actions int) {
@@ -25,8 +31,8 @@ func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
 		{principal: "discord:602", session: "lobby/discord:owner/dm:602", turnID: "turn-kept"},
 	}
 	for _, tc := range turns {
-		sess := store.Session{ID: tc.session, OwnerID: tc.principal}
-		if err := store.NewSessionService(rig.db).Create(t.Context(), &sess); err != nil {
+		sess := turn.Session{ID: tc.session, OwnerID: tc.principal}
+		if err := turnstore.NewSessionService(rig.db).Create(t.Context(), &sess); err != nil {
 			t.Fatalf("create session %s: %v", tc.session, err)
 		}
 		req := sampleRequest(tc.session, tc.turnID)
@@ -39,14 +45,33 @@ func TestErasedPrincipalLeavesNoTurnRun(t *testing.T) {
 			t.Fatalf("durable rows of %s before the erasure = %d runs, %d actions; want its run and its journal", tc.turnID, runs, actions)
 		}
 	}
-	counts, err := store.ErasePrincipal(t.Context(), rig.db, "discord:601", true, store.ErasureOptions{})
-	if err != nil || counts.Sessions != 1 {
-		t.Fatalf("ErasePrincipal = %+v, %v; want one session erased", counts, err)
+	orphanedTurns, err := NewOrphanedTurnRunEraser(rig.db, rig.runtime, turnstore.NewTurnStore(rig.db))
+	if err != nil {
+		t.Fatalf("NewOrphanedTurnRunEraser: %v", err)
+	}
+	report, err := principal.Erase(t.Context(), rig.db, principal.ErasureScope{PrincipalID: "discord:601", Apply: true}, []principal.Eraser{
+		turnstore.NewSessionEraser(rig.db, false),
+		orphanedTurns,
+	})
+	if err != nil || report.Count(principal.ErasureLineSessions) != 1 {
+		t.Fatalf("Erase = %v, %v; want one session erased", report.Lines(), err)
 	}
 	if runs, actions := durableRowsOf(t, rig.db, "turn-erased"); runs != 0 || actions != 0 {
 		t.Errorf("durable rows of the erased principal's turn = %d runs, %d actions; want none", runs, actions)
 	}
 	if runs, actions := durableRowsOf(t, rig.db, "turn-kept"); runs != 1 || actions == 0 {
 		t.Errorf("durable rows of the other principal's turn = %d runs, %d actions; want its run and its journal", runs, actions)
+	}
+}
+
+func TestOrphanedTurnRunEraserRefusesNilPorts(t *testing.T) {
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
+	turns := turnstore.NewTurnStore(db)
+	runs := newDurableHostRig(t, Deps{Config: testLimits(4, 16)}, newHoldingExecutor()).runtime
+	if _, err := NewOrphanedTurnRunEraser(db, nil, turns); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+		t.Fatalf("NewOrphanedTurnRunEraser(db, nil, turns) = %v, want %s", err, turn.ErrorCodeInvalidArgument)
+	}
+	if _, err := NewOrphanedTurnRunEraser(db, runs, nil); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+		t.Fatalf("NewOrphanedTurnRunEraser(db, runs, nil) = %v, want %s", err, turn.ErrorCodeInvalidArgument)
 	}
 }

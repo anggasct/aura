@@ -225,7 +225,7 @@ func TestHostEndsTheCallForRequestsThatBreakTheContract(t *testing.T) {
 			h := newTestHost(t, api, starter, &bearerAuth{token: testToken})
 			_, fail := invokeTool(t, h, tc.tool(h))
 			mustCode(t, fail, tc.want)
-			if fail.RequestSent {
+			if fail.requestSent {
 				t.Fatal("a refused request is marked as sent")
 			}
 			if !starter.session(0).closed.Load() {
@@ -446,4 +446,15 @@ func TestAuthHostsMatchLikeEgressEntries(t *testing.T) {
 			t.Errorf("credentialHost(%s) = %v, want %v", raw, got, want)
 		}
 	}
+}
+
+func TestSessionRPCLimitErrorIsPreserved(t *testing.T) {
+	starter := newStarter(func(int) func(map[string]any) (any, error) {
+		return func(map[string]any) (any, error) {
+			return nil, Errorf(ErrRPCLimit, "the connector message exceeds the size bound")
+		}
+	})
+	h := newTestHost(t, nil, starter, &bearerAuth{})
+	_, fail := invokeTool(t, h, readTool(h))
+	mustCode(t, fail, ErrRPCLimit)
 }

@@ -17,6 +17,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -580,7 +581,7 @@ func TestNewHandlerValidatesOptions(t *testing.T) {
 	for name, mutate := range cases {
 		t.Run(name, func(t *testing.T) {
 			handler, err := NewHandler(mutate(good()))
-			if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument || handler != nil {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument || handler != nil {
 				t.Fatalf("NewHandler = %v, %v; want %s", handler, err, ErrorCodeInvalidArgument)
 			}
 		})

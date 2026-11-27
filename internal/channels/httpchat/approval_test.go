@@ -15,7 +15,6 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type ownerCall struct {
@@ -72,8 +71,8 @@ type approvalProbe struct {
 	err         error
 }
 
-func (p *approvalProbe) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (p *approvalProbe) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		if !emit(yield, turnEvent(turn.EventKindTurnAccepted)) {
 			return
 		}

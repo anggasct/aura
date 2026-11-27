@@ -19,18 +19,24 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/usage"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -115,17 +121,17 @@ func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.Builti
 
 type approvalE2EStack struct {
 	engine   turn.AgentRuntime
-	sessions store.SessionService
+	sessions turnstore.SessionService
 	calls    *atomic.Int32
 }
 
 func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answer string) *approvalE2EStack {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	liveEvents := turn.NewEventBus(nil)
-	journal, err := effect.NewJournal(db, effect.Options{Events: liveEvents})
+	journal, err := effect.NewJournal(db, effect.Options{Events: liveEvents, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("journal: %v", err)
 	}
@@ -135,17 +141,28 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	}
 	calls := &atomic.Int32{}
 	broker, err := toolbroker.New(&toolbroker.Options{
-		Effects: effects,
-		Adapters: map[string]toolbroker.Adapter{
-			"exec@v1": func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
-				calls.Add(1)
-				return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
-			},
-		},
-		ApprovalDecider: decider,
+		Effects:          effects,
+		HostCapabilities: []string{"exec-linux"},
+		ApprovalDecider:  decider,
 	})
 	if err != nil {
 		t.Fatalf("broker: %v", err)
+	}
+	execDef := &auratools.Definition{
+		Name:                 "exec",
+		Version:              auratools.Version,
+		Schema:               json.RawMessage(`{"type":"object","properties":{"command":{"type":"array","items":{"type":"string"}}},"required":["command"]}`),
+		RequiredCapabilities: []string{"exec-linux"},
+		RequiresApproval:     true,
+		Effectful:            true,
+		Validator:            func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil },
+	}
+	execRule := toolbroker.DefaultRule(execDef)
+	if err := broker.RegisterTool(execDef, func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+		calls.Add(1)
+		return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+	}, &execRule); err != nil {
+		t.Fatalf("RegisterTool: %v", err)
 	}
 	builtin := e2eBuiltinTools{broker: broker}
 	model := &e2eApprovalModel{toolName: "exec", answer: answer}
@@ -154,7 +171,7 @@ func newApprovalE2EStack(t *testing.T, decider toolbroker.ApprovalDecider, answe
 	if err != nil {
 		t.Fatalf("executor: %v", err)
 	}
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: liveEvents})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default(), LiveEvents: liveEvents})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -165,23 +182,25 @@ func newApprovalE2EConsole(t *testing.T, stack *approvalE2EStack, bridge *termin
 	t.Helper()
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: stack.engine},
-		e2eSessions{sessions: stack.sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString(input),
-		out, diag,
-		terminal.Config{MaxInputBytes: 4096, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
-	console.SetTTY(terminal.NewTTYRenderer(terminal.TTYOptions{
-		Out:     e2eWriteCloser{Writer: out},
-		Width:   func() int { return 80 },
-		Hz:      500,
-		Styling: false,
-	}))
-	if bridge != nil {
-		console.SetApprovalBridge(bridge)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: stack.engine},
+		Sessions:  e2eSessions{sessions: stack.sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString(input),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 4096, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+		TTY: terminal.NewTTYRenderer(terminal.TTYOptions{
+			Out:     e2eWriteCloser{Writer: out},
+			Width:   func() int { return 80 },
+			Hz:      500,
+			Styling: false,
+		}),
+		Approvals: bridge,
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
 	}
 	return out, diag, console
 }
@@ -291,41 +310,41 @@ type blockingExecutor struct {
 	failText string
 }
 
-func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (b *blockingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		b.once.Do(func() { close(b.started) })
 		select {
 		case <-b.release:
 		case <-ctx.Done():
-			yield(store.RuntimeEvent{}, ctx.Err())
+			yield(turn.Event{}, ctx.Err())
 			return
 		}
 		payload, err := json.Marshal(map[string]any{"text": b.failText})
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
-		if !yield(store.RuntimeEvent{Kind: store.EventKindADK, Payload: payload}, nil) {
+		if !yield(turn.Event{Kind: turnstore.EventKindADK, Payload: payload}, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{Kind: turn.EventKindTurnCompleted}, nil)
+		yield(turn.Event{Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 
 func TestTerminalOverloadSurfacesError(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	now := time.Now().UTC()
 	for _, id := range []string{"seed-a", "seed-b"} {
-		if err := sessions.Create(context.Background(), &store.Session{ID: id, OwnerID: "e2e-owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := sessions.Create(context.Background(), &turn.Session{ID: id, OwnerID: "e2e-owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatalf("seed session %s: %v", id, err)
 		}
 	}
 	blocker := &blockingExecutor{started: make(chan struct{}), release: make(chan struct{})}
 	limits := runtimeengine.Default()
 	limits.MaxActiveTurns, limits.MaxPendingTurns = 1, 1
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: blocker, Config: limits})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: blocker, Config: limits})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
@@ -360,15 +379,19 @@ func TestTerminalOverloadSurfacesError(t *testing.T) {
 
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: engine},
-		e2eSessions{sessions: sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("hi\n"),
-		out, diag,
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine},
+		Sessions:  e2eSessions{sessions: sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("hi\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	err = console.Run(context.Background())
 	if err == nil {
 		t.Fatal("overloaded submission must surface an error")
@@ -400,30 +423,34 @@ func TestTerminalRestartResume(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
 
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
 	db1, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
-	sessions1 := store.NewSessionService(db1)
-	events1 := store.NewEventStore(db1)
+	sessions1 := turnstore.NewSessionService(db1)
+	events1 := turnstore.NewEventStore(db1)
 	executor1 := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"first durable answer"}]},"partial":false}`)},
 	})
-	engine1, err := runtimeengine.New(&runtimeengine.Deps{Events: events1, Dedupe: store.NewDedupeStore(db1), Executor: executor1, Config: runtimeengine.Default()})
+	engine1, err := runtimeengine.New(&runtimeengine.Deps{Events: events1, Dedupe: turnstore.NewDedupeStore(db1), Executor: executor1, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
 	out1 := &bytes.Buffer{}
-	console1 := terminal.NewConsole(
-		e2eRunner{engine: engine1},
-		e2eSessions{sessions: sessions1},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("hello\n"),
-		out1, &bytes.Buffer{},
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console1, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine1},
+		Sessions:  e2eSessions{sessions: sessions1},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("hello\n"),
+		Out:       out1,
+		Diag:      &bytes.Buffer{},
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console1.Run(context.Background()); err != nil {
 		t.Fatalf("first process run: %v", err)
 	}
@@ -439,26 +466,30 @@ func TestTerminalRestartResume(t *testing.T) {
 		t.Fatalf("open second process store: %v", err)
 	}
 	t.Cleanup(func() { _ = db2.Close() })
-	sessions2 := store.NewSessionService(db2)
-	events2 := store.NewEventStore(db2)
+	sessions2 := turnstore.NewSessionService(db2)
+	events2 := turnstore.NewEventStore(db2)
 	executor2 := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"second durable answer"}]},"partial":false}`)},
 	})
-	engine2, err := runtimeengine.New(&runtimeengine.Deps{Events: events2, Dedupe: store.NewDedupeStore(db2), Executor: executor2, Config: runtimeengine.Default()})
+	engine2, err := runtimeengine.New(&runtimeengine.Deps{Events: events2, Dedupe: turnstore.NewDedupeStore(db2), Executor: executor2, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("second engine: %v", err)
 	}
 	out2 := &bytes.Buffer{}
-	console2 := terminal.NewConsole(
-		e2eRunner{engine: engine2},
-		e2eSessions{sessions: sessions2},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("again\n"),
-		out2, &bytes.Buffer{},
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
-	console2.SetSessionID("e2e-session")
+	console2, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine2},
+		Sessions:  e2eSessions{sessions: sessions2},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("again\n"),
+		Out:       out2,
+		Diag:      &bytes.Buffer{},
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+		SessionID: "e2e-session",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console2.Run(context.Background()); err != nil {
 		t.Fatalf("resumed process run: %v", err)
 	}
@@ -488,34 +519,38 @@ func TestTerminalRestartResume(t *testing.T) {
 func TestTerminalPrivacyNoPlaintextHistory(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), auramodel.Schema(), storage.Schema())
 	db, err := sqlite.Open(context.Background(), dbPath, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"canary-output-7b1c"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"canary-output-7b1c"}]},"partial":false}`)},
 	})
 	logBuf := &bytes.Buffer{}
 	logger := slog.New(slog.NewTextHandler(logBuf, nil))
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Logger: logger, Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Logger: logger, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: engine},
-		e2eSessions{sessions: sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("canary-prompt-9f2a\n"),
-		out, diag,
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine},
+		Sessions:  e2eSessions{sessions: sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("canary-prompt-9f2a\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("console run: %v", err)
 	}

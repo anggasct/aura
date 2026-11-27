@@ -4,14 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"sync"
-
-	"github.com/anggasct/aura/internal/store"
 )
 
 type EventBus struct {
 	logger   *slog.Logger
 	mu       sync.RWMutex
-	handlers []func(*store.RuntimeEvent)
+	handlers []func(*Event)
 }
 
 func NewEventBus(logger *slog.Logger) *EventBus {
@@ -21,7 +19,7 @@ func NewEventBus(logger *slog.Logger) *EventBus {
 	return &EventBus{logger: logger}
 }
 
-func (b *EventBus) Subscribe(handler func(*store.RuntimeEvent)) error {
+func (b *EventBus) Subscribe(handler func(*Event)) error {
 	if handler == nil {
 		return invalidArgument("event subscriber must not be nil")
 	}
@@ -31,12 +29,12 @@ func (b *EventBus) Subscribe(handler func(*store.RuntimeEvent)) error {
 	return nil
 }
 
-func (b *EventBus) Publish(ev *store.RuntimeEvent) {
+func (b *EventBus) Publish(ev *Event) {
 	if ev == nil {
 		return
 	}
 	b.mu.RLock()
-	handlers := make([]func(*store.RuntimeEvent), len(b.handlers))
+	handlers := make([]func(*Event), len(b.handlers))
 	copy(handlers, b.handlers)
 	b.mu.RUnlock()
 	for _, handler := range handlers {
@@ -44,7 +42,7 @@ func (b *EventBus) Publish(ev *store.RuntimeEvent) {
 	}
 }
 
-func (b *EventBus) deliver(handler func(*store.RuntimeEvent), ev *store.RuntimeEvent) {
+func (b *EventBus) deliver(handler func(*Event), ev *Event) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			b.logger.ErrorContext(context.Background(), "live event subscriber panicked",

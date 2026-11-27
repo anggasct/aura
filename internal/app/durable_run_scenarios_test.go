@@ -16,7 +16,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
@@ -24,8 +23,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -74,7 +75,7 @@ type workflowShape struct {
 	budget          workflow.Budget
 	resumeFromStore bool
 	stubs           []workflowStub
-	wire            func(t *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner
+	wire            func(t *testing.T, life *runLife, runner *workflow.ToolStepRunner) workflow.ToolRunner
 }
 
 var buildAndShipStubs = []workflowStub{{tool: stubTool{name: stubBuildTool}}, {tool: stubTool{name: stubShipTool}}}
@@ -116,17 +117,22 @@ const scenarioPersona = "scenario"
 func (w *workflowShape) registry(t *testing.T) *auraagent.Registry {
 	t.Helper()
 	persona := auraagent.Persona{ID: scenarioPersona, Description: "runs the scenario tools", Instructions: "run the listed tools", Tools: w.known}
-	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, []string{"primary"})
+	registry, err := auraagent.Build([]auraagent.Persona{persona}, w.known, appconfig.BuiltinToolDefinitions(), []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent registry: %v", err)
 	}
 	return registry
 }
 
-func (w *workflowShape) deps(registry *auraagent.Registry, runner *workflowToolRunner) *workflow.ValidationDeps {
+func (w *workflowShape) deps(t *testing.T, registry *auraagent.Registry, runner *workflow.ToolStepRunner) *workflow.ValidationDeps {
+	t.Helper()
+	broker, ok := runner.Broker().(*toolbroker.Broker)
+	if !ok {
+		t.Fatalf("broker is %T, want *toolbroker.Broker", runner.Broker())
+	}
 	return &workflow.ValidationDeps{
 		KnownTools: w.known, EffectfulTools: append([]string{}, w.effectful...), Agents: registry,
-		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, toolsbuiltin.NewStepCatalog(runner.broker.Definitions())),
+		CheckToolCall: acceptToolCall, StepAllowed: stepCeiling(registry, newStepCatalog(broker.Definitions())),
 	}
 }
 
@@ -136,7 +142,7 @@ func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
 		t.Skip("the production workflow tool runner needs Linux: the filesystem adapters refuse other systems")
 	}
 	spec := w.spec()
-	if err := workflow.NewStore(suite.db).SaveDefinition(t.Context(), spec); err != nil {
+	if err := mustWorkflowStore(t, suite.db).SaveDefinition(t.Context(), spec); err != nil {
 		t.Fatalf("SaveDefinition: %v", err)
 	}
 	digest, err := workflow.Digest(spec)
@@ -151,7 +157,7 @@ func (w *workflowShape) seed(t *testing.T, suite *runSuite) {
 	}
 }
 
-func newProductionToolRunner(t *testing.T, life *runLife, cfg *appconfig.Config, registry *auraagent.Registry) *workflowToolRunner {
+func newProductionToolRunner(t *testing.T, life *runLife, cfg *appconfig.Config, registry *auraagent.Registry) *workflow.ToolStepRunner {
 	t.Helper()
 	cfg.Storage.Path = filepath.Dir(life.plan.Database)
 	cfg.Tools.Workspace = filepath.Join(cfg.Storage.Path, "workspace")
@@ -161,10 +167,14 @@ func newProductionToolRunner(t *testing.T, life *runLife, cfg *appconfig.Config,
 	return buildSurface(t, &surfaceInput{cfg: cfg, db: life.db, registry: registry}).runner
 }
 
-func (w *workflowShape) registerStubs(t *testing.T, life *runLife, runner *workflowToolRunner) {
+func (w *workflowShape) registerStubs(t *testing.T, life *runLife, runner *workflow.ToolStepRunner) {
 	t.Helper()
+	broker, ok := runner.Broker().(*toolbroker.Broker)
+	if !ok {
+		t.Fatalf("broker is %T, want *toolbroker.Broker", runner.Broker())
+	}
 	for _, stub := range w.stubs {
-		toolbrokertest.Register(t, runner.broker, toolbrokertest.Stub{
+		toolbrokertest.Register(t, broker, toolbrokertest.Stub{
 			Name:             stub.tool.name,
 			RequiresApproval: stub.tool.approval,
 			Effectful:        stub.effectful,
@@ -183,9 +193,9 @@ func (w *workflowShape) host(t *testing.T, life *runLife) {
 	if w.wire != nil {
 		tools = w.wire(t, life, runner)
 	}
-	deps := w.deps(registry, runner)
-	interpreter := workflow.NewInterpreter(life.workflows, life.runtime, &workflow.Options{
-		MaxConcurrentSteps: workflowMaxConcurrentSteps(&cfg),
+	deps := w.deps(t, registry, runner)
+	interpreter := mustWorkflowInterpreter(t, life.workflows, life.runtime, &workflow.Options{
+		MaxConcurrentSteps: cfg.Workflows.MaxConcurrentSteps,
 		Logger:             slog.New(slog.DiscardHandler),
 		AgentResolver:      deps.Agents,
 		Agents:             okAgentRunner{},
@@ -217,7 +227,7 @@ func (w *workflowShape) startRun(t *testing.T, life *runLife) {
 
 func discoverTheRun(t *testing.T, suite *runSuite) {
 	t.Helper()
-	disk := workflow.NewStore(suite.db)
+	disk := mustWorkflowStore(t, suite.db)
 	var started *workflow.RunSummary
 	suite.child.waitKillPoint(t, "the first life has started its workflow run", func() bool {
 		runs, err := disk.Runs(t.Context(), "")
@@ -289,9 +299,17 @@ func proofSpec(credential string) *workflow.Spec {
 	}
 }
 
-func registerGitHubOnTheStub(t *testing.T, life *runLife, runner *workflowToolRunner) workflow.ToolRunner {
+func registerGitHubOnTheStub(t *testing.T, life *runLife, runner *workflow.ToolStepRunner) workflow.ToolRunner {
 	t.Helper()
-	if err := githubadapter.Register(runner.in.Executor, &githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: secrettest.Ref("env://" + proofTokenEnv)}}}); err != nil {
+	broker, ok := runner.Broker().(*toolbroker.Broker)
+	if !ok {
+		t.Fatalf("broker is %T, want *toolbroker.Broker", runner.Broker())
+	}
+	provider, err := githubadapter.NewToolProvider(&githubadapter.ToolOptions{BaseURL: life.plan.GitHub, HTTPClient: &http.Client{}, Credentials: []githubadapter.Credential{{Name: proofCredential, Ref: secrettest.Ref("env://" + proofTokenEnv)}}})
+	if err != nil {
+		t.Fatalf("build the github tools: %v", err)
+	}
+	if err := broker.RegisterProvider(provider); err != nil {
 		t.Fatalf("register the github tools: %v", err)
 	}
 	return runner
@@ -341,11 +359,11 @@ func seedChild(t *testing.T, suite *runSuite) {
 	t.Helper()
 	now := time.Now().UTC()
 	for _, id := range []string{childParent, childSession} {
-		if err := store.NewSessionService(suite.db).Create(t.Context(), &store.Session{ID: id, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := turnstore.NewSessionService(suite.db).Create(t.Context(), &turn.Session{ID: id, OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("create %s: %v", id, err)
 		}
 	}
-	run := &store.ChildRun{
+	run := &child.Run{
 		ID: childID, IdempotencyKey: "key-1",
 		ParentSessionID: childParent, ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: childSession, DurableKey: child.DurableChildKey(childID),
@@ -353,7 +371,11 @@ func seedChild(t *testing.T, suite *runSuite) {
 		BudgetJSON: `{"max_tokens":1000}`, State: child.StatusQueued,
 		Deadline: now.Add(time.Hour), CreatedAt: now, UpdatedAt: now,
 	}
-	if err := store.NewChildStore(suite.db).InsertRun(t.Context(), run); err != nil {
+	childStore, err := child.NewSQLiteStore(suite.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	if err := childStore.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	suite.plan.Run, suite.plan.Key = run.ID, run.DurableKey
@@ -362,12 +384,18 @@ func seedChild(t *testing.T, suite *runSuite) {
 func hostChild(t *testing.T, life *runLife) {
 	t.Helper()
 	executor := newLedgerExecutor(t, life.db, &ledgerTurn{scenario: turnScenarios["tools"], ledger: life.ledger})
-	handler, err := buildChildHandler(life.db, nil, &runtimeSignaler{runtime: life.runtime}, executor, scriptedModelName)
+	childMod, err := child.New(&child.ModuleDeps{
+		DB:        life.db,
+		Sessions:  turnstore.NewSessionService(life.db),
+		Turns:     executor,
+		Runtime:   life.runtime,
+		ModelName: scriptedModelName,
+	})
 	if err != nil {
-		t.Fatalf("buildChildHandler: %v", err)
+		t.Fatalf("child.New: %v", err)
 	}
-	if err := registerChildHandler(life.runtime, handler); err != nil {
-		t.Fatalf("registerChildHandler: %v", err)
+	if err := childMod.Register(life.runtime); err != nil {
+		t.Fatalf("childMod.Register: %v", err)
 	}
 }
 

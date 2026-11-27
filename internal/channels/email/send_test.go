@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/effect"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -16,7 +16,7 @@ const (
 
 func (f *deliveryFixture) outgoing(key string) *Outgoing {
 	f.t.Helper()
-	if err := (&storeSessions{sessions: store.NewSessionService(f.h.db)}).EnsureSession(f.t.Context(), sendSession, "local-owner", testPersona); err != nil {
+	if err := (&storeSessions{sessions: turnstore.NewSessionService(f.h.db)}).EnsureSession(f.t.Context(), sendSession, "local-owner", testPersona); err != nil {
 		f.t.Fatalf("ensure session: %v", err)
 	}
 	return &Outgoing{SessionID: sendSession, IdempotencyKey: key, To: recipientAddr, Subject: "Your invoice", Body: "Attached is the summary."}

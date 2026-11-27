@@ -15,22 +15,24 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func writeWorkflowFixtures(t *testing.T, definition string) *globalFlags {
+func writeWorkflowFixtures(t *testing.T, definition string) *GlobalFlags {
 	t.Helper()
 	return writeWorkflowFixturesWith(t, definition, "")
 }
 
-func writeWorkflowFixturesWith(t *testing.T, definition, extraConfig string) *globalFlags {
+func writeWorkflowFixturesWith(t *testing.T, definition, extraConfig string) *GlobalFlags {
 	t.Helper()
 	dir := t.TempDir()
 	defsDir := filepath.Join(dir, "workflows")
@@ -64,7 +66,7 @@ workflows:
 		t.Fatalf("write config: %v", err)
 	}
 	seedConfiguredStorage(t, configPath)
-	return &globalFlags{configPath: configPath}
+	return &GlobalFlags{ConfigPath: configPath}
 }
 
 const validWorkflowYAML = `id: demo
@@ -77,13 +79,23 @@ steps:
     timeout: 1m
 `
 
-func runWorkflowCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func mustWorkflowInterpreter(t *testing.T, store *workflow.Store, durableRuntime durable.Runtime, options *workflow.Options) *workflow.Interpreter {
+	t.Helper()
+	interpreter, err := workflow.NewInterpreter(store, durableRuntime, options)
+	if err != nil {
+		t.Fatalf("workflow.NewInterpreter: %v", err)
+	}
+	return interpreter
+}
+
+func runWorkflowCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := newWorkflowCmd(gf)
+	cmd := workflow.Commands(workflowOpener(gf))[0]
 	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errOut)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -114,7 +126,7 @@ func TestWorkflowValidateRejectsInvalidFile(t *testing.T) {
 	gf := writeWorkflowFixtures(t, "")
 	if _, err := runWorkflowCommand(t, gf, "validate", file); err == nil {
 		t.Fatal("validate accepted an invalid executor kind")
-	} else if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+	} else if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 		t.Fatalf("error = %v, want workflow_executor_invalid", err)
 	}
 }
@@ -125,7 +137,7 @@ func TestWorkflowStartUnknownDefinitionFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("start accepted an unknown definition")
 	}
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeDefinitionNotFound {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeDefinitionNotFound {
 		t.Fatalf("error = %v, want workflow_definition_not_found", err)
 	}
 }
@@ -134,7 +146,7 @@ func TestWorkflowRunsAndInspectUnknownRunFails(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	if _, err := runWorkflowCommand(t, gf, "inspect", "run-missing"); err == nil {
 		t.Fatal("inspect accepted an unknown run")
-	} else if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeRunNotFound {
+	} else if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeRunNotFound {
 		t.Fatalf("inspect error = %v, want workflow_run_not_found", err)
 	}
 	if _, err := runWorkflowCommand(t, gf, "cancel", "run-missing"); err == nil {
@@ -178,10 +190,10 @@ workflows:
   definitions_dir: DEFS
 `
 
-func writeBrokenAgentFixtures(t *testing.T, definition string) *globalFlags {
+func writeBrokenAgentFixtures(t *testing.T, definition string) *GlobalFlags {
 	t.Helper()
 	gf := writeWorkflowFixtures(t, "")
-	cfgPath := gf.configPath
+	cfgPath := gf.ConfigPath
 	dir := filepath.Dir(cfgPath)
 	defsDir := filepath.Join(dir, "workflows")
 	cfg := strings.ReplaceAll(brokenAgentConfig, "DIR", dir)
@@ -231,11 +243,11 @@ func TestWorkflowValidateAcceptsOmittedTimeoutWithConfiguredDefault(t *testing.T
 func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	dir := filepath.Dir(gf.configPath)
+	dir := filepath.Dir(gf.ConfigPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
@@ -244,9 +256,9 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	disk := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	disk := mustWorkflowStore(t, db)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
@@ -272,7 +284,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 		t.Fatalf("reopen storage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	run, err := workflow.NewStore(db).Run(ctx, summary.ID)
+	run, err := mustWorkflowStore(t, db).Run(ctx, summary.ID)
 	if err != nil {
 		t.Fatalf("read run: %v", err)
 	}
@@ -297,11 +309,11 @@ steps:
 func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	gf := writeWorkflowFixtures(t, outputWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
-	dir := filepath.Dir(gf.configPath)
+	dir := filepath.Dir(gf.ConfigPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
@@ -310,9 +322,9 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	disk := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	disk := mustWorkflowStore(t, db)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
@@ -346,15 +358,15 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 
 func TestWorkflowStartFailsLoudlyWhenDataRootUnresolvable(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
-	content, err := os.ReadFile(gf.configPath)
+	content, err := os.ReadFile(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("read config: %v", err)
 	}
-	trimmed := strings.ReplaceAll(string(content), "storage:\n  path: "+filepath.Dir(gf.configPath)+"\n", "")
+	trimmed := strings.ReplaceAll(string(content), "storage:\n  path: "+filepath.Dir(gf.ConfigPath)+"\n", "")
 	if trimmed == string(content) {
 		t.Fatal("fixture rewrite removed no storage path")
 	}
-	if err := os.WriteFile(gf.configPath, []byte(trimmed), 0o600); err != nil {
+	if err := os.WriteFile(gf.ConfigPath, []byte(trimmed), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
 	t.Setenv("HOME", "")
@@ -385,22 +397,26 @@ func ownerStepCall(runID, stepID string, attempt int) *workflow.StepCall {
 	}
 }
 
+func mustWorkflowStore(t testing.TB, db *sql.DB) *workflow.Store {
+	t.Helper()
+	disk, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("workflow.NewStore: %v", err)
+	}
+	return disk
+}
+
 func seedRunSession(t *testing.T, db *sql.DB, call *workflow.StepCall) {
 	t.Helper()
-	tx, err := db.BeginTx(t.Context(), nil)
+	sess := &turn.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
+	err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		return turnstore.NewTurnStore(db).CreateSession(ctx, sess)
+	})
 	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	sess := &store.Session{ID: workflow.RunSessionID(call.RunID), OwnerID: call.Origin.PrincipalID, AgentID: call.Origin.AgentID}
-	if err := store.CreateSessionTx(t.Context(), tx, sess); err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 			return
 		}
 		t.Fatalf("create run session: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -463,7 +479,7 @@ func TestWorkflowToolRunnerRejectsEmptyArgumentsFailClosed(t *testing.T) {
 		if err == nil {
 			t.Fatalf("Invoke accepted empty arguments %s", args)
 		}
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeStepFailed {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeStepFailed {
 			t.Fatalf("error = %v, want the stable workflow_step_failed code", err)
 		}
 	}
@@ -480,8 +496,8 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 
 	toolPtr := func(s string) *string { return &s }
 	fake := durabletest.NewFake()
-	disk := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{
+	disk := mustWorkflowStore(t, db)
+	interpreter := mustWorkflowInterpreter(t, disk, fake, &workflow.Options{
 		Tools:  runner,
 		Logger: slog.Default(),
 	})
@@ -498,8 +514,8 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 	}
 	deps := &workflow.ValidationDeps{
 		Agents:         builtinRegistry(t),
-		KnownTools:     toolsbuiltin.DefinitionNames(),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     definitionNames(),
+		EffectfulTools: effectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
 		StepAllowed:    acceptStepAllowed,
 	}
@@ -588,7 +604,7 @@ func (b *syncBuffer) String() string {
 func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -604,15 +620,15 @@ func TestBuildWorkflowInterpreterEmitsWarningOnStatusPersistFailure(t *testing.T
 	}
 	defer func() { _ = app.Close(ctx) }()
 	interpreter := app.interpreter
-	runHost, ok := app.runtime.(durableRunHost)
+	runHost, ok := app.runtime.(durablesqlite.RunHost)
 	if !ok {
 		t.Fatal("the command build's durable runtime cannot host runs")
 	}
-	stage := &durableHostStage{host: runHost, handlers: []string{workflow.HandlerName}, logger: app.logger}
-	if err := stage.start(ctx); err != nil {
+	stage := durablesqlite.NewHostStage(runHost, []string{workflow.HandlerName}, app.logger)
+	if err := stage.Start(ctx); err != nil {
 		t.Fatalf("start the durable host: %v", err)
 	}
-	defer func() { _ = stage.stop(ctx) }()
+	defer func() { _ = stage.Stop(ctx) }()
 
 	db, err := openStorage(ctx, result.Config)
 	if err != nil {
@@ -681,7 +697,7 @@ func TestWorkflowSignalUnknownRunFailsClosed(t *testing.T) {
 func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	ctx := t.Context()
-	result, err := appconfig.Load(gf.configPath)
+	result, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -689,14 +705,14 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	disk := workflow.NewStore(db)
-	dir := filepath.Dir(gf.configPath)
+	disk := mustWorkflowStore(t, db)
+	dir := filepath.Dir(gf.ConfigPath)
 	spec, err := workflow.LoadSpecFile(filepath.Join(dir, "workflows", "demo.yaml"))
 	if err != nil {
 		t.Fatalf("load fixture spec: %v", err)
 	}
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{durabletest.NewFake()}, nil)
-	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{durabletest.NewFake()}, nil)
+	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
 	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")

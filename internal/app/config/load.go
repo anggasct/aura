@@ -11,8 +11,16 @@ import (
 
 	"github.com/go-viper/mapstructure/v2"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/child"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
+	"github.com/anggasct/aura/internal/modules/compaction"
+	"github.com/anggasct/aura/internal/modules/gitsync"
+	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/plugin"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -117,44 +125,44 @@ func load(path string, options LoadOptions) (LoadResult, error) {
 	}, nil
 }
 
-func validateLoaded(cfg *Config, doc *document, profile capability.Profile) error {
+func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile) error {
 	return errors.Join(
 		configkit.Under("capabilities", cfg.Capabilities.Validate()),
 		configkit.Under("models", cfg.Models.Validate()),
 		configkit.Under("model_routes", model.ValidateRoutes(cfg.ModelRoutes)),
-		legacyconfig.ValidateTools(cfg.Tools),
-		legacyconfig.ValidateSkills(cfg.Skills),
-		legacyconfig.ValidateContext(cfg.Context),
-		legacyconfig.ValidateProfile(cfg.Profile),
-		legacyconfig.ValidateChildren(cfg.Children),
+		configkit.Under("tools", cfg.Tools.Validate()),
+		validateSkills(cfg.Skills),
+		validateContext(cfg.Context),
+		validateProfile(cfg.Profile),
+		validateChildren(cfg.Children),
 		validateAccess(cfg.Access),
-		legacyconfig.ValidateSync(cfg.Sync),
+		validateSync(cfg.Sync),
 		validateVision(cfg.Vision),
-		legacyconfig.ValidateKnowledge(cfg.Knowledge),
-		legacyconfig.ValidateInterpreter(&cfg.Interpreter),
+		validateKnowledge(cfg.Knowledge),
+		configkit.Under("interpreter", cfg.Interpreter.Validate()),
 		configkit.Under("runtime", cfg.Runtime.Validate()),
 		configkit.Under("server", cfg.Server.Validate()),
 		configkit.Under("logging", cfg.Logging.Validate()),
-		legacyconfig.ValidateStorage(cfg.Storage),
+		configkit.Under("storage", cfg.Storage.Validate()),
 		configkit.Under("telemetry", cfg.Telemetry.Validate()),
 		configkit.Under("usage", cfg.Usage.Validate()),
 		configkit.Under("health", cfg.Health.Validate()),
-		legacyconfig.ValidateTerminal(cfg.Terminal),
-		legacyconfig.ValidateWorkflows(cfg.Workflows),
-		legacyconfig.ValidateMCP(cfg.MCP),
-		legacyconfig.ValidatePlugins(cfg.Plugins),
-		legacyconfig.ValidateWebhook(&cfg.Webhook),
-		legacyconfig.ValidateDiscord(&cfg.Channels.Discord),
-		legacyconfig.ValidateTelegram(&cfg.Channels.Telegram),
-		legacyconfig.ValidateEmail(&cfg.Channels.Email),
-		legacyconfig.ValidateHTTP(&cfg.Channels.HTTP),
-		legacyconfig.ValidateBroadcast(&cfg.Broadcast),
-		legacyconfig.ValidateScheduler(&cfg.Scheduler),
-		legacyconfig.ValidateMemory(&cfg.Memory),
+		configkit.Under("terminal", cfg.Terminal.Validate()),
+		validateWorkflows(cfg.Workflows),
+		validateMCP(cfg.MCP),
+		validatePlugins(cfg.Plugins),
+		configkit.Under("webhook", cfg.Webhook.Validate()),
+		configkit.Under("channels.discord", cfg.Channels.Discord.Validate()),
+		configkit.Under("channels.telegram", cfg.Channels.Telegram.Validate()),
+		configkit.Under("channels.email", cfg.Channels.Email.Validate()),
+		configkit.Under("channels.http", cfg.Channels.HTTP.Validate()),
+		configkit.Under("broadcast", cfg.Broadcast.Validate()),
+		configkit.Under("scheduler", cfg.Scheduler.Validate()),
+		configkit.Under("memory", cfg.Memory.Validate()),
 		configkit.Under("owner", principal.ValidateOwner(cfg.Owner)),
 		validateAgents(cfg.Agents),
 		configkit.Under("bindings", auraagent.ValidateBindings(cfg.Bindings)),
-		validateAgainstBuild(cfg, profile),
+		validateAgainstBuild(cfg, buildProfile),
 		validateReferences(cfg, doc),
 	)
 }
@@ -316,12 +324,12 @@ func screenOwnerSecrets(owner *principal.Owner, cfg *Config) error {
 		{"owner.timezone", owner.Timezone},
 	} {
 		if field.value != "" && vault.Contains(field.value) {
-			problems = append(problems, configkit.Field(field.path, fault.New(legacyconfig.ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
+			problems = append(problems, configkit.Field(field.path, fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
 		}
 	}
 	for key, value := range owner.Preferences {
 		if (key != "" && vault.Contains(key)) || (value != "" && vault.Contains(value)) {
-			problems = append(problems, configkit.Field("owner.preferences", fault.New(legacyconfig.ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
+			problems = append(problems, configkit.Field("owner.preferences", fault.New(ErrorCodeOwnerSecret, "must not repeat a configured secret value")))
 			break
 		}
 	}
@@ -380,15 +388,11 @@ func configuredSecretValues(cfg *Config) []string {
 				continue
 			}
 			if oauth := auth.OAuth; oauth != nil {
-				if oauth.ClientIDEnv != "" {
-					add(os.Getenv(oauth.ClientIDEnv))
-				}
-				if oauth.ClientSecretEnv != "" {
-					add(os.Getenv(oauth.ClientSecretEnv))
-				}
+				add(resolveSecretRef(oauth.ClientIDRef))
+				add(resolveSecretRef(oauth.ClientSecretRef))
 			}
 			if static := auth.Static; static != nil {
-				add(resolveStaticCredential(static.CredentialRef))
+				add(resolveSecretRef(static.CredentialRef))
 			}
 		}
 	}
@@ -400,17 +404,72 @@ func resolveSecretRef(ref secret.Ref) string {
 	return value
 }
 
-func resolveStaticCredential(raw string) string {
-	ref, err := secret.ParseRef(strings.TrimSpace(raw))
-	if err != nil {
-		return ""
+func validateMCP(section *mcp.Config) error {
+	if section == nil {
+		return nil
 	}
-	return resolveSecretRef(ref)
+	return configkit.Under("mcp", section.Validate())
 }
 
 func checkVersion(v int) error {
 	if v != supportedVersion {
-		return configkit.Field("version", fault.New(legacyconfig.ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
+		return configkit.Field("version", fault.New(ErrorCodeVersionUnsupported, fmt.Sprintf("unsupported version %d (supported: %d)", v, supportedVersion)))
 	}
 	return nil
+}
+
+func validateKnowledge(section *knowledge.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("knowledge", section.Validate())
+}
+
+func validateContext(section *compaction.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("context", section.Validate())
+}
+
+func validatePlugins(section *plugin.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("plugins", section.Validate())
+}
+
+func validateSkills(section *skills.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("skills", section.Validate())
+}
+
+func validateProfile(section *profile.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("profile", section.Validate())
+}
+
+func validateWorkflows(section *workflow.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("workflows", section.Validate())
+}
+
+func validateSync(section *gitsync.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("sync", section.Validate())
+}
+
+func validateChildren(section *child.Config) error {
+	if section == nil {
+		return nil
+	}
+	return configkit.Under("children", section.Validate())
 }

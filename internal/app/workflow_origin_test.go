@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +12,8 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestApprovedProposalRunKeepsTheProposalTaint(t *testing.T) {
@@ -33,7 +33,7 @@ func TestApprovedProposalRunKeepsTheProposalTaint(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			runID, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+			runID, err := workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposed.ProposalID, h.showCall, time.Now())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 		if runID == "" {
 			t.Fatalf("start output = %q, want a run id", out)
 		}
-		run, err := workflow.NewStore(openAccessDB(t, gf.configPath)).Run(t.Context(), runID)
+		run, err := mustWorkflowStore(t, openAccessDB(t, gf.ConfigPath)).Run(t.Context(), runID)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -87,7 +87,7 @@ func TestCLIAndScheduledStartsRunAsTheOwnerDefaultPersona(t *testing.T) {
 		t.Run("scheduled start/"+tc.name, func(t *testing.T) {
 			controller, runs, _ := workflowToolFixture(t, "book_visit")
 			workflows := &scheduleWorkflows{}
-			workflows.set(controller.interpreter)
+			workflows.set(controller.Interpreter())
 			turns := &engineTurnRunner{workflows: workflows}
 			fired, err := turns.RunTurn(t.Context(), &schedule.TurnRequest{PrincipalID: tc.principal, IdempotencyKey: "cron/job-1/2026-11-13T03:00:00Z", WorkflowID: "book_visit"})
 			if tc.refused {
@@ -125,8 +125,8 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 		t.Run("card/"+tc.name, func(t *testing.T) {
 			h := proposalFixture(t)
 			bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-			h.controller.enableProposalCards(h.cfg, []proposalOfferer{bound}, slog.New(slog.DiscardHandler))
-			go h.controller.runProposalCards(t.Context())
+			h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+			go h.controller.RunProposalCards(t.Context())
 			owner := *h.owner
 			owner.Tainted = tc.tainted
 			proposed, err := h.controller.Propose(t.Context(), &owner, json.RawMessage(coveredProposal))
@@ -161,11 +161,11 @@ func TestProposalCardAndShowSayUntrustedInput(t *testing.T) {
 				ID: workflow.NewProposalID(), SessionID: "ops/terminal:owner", AgentID: "ops", PrincipalID: principal.OwnerID,
 				Tainted: tc.tainted, Spec: spec, Digest: digest, CreatedAt: time.Now().UTC(),
 			}
-			db := openAccessDB(t, gf.configPath)
-			if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+			db := openAccessDB(t, gf.ConfigPath)
+			if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 				t.Fatal(err)
 			}
-			if err := workflow.NewStore(db).CreateProposal(t.Context(), proposal); err != nil {
+			if err := mustWorkflowStore(t, db).CreateProposal(t.Context(), proposal); err != nil {
 				t.Fatal(err)
 			}
 			out, err := runWorkflowCommand(t, gf, "proposal", "show", proposal.ID)

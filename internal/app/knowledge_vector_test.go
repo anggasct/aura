@@ -3,14 +3,18 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -57,7 +61,7 @@ func (r *knowledgeTurnRig) settle(t *testing.T) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(t.Context(), vectorWait)
 	defer cancel()
-	if err := r.vectors.index.Idle(ctx); err != nil {
+	if err := r.vectors.Idle(ctx); err != nil {
 		t.Fatalf("the vector index never went idle: %v", err)
 	}
 }
@@ -97,17 +101,30 @@ func (r *knowledgeTurnRig) lastMode(t *testing.T) string {
 
 func (r *knowledgeTurnRig) toolSearch(t *testing.T, scope []string, query string, class principal.Class) (mode string, results int) {
 	t.Helper()
-	searcher := &knowledgeToolSearcher{retriever: r.retriever}
-	raw, err := searcher.SearchKnowledge(t.Context(), scope, query, 5, class)
+	adapter := knowledge.NewToolAdapter(r.retriever)
+	args, err := json.Marshal(struct {
+		Query string `json:"query"`
+		Limit int    `json:"limit"`
+	}{Query: query, Limit: 5})
 	if err != nil {
-		t.Fatalf("SearchKnowledge: %v", err)
+		t.Fatalf("marshal args: %v", err)
+	}
+	res, err := adapter(t.Context(), &toolbroker.ToolRequest{
+		ToolName:       "kb_search",
+		ToolVersion:    "v1",
+		Arguments:      args,
+		Knowledge:      scope,
+		PrincipalClass: class,
+	}, approval.Constraints{})
+	if err != nil {
+		t.Fatalf("kb_search adapter: %v", err)
 	}
 	var output struct {
 		Mode    string            `json:"mode"`
 		Results []json.RawMessage `json:"results"`
 	}
-	if err := json.Unmarshal(raw, &output); err != nil {
-		t.Fatalf("decode output %s: %v", raw, err)
+	if err := json.Unmarshal(res.Output, &output); err != nil {
+		t.Fatalf("decode output %s: %v", res.Output, err)
 	}
 	return output.Mode, len(output.Results)
 }
@@ -175,9 +192,26 @@ func TestKnowledgeSearchToolReturnsTheModeAndFindsAChunkByMeaning(t *testing.T) 
 	}
 }
 
+func decodeContextEventPayload(t *testing.T, blocks []turn.ContextBlock) (mode string, retrieved int) {
+	t.Helper()
+	if len(blocks) != 1 || len(blocks[0].Events) != 1 {
+		t.Fatalf("blocks = %+v, want 1 block with 1 event", blocks)
+	}
+	var payload struct {
+		Mode   string `json:"mode"`
+		Counts struct {
+			Retrieved int `json:"retrieved"`
+		} `json:"counts"`
+	}
+	if err := json.Unmarshal(blocks[0].Events[0].Payload, &payload); err != nil {
+		t.Fatalf("decode event payload: %v", err)
+	}
+	return payload.Mode, payload.Counts.Retrieved
+}
+
 func TestKnowledgeQueriesLeaveTheHostOnlyWhenEveryGateHolds(t *testing.T) {
 	rig := newEmbeddedRig(t, "")
-	provider, err := knowledge.NewContextProvider(rig.retriever)
+	provider, err := knowledge.NewContextProvider(rig.retriever, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
@@ -195,12 +229,16 @@ func TestKnowledgeQueriesLeaveTheHostOnlyWhenEveryGateHolds(t *testing.T) {
 	for name, test := range tests {
 		t.Run("turn context "+name, func(t *testing.T) {
 			rig.provider.reset()
-			evidence, err := provider.KnowledgeContext(t.Context(), &turn.TurnRequest{
+			blocks, err := provider.TurnContext(t.Context(), &turn.TurnRequest{
 				Knowledge: []string{"support", "faq"}, PrincipalClass: test.class,
 				Parts: []runtimeingress.InputPart{{Text: meaningQuery}},
 			})
-			if err != nil || evidence.Mode != test.wantMode || rig.queriesSent() != test.wantSends {
-				t.Fatalf("evidence mode %q, sends %d, error %v; want %q and %d", evidence.Mode, rig.queriesSent(), err, test.wantMode, test.wantSends)
+			if err != nil {
+				t.Fatalf("TurnContext: %v", err)
+			}
+			gotMode, _ := decodeContextEventPayload(t, blocks)
+			if gotMode != test.wantMode || rig.queriesSent() != test.wantSends {
+				t.Fatalf("mode %q, sends %d; want %q and %d", gotMode, rig.queriesSent(), test.wantMode, test.wantSends)
 			}
 		})
 		t.Run("kb_search "+name, func(t *testing.T) {
@@ -280,7 +318,7 @@ func TestKnowledgeColdAndPartialScopesSendNothing(t *testing.T) {
 
 func TestKnowledgeServerStopsSendingWhenTheCLIReembedsUnderAnotherFingerprint(t *testing.T) {
 	rig := newEmbeddedRig(t, "")
-	if rig.vectors.index.Used() == 0 {
+	if rig.vectors.Used() == 0 {
 		t.Fatal("nothing was loaded")
 	}
 
@@ -300,8 +338,8 @@ func TestKnowledgeServerStopsSendingWhenTheCLIReembedsUnderAnotherFingerprint(t 
 	rig.provider.reset()
 
 	found := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner)
-	if found.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.index.Used() != faqVectorBytes {
-		t.Fatalf("after the fingerprint changed: mode %q, sends %d, memory %d", found.Mode, rig.queriesSent(), rig.vectors.index.Used())
+	if found.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.Used() != faqVectorBytes {
+		t.Fatalf("after the fingerprint changed: mode %q, sends %d, memory %d", found.Mode, rig.queriesSent(), rig.vectors.Used())
 	}
 	rig.settle(t)
 	if found := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner); found.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 {
@@ -334,8 +372,8 @@ func TestKnowledgeServerSeesACLIChangeAtItsNextRetrieval(t *testing.T) {
 	}
 	rig.provider.reset()
 	erased := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner)
-	if erased.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.index.Used() != faqVectorBytes {
-		t.Fatalf("after --off: mode %q, sends %d, memory %d", erased.Mode, rig.queriesSent(), rig.vectors.index.Used())
+	if erased.Mode != knowledge.ModeLexical || rig.queriesSent() != 0 || rig.vectors.Used() != faqVectorBytes {
+		t.Fatalf("after --off: mode %q, sends %d, memory %d", erased.Mode, rig.queriesSent(), rig.vectors.Used())
 	}
 }
 
@@ -344,34 +382,42 @@ func TestKnowledgeOverLimitCollectionStaysLexicalAndSendsNothing(t *testing.T) {
 	rig.add(t, "support", "policy.md", returnsAndShippingDocument)
 	rig.embedAll(t, "support")
 	rig.cfg.Knowledge.Embedding.MaxMemory = 100
-	pool, err := openKnowledgeReadPool(t.Context(), rig.dbPath)
-	if err != nil {
-		t.Fatalf("openKnowledgeReadPool: %v", err)
+	mod, err := knowledge.New(t.Context(), &knowledge.ModuleDeps{
+		Config:  rig.cfg.Knowledge,
+		DBPath:  rig.dbPath,
+		Scopes:  personaKnowledgeScopes(rig.cfg.Agents),
+		Secrets: &knowledgeSecrets{cfg: rig.cfg},
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+	if err != nil || mod.VectorLoader() == nil {
+		t.Fatalf("knowledge.New = %v, loader %v", err, mod != nil && mod.VectorLoader() != nil)
 	}
-	t.Cleanup(func() { _ = pool.Close() })
-	vectors, enabled, err := startKnowledgeVectors(t.Context(), rig.cfg, pool, rig.dbPath)
-	if err != nil || !enabled {
-		t.Fatalf("startKnowledgeVectors = %v, %v", enabled, err)
-	}
-	t.Cleanup(vectors.close)
-	retriever, err := newKnowledgeRetriever(rig.cfg, pool, vectors.options()...)
-	if err != nil {
-		t.Fatalf("newKnowledgeRetriever: %v", err)
-	}
+	t.Cleanup(func() { _ = mod.Close() })
+	runCtx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		mod.VectorLoader()(runCtx)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+	retriever := mod.Retriever()
 	rig.provider.reset()
 	for range 2 {
 		found, err := retriever.Search(t.Context(), &knowledge.SearchRequest{Scope: []string{"support"}, Query: meaningQuery, Depth: knowledge.SearchDepth, Class: principal.ClassOwner})
 		if err != nil || found.Mode != knowledge.ModeLexical {
 			t.Fatalf("Search = %+v, %v, want a lexical answer", found, err)
 		}
-		ctx, cancel := context.WithTimeout(t.Context(), vectorWait)
-		if err := vectors.index.Idle(ctx); err != nil {
+		ctx, idleCancel := context.WithTimeout(t.Context(), vectorWait)
+		if err := mod.VectorIndex().Idle(ctx); err != nil {
 			t.Fatalf("Idle: %v", err)
 		}
-		cancel()
+		idleCancel()
 	}
-	if rig.queriesSent() != 0 || vectors.index.Used() != 0 {
-		t.Errorf("sends %d, memory %d, want nothing sent and nothing held", rig.queriesSent(), vectors.index.Used())
+	if rig.queriesSent() != 0 || mod.VectorIndex().Used() != 0 {
+		t.Errorf("sends %d, memory %d, want nothing sent and nothing held", rig.queriesSent(), mod.VectorIndex().Used())
 	}
 
 	findings := embeddingFindings(t, rig.kbRetrievalRig)
@@ -422,32 +468,57 @@ func TestKnowledgeSlowEmbeddingProviderFallsBackToLexicalWithinTheBudget(t *test
 
 	budgeted, cancel := context.WithTimeout(t.Context(), knowledge.RetrievalBudget)
 	defer cancel()
-	provider, err := knowledge.NewContextProvider(rig.retriever)
+	provider, err := knowledge.NewContextProvider(rig.retriever, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewContextProvider: %v", err)
 	}
-	evidence, err := provider.KnowledgeContext(budgeted, &turn.TurnRequest{
+	blocks, err := provider.TurnContext(budgeted, &turn.TurnRequest{
 		Knowledge: []string{"support"}, PrincipalClass: principal.ClassOwner,
 		Parts: []runtimeingress.InputPart{{Text: meaningQuery}},
 	})
-	if err != nil || evidence.Mode != knowledge.ModeLexicalFallback || evidence.Retrieved == 0 {
-		t.Fatalf("turn context = %+v, %v, want lexical hits in fallback mode", evidence, err)
+	if err != nil {
+		t.Fatalf("TurnContext: %v", err)
+	}
+	gotMode, gotRetrieved := decodeContextEventPayload(t, blocks)
+	if gotMode != knowledge.ModeLexicalFallback || gotRetrieved == 0 {
+		t.Fatalf("turn context = mode %q retrieved %d, want lexical hits in fallback mode", gotMode, gotRetrieved)
 	}
 	once.Do(func() { close(release) })
 }
 
 func TestBuildKnowledgeRuntimeStopsItsLoaderWithTheRuntime(t *testing.T) {
 	rig := newVectorTurnRig(t, "")
-	registry := personaRegistry(t, rig.cfgPath)
-	runtimeState, enabled, err := buildKnowledgeRuntime(t.Context(), rig.cfg, registry)
-	if err != nil || !enabled || runtimeState.vectors == nil {
-		t.Fatalf("buildKnowledgeRuntime = %v, %v, vectors %v", enabled, err, runtimeState.vectors)
+	mod, err := knowledge.New(t.Context(), &knowledge.ModuleDeps{
+		Config:  rig.cfg.Knowledge,
+		DBPath:  rig.dbPath,
+		Scopes:  personaKnowledgeScopes(rig.cfg.Agents),
+		Secrets: &knowledgeSecrets{cfg: rig.cfg},
+		Logger:  slog.New(slog.DiscardHandler),
+	})
+	if err != nil || mod.VectorLoader() == nil {
+		t.Fatalf("knowledge.New = %v, loader %v", err, mod != nil && mod.VectorLoader() != nil)
 	}
-	done := runtimeState.vectors.done
-	runtimeState.close()
+	stopped := make(chan struct{})
+	group := server.NewLifecycleGroup(server.LifecycleOptions{Logger: slog.New(slog.DiscardHandler)})
+	if err := group.Defer("knowledge", func(context.Context) error { return mod.Close() }); err != nil {
+		t.Fatalf("Defer: %v", err)
+	}
+	run := mod.VectorLoader()
+	if err := group.Add(server.Background("knowledge_vectors", func(ctx context.Context) {
+		defer close(stopped)
+		run(ctx)
+	})); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	if err := group.Start(t.Context()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if err := group.Stop(t.Context()); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
 	select {
-	case <-done:
+	case <-stopped:
 	default:
-		t.Fatal("the loader goroutine was still running after close")
+		t.Fatal("the loader goroutine was still running after stop")
 	}
 }

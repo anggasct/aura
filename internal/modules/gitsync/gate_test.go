@@ -5,12 +5,11 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
-func syncConfig() *config.Sync {
-	return &config.Sync{
+func syncConfig() *Config {
+	return &Config{
 		Enabled:            true,
 		Remote:             "ssh://git@example.com/owner/aura-assets.git",
 		Branch:             "main",

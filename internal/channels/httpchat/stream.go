@@ -11,7 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -45,7 +45,7 @@ type chunkDelta struct {
 }
 
 type turnItem struct {
-	event store.RuntimeEvent
+	event turn.Event
 	err   error
 }
 
@@ -115,7 +115,7 @@ type streamRun struct {
 	includeUsage bool
 	created      int64
 	turnID       string
-	events       []store.RuntimeEvent
+	events       []turn.Event
 	live         *liveMessage
 	nextDelta    uint64
 	answered     strings.Builder
@@ -250,7 +250,7 @@ func (r *streamRun) errorEvent(ctx context.Context, spec *errorSpec, reason stri
 	return r.es.writeData(newErrorEnvelope(spec))
 }
 
-func (r *streamRun) delta(event *store.RuntimeEvent) error {
+func (r *streamRun) delta(event *turn.Event) error {
 	delta, ok := turn.DecodeModelDelta(event.Payload)
 	if !ok || delta.Index != r.nextDelta {
 		r.live.lost = true
@@ -279,9 +279,9 @@ func (r *streamRun) openMessage() string {
 	return separator
 }
 
-func (r *streamRun) deliver(event *store.RuntimeEvent) (consistent bool, err error) {
+func (r *streamRun) deliver(event *turn.Event) (consistent bool, err error) {
 	live := r.live
-	if event.Kind == store.EventKindADK {
+	if event.Kind == turnstore.EventKindADK {
 		r.live = &liveMessage{}
 	}
 	for i, text := range r.chat.answerTexts(r.events[len(r.events)-1:]) {

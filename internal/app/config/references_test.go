@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -65,7 +65,7 @@ func TestReferenceHelpersGuardNilPointers(t *testing.T) {
 	}{
 		{"webhook nil", "webhook", func() error { return webhookListenProblem(nil, "") }},
 		{"telegram discord tokens nil telegram", "channels.telegram", func() error { return telegramDiscordTokenProblems(nil, nil)[0] }},
-		{"telegram discord tokens nil discord", "channels.discord", func() error { return telegramDiscordTokenProblems(&legacyconfig.Telegram{}, nil)[0] }},
+		{"telegram discord tokens nil discord", "channels.discord", func() error { return telegramDiscordTokenProblems(&telegram.Config{}, nil)[0] }},
 		{"telegram owner nil telegram", "channels.telegram", func() error { return telegramOwnerProblem(nil, nil) }},
 		{"email owner nil email", "channels.email", func() error { return emailOwnerProblem(nil, nil) }},
 		{"bindings nil channels", "channels", func() error { return bindingAccountProblems(nil, nil)[0] }},

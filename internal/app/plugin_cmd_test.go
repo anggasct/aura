@@ -46,10 +46,12 @@ func writeCLIPluginBundle(t *testing.T, manifest string) string {
 
 func runPluginCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newPluginCmd(&globalFlags{configPath: cfg})
+	restoreDefaultLogger(t)
+	cmd := plugin.Commands(pluginOpener(&GlobalFlags{ConfigPath: cfg}))[0]
 	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errOut)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -99,21 +101,21 @@ func TestPluginCommandsInstallReviewApproveLifecycle(t *testing.T) {
 	if out, err := runPluginCommand(t, cfg, "approve", "demo", "--digest", digest[:16]); err != nil || !strings.Contains(out, "approved demo 1.0.0") || !strings.Contains(out, "demo.forecast") {
 		t.Fatalf("approve = %q, %v", out, err)
 	}
-	if accessEventCount(t, cfg, accessActionPluginApprove) != 1 {
+	if accessEventCount(t, cfg, plugin.AuditActionApprove) != 1 {
 		t.Fatal("approve left no owner-action event")
 	}
 	listed, err := runPluginCommand(t, cfg, "list", "--json")
 	if err != nil {
 		t.Fatalf("list json: %v", err)
 	}
-	var parsed pluginListOutput
+	var parsed plugin.ListOutput
 	if err := json.Unmarshal([]byte(listed), &parsed); err != nil || len(parsed.Plugins) != 1 || parsed.Plugins[0].State != "active" || parsed.Plugins[0].ApprovedVersion != "1.0.0" {
 		t.Fatalf("json list = %q, %v", listed, err)
 	}
 	if out, err := runPluginCommand(t, cfg, "disable", "demo"); err != nil || !strings.Contains(out, "disabled demo") {
 		t.Fatalf("disable = %q, %v", out, err)
 	}
-	if accessEventCount(t, cfg, accessActionPluginDisable) != 1 {
+	if accessEventCount(t, cfg, plugin.AuditActionDisable) != 1 {
 		t.Fatal("disable left no owner-action event")
 	}
 	if out, _ := runPluginCommand(t, cfg, "list"); !strings.Contains(out, "demo\tdisabled\t") {
@@ -140,7 +142,7 @@ func TestPluginRemoveDryRunKeepsEverythingUntilApply(t *testing.T) {
 	if out, _ := runPluginCommand(t, cfg, "list"); !strings.Contains(out, "demo\t") {
 		t.Fatalf("dry run removed the registry row: %q", out)
 	}
-	if accessEventCount(t, cfg, accessActionPluginRemove) != 0 {
+	if accessEventCount(t, cfg, plugin.AuditActionRemove) != 0 {
 		t.Fatal("dry run recorded an owner action")
 	}
 	if out, err := runPluginCommand(t, cfg, "remove", "demo", "--apply"); err != nil || !strings.Contains(out, "removed demo") {
@@ -152,7 +154,7 @@ func TestPluginRemoveDryRunKeepsEverythingUntilApply(t *testing.T) {
 	if out, _ := runPluginCommand(t, cfg, "list"); strings.TrimSpace(out) != "no plugins installed" {
 		t.Fatalf("list after remove = %q", out)
 	}
-	if accessEventCount(t, cfg, accessActionPluginRemove) != 1 {
+	if accessEventCount(t, cfg, plugin.AuditActionRemove) != 1 {
 		t.Fatal("remove left no owner-action event")
 	}
 	if _, err := runPluginCommand(t, cfg, "remove", "demo", "--apply"); err == nil {
@@ -192,58 +194,5 @@ func TestPluginInstallRejectsBadBundlesWithoutCopying(t *testing.T) {
 				t.Fatalf("rejected install registered a plugin: %q", out)
 			}
 		})
-	}
-}
-
-func TestReviewPrintsTheHostsThatReceiveTheCredential(t *testing.T) {
-	cases := []struct {
-		name string
-		auth plugin.Auth
-		want string
-	}{
-		{"static secret", plugin.Auth{Kind: plugin.AuthStaticSecret, Secret: "token", Hosts: []string{"b.mail.example:8443", "api.mail.example"}}, "Auth: static_secret (secret token, credential sent to api.mail.example, b.mail.example:8443)"},
-		{"oauth2", plugin.Auth{Kind: plugin.AuthOAuth2, AuthorizeURL: "https://auth.mail.example/a", TokenURL: "https://auth.mail.example/t", Scopes: []string{"mail.read"}, RedirectURI: "https://aura.example/cb", ClientIDSecret: "client_id", Hosts: []string{"api.mail.example"}}, "credential sent to api.mail.example)"},
-		{"none", plugin.Auth{Kind: plugin.AuthNone}, "Auth: none"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			text := strings.Join(reviewLines(&plugin.Review{ID: "mailer", Auth: tc.auth}), "\n")
-			if !strings.Contains(text, tc.want) {
-				t.Fatalf("review output = %q, want it to contain %q", text, tc.want)
-			}
-			if tc.auth.Kind == plugin.AuthNone && strings.Contains(text, "credential sent") {
-				t.Fatalf("review output = %q", text)
-			}
-		})
-	}
-}
-
-func TestReviewPrintsTheApprovalDisplayAndTheOAuthLoginExtras(t *testing.T) {
-	oauth := plugin.Auth{
-		Kind: plugin.AuthOAuth2, AuthorizeURL: "https://auth.mail.example/a", TokenURL: "https://auth.mail.example/t",
-		Scopes: []string{"mail.read"}, RedirectURI: "http://127.0.0.1/cb", ClientIDSecret: "client_id", Hosts: []string{"api.mail.example"},
-		AuthorizeParams: map[string]string{"prompt": "consent", "access_type": "offline"}, Issuer: "https://auth.mail.example", AccessOnly: true,
-	}
-	review := &plugin.Review{
-		ID:   "mailer",
-		Auth: oauth,
-		Tools: []plugin.ReviewTool{
-			{ID: "plugin_mailer_send", Tier: "effect", Description: "Send mail.", Display: []string{"to", "subject", "body"}},
-			{ID: "plugin_mailer_search", Tier: "read", Description: "Search mail."},
-		},
-	}
-	text := strings.Join(reviewLines(review), "\n")
-	for _, want := range []string{
-		"approval shows, in order: to, subject, body",
-		"authorize params access_type=offline prompt=consent",
-		"issuer https://auth.mail.example",
-		"access only (no refresh token required)",
-	} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("review output = %q, want it to contain %q", text, want)
-		}
-	}
-	if strings.Count(text, "approval shows") != 1 {
-		t.Fatalf("review output = %q, want the display line only for the tool that sets one", text)
 	}
 }

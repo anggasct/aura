@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -106,7 +107,7 @@ func (a *Adapter) SupportsIdempotency() bool {
 
 func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	if invocation == nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "invocation must not be nil")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "invocation must not be nil")
 	}
 	switch invocation.Operation {
 	case OpSendMessage:
@@ -116,21 +117,21 @@ func (a *Adapter) Invoke(ctx context.Context, invocation *effect.Invocation) (ef
 	case OpCreateThread:
 		return a.invokeCreateThread(ctx, invocation)
 	default:
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "unsupported effect operation")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "unsupported effect operation")
 	}
 }
 
 func (a *Adapter) invokeSend(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	var operation SendOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is not decodable")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "send request is not decodable")
 	}
 	if operation.ChannelID == "" || operation.Text == "" {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "send request is missing channel or text")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "send request is missing channel or text")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return effect.Outcome{}, fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	messageID, outcome, err := a.postMessage(ctx, token, &operation)
 	if err != nil {
@@ -141,7 +142,7 @@ func (a *Adapter) invokeSend(ctx context.Context, invocation *effect.Invocation)
 	}
 	receipt, err := json.Marshal(messageReceipt{MessageID: messageID, ChannelID: operation.ChannelID})
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "receipt is not serializable")
+		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "receipt is not serializable")
 	}
 	outcome.Receipt = receipt
 	return outcome, nil
@@ -150,14 +151,14 @@ func (a *Adapter) invokeSend(ctx context.Context, invocation *effect.Invocation)
 func (a *Adapter) invokeEdit(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	var operation editOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "edit request is not decodable")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "edit request is not decodable")
 	}
 	if operation.ChannelID == "" || operation.MessageID == "" || operation.Text == "" {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "edit request is missing channel, message, or text")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "edit request is missing channel, message, or text")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return effect.Outcome{}, fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	outcome, err := a.patchMessage(ctx, token, &operation)
 	if err != nil {
@@ -168,7 +169,7 @@ func (a *Adapter) invokeEdit(ctx context.Context, invocation *effect.Invocation)
 	}
 	receipt, err := json.Marshal(messageReceipt{MessageID: operation.MessageID, ChannelID: operation.ChannelID})
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "receipt is not serializable")
+		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "receipt is not serializable")
 	}
 	outcome.Receipt = receipt
 	return outcome, nil
@@ -177,28 +178,28 @@ func (a *Adapter) invokeEdit(ctx context.Context, invocation *effect.Invocation)
 func (a *Adapter) invokeCreateThread(ctx context.Context, invocation *effect.Invocation) (effect.Outcome, error) {
 	var operation createThreadOperation
 	if err := json.Unmarshal(invocation.Request, &operation); err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "thread request is not decodable")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "thread request is not decodable")
 	}
 	if operation.ParentID == "" || operation.MessageID == "" || operation.Name == "" {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "thread request is missing parent, message, or name")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "thread request is missing parent, message, or name")
 	}
 	if !isChannelID(operation.ParentID) || !isChannelID(operation.MessageID) {
-		return effect.Outcome{}, Errorf(ErrorCodeInvalidArgument, "thread request carries no channel id")
+		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "thread request carries no channel id")
 	}
 	token, err := a.tokenRef.Resolve()
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeConnectionFailed, "bot token is unavailable")
+		return effect.Outcome{}, fault.New(ErrorCodeConnectionFailed, "bot token is unavailable")
 	}
 	threadID, err := a.createThreadREST(ctx, token, operation.ParentID, operation.MessageID, operation.Name)
 	if err != nil {
-		if code, ok := CodeOf(err); ok && (code == ErrorCodeThreadCreateFailed) {
+		if fault.HasCode(err, ErrorCodeThreadCreateFailed) {
 			return effect.Outcome{Succeeded: false, SafeErrorCode: "discord_thread_rejected"}, nil
 		}
 		return effect.Outcome{}, err
 	}
 	receipt, err := json.Marshal(threadReceipt{ThreadID: threadID, ParentID: operation.ParentID})
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "receipt is not serializable")
+		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "receipt is not serializable")
 	}
 	return effect.Outcome{Succeeded: true, Receipt: receipt}, nil
 }
@@ -239,7 +240,7 @@ func (a *Adapter) patchMessage(ctx context.Context, token string, operation *edi
 	suppressEmbedsUnlessOptedIn(edit, a.account.LinkPreviews)
 	payload, err := json.Marshal(edit)
 	if err != nil {
-		return effect.Outcome{}, Errorf(ErrorCodeProtocolInvalid, "edit payload is not serializable")
+		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "edit payload is not serializable")
 	}
 	endpoint := a.restBase + "/channels/" + operation.ChannelID + "/messages/" + operation.MessageID
 	_, outcome, err := a.requestWithRetry(ctx, http.MethodPatch, endpoint, token, payload, "application/json")
@@ -307,7 +308,7 @@ func sendBody(operation *SendOperation, linkPreviews bool) (body []byte, content
 	if len(operation.FileBody) == 0 {
 		raw, err := json.Marshal(message)
 		if err != nil {
-			return nil, "", Errorf(ErrorCodeProtocolInvalid, "send payload is not serializable")
+			return nil, "", fault.New(ErrorCodeProtocolInvalid, "send payload is not serializable")
 		}
 		return raw, "application/json", nil
 	}
@@ -315,20 +316,20 @@ func sendBody(operation *SendOperation, linkPreviews bool) (body []byte, content
 	writer := multipart.NewWriter(&upload)
 	payload, err := json.Marshal(message)
 	if err != nil {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "send payload is not serializable")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "send payload is not serializable")
 	}
 	if err := writer.WriteField("payload_json", string(payload)); err != nil {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "send payload is not serializable")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "send payload is not serializable")
 	}
 	part, err := writer.CreateFormFile("files[0]", operation.FileName)
 	if err != nil {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "upload part is not writable")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "upload part is not writable")
 	}
 	if _, err := part.Write(operation.FileBody); err != nil {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "upload part is not writable")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "upload part is not writable")
 	}
 	if err := writer.Close(); err != nil {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "upload body is not serializable")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "upload body is not serializable")
 	}
 	return upload.Bytes(), writer.FormDataContentType(), nil
 }
@@ -378,7 +379,7 @@ func splitUploads(chunks []string, fileCap int64) ([]string, []uploadChunk, erro
 	texts := chunks[:maxTextMessages]
 	remainder := strings.Join(chunks[maxTextMessages:], "")
 	if int64(len(remainder)) > fileCap {
-		return nil, nil, Errorf(ErrorCodeMessageTooLarge, "message exceeds the text and file budget")
+		return nil, nil, fault.New(ErrorCodeMessageTooLarge, "message exceeds the text and file budget")
 	}
 	return texts, []uploadChunk{{name: "message.txt", text: remainder}}, nil
 }
@@ -386,19 +387,19 @@ func splitUploads(chunks []string, fileCap int64) ([]string, []uploadChunk, erro
 func parseDeliveryContext(raw json.RawMessage, channel string) (target, parent, messageID string, err error) {
 	if len(raw) == 0 {
 		if !isChannelID(channel) {
-			return "", "", "", Errorf(ErrorCodeInvalidArgument, "delivery channel is not a discord channel id")
+			return "", "", "", fault.New(ErrorCodeInvalidArgument, "delivery channel is not a discord channel id")
 		}
 		return channel, "", "", nil
 	}
 	var reference replyReference
 	if err := json.Unmarshal(raw, &reference); err != nil {
-		return "", "", "", Errorf(ErrorCodeInvalidArgument, "reply context is not decodable")
+		return "", "", "", fault.New(ErrorCodeInvalidArgument, "reply context is not decodable")
 	}
 	if !isChannelID(reference.ChannelID) {
-		return "", "", "", Errorf(ErrorCodeInvalidArgument, "reply context carries no channel id")
+		return "", "", "", fault.New(ErrorCodeInvalidArgument, "reply context carries no channel id")
 	}
 	if reference.ThreadID != "" && !isChannelID(reference.ThreadID) {
-		return "", "", "", Errorf(ErrorCodeInvalidArgument, "reply context carries no thread id")
+		return "", "", "", fault.New(ErrorCodeInvalidArgument, "reply context carries no thread id")
 	}
 	target, parent, message := deliveryTarget(&reference)
 	return target, parent, message, nil
@@ -419,14 +420,14 @@ func isChannelID(id string) bool {
 func marshalOperation(operation any) (json.RawMessage, error) {
 	raw, err := json.Marshal(operation)
 	if err != nil {
-		return nil, Errorf(ErrorCodeProtocolInvalid, "effect request is not serializable")
+		return nil, fault.New(ErrorCodeProtocolInvalid, "effect request is not serializable")
 	}
 	return raw, nil
 }
 
 func unmarshalReceipt(raw json.RawMessage, receipt *messageReceipt) error {
 	if len(raw) == 0 {
-		return Errorf(ErrorCodeDeliveryAmbiguous, "delivery receipt is empty")
+		return deliveryAmbiguous("delivery receipt is empty")
 	}
 	return json.Unmarshal(raw, receipt)
 }

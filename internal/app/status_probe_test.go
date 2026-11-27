@@ -2,7 +2,6 @@ package app
 
 import (
 	"bytes"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/anggasct/aura/internal/platform/clikit"
 )
 
 func processProbeOutput(t *testing.T, listen, probe string) (string, error) {
@@ -42,23 +43,21 @@ func TestStatusProbeFollowsTheRunningProcess(t *testing.T) {
 		t.Fatalf("ready probe = %q, %v", out, err)
 	}
 	ready.Store(http.StatusServiceUnavailable)
-	var coded *exitCodeError
-	if out, err := processProbeOutput(t, listen, "ready"); !errors.As(err, &coded) || coded.code != exitCritical || !strings.Contains(out, "ready: no") {
+	if out, err := processProbeOutput(t, listen, "ready"); func() bool { code, ok := clikit.ExitCodeOf(err); return !ok || code != exitCritical }() || !strings.Contains(out, "ready: no") {
 		t.Fatalf("not-ready probe = %q, %v", out, err)
 	}
 	if out, err := processProbeOutput(t, listen, "live"); err != nil || !strings.Contains(out, "live: yes") {
 		t.Fatalf("live probe while not ready = %q, %v", out, err)
 	}
 	server.Close()
-	if out, err := processProbeOutput(t, listen, "live"); !errors.As(err, &coded) || coded.code != exitCritical || !strings.Contains(out, "live: unreachable") {
+	if out, err := processProbeOutput(t, listen, "live"); func() bool { code, ok := clikit.ExitCodeOf(err); return !ok || code != exitCritical }() || !strings.Contains(out, "live: unreachable") {
 		t.Fatalf("stopped probe = %q, %v", out, err)
 	}
 }
 
 func TestStatusProbeRejectsAnUnknownProbe(t *testing.T) {
 	_, err := processProbeOutput(t, "127.0.0.1:1", "startup")
-	var coded *exitCodeError
-	if !errors.As(err, &coded) || coded.code != exitCommand {
+	if code, ok := clikit.ExitCodeOf(err); !ok || code != exitCommand {
 		t.Fatalf("unknown probe = %v", err)
 	}
 }

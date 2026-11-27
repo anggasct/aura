@@ -11,6 +11,9 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 const eventPath = "/webhook/event"
@@ -20,50 +23,33 @@ type Settings struct {
 	TimestampTolerance time.Duration
 }
 
-type AcceptedEvent struct {
-	KeyID      string
-	Nonce      string
-	BodyDigest string
-	Body       []byte
-	Envelope   Envelope
-}
-
-type ExecutionRef struct {
-	ExecutionID string
-	TurnID      string
-}
-
-type Dispatcher interface {
-	Dispatch(ctx context.Context, event *AcceptedEvent) (ExecutionRef, error)
-}
-
 type Handler struct {
 	settings Settings
 	keys     *KeyRing
 	limiter  *RateLimiter
 	clock    func() time.Time
 	logger   *slog.Logger
-	dispatch Dispatcher
+	dispatch platformwebhook.Dispatcher
 }
 
-func NewHandler(settings Settings, keys *KeyRing, limiter *RateLimiter, clock func() time.Time, logger *slog.Logger, dispatch Dispatcher) (*Handler, error) {
+func NewHandler(settings Settings, keys *KeyRing, limiter *RateLimiter, clock func() time.Time, logger *slog.Logger, dispatch platformwebhook.Dispatcher) (*Handler, error) {
 	if keys == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "key ring must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "key ring must not be nil")
 	}
 	if limiter == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "rate limiter must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "rate limiter must not be nil")
 	}
 	if clock == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "clock must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "clock must not be nil")
 	}
 	if dispatch == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "dispatcher must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "dispatcher must not be nil")
 	}
 	if settings.MaxBodySize <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "max body size must be positive")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "max body size must be positive")
 	}
 	if settings.TimestampTolerance <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp tolerance must be positive")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "timestamp tolerance must be positive")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -74,15 +60,15 @@ func NewHandler(settings Settings, keys *KeyRing, limiter *RateLimiter, clock fu
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.URL.Path != eventPath {
-		writeError(w, http.StatusNotFound, ErrorCodeInvalidRequest, "unknown route")
+		writeError(w, http.StatusNotFound, platformwebhook.ErrorCodeInvalidRequest, "unknown route")
 		return
 	}
 	if r.Method != http.MethodPost {
-		writeError(w, http.StatusMethodNotAllowed, ErrorCodeInvalidRequest, "event endpoint accepts POST only")
+		writeError(w, http.StatusMethodNotAllowed, platformwebhook.ErrorCodeInvalidRequest, "event endpoint accepts POST only")
 		return
 	}
 	if !isJSONContentType(r.Header.Get("Content-Type")) {
-		writeError(w, http.StatusUnsupportedMediaType, ErrorCodeMediaUnsupported, "content type must be JSON")
+		writeError(w, http.StatusUnsupportedMediaType, platformwebhook.ErrorCodeMediaUnsupported, "content type must be JSON")
 		return
 	}
 	auth, err := ParseRequestAuth(r.Header)
@@ -91,7 +77,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if ok, _ := h.limiter.Allow(auth.KeyID, remoteAddr(r)); !ok {
-		writeError(w, http.StatusTooManyRequests, ErrorCodeRateLimited, "request budget exceeded")
+		writeError(w, http.StatusTooManyRequests, platformwebhook.ErrorCodeRateLimited, "request budget exceeded")
 		return
 	}
 	body, digest, err := readBoundedBody(r, h.settings.MaxBodySize)
@@ -100,17 +86,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.authenticate(auth, body) || !auth.WithinTolerance(h.clock(), h.settings.TimestampTolerance) {
-		writeError(w, http.StatusUnauthorized, ErrorCodeAuthFailed, "authentication failed")
-		h.logRejected(r.Context(), auth.KeyID, digest, string(ErrorCodeAuthFailed), start)
+		writeError(w, http.StatusUnauthorized, platformwebhook.ErrorCodeAuthFailed, "authentication failed")
+		h.logRejected(r.Context(), auth.KeyID, digest, string(platformwebhook.ErrorCodeAuthFailed), start)
 		return
 	}
-	envelope, err := ParseEnvelope(body)
+	envelope, err := platformwebhook.ParseEnvelope(body)
 	if err != nil {
 		writeErrorTyped(w, err)
-		h.logRejected(r.Context(), auth.KeyID, digest, string(codeOfOr(err, ErrorCodeInvalidRequest)), start)
+		h.logRejected(r.Context(), auth.KeyID, digest, string(codeOfOr(err, platformwebhook.ErrorCodeInvalidRequest)), start)
 		return
 	}
-	ref, err := h.dispatch.Dispatch(r.Context(), &AcceptedEvent{
+	ref, err := h.dispatch.Dispatch(r.Context(), &platformwebhook.AcceptedEvent{
 		KeyID:      auth.KeyID,
 		Nonce:      auth.Nonce,
 		BodyDigest: digest,
@@ -157,14 +143,14 @@ func (h *Handler) logRejected(ctx context.Context, keyID, digest, result string,
 
 func readBoundedBody(r *http.Request, limit int64) (body []byte, digest string, err error) {
 	if r.ContentLength > limit {
-		return nil, "", Errorf(ErrorCodeBodyTooLarge, "body exceeds the configured limit")
+		return nil, "", platformwebhook.Errorf(platformwebhook.ErrorCodeBodyTooLarge, "body exceeds the configured limit")
 	}
 	read, readErr := io.ReadAll(io.LimitReader(r.Body, limit+1))
 	if readErr != nil {
-		return nil, "", Errorf(ErrorCodeInvalidRequest, "body could not be read")
+		return nil, "", platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "body could not be read")
 	}
 	if int64(len(read)) > limit {
-		return nil, "", Errorf(ErrorCodeBodyTooLarge, "body exceeds the configured limit")
+		return nil, "", platformwebhook.Errorf(platformwebhook.ErrorCodeBodyTooLarge, "body exceeds the configured limit")
 	}
 	sum := sha256.Sum256(read)
 	return read, hex.EncodeToString(sum[:]), nil
@@ -203,63 +189,75 @@ type errorBody struct {
 	} `json:"error"`
 }
 
-func writeAccepted(w http.ResponseWriter, ref ExecutionRef) {
+func writeAccepted(w http.ResponseWriter, ref platformwebhook.ExecutionRef) {
 	encoded, err := json.Marshal(acceptedBody{ExecutionID: ref.ExecutionID, TurnID: ref.TurnID, Status: "accepted"})
 	if err != nil {
 		http.Error(w, "response encoding failed", http.StatusInternalServerError)
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Location", StatusPathPrefix+ref.ExecutionID)
+	w.Header().Set("Location", platformwebhook.StatusPathPrefix+ref.ExecutionID)
 	w.WriteHeader(http.StatusAccepted)
 	_, _ = w.Write(encoded)
 }
 
 func writeErrorTyped(w http.ResponseWriter, err error) {
-	code, ok := CodeOf(err)
+	code, ok := fault.CodeOf[platformwebhook.ErrorCode](err)
 	if !ok {
-		code = ErrorCodeInvalidRequest
+		writeError(w, http.StatusBadRequest, platformwebhook.ErrorCodeInvalidRequest, "request was rejected")
+		return
 	}
-	writeError(w, statusForCode(code), code, "request was rejected")
+	status, external := externalStatusForCode(code)
+	if !external {
+		writeError(w, http.StatusInternalServerError, platformwebhook.ErrorCodeInvalidRequest, "request was rejected")
+		return
+	}
+	writeError(w, status, code, "request was rejected")
 }
 
-func dispatchError(err error) (int, ErrorCode) {
-	code, ok := CodeOf(err)
+func dispatchError(err error) (int, platformwebhook.ErrorCode) {
+	code, ok := fault.CodeOf[platformwebhook.ErrorCode](err)
 	if !ok {
-		return http.StatusInternalServerError, ErrorCodeInvalidRequest
+		return http.StatusInternalServerError, platformwebhook.ErrorCodeInvalidRequest
 	}
-	return statusForCode(code), code
+	status, external := externalStatusForCode(code)
+	if !external {
+		return http.StatusInternalServerError, platformwebhook.ErrorCodeInvalidRequest
+	}
+	return status, code
 }
 
-func statusForCode(code ErrorCode) int {
+func externalStatusForCode(code platformwebhook.ErrorCode) (int, bool) {
 	switch code {
-	case ErrorCodeAuthFailed:
-		return http.StatusUnauthorized
-	case ErrorCodeReplayConflict:
-		return http.StatusConflict
-	case ErrorCodeBodyTooLarge:
-		return http.StatusRequestEntityTooLarge
-	case ErrorCodeMediaUnsupported:
-		return http.StatusUnsupportedMediaType
-	case ErrorCodeRateLimited:
-		return http.StatusTooManyRequests
-	case ErrorCodeRuntimeOverloaded:
-		return http.StatusServiceUnavailable
-	case ErrorCodeExecutionNotFound:
-		return http.StatusNotFound
+	case platformwebhook.ErrorCodeInvalidRequest:
+		return http.StatusBadRequest, true
+	case platformwebhook.ErrorCodeAuthFailed:
+		return http.StatusUnauthorized, true
+	case platformwebhook.ErrorCodeExecutionNotFound:
+		return http.StatusNotFound, true
+	case platformwebhook.ErrorCodeReplayConflict:
+		return http.StatusConflict, true
+	case platformwebhook.ErrorCodeBodyTooLarge:
+		return http.StatusRequestEntityTooLarge, true
+	case platformwebhook.ErrorCodeMediaUnsupported:
+		return http.StatusUnsupportedMediaType, true
+	case platformwebhook.ErrorCodeRateLimited:
+		return http.StatusTooManyRequests, true
+	case platformwebhook.ErrorCodeRuntimeOverloaded:
+		return http.StatusServiceUnavailable, true
 	default:
-		return http.StatusBadRequest
+		return http.StatusInternalServerError, false
 	}
 }
 
-func codeOfOr(err error, fallback ErrorCode) ErrorCode {
-	if code, ok := CodeOf(err); ok {
+func codeOfOr(err error, fallback platformwebhook.ErrorCode) platformwebhook.ErrorCode {
+	if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); ok {
 		return code
 	}
 	return fallback
 }
 
-func writeError(w http.ResponseWriter, status int, code ErrorCode, message string) {
+func writeError(w http.ResponseWriter, status int, code platformwebhook.ErrorCode, message string) {
 	var body errorBody
 	body.Error.Code = string(code)
 	body.Error.Message = message

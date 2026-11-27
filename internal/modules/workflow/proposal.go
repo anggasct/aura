@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -160,10 +161,10 @@ func (s *Store) CreateProposal(ctx context.Context, proposal *Proposal) error {
 	if err != nil {
 		return codedError(ErrorCodeSpecInvalid, "encode proposal spec: "+err.Error())
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted, plan_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+	_, err = sqlite.Conn(ctx, s.db).ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, tainted, plan_text) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		proposal.ID, proposal.SessionID, proposal.AgentID, proposal.PrincipalID, string(encoded), proposal.Digest, ProposalProposed, proposal.CreatedAt.UTC().Format(time.RFC3339Nano), proposal.Tainted, proposal.PlanText)
 	if err != nil {
-		return fmt.Errorf("insert proposal: %w", err)
+		return sqlite.Classify(fmt.Errorf("insert proposal: %w", err))
 	}
 	return nil
 }
@@ -174,11 +175,14 @@ func (s *Store) Proposal(ctx context.Context, id string, now time.Time) (*Propos
 	if err := s.expireProposals(ctx, now); err != nil {
 		return nil, err
 	}
-	proposal, err := scanProposal(s.db.QueryRowContext(ctx, `SELECT `+proposalColumns+` FROM workflow_proposal WHERE id = ?`, id))
+	proposal, err := scanProposal(sqlite.Conn(ctx, s.db).QueryRowContext(ctx, `SELECT `+proposalColumns+` FROM workflow_proposal WHERE id = ?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, codedError(ErrorCodeProposalNotFound, "proposal "+id+" does not exist")
 	}
-	return proposal, err
+	if err != nil {
+		return nil, sqlite.Classify(err)
+	}
+	return proposal, nil
 }
 
 func (s *Store) Proposals(ctx context.Context, status string, now time.Time) ([]*Proposal, error) {
@@ -191,41 +195,44 @@ func (s *Store) Proposals(ctx context.Context, status string, now time.Time) ([]
 		query += ` WHERE status = ?`
 		args = append(args, status)
 	}
-	rows, err := s.db.QueryContext(ctx, query+` ORDER BY created_at, id`, args...)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query+` ORDER BY created_at, id`, args...)
 	if err != nil {
-		return nil, fmt.Errorf("list proposals: %w", err)
+		return nil, sqlite.Classify(fmt.Errorf("list proposals: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var proposals []*Proposal
 	for rows.Next() {
 		proposal, err := scanProposal(rows)
 		if err != nil {
-			return nil, err
+			return nil, sqlite.Classify(err)
 		}
 		proposals = append(proposals, proposal)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate proposals: %w", err)
+		return nil, sqlite.Classify(fmt.Errorf("iterate proposals: %w", err))
 	}
 	return proposals, nil
 }
 
 func (s *Store) DecideProposal(ctx context.Context, id, status, runID string, at time.Time) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE workflow_proposal SET status = ?, decided_at = ?, run_id = ? WHERE id = ? AND status = ?`,
+	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `UPDATE workflow_proposal SET status = ?, decided_at = ?, run_id = ? WHERE id = ? AND status = ?`,
 		status, at.UTC().Format(time.RFC3339Nano), nullable(runID), id, ProposalProposed)
 	if err != nil {
-		return fmt.Errorf("decide proposal: %w", err)
+		return sqlite.Classify(fmt.Errorf("decide proposal: %w", err))
 	}
 	if changed, err := result.RowsAffected(); err != nil || changed != 1 {
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("decide proposal: %w", err))
+		}
 		return codedError(ErrorCodeProposalDecided, "proposal "+id+" is not awaiting a decision")
 	}
 	return nil
 }
 
 func (s *Store) expireProposals(ctx context.Context, now time.Time) error {
-	if _, err := s.db.ExecContext(ctx, `UPDATE workflow_proposal SET status = ? WHERE status = ? AND created_at < ?`,
+	if _, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `UPDATE workflow_proposal SET status = ? WHERE status = ? AND created_at < ?`,
 		ProposalExpired, ProposalProposed, now.Add(-ProposalTTL).UTC().Format(time.RFC3339Nano)); err != nil {
-		return fmt.Errorf("expire proposals: %w", err)
+		return sqlite.Classify(fmt.Errorf("expire proposals: %w", err))
 	}
 	return nil
 }

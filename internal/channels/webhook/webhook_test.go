@@ -15,6 +15,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 const (
@@ -83,18 +86,18 @@ func TestVerifySignature(t *testing.T) {
 
 type recordingDispatcher struct {
 	mu     sync.Mutex
-	events []AcceptedEvent
-	result func(event *AcceptedEvent) (ExecutionRef, error)
+	events []platformwebhook.AcceptedEvent
+	result func(event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error)
 }
 
-func (d *recordingDispatcher) Dispatch(_ context.Context, event *AcceptedEvent) (ExecutionRef, error) {
+func (d *recordingDispatcher) Dispatch(_ context.Context, event *platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.events = append(d.events, *event)
 	if d.result != nil {
 		return d.result(event)
 	}
-	return ExecutionRef{ExecutionID: "01EXEC", TurnID: "01TURN"}, nil
+	return platformwebhook.ExecutionRef{ExecutionID: "01EXEC", TurnID: "01TURN"}, nil
 }
 
 type harness struct {
@@ -212,7 +215,7 @@ func TestHandler_Routes(t *testing.T) {
 		req.Header.Set("Content-Type", "text/plain")
 		rec := httptest.NewRecorder()
 		h.handler.ServeHTTP(rec, req)
-		assertErrorBody(t, rec, http.StatusUnsupportedMediaType, string(ErrorCodeMediaUnsupported))
+		assertErrorBody(t, rec, http.StatusUnsupportedMediaType, string(platformwebhook.ErrorCodeMediaUnsupported))
 	})
 }
 
@@ -242,7 +245,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 			mutate: func(req *http.Request, body []byte) []byte {
 				return []byte(strings.Replace(vectorBody, `"k":1`, `"k":2`, 1))
 			},
-			status: http.StatusUnauthorized, code: string(ErrorCodeAuthFailed),
+			status: http.StatusUnauthorized, code: string(platformwebhook.ErrorCodeAuthFailed),
 		},
 		{
 			name: "timestamp header changed after signing",
@@ -250,7 +253,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 				req.Header.Set(headerTimestamp, "1750000060")
 				return body
 			},
-			status: http.StatusUnauthorized, code: string(ErrorCodeAuthFailed),
+			status: http.StatusUnauthorized, code: string(platformwebhook.ErrorCodeAuthFailed),
 		},
 		{
 			name: "nonce header changed after signing",
@@ -258,7 +261,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 				req.Header.Set(headerNonce, "nonce-ZZZZZZZZZZZZZZZZ")
 				return body
 			},
-			status: http.StatusUnauthorized, code: string(ErrorCodeAuthFailed),
+			status: http.StatusUnauthorized, code: string(platformwebhook.ErrorCodeAuthFailed),
 		},
 		{
 			name: "signature header truncated",
@@ -267,7 +270,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 				req.Header.Set(headerSignature, value[:len(value)-1])
 				return body
 			},
-			status: http.StatusBadRequest, code: string(ErrorCodeInvalidRequest),
+			status: http.StatusBadRequest, code: string(platformwebhook.ErrorCodeInvalidRequest),
 		},
 		{
 			name: "unknown key id",
@@ -275,7 +278,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 				req.Header.Set(headerKeyID, "ghost")
 				return body
 			},
-			status: http.StatusUnauthorized, code: string(ErrorCodeAuthFailed),
+			status: http.StatusUnauthorized, code: string(platformwebhook.ErrorCodeAuthFailed),
 		},
 		{
 			name: "expired key id",
@@ -284,7 +287,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 				req.Header.Set(headerSignature, Sign("expired-secret-1234567890", EventSigningBytes(vectorTimestamp, vectorNonce, body)))
 				return body
 			},
-			status: http.StatusUnauthorized, code: string(ErrorCodeAuthFailed),
+			status: http.StatusUnauthorized, code: string(platformwebhook.ErrorCodeAuthFailed),
 		},
 		{
 			name: "timestamp outside tolerance",
@@ -294,7 +297,7 @@ func TestHandler_TamperingRejectedBeforeDispatch(t *testing.T) {
 				req.Header.Set(headerSignature, Sign(vectorSecret, EventSigningBytes(stale, vectorNonce, body)))
 				return body
 			},
-			status: http.StatusUnauthorized, code: string(ErrorCodeAuthFailed),
+			status: http.StatusUnauthorized, code: string(platformwebhook.ErrorCodeAuthFailed),
 		},
 	}
 	for _, tc := range cases {
@@ -347,7 +350,7 @@ func TestHandler_RateLimit(t *testing.T) {
 	}
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, signedRequest(t, http.MethodPost, eventPath, "primary", vectorSecret, vectorTimestamp, nonce(3), []byte(vectorBody)))
-	assertErrorBody(t, rec, http.StatusTooManyRequests, string(ErrorCodeRateLimited))
+	assertErrorBody(t, rec, http.StatusTooManyRequests, string(platformwebhook.ErrorCodeRateLimited))
 	if len(dispatch.events) != 3 {
 		t.Fatalf("dispatch called %d times", len(dispatch.events))
 	}
@@ -373,7 +376,7 @@ func TestHandler_BodyTooLarge(t *testing.T) {
 	huge = append(huge, []byte(`"}`)...)
 	rec := httptest.NewRecorder()
 	h.handler.ServeHTTP(rec, signedRequest(t, http.MethodPost, eventPath, "primary", vectorSecret, vectorTimestamp, vectorNonce, huge))
-	assertErrorBody(t, rec, http.StatusRequestEntityTooLarge, string(ErrorCodeBodyTooLarge))
+	assertErrorBody(t, rec, http.StatusRequestEntityTooLarge, string(platformwebhook.ErrorCodeBodyTooLarge))
 	if len(h.dispatch.events) != 0 {
 		t.Fatal("oversized request was dispatched")
 	}
@@ -402,7 +405,7 @@ func TestHandler_LogsContainNoSecrets(t *testing.T) {
 
 func TestParseEnvelope(t *testing.T) {
 	t.Run("accepts the reference body", func(t *testing.T) {
-		envelope, err := ParseEnvelope([]byte(vectorBody))
+		envelope, err := platformwebhook.ParseEnvelope([]byte(vectorBody))
 		if err != nil {
 			t.Fatalf("valid body rejected: %v", err)
 		}
@@ -428,9 +431,9 @@ func TestParseEnvelope(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := ParseEnvelope([]byte(tc.body)); err == nil {
+			if _, err := platformwebhook.ParseEnvelope([]byte(tc.body)); err == nil {
 				t.Fatal("invalid body accepted")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidRequest {
+			} else if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); !ok || code != platformwebhook.ErrorCodeInvalidRequest {
 				t.Fatalf("error code = %v, want webhook_invalid_request", code)
 			}
 		})
@@ -445,7 +448,7 @@ func TestParseEnvelope(t *testing.T) {
 			b.WriteString(`"k` + string(rune('a'+i%26)) + string(rune('a'+i/26)) + `":"v"`)
 		}
 		b.WriteString(`}}`)
-		if _, err := ParseEnvelope([]byte(b.String())); err == nil {
+		if _, err := platformwebhook.ParseEnvelope([]byte(b.String())); err == nil {
 			t.Fatal("oversized metadata accepted")
 		}
 	})
@@ -492,14 +495,14 @@ func TestKeyRing(t *testing.T) {
 	t.Run("unresolvable secret fails closed", func(t *testing.T) {
 		entries := []KeyEntry{{ID: "a", SecretEnv: "MISSING"}}
 		_, err := NewKeyRing(entries, func(string) (string, error) { return "", errors.New("gone") })
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeKeyResolutionFailed {
+		if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); !ok || code != platformwebhook.ErrorCodeKeyResolutionFailed {
 			t.Fatalf("error code = %v, want webhook_key_resolution_failed", code)
 		}
 	})
 	t.Run("empty secret fails closed", func(t *testing.T) {
 		entries := []KeyEntry{{ID: "a", SecretEnv: "EMPTY"}}
 		_, err := NewKeyRing(entries, func(string) (string, error) { return "", nil })
-		if code, ok := CodeOf(err); !ok || code != ErrorCodeKeyResolutionFailed {
+		if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); !ok || code != platformwebhook.ErrorCodeKeyResolutionFailed {
 			t.Fatalf("error code = %v, want webhook_key_resolution_failed", code)
 		}
 	})
@@ -559,5 +562,69 @@ func TestDigestIsLowercaseHex(t *testing.T) {
 	got := hex.EncodeToString(sum[:])
 	if got != vectorDigest {
 		t.Fatalf("digest = %s, want %s", got, vectorDigest)
+	}
+}
+
+func TestWebhookHandlerMapsEscapedStoreErrorsToInternalServerError(t *testing.T) {
+	now := time.Unix(1750000000, 0).UTC()
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+	}{
+		{
+			name:       "replay conflict maps to 409",
+			err:        platformwebhook.Errorf(platformwebhook.ErrorCodeReplayConflict, "conflict"),
+			wantStatus: http.StatusConflict,
+			wantCode:   string(platformwebhook.ErrorCodeReplayConflict),
+		},
+		{
+			name:       "runtime overloaded maps to 503",
+			err:        platformwebhook.Errorf(platformwebhook.ErrorCodeRuntimeOverloaded, "busy"),
+			wantStatus: http.StatusServiceUnavailable,
+			wantCode:   string(platformwebhook.ErrorCodeRuntimeOverloaded),
+		},
+		{
+			name:       "execution conflict maps to 500 with sanitized code",
+			err:        platformwebhook.Errorf(platformwebhook.ErrorCodeExecutionConflict, "unique constraint"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   string(platformwebhook.ErrorCodeInvalidRequest),
+		},
+		{
+			name:       "execution invalid maps to 500 with sanitized code",
+			err:        platformwebhook.Errorf(platformwebhook.ErrorCodeExecutionInvalid, "bad timestamp"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   string(platformwebhook.ErrorCodeInvalidRequest),
+		},
+		{
+			name:       "invalid argument maps to 500 with sanitized code",
+			err:        platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "nil db"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   string(platformwebhook.ErrorCodeInvalidRequest),
+		},
+		{
+			name:       "key resolution failed maps to 500 with sanitized code",
+			err:        platformwebhook.Errorf(platformwebhook.ErrorCodeKeyResolutionFailed, "missing env"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   string(platformwebhook.ErrorCodeInvalidRequest),
+		},
+		{
+			name:       "unknown error maps to 500 with sanitized code",
+			err:        errors.New("boom"),
+			wantStatus: http.StatusInternalServerError,
+			wantCode:   string(platformwebhook.ErrorCodeInvalidRequest),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t, now, defaultTestKeys(now), 60)
+			h.dispatch.result = func(*platformwebhook.AcceptedEvent) (platformwebhook.ExecutionRef, error) {
+				return platformwebhook.ExecutionRef{}, tc.err
+			}
+			rec := httptest.NewRecorder()
+			h.handler.ServeHTTP(rec, signedRequest(t, http.MethodPost, eventPath, "primary", vectorSecret, vectorTimestamp, vectorNonce, []byte(vectorBody)))
+			assertErrorBody(t, rec, tc.wantStatus, tc.wantCode)
+		})
 	}
 }

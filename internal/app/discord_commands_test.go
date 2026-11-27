@@ -12,13 +12,14 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type parityPorts struct{}
@@ -122,16 +123,16 @@ func (s *stubActivity) CancelActive(_ context.Context, sessionID string) (turnID
 
 func (s *stubActivity) SessionActivity(string) (activeTurnID string, queued int) { return "turn-1", 3 }
 
-func newCommandStore(t *testing.T) (store.SessionService, store.EventStore, store.ConversationSessionStore, *sql.DB) {
+func newCommandStore(t *testing.T) (turnstore.SessionService, turnstore.EventStore, turnstore.ConversationSessionStore, *sql.DB) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
-	return store.NewSessionService(db), store.NewEventStore(db), store.NewConversationSessionStore(db), db
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
+	return turnstore.NewSessionService(db), turnstore.NewEventStore(db), turnstore.NewConversationSessionStore(db), db
 }
 
-func seedCommandSession(t *testing.T, sessions store.SessionService, id, owner, agent string) {
+func seedCommandSession(t *testing.T, sessions turnstore.SessionService, id, owner, agent string) {
 	t.Helper()
 	now := time.Now().UTC()
-	sess := store.Session{ID: id, OwnerID: owner, AgentID: agent, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
+	sess := turn.Session{ID: id, OwnerID: owner, AgentID: agent, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now}
 	if err := sessions.Create(t.Context(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
@@ -146,12 +147,15 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 	seedCommandSession(t, sessions, key+"~foreign", "discord:222", "main")
 	now := time.Now().UTC()
 	for i := range 2 {
-		if _, err := events.AppendSequenced(t.Context(), key, &store.RuntimeEvent{ID: "ev-" + strconv.Itoa(i), SessionID: key, Kind: "message.completed", SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
+		if _, err := events.AppendSequenced(t.Context(), key, &turn.Event{ID: "ev-" + strconv.Itoa(i), SessionID: key, Kind: "message.completed", SchemaVersion: 1, Payload: json.RawMessage(`{}`), CreatedAt: now}); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
 	port := &discordCommandSessions{sessions: sessions, events: events, pointers: pointers}
-	resolver := &discordConversationResolver{pointers: pointers}
+	resolver, err := access.NewConversationResolver(pointers)
+	if err != nil {
+		t.Fatalf("NewConversationResolver: %v", err)
+	}
 	if n, err := port.EventCount(t.Context(), key); err != nil || n != 2 {
 		t.Errorf("EventCount = %d %v, want 2", n, err)
 	}
@@ -219,7 +223,10 @@ func TestDiscordCommandSessionsAgainstTheStore(t *testing.T) {
 	if _, found, _ := pointers.Resolve(t.Context(), key); found {
 		t.Fatal("switching to the base key with the base row absent kept the pointer")
 	}
-	ensurer := &discordSessionEnsurer{sessions: sessions}
+	ensurer, err := access.NewSessionEnsurer(sessions)
+	if err != nil {
+		t.Fatalf("NewSessionEnsurer: %v", err)
+	}
 	if err := ensurer.EnsureSession(t.Context(), key, principal.OwnerID, "main"); err != nil {
 		t.Fatalf("next message re-ensures the base session: %v", err)
 	}
@@ -236,15 +243,40 @@ func isNotSwitchable(err error) bool {
 func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	activity := &stubActivity{}
 	recorder := &wireRecorder{}
-	if err := wireChatCommands([]runtimechannelhost.ChannelPort{}, activity, nil, nil, nil, nil, recorder); err != nil {
-		t.Fatalf("wire without adapters: %v", err)
+	turns := &deferredCommandTurns{}
+	skills := &deferredCommandSkills{}
+	dispatcher, err := newChatCommandDispatcher(nil, nil, nil, turns, skills, recorder)
+	if err != nil || dispatcher == nil {
+		t.Fatalf("newChatCommandDispatcher() = %v, %v", dispatcher, err)
 	}
-	turns := engineCommandTurns{engine: activity}
+
+	if id, cancelled, err := turns.CancelActive(t.Context(), "s"); cancelled || id != "" || !fault.HasCode(err, command.ErrorCodeUnavailable) {
+		t.Errorf("unbound CancelActive = %q %v %v, want command_unavailable", id, cancelled, err)
+	}
+	if active, queued := turns.Activity("s"); active != "" || queued != 0 {
+		t.Errorf("unbound Activity = %q %d, want zero", active, queued)
+	}
+
+	turns.bind(activity)
 	if id, cancelled, err := turns.CancelActive(t.Context(), "s"); err != nil || !cancelled || id != "turn-1" || !slices.Equal(activity.cancelled, []string{"s"}) {
 		t.Errorf("CancelActive = %q %v %v", id, cancelled, err)
 	}
 	if active, queued := turns.Activity("s"); active != "turn-1" || queued != 3 {
 		t.Errorf("Activity = %q %d", active, queued)
+	}
+
+	if _, err := skills.Activate(t.Context(), "pdf"); err == nil || err.Error() != "skill support is not available" {
+		t.Errorf("unbound Activate error = %v, want skill support is not available", err)
+	}
+	if _, err := skills.StageDraft(t.Context(), "notes", "body"); err == nil || err.Error() != "skill support is not available" {
+		t.Errorf("unbound StageDraft error = %v, want skill support is not available", err)
+	}
+	skills.bind(parityPorts{})
+	if pin, err := skills.Activate(t.Context(), "pdf"); err != nil || pin.SkillID != "local/pdf@0123456789ab" {
+		t.Errorf("bound Activate = %+v, %v", pin, err)
+	}
+	if draft, err := skills.StageDraft(t.Context(), "notes", "body"); err != nil || draft.ID != "local/notes@0123456789ab" {
+		t.Errorf("bound StageDraft = %+v, %v", draft, err)
 	}
 }
 

@@ -2,7 +2,6 @@ package app
 
 import (
 	"encoding/json"
-	"log/slog"
 	"testing"
 	"time"
 
@@ -23,15 +22,15 @@ func TestApprovedProposalRecordsTheApprover(t *testing.T) {
 				owner := *h.owner
 				owner.Tainted = tainted
 				bound := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-				h.controller.enableProposalCards(h.cfg, []proposalOfferer{bound}, slog.New(slog.DiscardHandler))
-				go h.controller.runProposalCards(t.Context())
+				h.rebuildController(t, &discordProposalOffererAdapter{offerer: bound})
+				go h.controller.RunProposalCards(t.Context())
 				proposed, err := h.controller.Propose(t.Context(), &owner, json.RawMessage(coveredProposal))
 				if err != nil {
 					t.Fatal(err)
 				}
 				bound.waitAttempts(t, 1)
 				if via == "cli" {
-					_, err = approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+					_, err = workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposed.ProposalID, h.showCall, time.Now())
 				} else {
 					_, err = bound.decide(t.Context(), true)
 				}

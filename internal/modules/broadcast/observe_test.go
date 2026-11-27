@@ -42,15 +42,15 @@ func (r *recordingObserver) find(result string) (Observation, bool) {
 func TestObserver_SubmitHeldAndScheduled(t *testing.T) {
 	recorder := &recordingObserver{}
 	store := newFakeItemStore()
-	broadcaster, err := New(testPolicy(), &fakeRegistry{registered: map[string]bool{"discord": true}}, store, nil, recorder.observe)
+	broadcaster, err := NewBroadcaster(testPolicy(), &fakeRegistry{registered: map[string]bool{"discord": true}}, store, nil, recorder.observe)
 	if err != nil {
-		t.Fatalf("New(): %v", err)
+		t.Fatalf("NewBroadcaster(): %v", err)
 	}
 	quiet := testPolicy()
 	quiet.Quiet = QuietConfig{Enabled: true, Location: time.UTC, StartMin: 1380, EndMin: 420}
-	held, err := New(quiet, &fakeRegistry{registered: map[string]bool{"discord": true}}, newFakeItemStore(), nil, recorder.observe)
+	held, err := NewBroadcaster(quiet, &fakeRegistry{registered: map[string]bool{"discord": true}}, newFakeItemStore(), nil, recorder.observe)
 	if err != nil {
-		t.Fatalf("New(): %v", err)
+		t.Fatalf("NewBroadcaster(): %v", err)
 	}
 	notification := testNotification()
 	if _, _, err := broadcaster.Submit(t.Context(), notification); err != nil {

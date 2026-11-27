@@ -7,12 +7,12 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func seedAPIKey(t *testing.T, keys store.APIKeyStore, id, class string, at time.Time) {
+func seedAPIKey(t *testing.T, keys principal.APIKeyStore, id string, class principal.Class, at time.Time) {
 	t.Helper()
-	key := &store.APIKey{ID: id, KeySHA256: strings.Repeat("a", 52) + strings.ToLower(id), PersonaID: "main", Class: class, Label: "client", CreatedAt: at}
+	key := &principal.APIKey{ID: id, KeySHA256: strings.Repeat("a", 52) + strings.ToLower(id), PersonaID: "main", Class: string(class), Label: "client", CreatedAt: at}
 	if err := keys.Create(t.Context(), key); err != nil {
 		t.Fatalf("Create key %s: %v", id, err)
 	}
@@ -22,15 +22,15 @@ func TestPrincipalAdminCoversHTTPKeys(t *testing.T) {
 	cfg := writePrincipalCLIConfig(t)
 	db := openAccessDB(t, cfg)
 	now := time.Now().UTC()
-	keys := store.NewAPIKeyStore(db)
-	seedAPIKey(t, keys, "aaaaaaaaaaaa", store.APIKeyClassPublic, now)
-	seedAPIKey(t, keys, "bbbbbbbbbbbb", store.APIKeyClassTrusted, now)
-	seedAPIKey(t, keys, "cccccccccccc", store.APIKeyClassPublic, now)
-	seedAPIKey(t, keys, "dddddddddddd", store.APIKeyClassOwner, now)
+	keys := principal.NewAPIKeyStore(db)
+	seedAPIKey(t, keys, "aaaaaaaaaaaa", principal.ClassPublic, now)
+	seedAPIKey(t, keys, "bbbbbbbbbbbb", principal.ClassTrusted, now)
+	seedAPIKey(t, keys, "cccccccccccc", principal.ClassPublic, now)
+	seedAPIKey(t, keys, "dddddddddddd", principal.ClassOwner, now)
 	if _, err := keys.Revoke(t.Context(), "cccccccccccc", now); err != nil {
 		t.Fatalf("Revoke: %v", err)
 	}
-	seedIdleSession(t, store.NewSessionService(db), "main/http/aaaaaaaaaaaa/one", "http:aaaaaaaaaaaa", now)
+	seedIdleSession(t, turnstore.NewSessionService(db), "main/http/aaaaaaaaaaaa/one", "http:aaaaaaaaaaaa", now)
 
 	out, err := runAccessCommand(t, newPrincipalCmd, cfg, "list")
 	if err != nil {
@@ -66,10 +66,10 @@ func TestRetentionSweepErasesIdleHTTPPrincipalsByKeyClass(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
-	keys := store.NewAPIKeyStore(db)
-	seedAPIKey(t, keys, "aaaaaaaaaaaa", store.APIKeyClassPublic, now.Add(-9000*time.Hour))
-	seedAPIKey(t, keys, "bbbbbbbbbbbb", store.APIKeyClassTrusted, now.Add(-9000*time.Hour))
-	sessions := store.NewSessionService(db)
+	keys := principal.NewAPIKeyStore(db)
+	seedAPIKey(t, keys, "aaaaaaaaaaaa", principal.ClassPublic, now.Add(-9000*time.Hour))
+	seedAPIKey(t, keys, "bbbbbbbbbbbb", principal.ClassTrusted, now.Add(-9000*time.Hour))
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/http/aaaaaaaaaaaa/one", "http:aaaaaaaaaaaa", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/http/bbbbbbbbbbbb/one", "http:bbbbbbbbbbbb", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/http/dddddddddddd/one", principal.OwnerID, now.Add(-9000*time.Hour))

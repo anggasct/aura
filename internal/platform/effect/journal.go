@@ -13,7 +13,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type Classification string
@@ -127,10 +128,17 @@ type Journal struct {
 	logger   *slog.Logger
 	observer Observer
 	events   EventPublisher
+	turns    TurnStore
 }
 
 type EventPublisher interface {
-	Publish(*store.RuntimeEvent)
+	Publish(*turn.Event)
+}
+
+type TurnStore interface {
+	AllocateSequence(ctx context.Context, sessionID string) (uint64, error)
+	AppendEvent(ctx context.Context, e *turn.Event) error
+	SessionOwner(ctx context.Context, sessionID string) (string, error)
 }
 
 type Options struct {
@@ -138,11 +146,15 @@ type Options struct {
 	Logger   *slog.Logger
 	Observer Observer
 	Events   EventPublisher
+	Turns    TurnStore
 }
 
 func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if db == nil {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: database handle must not be nil", nil)
+	}
+	if opts.Turns == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "effect: turn store must not be nil", nil)
 	}
 	if opts.Now == nil {
 		opts.Now = func() time.Time { return time.Now().UTC() }
@@ -153,7 +165,7 @@ func NewJournal(db *sql.DB, opts Options) (*Journal, error) {
 	if opts.Observer == nil {
 		opts.Observer = observerFunc(noopObserver)
 	}
-	return &Journal{db: db, now: opts.Now, logger: opts.Logger, observer: opts.Observer, events: opts.Events}, nil
+	return &Journal{db: db, now: opts.Now, logger: opts.Logger, observer: opts.Observer, events: opts.Events, turns: opts.Turns}, nil
 }
 
 const insertIntentSQL = `
@@ -197,116 +209,103 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 	}
 	digest := digestRequest(normalizedRequest)
 
-	tx, err := j.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("effect: begin prepare transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	var intent *Intent
+	var reused bool
+	err = sqlite.RunInTx(ctx, j.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, j.db)
+		existing, lookupErr := intentByKey(ctx, q, req.Provider, req.Operation, req.IdempotencyKey)
+		if lookupErr != nil && !errors.Is(lookupErr, errIntentNotFound) {
+			return lookupErr
+		}
+		if existing != nil {
+			if existing.RequestDigest != digest {
+				return codedError(ErrorCodeIdempotencyConflict,
+					fmt.Sprintf("effect: idempotency key %q already bound to a different request", req.IdempotencyKey), nil)
+			}
+			intent = existing
+			reused = true
+			return nil
+		}
 
-	existing, err := intentByKey(ctx, tx, req.Provider, req.Operation, req.IdempotencyKey)
-	if err != nil && !errors.Is(err, errIntentNotFound) {
-		return nil, err
-	}
-	if existing != nil {
-		if existing.RequestDigest != digest {
-			return nil, codedError(ErrorCodeIdempotencyConflict,
-				fmt.Sprintf("effect: idempotency key %q already bound to a different request", req.IdempotencyKey), nil)
+		now := j.now()
+		intentID, idErr := randomID()
+		if idErr != nil {
+			return idErr
 		}
-		if err := tx.Rollback(); err != nil {
-			return nil, fmt.Errorf("effect: rollback idempotent prepare: %w", err)
+		_, execErr := q.ExecContext(ctx, insertIntentSQL,
+			intentID, req.SessionID, req.TurnID, req.ToolCallID, req.IdempotencyKey, req.Provider, req.Operation,
+			string(req.Classification), string(StatePrepared), digest, string(normalizedRequest),
+			fmtTime(now), fmtTime(now),
+		)
+		if execErr != nil {
+			if isUniqueViolation(execErr) {
+				resolved, conflictErr := j.resolvePrepareConflict(ctx, req, digest, execErr)
+				if conflictErr != nil {
+					return conflictErr
+				}
+				intent = resolved
+				reused = true
+				return nil
+			}
+			return fmt.Errorf("effect: insert intent: %w", execErr)
 		}
-		return existing, nil
-	}
 
-	now := j.now()
-	intentID, err := randomID()
-	if err != nil {
-		return nil, err
-	}
-	_, err = tx.ExecContext(ctx, insertIntentSQL,
-		intentID, req.SessionID, req.TurnID, req.ToolCallID, req.IdempotencyKey, req.Provider, req.Operation,
-		string(req.Classification), string(StatePrepared), digest, string(normalizedRequest),
-		fmtTime(now), fmtTime(now),
-	)
-	if err != nil {
-		if isUniqueViolation(err) {
-			return j.resolvePrepareConflict(ctx, req, digest, err)
+		kind := req.EventKind
+		if kind == "" {
+			kind = EventKindToolRequested
 		}
-		return nil, fmt.Errorf("effect: insert intent: %w", err)
-	}
-
-	kind := req.EventKind
-	if kind == "" {
-		kind = EventKindToolRequested
-	}
-	var payload json.RawMessage
-	var sequence uint64
-	var schemaVersion uint16
-	if kind == EventKindChannelRequested || req.AllocateSequence {
-		sequence, err = store.AllocateSequenceTx(ctx, tx, req.SessionID)
-		if err != nil {
-			return nil, err
+		var payload json.RawMessage
+		var sequence uint64
+		var schemaVersion uint16
+		if kind == EventKindChannelRequested || req.AllocateSequence {
+			var seqErr error
+			sequence, seqErr = j.turns.AllocateSequence(ctx, req.SessionID)
+			if seqErr != nil {
+				return seqErr
+			}
 		}
-	}
-	if kind == EventKindChannelRequested {
-		payload, err = json.Marshal(channelRequestedPayload{
-			EffectIntentID: intentID,
-			Provider:       req.Provider,
-			Operation:      req.Operation,
-			Classification: req.Classification,
-			IdempotencyKey: req.IdempotencyKey,
-			RequestDigest:  digest,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("effect: marshal channel.requested payload: %w", err)
+		if kind == EventKindChannelRequested {
+			var marshalErr error
+			payload, marshalErr = json.Marshal(channelRequestedPayload{
+				EffectIntentID: intentID,
+				Provider:       req.Provider,
+				Operation:      req.Operation,
+				Classification: req.Classification,
+				IdempotencyKey: req.IdempotencyKey,
+				RequestDigest:  digest,
+			})
+			if marshalErr != nil {
+				return fmt.Errorf("effect: marshal channel.requested payload: %w", marshalErr)
+			}
+			schemaVersion = channelRequestedSchemaVersion
+		} else {
+			var marshalErr error
+			payload, marshalErr = json.Marshal(toolRequestedPayload{
+				EffectIntentID: intentID,
+				ToolCallID:     req.ToolCallID,
+				Provider:       req.Provider,
+				Operation:      req.Operation,
+				Classification: req.Classification,
+				IdempotencyKey: req.IdempotencyKey,
+				RequestDigest:  digest,
+			})
+			if marshalErr != nil {
+				return fmt.Errorf("effect: marshal tool.requested payload: %w", marshalErr)
+			}
+			if !req.AllocateSequence {
+				sequence = req.EventSequence
+			}
+			schemaVersion = toolRequestedSchemaVersion
 		}
-		schemaVersion = channelRequestedSchemaVersion
-	} else {
-		payload, err = json.Marshal(toolRequestedPayload{
-			EffectIntentID: intentID,
-			ToolCallID:     req.ToolCallID,
-			Provider:       req.Provider,
-			Operation:      req.Operation,
-			Classification: req.Classification,
-			IdempotencyKey: req.IdempotencyKey,
-			RequestDigest:  digest,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("effect: marshal tool.requested payload: %w", err)
+		eventID := req.EventID
+		if eventID == "" {
+			var evIDErr error
+			eventID, evIDErr = randomID()
+			if evIDErr != nil {
+				return evIDErr
+			}
 		}
-		if !req.AllocateSequence {
-			sequence = req.EventSequence
-		}
-		schemaVersion = toolRequestedSchemaVersion
-	}
-	eventID := req.EventID
-	if eventID == "" {
-		eventID, err = randomID()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if err := store.AppendEventTx(ctx, tx, &store.RuntimeEvent{
-		ID:            eventID,
-		SessionID:     req.SessionID,
-		Sequence:      sequence,
-		TurnID:        req.TurnID,
-		InvocationID:  req.EventInvocation,
-		Branch:        req.EventBranch,
-		Author:        req.EventAuthor,
-		Kind:          kind,
-		SchemaVersion: schemaVersion,
-		Payload:       payload,
-		CreatedAt:     now,
-	}); err != nil {
-		return nil, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("effect: commit prepare: %w", err)
-	}
-	if j.events != nil {
-		j.events.Publish(&store.RuntimeEvent{
+		ev := turn.Event{
 			ID:            eventID,
 			SessionID:     req.SessionID,
 			Sequence:      sequence,
@@ -318,24 +317,39 @@ func (j *Journal) Prepare(ctx context.Context, req *PrepareRequest) (*Intent, er
 			SchemaVersion: schemaVersion,
 			Payload:       payload,
 			CreatedAt:     now,
-		})
+		}
+		if appendErr := j.turns.AppendEvent(ctx, &ev); appendErr != nil {
+			return appendErr
+		}
+		if j.events != nil {
+			published := ev
+			sqlite.AfterCommit(ctx, j.db, func() {
+				j.events.Publish(&published)
+			})
+		}
+		intent = &Intent{
+			ID:             intentID,
+			SessionID:      req.SessionID,
+			TurnID:         req.TurnID,
+			ToolCallID:     req.ToolCallID,
+			IdempotencyKey: req.IdempotencyKey,
+			Provider:       req.Provider,
+			Operation:      req.Operation,
+			Classification: req.Classification,
+			State:          StatePrepared,
+			RequestDigest:  digest,
+			RequestJSON:    normalizedRequest,
+			PreparedAt:     now,
+			UpdatedAt:      now,
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
-	intent := &Intent{
-		ID:             intentID,
-		SessionID:      req.SessionID,
-		TurnID:         req.TurnID,
-		ToolCallID:     req.ToolCallID,
-		IdempotencyKey: req.IdempotencyKey,
-		Provider:       req.Provider,
-		Operation:      req.Operation,
-		Classification: req.Classification,
-		State:          StatePrepared,
-		RequestDigest:  digest,
-		RequestJSON:    normalizedRequest,
-		PreparedAt:     now,
-		UpdatedAt:      now,
+	if !reused {
+		j.observe(ctx, intent, "prepared")
 	}
-	j.observe(ctx, intent, "prepared")
 	return intent, nil
 }
 
@@ -344,7 +358,7 @@ func (j *Journal) Lookup(ctx context.Context, provider, operation, idempotencyKe
 	if err != nil {
 		return nil, false, err
 	}
-	existing, err := intentByKey(ctx, j.db, provider, operation, idempotencyKey)
+	existing, err := intentByKey(ctx, sqlite.Conn(ctx, j.db), provider, operation, idempotencyKey)
 	if errors.Is(err, errIntentNotFound) {
 		return nil, false, nil
 	}
@@ -359,7 +373,7 @@ func (j *Journal) Lookup(ctx context.Context, provider, operation, idempotencyKe
 }
 
 func (j *Journal) resolvePrepareConflict(ctx context.Context, req *PrepareRequest, digest string, cause error) (*Intent, error) {
-	existing, err := intentByKey(ctx, j.db, req.Provider, req.Operation, req.IdempotencyKey)
+	existing, err := intentByKey(ctx, sqlite.Conn(ctx, j.db), req.Provider, req.Operation, req.IdempotencyKey)
 	if err != nil && !errors.Is(err, errIntentNotFound) {
 		return nil, err
 	}
@@ -552,35 +566,31 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
-	tx, err := j.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("effect: begin transition transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	err := sqlite.RunInTx(ctx, j.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, j.db)
+		var currentState State
+		err := q.QueryRowContext(ctx, `SELECT state FROM effect_intent WHERE id = ?`, id).Scan(&currentState)
+		if errors.Is(err, sql.ErrNoRows) {
+			return codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", id), nil)
+		}
+		if err != nil {
+			return fmt.Errorf("effect: read intent %s state: %w", id, err)
+		}
+		if !stateIn(currentState, spec.from) {
+			return codedError(spec.invalidCode,
+				fmt.Sprintf("effect: intent %s is %s, cannot transition to %s", id, currentState, spec.to), nil)
+		}
 
-	var currentState State
-	err = tx.QueryRowContext(ctx, `SELECT state FROM effect_intent WHERE id = ?`, id).Scan(&currentState)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", id), nil)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("effect: read intent %s state: %w", id, err)
-	}
-	if !stateIn(currentState, spec.from) {
-		return nil, codedError(spec.invalidCode,
-			fmt.Sprintf("effect: intent %s is %s, cannot transition to %s", id, currentState, spec.to), nil)
-	}
-
-	now := j.now()
-	var receiptArg any
-	if spec.receipt != nil {
-		receiptArg = string(spec.receipt)
-	}
-	var resultArg any
-	if spec.result != nil {
-		resultArg = string(spec.result)
-	}
-	res, err := tx.ExecContext(ctx, `
+		now := j.now()
+		var receiptArg any
+		if spec.receipt != nil {
+			receiptArg = string(spec.receipt)
+		}
+		var resultArg any
+		if spec.result != nil {
+			resultArg = string(spec.result)
+		}
+		res, err := q.ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?,
 		    updated_at = ?,
@@ -592,26 +602,28 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		    result_digest = ?,
 		    safe_error_code = ?
 		WHERE id = ? AND state = ?`,
-		string(spec.to), fmtTime(now),
-		boolToInt(spec.setStartedAt), fmtTime(now),
-		boolToInt(spec.setFinishedAt), fmtTime(now),
-		boolToInt(spec.setReconciledAt), fmtTime(now),
-		receiptArg, resultArg, nullableString(spec.resultDigest), nullableString(spec.safeErrorCode),
-		id, string(currentState),
-	)
+			string(spec.to), fmtTime(now),
+			boolToInt(spec.setStartedAt), fmtTime(now),
+			boolToInt(spec.setFinishedAt), fmtTime(now),
+			boolToInt(spec.setReconciledAt), fmtTime(now),
+			receiptArg, resultArg, nullableString(spec.resultDigest), nullableString(spec.safeErrorCode),
+			id, string(currentState),
+		)
+		if err != nil {
+			return fmt.Errorf("effect: transition intent %s to %s: %w", id, spec.to, err)
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("effect: read transition rows affected: %w", err)
+		}
+		if affected == 0 {
+			return codedError(spec.invalidCode,
+				fmt.Sprintf("effect: intent %s changed state before transition to %s", id, spec.to), nil)
+		}
+		return nil
+	})
 	if err != nil {
-		return nil, fmt.Errorf("effect: transition intent %s to %s: %w", id, spec.to, err)
-	}
-	affected, err := res.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("effect: read transition rows affected: %w", err)
-	}
-	if affected == 0 {
-		return nil, codedError(spec.invalidCode,
-			fmt.Sprintf("effect: intent %s changed state before transition to %s", id, spec.to), nil)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("effect: commit transition to %s: %w", spec.to, err)
+		return nil, err
 	}
 	intent, err := j.Get(ctx, id)
 	if err != nil {
@@ -641,7 +653,7 @@ func (j *Journal) Get(ctx context.Context, id string) (*Intent, error) {
 	if id == "" {
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
-	intent, err := scanIntent(j.db.QueryRowContext(ctx, selectIntentByIDSQL, id))
+	intent, err := scanIntent(sqlite.Conn(ctx, j.db).QueryRowContext(ctx, selectIntentByIDSQL, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", id), nil)
 	}
@@ -671,7 +683,7 @@ func (j *Journal) ListByState(ctx context.Context, state State, limit int) ([]In
 	LIMIT ?`
 		args = append(args, limit)
 	}
-	rows, err := j.db.QueryContext(ctx, query, args...)
+	rows, err := sqlite.Conn(ctx, j.db).QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("effect: list intents in state %s: %w", state, err)
 	}

@@ -13,8 +13,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -27,52 +27,64 @@ import (
 
 type countingWorkflowController struct{ calls atomic.Int64 }
 
-func (c *countingWorkflowController) SaveRoutine(context.Context, *toolsbuiltin.WorkflowCaller, string, string) (toolsbuiltin.WorkflowRoutine, error) {
+func (c *countingWorkflowController) SaveRoutine(context.Context, *workflow.Caller, string, string) (workflow.RoutineSummary, error) {
 	c.calls.Add(1)
-	return toolsbuiltin.WorkflowRoutine{}, nil
+	return workflow.RoutineSummary{}, nil
 }
 
-func (c *countingWorkflowController) Propose(context.Context, *toolsbuiltin.WorkflowCaller, json.RawMessage) (toolsbuiltin.WorkflowProposal, error) {
+func (c *countingWorkflowController) Propose(context.Context, *workflow.Caller, json.RawMessage) (workflow.ProposalSummary, error) {
 	c.calls.Add(1)
-	return toolsbuiltin.WorkflowProposal{}, nil
+	return workflow.ProposalSummary{}, nil
 }
 
-func (c *countingWorkflowController) List(context.Context, *toolsbuiltin.WorkflowCaller) ([]toolsbuiltin.WorkflowInfo, error) {
+func (c *countingWorkflowController) List(context.Context, *workflow.Caller) ([]workflow.Info, error) {
 	c.calls.Add(1)
 	return nil, nil
 }
 
-func (c *countingWorkflowController) Start(context.Context, *toolsbuiltin.WorkflowCaller, string, string) (toolsbuiltin.WorkflowRunState, error) {
+func (c *countingWorkflowController) Start(context.Context, *workflow.Caller, string, string) (workflow.RunState, error) {
 	c.calls.Add(1)
-	return toolsbuiltin.WorkflowRunState{}, nil
+	return workflow.RunState{}, nil
 }
 
-func (c *countingWorkflowController) Status(context.Context, *toolsbuiltin.WorkflowCaller, string) (toolsbuiltin.WorkflowRunState, error) {
+func (c *countingWorkflowController) Status(context.Context, *workflow.Caller, string) (workflow.RunState, error) {
 	c.calls.Add(1)
-	return toolsbuiltin.WorkflowRunState{}, nil
+	return workflow.RunState{}, nil
 }
 
-func (c *countingWorkflowController) Cancel(context.Context, *toolsbuiltin.WorkflowCaller, string) (toolsbuiltin.WorkflowRunState, error) {
+func (c *countingWorkflowController) Cancel(context.Context, *workflow.Caller, string) (workflow.RunState, error) {
 	c.calls.Add(1)
-	return toolsbuiltin.WorkflowRunState{}, nil
+	return workflow.RunState{}, nil
 }
 
 type countingHandoffOpener struct{ calls atomic.Int64 }
 
-func (o *countingHandoffOpener) OpenHandoff(context.Context, *toolsbuiltin.HandoffRequest) error {
+func (o *countingHandoffOpener) OpenHandoff(context.Context, *handoff.Request) error {
 	o.calls.Add(1)
 	return nil
 }
 
 func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 	runner, db, _ := newWorkflowToolRunnerFixture(t)
-	toolRunner, ok := runner.(*workflowToolRunner)
+	toolRunner, ok := runner.(*workflow.ToolStepRunner)
 	if !ok {
-		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
+		t.Fatalf("runner is %T, want *workflow.ToolStepRunner", runner)
+	}
+	broker, ok := toolRunner.Broker().(*toolbroker.Broker)
+	if !ok {
+		t.Fatalf("broker is %T, want *toolbroker.Broker", toolRunner.Broker())
 	}
 	controller, opener := &countingWorkflowController{}, &countingHandoffOpener{}
-	toolRunner.in.Executor.SetWorkflowController(controller)
-	toolRunner.in.Executor.SetHandoffOpener(opener)
+	wfProvider, err := workflow.NewToolProvider(controller)
+	if err != nil {
+		t.Fatalf("NewToolProvider(workflow): %v", err)
+	}
+	if err := broker.RegisterProvider(wfProvider); err != nil {
+		t.Fatalf("RegisterProvider(workflow): %v", err)
+	}
+	if err := broker.RegisterProvider(handoff.NewToolProvider(opener)); err != nil {
+		t.Fatalf("RegisterProvider(handoff): %v", err)
+	}
 
 	for name, args := range map[string]json.RawMessage{
 		"workflow_status":  json.RawMessage(`{"run_id":"r"}`),
@@ -80,7 +92,7 @@ func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := runner.Invoke(stepCallContext(t, db), name, args)
-			if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+			if !fault.HasCode(err, workflow.ErrorCodeExecutorInvalid) {
 				t.Fatalf("Invoke error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 			}
 		})
@@ -93,14 +105,14 @@ func TestWorkflowToolRunnerRefusesAnOrchestrationTool(t *testing.T) {
 func TestStepToolCatalogMatchesTheBroker(t *testing.T) {
 	var configured appconfig.Config
 	runner, _, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *appconfig.Config) {
-		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+		cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		configured = *cfg
 	})
-	toolRunner, ok := runner.(*workflowToolRunner)
+	toolRunner, ok := runner.(*workflow.ToolStepRunner)
 	if !ok {
-		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
+		t.Fatalf("runner is %T, want *workflow.ToolStepRunner", runner)
 	}
-	broker := toolRunner.broker
+	broker := toolRunner.Broker()
 	catalog, err := stepToolCatalog(&configured)
 	if err != nil {
 		t.Fatalf("stepToolCatalog: %v", err)
@@ -142,13 +154,13 @@ func commentWorkflow(credential string) *workflow.Spec {
 func TestWorkflowValidateRefusesAnUnconfiguredCredentialName(t *testing.T) {
 	t.Run("the deps every compile path shares", func(t *testing.T) {
 		configured := appconfig.Default()
-		configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+		configured.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		deps, err := workflowValidationDeps(&configured)
 		if err != nil {
 			t.Fatalf("workflowValidationDeps: %v", err)
 		}
 		_, err = workflow.Compile(commentWorkflow("nope"), deps)
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeSpecInvalid {
+		if !fault.HasCode(err, workflow.ErrorCodeSpecInvalid) {
 			t.Fatalf("Compile with an unconfigured credential = %v, want %s", err, workflow.ErrorCodeSpecInvalid)
 		}
 		if err == nil || !strings.Contains(err.Error(), `"call"`) {
@@ -168,7 +180,7 @@ func TestWorkflowValidateRefusesAnUnconfiguredCredentialName(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		_, err := runWorkflowCommand(t, gf, "validate", file)
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeSpecInvalid {
+		if !fault.HasCode(err, workflow.ErrorCodeSpecInvalid) {
 			t.Fatalf("validate of invalid arguments = %v, want %s", err, workflow.ErrorCodeSpecInvalid)
 		}
 		if err == nil || !strings.Contains(err.Error(), `"load"`) {
@@ -183,12 +195,12 @@ func TestProposalApprovalLoadStaysStrict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	refusing := h.controller.interpreter.ValidationDeps()
+	refusing := h.controller.Interpreter().ValidationDeps()
 	refusing.CheckToolCall = func(string, json.RawMessage) error { return errors.New("a credential was removed") }
-	if err := h.controller.interpreter.LoadAll(t.Context(), nil, refusing); err != nil {
+	if err := h.controller.Interpreter().LoadAll(t.Context(), nil, refusing); err != nil {
 		t.Fatal(err)
 	}
-	_, err = approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposed.ProposalID, h.controller.showCall, time.Now())
+	_, err = workflow.ApproveRenderedProposal(t.Context(), h.controller.Interpreter(), h.runs, proposed.ProposalID, h.controller.ShowCall(), time.Now())
 	if !hasWorkflowCode(err, workflow.ErrorCodeSpecInvalid) {
 		t.Fatalf("approval of a proposal that fails the argument check = %v, want %s", err, workflow.ErrorCodeSpecInvalid)
 	}
@@ -268,7 +280,7 @@ func TestServerReportsQuarantinedWorkflowDefinitions(t *testing.T) {
 		}
 		var check *health.RegisteredCheck
 		for i := range b.server.checks {
-			if b.server.checks[i].ID == workflowDefinitionsComponent {
+			if b.server.checks[i].ID == "workflow_definitions" {
 				check = &b.server.checks[i]
 			}
 		}
@@ -308,14 +320,14 @@ func TestQuarantinedRoutineIsHiddenFromTheControllerTools(t *testing.T) {
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "desk", Description: "desk", Instructions: "You help.", Audience: auraagent.AudienceTrusted,
 		Tools: []string{"workflow_start"}, PrincipalTools: []string{"workflow_start"}, Workflows: []string{"book_visit", "broken_routine"},
-	}}, toolsbuiltin.DefinitionNames(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := newWorkflowToolController(controller.interpreter, controller.runs, registry, nil); !hasConfigCode(err, auraagent.ErrorCodePersonaInvalid) {
+	if _, err := workflow.NewController(&workflow.ControllerDeps{Interpreter: controller.Interpreter(), Runs: controller.Store(), Registry: registry}); !hasConfigCode(err, auraagent.ErrorCodePersonaInvalid) {
 		t.Fatalf("controller without the quarantine list = %v, want %s", err, auraagent.ErrorCodePersonaInvalid)
 	}
-	quarantined, err := newWorkflowToolController(controller.interpreter, controller.runs, registry, []string{"broken_routine"})
+	quarantined, err := workflow.NewController(&workflow.ControllerDeps{Interpreter: controller.Interpreter(), Runs: controller.Store(), Registry: registry, Quarantined: []string{"broken_routine"}})
 	if err != nil {
 		t.Fatalf("controller with the quarantine list: %v", err)
 	}

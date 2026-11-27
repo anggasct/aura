@@ -7,49 +7,48 @@ import (
 	"path/filepath"
 	"testing"
 
-	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/codeexec"
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
-	"github.com/anggasct/aura/internal/platform/health"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 func TestEnableExecutionBuildsTheRunnerAndVerifier(t *testing.T) {
-	defaults := config.DefaultInterpreter()
+	defaults := codeexec.Default()
 	rig := newAvailableInterpreterRig(t)
-	runtime, err := newInterpreterRuntime(&appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, rig.manifest)
+	mod, err := codeexec.New(t.Context(), &codeexec.ModuleDeps{
+		Config:    &defaults,
+		DataRoot:  rig.dataRoot,
+		Manifest:  rig.manifest,
+		Artifacts: testArtifacts(t),
+		Logger:    slog.New(slog.DiscardHandler),
+	})
 	if err != nil {
-		t.Fatalf("newInterpreterRuntime: %v", err)
+		t.Fatalf("codeexec.New: %v", err)
 	}
-	if runtime.runner != nil {
-		t.Fatal("execution must stay off until it is enabled")
+	if mod.Runner() == nil || mod.Store() == nil || mod.Verified() == nil {
+		t.Fatal("codeexec.New left the runner, store, or verified set unset")
 	}
-	if err := runtime.enableExecution(t.Context(), &appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: defaults}, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err != nil {
-		t.Fatalf("enableExecution: %v", err)
-	}
-	if runtime.runner == nil || runtime.verifier == nil {
-		t.Fatal("enableExecution left the runner or the verifier unset")
+	if len(mod.Tools()) != 1 || len(mod.HealthChecks()) != 1 {
+		t.Fatalf("tools=%d health=%d, want 1 each", len(mod.Tools()), len(mod.HealthChecks()))
 	}
 }
 
 func TestEnableExecutionSweepsStaleRunDirectories(t *testing.T) {
 	rig := newAvailableInterpreterRig(t)
-	cfg := &appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: config.DefaultInterpreter()}
-	dataRoot, err := resolveDataRoot(cfg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	stale := filepath.Join(dataRoot, interpreterRunsDirName, "run-stale", "output")
+	defaults := codeexec.Default()
+	stale := filepath.Join(rig.dataRoot, codeexec.RunsDirName, "run-stale", "output")
 	if err := os.MkdirAll(stale, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := newInterpreterRuntime(cfg, rig.manifest)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := runtime.enableExecution(t.Context(), cfg, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err != nil {
-		t.Fatalf("enableExecution: %v", err)
+	if _, err := codeexec.New(t.Context(), &codeexec.ModuleDeps{
+		Config:    &defaults,
+		DataRoot:  rig.dataRoot,
+		Manifest:  rig.manifest,
+		Artifacts: testArtifacts(t),
+		Logger:    slog.New(slog.DiscardHandler),
+	}); err != nil {
+		t.Fatalf("codeexec.New: %v", err)
 	}
 	if _, err := os.Stat(filepath.Dir(stale)); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the stale run directory survived startup: %v", err)
@@ -58,32 +57,33 @@ func TestEnableExecutionSweepsStaleRunDirectories(t *testing.T) {
 
 func TestEnableExecutionRejectsAnInvalidLimit(t *testing.T) {
 	rig := newAvailableInterpreterRig(t)
-	invalid := config.DefaultInterpreter()
+	invalid := codeexec.Default()
 	invalid.MaxProcesses = 0
-	cfg := &appconfig.Config{Storage: config.Storage{Path: rig.dataRoot}, Interpreter: invalid}
-	runtime, err := newInterpreterRuntime(cfg, rig.manifest)
-	if err != nil {
-		t.Fatal(err)
+	mod, err := codeexec.New(t.Context(), &codeexec.ModuleDeps{
+		Config:    &invalid,
+		DataRoot:  rig.dataRoot,
+		Manifest:  rig.manifest,
+		Artifacts: testArtifacts(t),
+		Logger:    slog.New(slog.DiscardHandler),
+	})
+	if err == nil {
+		t.Fatal("codeexec.New accepted a zero process limit")
 	}
-	if err := runtime.enableExecution(t.Context(), cfg, testArtifacts(t), nil, slog.New(slog.DiscardHandler)); err == nil {
-		t.Fatal("enableExecution accepted a zero process limit")
-	}
-	if runtime.runner != nil {
-		t.Fatal("a rejected configuration left a runner behind")
+	if mod != nil {
+		t.Fatal("a rejected configuration returned a non-nil module")
 	}
 }
 
 func TestHealthReasonForAFailedProbeMatchesTheVerifierReason(t *testing.T) {
-	if health.InterpreterReasonProbeFailed != string(interpreter.ReasonProbeFailed) {
-		t.Fatalf("health reason %q differs from the verifier reason %q", health.InterpreterReasonProbeFailed, interpreter.ReasonProbeFailed)
+	if codeexec.ReasonProbeFailed != string(interpreter.ReasonProbeFailed) {
+		t.Fatalf("health reason %q differs from the verifier reason %q", codeexec.ReasonProbeFailed, interpreter.ReasonProbeFailed)
 	}
-	rows := healthRuntimes([]interpreter.Verification{{Runtime: "python", Version: "3", State: interpreter.StateInvalid, Reason: interpreter.ReasonProbeFailed}})
-	if len(rows) != 1 || rows[0].State != health.InterpreterRuntimeInvalid || rows[0].Reason != health.InterpreterReasonProbeFailed {
-		t.Fatalf("rows = %+v", rows)
+	if codeexec.RuntimeStateInvalid != string(interpreter.StateInvalid) {
+		t.Fatalf("health invalid state %q differs from %q", codeexec.RuntimeStateInvalid, interpreter.StateInvalid)
 	}
 }
 
-func testArtifacts(t *testing.T) store.ArtifactStore {
+func testArtifacts(t *testing.T) storage.ArtifactStore {
 	t.Helper()
-	return store.NewArtifactStore(storetest.OpenMigrated(t), t.TempDir(), store.DefaultArtifactQuotaBytes)
+	return storage.NewArtifactStore(sqlitetest.OpenMigrated(t, Schemas()...), t.TempDir(), storage.DefaultArtifactQuotaBytes)
 }

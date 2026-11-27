@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -176,8 +177,7 @@ func TestExecuteRejectsIncompleteRuns(t *testing.T) {
 	for name, candidate := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := Execute(t.Context(), candidate)
-			var target *Error
-			if !errors.As(err, &target) || target.Code != ErrorCodeInvalidArgument {
+			if !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("Execute() error = %v, want invalid_argument", err)
 			}
 		})

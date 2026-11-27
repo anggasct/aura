@@ -6,10 +6,8 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
-	"errors"
 	"iter"
 	"log/slog"
-	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -21,10 +19,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type fakeTurnRuntime struct {
@@ -32,33 +31,33 @@ type fakeTurnRuntime struct {
 	calls     int
 	overload  bool
 	events    func(turnID string) []turnOutcome
-	store     store.EventStore
+	store     turnstore.EventStore
 	sequences map[string]uint64
 	parts     [][]runtimeingress.InputPart
 	sessions  []string
 }
 
 type turnOutcome struct {
-	event store.RuntimeEvent
+	event turn.Event
 	err   error
 }
 
-func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	f.mu.Lock()
 	f.calls++
 	f.parts = append(f.parts, req.Parts)
 	f.sessions = append(f.sessions, req.SessionID)
 	f.mu.Unlock()
-	return func(yield func(store.RuntimeEvent, error) bool) {
+	return func(yield func(turn.Event, error) bool) {
 		if f.overload {
-			yield(store.RuntimeEvent{}, fault.New(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full"))
+			yield(turn.Event{}, fault.New(turn.ErrorCodeRuntimeOverloaded, "pending turn queue is full"))
 			return
 		}
 		outcomes := f.events(req.TurnID)
 		for i := range outcomes {
 			outcome := &outcomes[i]
 			if outcome.err != nil {
-				yield(store.RuntimeEvent{}, outcome.err)
+				yield(turn.Event{}, outcome.err)
 				return
 			}
 			event := outcome.event
@@ -86,7 +85,7 @@ func (f *fakeTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.S
 			f.mu.Unlock()
 			if persist != nil {
 				if err := persist.Append(ctx, &event); err != nil {
-					yield(store.RuntimeEvent{}, err)
+					yield(turn.Event{}, err)
 					return
 				}
 			}
@@ -103,44 +102,35 @@ func (f *fakeTurnRuntime) submitted() int {
 	return f.calls
 }
 
-func (f *fakeTurnRuntime) submittedSessions() []string {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return slices.Clone(f.sessions)
-}
-
 func acceptedTurnEvents(turnID string) []turnOutcome {
 	return []turnOutcome{
-		{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
-		{event: store.RuntimeEvent{ID: "evt_msg_" + turnID, TurnID: turnID, Kind: turn.EventKindMessageCompleted}},
-		{event: store.RuntimeEvent{ID: "evt_done_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnCompleted}},
+		{event: turn.Event{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
+		{event: turn.Event{ID: "evt_msg_" + turnID, TurnID: turnID, Kind: turn.EventKindMessageCompleted}},
+		{event: turn.Event{ID: "evt_done_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnCompleted}},
 	}
 }
 
-type webhookTestRig struct {
-	db       *sql.DB
-	backend  *fakeTurnRuntime
-	sessions store.SessionService
-	logger   *slog.Logger
-}
-
-func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime) (*webhookDispatcher, store.WebhookExecutionStore) {
+func webhookTestSetup(t *testing.T, backend *fakeTurnRuntime, handlers ...gatewaywebhook.EventHandler) (*gatewaywebhook.Dispatcher, platformwebhook.ExecutionStore) {
 	t.Helper()
-	return newWebhookTestDispatcher(t, &webhookTestRig{db: storetest.OpenMigrated(t), backend: backend})
-}
-
-func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispatcher, store.WebhookExecutionStore) {
-	t.Helper()
-	executions := store.NewWebhookExecutionStore(rig.db)
-	rig.backend.store = store.NewEventStore(rig.db)
-	rig.backend.sequences = make(map[string]uint64)
-	sessions := rig.sessions
-	if sessions == nil {
-		sessions = store.NewSessionService(rig.db)
-	}
-	dispatcher, err := newWebhookDispatcher(sessions, executions, rig.backend, 24*time.Hour, time.Now, rig.logger)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
+	executions, err := platformwebhook.NewSQLiteStore(db)
 	if err != nil {
-		t.Fatalf("newWebhookDispatcher: %v", err)
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	backend.store = turnstore.NewEventStore(db)
+	backend.sequences = make(map[string]uint64)
+	dispatcher, err := gatewaywebhook.NewDispatcher(&gatewaywebhook.DispatcherDeps{
+		Sessions:   turnstore.NewSessionService(db),
+		Events:     turnstore.NewTurnStore(db),
+		Executions: executions,
+		Runtime:    backend,
+		Retention:  24 * time.Hour,
+		Clock:      time.Now,
+		Logger:     slog.New(slog.DiscardHandler),
+		Handlers:   handlers,
+	})
+	if err != nil {
+		t.Fatalf("NewDispatcher: %v", err)
 	}
 	t.Cleanup(func() {
 		if err := dispatcher.Wait(context.Background()); err != nil {
@@ -150,12 +140,12 @@ func newWebhookTestDispatcher(t *testing.T, rig *webhookTestRig) (*webhookDispat
 	return dispatcher, executions
 }
 
-func webhookTestEvent() *gatewaywebhook.AcceptedEvent {
-	return &gatewaywebhook.AcceptedEvent{
+func webhookTestEvent() *platformwebhook.AcceptedEvent {
+	return &platformwebhook.AcceptedEvent{
 		KeyID:      "primary",
 		Nonce:      "nonce-abcdefghijklmnop",
 		BodyDigest: "digest-1",
-		Envelope: gatewaywebhook.Envelope{
+		Envelope: platformwebhook.Envelope{
 			EventID:  "evt-1",
 			Subject:  "hello",
 			Payload:  []byte(`{"k":1}`),
@@ -164,7 +154,7 @@ func webhookTestEvent() *gatewaywebhook.AcceptedEvent {
 	}
 }
 
-func waitForExecutionState(t *testing.T, executions store.WebhookExecutionStore, id, want string) store.WebhookExecution {
+func waitForExecutionState(t *testing.T, executions platformwebhook.ExecutionStore, id, want string) platformwebhook.Execution {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
@@ -182,196 +172,10 @@ func waitForExecutionState(t *testing.T, executions store.WebhookExecutionStore,
 	}
 }
 
-func TestWebhookDispatcher_AcceptCompletesTurn(t *testing.T) {
-	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, executions := webhookTestSetup(t, backend)
-
-	ref, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	if ref.ExecutionID == "" || ref.TurnID == "" {
-		t.Fatalf("empty execution reference: %+v", ref)
-	}
-
-	execution := waitForExecutionState(t, executions, ref.ExecutionID, store.WebhookExecutionStateCompleted)
-	if execution.TurnID != ref.TurnID {
-		t.Errorf("turn id = %q, want %q", execution.TurnID, ref.TurnID)
-	}
-	if got := backend.submittedSessions(); execution.SessionID == "" || !slices.Equal(got, []string{execution.SessionID}) {
-		t.Errorf("execution session = %q, turn sessions = %v; want the session the turn ran in", execution.SessionID, got)
-	}
-	if execution.ResultEventID == "" {
-		t.Error("expected a result event id on completion")
-	}
-	if backend.submitted() != 1 {
-		t.Errorf("submitted turns = %d, want 1", backend.submitted())
-	}
-	backend.mu.Lock()
-	defer backend.mu.Unlock()
-	if len(backend.parts) != 1 || len(backend.parts[0]) != 3 {
-		t.Fatalf("turn parts = %v, want subject, payload, and metadata", backend.parts)
-	}
-	if backend.parts[0][0].Text != "hello" || backend.parts[0][1].Text != `{"k":1}` {
-		t.Errorf("subject/payload parts = %q, %q", backend.parts[0][0].Text, backend.parts[0][1].Text)
-	}
-	if backend.parts[0][2].Text != `{"src":"ci"}` {
-		t.Errorf("metadata part = %q, want %q", backend.parts[0][2].Text, `{"src":"ci"}`)
-	}
-}
-
-func TestWebhookDispatcher_IdenticalReplayReturnsOriginal(t *testing.T) {
-	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, executions := webhookTestSetup(t, backend)
-
-	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	second, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("replay Dispatch: %v", err)
-	}
-	if first != second {
-		t.Errorf("replay ref = %+v, want %+v", second, first)
-	}
-	waitForExecutionState(t, executions, first.ExecutionID, store.WebhookExecutionStateCompleted)
-	if backend.submitted() != 1 {
-		t.Errorf("submitted turns = %d, want 1", backend.submitted())
-	}
-}
-
-func TestWebhookDispatcher_ChangedBodyConflicts(t *testing.T) {
-	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, executions := webhookTestSetup(t, backend)
-
-	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	changed := webhookTestEvent()
-	changed.BodyDigest = "digest-2"
-	if _, err := dispatcher.Dispatch(t.Context(), changed); err == nil {
-		t.Fatal("expected replay conflict, got nil")
-	} else if code, ok := gatewaywebhook.CodeOf(err); !ok || code != gatewaywebhook.ErrorCodeReplayConflict {
-		t.Fatalf("conflict code = %v (ok=%v), want %s", code, ok, gatewaywebhook.ErrorCodeReplayConflict)
-	}
-	waitForExecutionState(t, executions, first.ExecutionID, store.WebhookExecutionStateCompleted)
-}
-
-func TestWebhookDispatcher_OverloadLeavesNoRow(t *testing.T) {
-	backend := &fakeTurnRuntime{overload: true}
-	dispatcher, executions := webhookTestSetup(t, backend)
-
-	if _, err := dispatcher.Dispatch(t.Context(), webhookTestEvent()); err == nil {
-		t.Fatal("expected overload error, got nil")
-	} else if code, ok := gatewaywebhook.CodeOf(err); !ok || code != gatewaywebhook.ErrorCodeRuntimeOverloaded {
-		t.Fatalf("overload code = %v (ok=%v), want %s", code, ok, gatewaywebhook.ErrorCodeRuntimeOverloaded)
-	}
-	if _, found, err := executions.ExecutionByNonce(t.Context(), "primary", "nonce-abcdefghijklmnop"); err != nil || found {
-		t.Errorf("overloaded request left an execution row: found=%v err=%v", found, err)
-	}
-}
-
-func TestWebhookDispatcher_ConcurrentDuplicatesSubmitOnce(t *testing.T) {
-	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, executions := webhookTestSetup(t, backend)
-
-	const callers = 8
-	refs := make([]gatewaywebhook.ExecutionRef, callers)
-	errs := make([]error, callers)
-	var group sync.WaitGroup
-	for i := range callers {
-		group.Add(1)
-		go func() {
-			defer group.Done()
-			ref, err := dispatcher.Dispatch(context.Background(), webhookTestEvent())
-			refs[i] = ref
-			errs[i] = err
-		}()
-	}
-	group.Wait()
-
-	for i := range callers {
-		if errs[i] != nil {
-			t.Fatalf("caller %d: %v", i, errs[i])
-		}
-		if refs[i] != refs[0] || refs[i] == (gatewaywebhook.ExecutionRef{}) {
-			t.Fatalf("caller %d ref = %+v, want %+v", i, refs[i], refs[0])
-		}
-	}
-	waitForExecutionState(t, executions, refs[0].ExecutionID, store.WebhookExecutionStateCompleted)
-	if backend.submitted() != 1 {
-		t.Errorf("submitted turns = %d, want 1", backend.submitted())
-	}
-}
-
-func TestWebhookDispatcher_OrphanedAcceptedReplayResubmits(t *testing.T) {
-	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	db := storetest.OpenMigrated(t)
-	dispatcher, executions := newWebhookTestDispatcher(t, &webhookTestRig{db: db, backend: backend})
-	ctx := t.Context()
-
-	now := time.Now().UTC()
-	orphan := &store.WebhookExecution{
-		ID:         "whex_orphan",
-		KeyID:      "primary",
-		EventID:    "evt-1",
-		Nonce:      "nonce-abcdefghijklmnop",
-		BodyDigest: "digest-1",
-		TurnID:     "turn_orphan",
-		SessionID:  "sess_orphan",
-		State:      store.WebhookExecutionStateAccepted,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		ExpiresAt:  now.Add(24 * time.Hour),
-	}
-	if err := executions.InsertExecution(ctx, orphan); err != nil {
-		t.Fatalf("InsertExecution: %v", err)
-	}
-
-	ref, err := dispatcher.Dispatch(ctx, webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	if ref.ExecutionID != "whex_orphan" || ref.TurnID != "turn_orphan" {
-		t.Fatalf("replay ref = %+v, want the orphaned identity", ref)
-	}
-	execution := waitForExecutionState(t, executions, "whex_orphan", store.WebhookExecutionStateCompleted)
-	if got := backend.submittedSessions(); !slices.Equal(got, []string{"sess_orphan"}) {
-		t.Errorf("submitted turn sessions = %v, want one turn in sess_orphan", got)
-	}
-	if execution.ResultEventID != "evt_msg_turn_orphan" {
-		t.Errorf("result event = %q, want the message of the turn that ran", execution.ResultEventID)
-	}
-	if got := countRows(t, db, `SELECT COUNT(*) FROM session`); got != 1 || countRows(t, db, `SELECT COUNT(*) FROM session WHERE id = 'sess_orphan'`) != 1 {
-		t.Errorf("sessions = %d, want only sess_orphan", got)
-	}
-}
-
-func TestWebhookDispatcher_FailedTurnRecordsCode(t *testing.T) {
-	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
-		return []turnOutcome{
-			{event: store.RuntimeEvent{ID: "evt_a_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}},
-			{event: store.RuntimeEvent{ID: "evt_f_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnFailed, Payload: []byte(`{"code":"model_capability_unsupported","detail":"no"}`)}},
-		}
-	}}
-	dispatcher, executions := webhookTestSetup(t, backend)
-
-	ref, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	execution := waitForExecutionState(t, executions, ref.ExecutionID, store.WebhookExecutionStateFailed)
-	if execution.ErrorCode != "model_capability_unsupported" {
-		t.Errorf("error code = %q, want model_capability_unsupported", execution.ErrorCode)
-	}
-}
-
 func githubTestStore(t *testing.T) (*sql.DB, *workflow.Store) {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
-	return db, workflow.NewStore(db)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
+	return db, mustWorkflowStore(t, db)
 }
 
 type queuedRuntime struct{ durable.Runtime }
@@ -390,7 +194,7 @@ func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durabletest.
 			{ID: "hold", Executor: workflow.ExecutorSpec{Kind: workflow.KindWait, Event: &event}, Timeout: time.Minute},
 		},
 	}
-	interpreter := workflow.NewInterpreter(disk, queuedRuntime{backend}, nil)
+	interpreter := mustWorkflowInterpreter(t, disk, queuedRuntime{backend}, nil)
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
@@ -425,17 +229,16 @@ func githubSuiteBody() []byte {
 
 func TestDispatcherRoutesGitHubEventToCorrelation(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
 	fake := durabletest.NewFake()
 	runID := githubTestBinding(t, disk, fake)
-	adapter, err := github.NewAdapter(disk, fake, nil)
+	adapter, err := github.NewAdapter(newWorkflowCorrelationStore(disk), fake, nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	dispatcher.github = adapter
+	dispatcher, _ := webhookTestSetup(t, backend, adapter)
 
-	event := &gatewaywebhook.AcceptedEvent{
+	event := &platformwebhook.AcceptedEvent{
 		KeyID: "github", Nonce: "nonce-abcdefghijklmnop", BodyDigest: "digest-github-1", Body: githubSuiteBody(),
 	}
 	ref, err := dispatcher.Dispatch(context.Background(), event)
@@ -459,13 +262,12 @@ func TestDispatcherRoutesGitHubEventToCorrelation(t *testing.T) {
 
 func TestDispatcherFallsBackToTurnsForNonGitHub(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
-	adapter, err := github.NewAdapter(disk, durabletest.NewFake(), nil)
+	adapter, err := github.NewAdapter(newWorkflowCorrelationStore(disk), durabletest.NewFake(), nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	dispatcher.github = adapter
+	dispatcher, _ := webhookTestSetup(t, backend, adapter)
 
 	ref, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
 	if err != nil {
@@ -498,20 +300,20 @@ func (c *signalCountingRuntime) count() int {
 	return c.signals
 }
 
-func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []byte) *gatewaywebhook.AcceptedEvent {
+func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []byte) *platformwebhook.AcceptedEvent {
 	t.Helper()
-	document, err := json.Marshal(gatewaywebhook.Envelope{
+	document, err := json.Marshal(platformwebhook.Envelope{
 		EventID: eventID, Subject: "github delivery", Payload: json.RawMessage(payload),
 	})
 	if err != nil {
 		t.Fatalf("marshal envelope: %v", err)
 	}
-	parsed, err := gatewaywebhook.ParseEnvelope(document)
+	parsed, err := platformwebhook.ParseEnvelope(document)
 	if err != nil {
 		t.Fatalf("ParseEnvelope: %v", err)
 	}
 	sum := sha256.Sum256(document)
-	return &gatewaywebhook.AcceptedEvent{
+	return &platformwebhook.AcceptedEvent{
 		KeyID: "github", Nonce: nonce,
 		BodyDigest: hex.EncodeToString(sum[:]), Body: document, Envelope: parsed,
 	}
@@ -519,16 +321,15 @@ func envelopeWrappedGitHubEvent(t *testing.T, eventID, nonce string, payload []b
 
 func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	backend := &fakeTurnRuntime{events: acceptedTurnEvents}
-	dispatcher, _ := webhookTestSetup(t, backend)
 	_, disk := githubTestStore(t)
 	fake := durabletest.NewFake()
 	runID := githubTestBinding(t, disk, fake)
 	counter := &signalCountingRuntime{Runtime: fake}
-	adapter, err := github.NewAdapter(disk, counter, nil)
+	adapter, err := github.NewAdapter(newWorkflowCorrelationStore(disk), counter, nil)
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}
-	dispatcher.github = adapter
+	dispatcher, _ := webhookTestSetup(t, backend, adapter)
 
 	event := envelopeWrappedGitHubEvent(t, "evt-github-1", "nonce-abcdefghijklmnop", githubSuiteBody())
 	ref, err := dispatcher.Dispatch(context.Background(), event)
@@ -544,7 +345,7 @@ func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	if counter.count() != 1 {
 		t.Errorf("signals = %d, want exactly one for envelope github event", counter.count())
 	}
-	reserialized := &gatewaywebhook.AcceptedEvent{
+	reserialized := &platformwebhook.AcceptedEvent{
 		KeyID: "github", Nonce: "nonce-abcdefghijklmnop",
 		BodyDigest: "different-digest-for-reserialized-envelope",
 		Body:       []byte(`{"event_id":"evt-github-1","subject":"github delivery","payload":{}}`),
@@ -562,57 +363,5 @@ func TestDispatcherRoutesEnvelopeWrappedGitHubEventToCorrelation(t *testing.T) {
 	}
 	if counter.count() != 1 {
 		t.Errorf("signals after redelivery = %d, want exactly one", counter.count())
-	}
-}
-
-func TestWebhookDispatcherWaitTracksInFlightDrains(t *testing.T) {
-	dispatcher, _ := webhookTestSetup(t, &fakeTurnRuntime{events: acceptedTurnEvents})
-	release := make(chan struct{})
-	stopped := make(chan struct{})
-	dispatcher.startDrain(context.Background(), "exec-held", func() (store.RuntimeEvent, error, bool) {
-		<-release
-		return store.RuntimeEvent{}, nil, false
-	}, func() { close(stopped) })
-	short, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	defer cancel()
-	if err := dispatcher.Wait(short); !errors.Is(err, context.DeadlineExceeded) {
-		t.Fatalf("Wait with a drain in flight = %v, want the deadline", err)
-	}
-	close(release)
-	if err := dispatcher.Wait(context.Background()); err != nil {
-		t.Fatalf("Wait after the drain finished = %v", err)
-	}
-	select {
-	case <-stopped:
-	default:
-		t.Fatal("drain finished without stopping its turn")
-	}
-}
-
-func TestWebhookDispatcher_FinishedDrainIsNotResubmittedAsOrphan(t *testing.T) {
-	backend := &fakeTurnRuntime{events: func(turnID string) []turnOutcome {
-		return []turnOutcome{{event: store.RuntimeEvent{ID: "evt_accepted_" + turnID, TurnID: turnID, Kind: turn.EventKindTurnAccepted}}}
-	}}
-	dispatcher, executions := webhookTestSetup(t, backend)
-	first, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil {
-		t.Fatalf("Dispatch: %v", err)
-	}
-	if err := dispatcher.Wait(t.Context()); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-	execution, found, err := executions.ExecutionByNonce(t.Context(), "primary", "nonce-abcdefghijklmnop")
-	if err != nil || !found || execution.State != store.WebhookExecutionStateAccepted {
-		t.Fatalf("execution = %+v, %v, %v; want it left accepted by a turn that ended without a terminal event", execution, found, err)
-	}
-	again, err := dispatcher.Dispatch(t.Context(), webhookTestEvent())
-	if err != nil || again != first {
-		t.Fatalf("duplicate Dispatch = %+v, %v; want %+v", again, err, first)
-	}
-	if err := dispatcher.Wait(t.Context()); err != nil {
-		t.Fatalf("Wait: %v", err)
-	}
-	if backend.submitted() != 1 {
-		t.Fatalf("submitted turns = %d, want 1: a drain this process already ran is not an orphan", backend.submitted())
 	}
 }

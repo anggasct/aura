@@ -14,7 +14,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type recordingExecutor struct {
@@ -23,7 +22,7 @@ type recordingExecutor struct {
 	seen  []turn.TurnRequest
 }
 
-func (r *recordingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (r *recordingExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	r.mu.Lock()
 	r.seen = append(r.seen, *req)
 	r.mu.Unlock()

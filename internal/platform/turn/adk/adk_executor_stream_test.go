@@ -14,7 +14,7 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type streamingADKModel struct {
@@ -76,9 +76,9 @@ func streamTurn(turnID string, streamPartial bool, budget int64) *turn.TurnReque
 	}
 }
 
-func runStreamTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) ([]store.RuntimeEvent, error) {
+func runStreamTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) ([]turn.Event, error) {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			return events, err
@@ -88,13 +88,13 @@ func runStreamTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) (
 	return events, nil
 }
 
-func partialTexts(t *testing.T, events []store.RuntimeEvent) (partials []string, finals int) {
+func partialTexts(t *testing.T, events []turn.Event) (partials []string, finals int) {
 	t.Helper()
 	for i := range events {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
-		adk, err := store.RuntimeEventToADK(&events[i])
+		adk, err := turnstore.RuntimeEventToADK(&events[i])
 		if err != nil {
 			t.Fatalf("RuntimeEventToADK: %v", err)
 		}
@@ -168,7 +168,7 @@ func TestADKExecutorStreamingKeepsTurnBudgetTotals(t *testing.T) {
 
 			var counted int64
 			for i := range events {
-				adk, err := store.RuntimeEventToADK(&events[i])
+				adk, err := turnstore.RuntimeEventToADK(&events[i])
 				if err != nil {
 					t.Fatalf("RuntimeEventToADK: %v", err)
 				}
@@ -205,10 +205,10 @@ func TestADKExecutorRecordsTheFinishReason(t *testing.T) {
 
 			var reasons []genai.FinishReason
 			for i := range events {
-				if events[i].Kind != store.EventKindADK {
+				if events[i].Kind != turnstore.EventKindADK {
 					continue
 				}
-				adk, err := store.RuntimeEventToADK(&events[i])
+				adk, err := turnstore.RuntimeEventToADK(&events[i])
 				if err != nil {
 					t.Fatalf("RuntimeEventToADK: %v", err)
 				}

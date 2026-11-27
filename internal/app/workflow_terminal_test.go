@@ -5,19 +5,19 @@ import (
 	"testing"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
-	db := openAccessDB(t, gf.configPath)
-	runs := workflow.NewStore(db)
+	db := openAccessDB(t, gf.ConfigPath)
+	runs := mustWorkflowStore(t, db)
 	sessionID := "ops/term\x1b[2Jinal"
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: sessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	propose := func(id, goal string) *workflow.Proposal {
@@ -38,9 +38,9 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	shown := propose("prop-shown", "Show the plan")
 	listed := propose("prop-listed", "Ship\x1b[2Jit")
 
-	interpreter := workflow.NewInterpreter(runs, queuedRuntime{durabletest.NewFake()}, nil)
+	interpreter := mustWorkflowInterpreter(t, runs, queuedRuntime{durabletest.NewFake()}, nil)
 	spec := &workflow.Spec{ID: "terminal_demo", Goal: "Run the demo", Version: 1, Source: workflow.SourceDefined, Steps: []workflow.StepSpec{{ID: "approve", Executor: workflow.ExecutorSpec{Kind: workflow.KindApproval}, Timeout: time.Minute}}}
-	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: toolsbuiltin.DefinitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
+	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatal(err)
 	}
 	run, err := interpreter.StartConfigured(t.Context(), spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
@@ -78,7 +78,7 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	}
 	t.Run("proposal show of a goal that is out of rule prints only its stored plan", func(t *testing.T) {
 		out, err := runWorkflowCommand(t, gf, "proposal", "show", listed.ID)
-		if err != nil || strings.ContainsRune(out, 0x1b) || !strings.Contains(out, planNotStoredLine) {
+		if err != nil || strings.ContainsRune(out, 0x1b) || !strings.Contains(out, "plan: not stored; this proposal predates plan storage; propose it again") {
 			t.Fatalf("proposal show = %q, %v, want the escaped headers and the not-stored line", out, err)
 		}
 	})

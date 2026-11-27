@@ -15,14 +15,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
-func collectDurableTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func collectDurableTerminal(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
 	waitForTerminalDurable(t, db, turnID)
-	events, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), acceptedSessionOf(t, db, turnID), turnID)
+	events, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), acceptedSessionOf(t, db, turnID), turnID)
 	if err != nil {
 		t.Fatalf("list turn events: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 		if got := acceptedCount(t, db, "session-a"); got != 1 {
 			t.Fatalf("accepted events = %d, want 1 (overloaded admit must persist nothing)", got)
 		}
-		rejected, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-1")
+		rejected, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-1")
 		if err != nil {
 			t.Fatalf("list rejected turn events: %v", err)
 		}
@@ -156,7 +156,7 @@ func TestDurableQueueOverflowFailsClosed(t *testing.T) {
 	})
 }
 
-func transcript(events []store.RuntimeEvent) [][2]string {
+func transcript(events []turn.Event) [][2]string {
 	out := make([][2]string, 0, len(events))
 	for i := range events {
 		out = append(out, [2]string{events[i].Kind, string(events[i].Payload)})
@@ -318,7 +318,7 @@ func TestDurableLongStreamReplaysFullyFromStore(t *testing.T) {
 				t.Fatalf("stream sequences not contiguous at %d: %d after %d", i, events[i].Sequence, events[i-1].Sequence)
 			}
 		}
-		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-0")
+		stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-0")
 		if err != nil {
 			t.Fatalf("list turn events: %v", err)
 		}
@@ -348,7 +348,7 @@ func TestDurableLiveStreamDeliversPersistedSequence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-live", "turn-live-0")
+	stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-live", "turn-live-0")
 	if err != nil {
 		t.Fatalf("list turn events: %v", err)
 	}
@@ -429,7 +429,7 @@ func TestDurableResumeNeedsNoScan(t *testing.T) {
 			t.Fatalf("preload admit %s: %v", turnRequest, err)
 		}
 	}
-	restarted, err := New(&Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: testLimits(4, 16)})
+	restarted, err := New(&Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: testLimits(4, 16)})
 	if err != nil {
 		t.Fatalf("restarted engine: %v", err)
 	}
@@ -499,9 +499,9 @@ type errorExecutor struct {
 	err error
 }
 
-func (e errorExecutor) Execute(_ context.Context, _ *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
-		yield(store.RuntimeEvent{}, e.err)
+func (e errorExecutor) Execute(_ context.Context, _ *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
+		yield(turn.Event{}, e.err)
 	}
 }
 
@@ -545,7 +545,7 @@ func TestDurableCancelIsTerminal(t *testing.T) {
 	mustCreateSession(t, db, "session-a")
 
 	ctx, cancel := context.WithCancel(context.Background())
-	streamed := make(chan store.RuntimeEvent, 16)
+	streamed := make(chan turn.Event, 16)
 	errs := make(chan error, 1)
 	go func() {
 		for ev, err := range engine.Run(ctx, sampleRequest("session-a", "turn-cancel")) {
@@ -648,7 +648,7 @@ func TestDurableTurnReleasedBeforeItIsStagedStillReachesItsCaller(t *testing.T) 
 		}()
 		waitFor(t, func() bool { return executor.StartCount() == 1 })
 		type streamed struct {
-			events []store.RuntimeEvent
+			events []turn.Event
 			err    error
 		}
 		second := make(chan streamed, 1)
@@ -751,7 +751,7 @@ func TestDurableTurnIgnoresAnotherSessionsEventsUnderItsTurnID(t *testing.T) {
 	}()
 	executor.waitEntered(t, "turn-1")
 	type streamed struct {
-		events []store.RuntimeEvent
+		events []turn.Event
 		err    error
 	}
 	second := make(chan streamed, 1)
@@ -763,11 +763,11 @@ func TestDurableTurnIgnoresAnotherSessionsEventsUnderItsTurnID(t *testing.T) {
 		_, queued := storeActiveTurn(t, rig.sessions, "session-a")
 		return queued == 1
 	})
-	foreign := &store.RuntimeEvent{
+	foreign := &turn.Event{
 		ID: "session-b-turn-2-completed", SessionID: "session-b", Sequence: 1, TurnID: "turn-2", InvocationID: "foreign",
 		Author: "runtime", Kind: turn.EventKindTurnCompleted, SchemaVersion: 1, Payload: []byte(`{}`), CreatedAt: time.Now().UTC(),
 	}
-	if err := store.NewEventStore(rig.db).Append(t.Context(), foreign); err != nil {
+	if err := turnstore.NewEventStore(rig.db).Append(t.Context(), foreign); err != nil {
 		t.Fatalf("append the foreign event: %v", err)
 	}
 	close(gate)

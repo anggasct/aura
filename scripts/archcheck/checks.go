@@ -10,7 +10,6 @@ type groupKind int
 
 const (
 	kindExempt groupKind = iota
-	kindLegacy
 	kindApp
 	kindCLI
 	kindPlatform
@@ -25,9 +24,7 @@ type group struct {
 	name string
 }
 
-var legacyRoots = []string{"internal/config", "internal/store"}
-
-var allowedInternalDirs = []string{"app", "channels", "cli", "config", "modules", "platform", "store"}
+var allowedInternalDirs = []string{"app", "channels", "cli", "modules", "platform"}
 
 const pluginWire = "internal/modules/plugin/wire"
 
@@ -43,8 +40,6 @@ func segmentAfter(path, root string) string {
 
 func classify(path string) group {
 	switch {
-	case slices.ContainsFunc(legacyRoots, func(root string) bool { return within(path, root) }):
-		return group{kind: kindLegacy, name: path}
 	case within(path, "internal/app"):
 		return group{kind: kindApp}
 	case within(path, "internal/cli"):
@@ -69,7 +64,7 @@ func layerViolation(from, to string) bool {
 	if source.kind == kindCLI {
 		return !within(to, "internal/app") && !within(to, "internal/platform/logging")
 	}
-	if source.kind == kindExempt || source.kind == kindLegacy || source.kind == kindApp || target.kind == kindLegacy {
+	if source.kind == kindExempt || source.kind == kindApp {
 		return false
 	}
 	if source.kind == kindPlugin {
@@ -90,49 +85,14 @@ func layerViolation(from, to string) bool {
 	}
 }
 
-type allowEntry struct {
-	from, to string
-	line     int
-}
-
-func parseAllow(content string) (entries []allowEntry, problems []string) {
-	for index, raw := range strings.Split(content, "\n") {
-		line, _, _ := strings.Cut(raw, "#")
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
-		}
-		from, to, ok := strings.Cut(line, "->")
-		if !ok || strings.TrimSpace(from) == "" || strings.TrimSpace(to) == "" {
-			problems = append(problems, fmt.Sprintf("layers.allow:%d: malformed entry %q", index+1, raw))
-			continue
-		}
-		entries = append(entries, allowEntry{from: strings.TrimSpace(from), to: strings.TrimSpace(to), line: index + 1})
-	}
-	return entries, problems
-}
-
-func checkLayers(packages []repoPackage, allowed []allowEntry) []string {
-	used := make([]bool, len(allowed))
+func checkLayers(packages []repoPackage) []string {
 	var violations []string
 	for _, pkg := range packages {
 		for _, imported := range uniqueSorted(pkg.imports) {
 			if !layerViolation(pkg.path, imported) {
 				continue
 			}
-			index := slices.IndexFunc(allowed, func(entry allowEntry) bool {
-				return within(pkg.path, entry.from) && within(imported, entry.to)
-			})
-			if index >= 0 {
-				used[index] = true
-				continue
-			}
 			violations = append(violations, fmt.Sprintf("layers: %s imports %s", pkg.path, imported))
-		}
-	}
-	for index, entry := range allowed {
-		if !used[index] {
-			violations = append(violations, fmt.Sprintf("layers.allow:%d: stale allow entry %s -> %s", entry.line, entry.from, entry.to))
 		}
 	}
 	return violations

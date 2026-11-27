@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func TestGoldenTrajectories(t *testing.T) {
@@ -95,7 +95,7 @@ func TestAuthorizedRequestIsAllowed(t *testing.T) {
 }
 
 func TestCheckTrajectoryRejectsMissingAndExtraSteps(t *testing.T) {
-	events := []store.RuntimeEvent{
+	events := []turn.Event{
 		{Sequence: 1, Kind: "turn.accepted"},
 		{Sequence: 2, Kind: "tool.requested"},
 		{Sequence: 3, Kind: "tool.completed"},
@@ -107,14 +107,14 @@ func TestCheckTrajectoryRejectsMissingAndExtraSteps(t *testing.T) {
 	if err := CheckTrajectory(events[:3], []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"}); err == nil {
 		t.Fatal("CheckTrajectory accepted a missing terminal step")
 	}
-	withExtra := append(append([]store.RuntimeEvent{}, events...), store.RuntimeEvent{Sequence: 5, Kind: "policy.bypass"})
+	withExtra := append(append([]turn.Event{}, events...), turn.Event{Sequence: 5, Kind: "policy.bypass"})
 	if err := CheckTrajectory(withExtra, []string{"turn.accepted", "tool.requested", "tool.completed", "turn.completed"}); err == nil {
 		t.Fatal("CheckTrajectory accepted an extra step")
 	}
 }
 
 func TestGradeTraceScoresToolApprovalHandoffAndContinuationSignals(t *testing.T) {
-	trace := NewTrace("core", "completed", []store.RuntimeEvent{
+	trace := NewTrace("core", "completed", []turn.Event{
 		{Sequence: 1, Kind: "tool.requested"},
 		{Sequence: 2, Kind: "approval.required"},
 		{Sequence: 3, Kind: "tool.completed"},

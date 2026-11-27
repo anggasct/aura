@@ -12,9 +12,8 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/channels/httpchat"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const (
@@ -24,28 +23,28 @@ const (
 )
 
 type handoffTurnRuntime struct {
-	opener toolsbuiltin.HandoffOpener
+	opener handoff.Opener
 	turns  int
 }
 
-func (r *handoffTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (r *handoffTurnRuntime) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	r.turns++
-	return func(yield func(store.RuntimeEvent, error) bool) {
-		if !yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
+	return func(yield func(turn.Event, error) bool) {
+		if !yield(turn.Event{TurnID: "turn-1", Kind: turn.EventKindTurnAccepted}, nil) {
 			return
 		}
 		text := handoffTurnHandedOff
-		if err := r.opener.OpenHandoff(ctx, &toolsbuiltin.HandoffRequest{
+		if err := r.opener.OpenHandoff(ctx, &handoff.Request{
 			SessionID: req.SessionID, PrincipalID: req.PrincipalID, AgentID: req.AgentID, Reason: handoffTurnReason,
 		}); err != nil {
 			text = handoffTurnFailed
 		}
-		answer := store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
+		answer := turn.Event{TurnID: "turn-1", Kind: turn.EventKindMessageCompleted}
 		answer.Payload, _ = json.Marshal(map[string]string{"text": text})
 		if !yield(answer, nil) {
 			return
 		}
-		yield(store.RuntimeEvent{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
+		yield(turn.Event{TurnID: "turn-1", Kind: turn.EventKindTurnCompleted}, nil)
 	}
 }
 
@@ -71,7 +70,11 @@ func newHandoffHTTPHarness(t *testing.T, build func(log *askLog) []approvalAdapt
 	if err != nil {
 		t.Fatalf("newOwnerRoute: %v", err)
 	}
-	service := newHandoffService(db, []handoffNotifier{newHTTPHandoffNotifier(approvals, adapters)})
+	httpNotifier, err := newHTTPHandoffNotifier(approvals, adapters)
+	if err != nil {
+		t.Fatalf("newHTTPHandoffNotifier: %v", err)
+	}
+	service := mustHandoffService(t, db, []handoff.Notifier{httpNotifier})
 	backend := &handoffTurnRuntime{opener: service}
 	server, _, err := buildHTTPChat(cfg, db, backend, registry, nil, approvals, slog.New(slog.DiscardHandler))
 	if err != nil {
@@ -204,9 +207,9 @@ func TestHTTPTurnHandoffNotifiesTheOwnerAndHoldsTheSession(t *testing.T) {
 			if got := h.log.approvers(); !slices.Equal(got, tc.wantAsked) {
 				t.Errorf("owner notified through %v, want %v", got, tc.wantAsked)
 			}
-			handoff, found, err := store.NewHandoffStore(h.db).Get(t.Context(), first.session)
+			hRecord, found, err := mustHandoffStore(t, h.db).Get(t.Context(), first.session)
 			if err != nil || found != tc.wantOpened {
-				t.Fatalf("handoff = %+v, found %v, %v; want found %v", handoff, found, err, tc.wantOpened)
+				t.Fatalf("handoff = %+v, found %v, %v; want found %v", hRecord, found, err, tc.wantOpened)
 			}
 			next := h.post(key, chatJSON(chatMessage("user", "hello?")), httpchat.SessionHeader, first.session)
 			if !tc.wantOpened {
@@ -220,9 +223,9 @@ func TestHTTPTurnHandoffNotifiesTheOwnerAndHoldsTheSession(t *testing.T) {
 			if notified.requester.Principal != wantPrincipal || notified.session != first.session || notified.reason != handoffTurnReason {
 				t.Errorf("owner notification = %+v, want principal %s for the session", notified, wantPrincipal)
 			}
-			if handoff.Channel != store.HandoffChannelHTTP || handoff.Account != keyID || handoff.PrincipalID != wantPrincipal || handoff.AgentID != "lobby" ||
-				handoff.Reason != handoffTurnReason || handoff.ReplyChannelID != "" || handoff.ReplyThreadID != "" || !handoff.ReleasedAt.IsZero() {
-				t.Errorf("handoff = %+v", handoff)
+			if hRecord.Channel != handoff.ChannelHTTP || hRecord.Account != keyID || hRecord.PrincipalID != wantPrincipal || hRecord.AgentID != "lobby" ||
+				hRecord.Reason != handoffTurnReason || hRecord.ReplyChannelID != "" || hRecord.ReplyThreadID != "" || !hRecord.ReleasedAt.IsZero() {
+				t.Errorf("handoff = %+v", hRecord)
 			}
 			h.expectError(next, http.StatusConflict, "invalid_request_error", "handoff_open")
 			if h.runtime.turns != 1 {
@@ -248,12 +251,12 @@ func TestHTTPHandoffOwnerRepliesFlowThroughTheReadEndpoint(t *testing.T) {
 		t.Fatalf("replies before any owner reply = %d %+v, want an empty open list", status, listing)
 	}
 
-	listed, err := runAccessCommand(t, newHandoffCmd, h.config, "list")
+	listed, err := runHandoffCommand(t, h.config, "list")
 	if err != nil || !strings.Contains(listed, session+"\thttp:"+keyID+"\tlobby\t") {
 		t.Fatalf("handoff list = %q, %v", listed, err)
 	}
 	for _, text := range []string{"Your refund is approved.", "Anything else?"} {
-		if _, err := runAccessCommand(t, newReplyCmd, h.config, session, text); err != nil {
+		if _, err := runReplyCommand(t, h.config, session, text); err != nil {
 			t.Fatalf("reply %q: %v", text, err)
 		}
 	}
@@ -283,7 +286,7 @@ func TestHTTPHandoffOwnerRepliesFlowThroughTheReadEndpoint(t *testing.T) {
 		t.Fatalf("another key read the session: status %d, want 404", status)
 	}
 
-	if _, err := runAccessCommand(t, newHandoffCmd, h.config, "release", session); err != nil {
+	if _, err := runHandoffCommand(t, h.config, "release", session); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if len(*delivered) != 0 || len(*deliveredTelegram) != 0 {

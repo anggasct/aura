@@ -8,7 +8,9 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/modules/child"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeChildrenCLIConfig(t *testing.T) string {
@@ -65,8 +67,8 @@ children:
 func runChildrenCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &globalFlags{configPath: cfg}
-	cmd := newChildrenCmd(gf)
+	gf := &GlobalFlags{ConfigPath: cfg}
+	cmd := child.Commands(childOpener(gf))[0]
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -87,14 +89,17 @@ func seedChildRow(t *testing.T, cfg string) string {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children, err := child.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -106,7 +111,7 @@ func seedChildRow(t *testing.T, cfg string) string {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	completed := now.Add(time.Minute)
-	if err := children.SetResult(t.Context(), "ch-1", &store.ChildResult{
+	if err := children.SetResult(t.Context(), "ch-1", &child.StoredResult{
 		Status: "completed", Output: "summary", ArtifactsJSON: `[]`,
 		TokensUsed: 12, CostMicros: 34, CompletedAt: completed,
 		Provenance: "child=ch-1 session=sess-child-1 digest=digest-1 durable=child/ch-1",
@@ -147,6 +152,8 @@ func TestChildrenCLIListShowCancel(t *testing.T) {
 	}
 	if _, err := runChildrenCommand(t, cfg, "list", "--state", "bogus"); err == nil {
 		t.Error("expected bogus state rejection")
+	} else if code := ExitCode(NewRootCommand(), []string{"children", "list", "--state", "bogus"}, err); code != 2 {
+		t.Errorf("bogus state exit code = %d, want 2 (%v)", code, err)
 	}
 	out, err = runChildrenCommand(t, cfg, "show", id)
 	if err != nil {

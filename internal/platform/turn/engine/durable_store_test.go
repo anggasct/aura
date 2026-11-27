@@ -13,13 +13,15 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 type hookedSessionStore struct {
@@ -34,7 +36,7 @@ type hookedSessionStore struct {
 
 func newHookedSessionStore(t *testing.T, db *sql.DB) *hookedSessionStore {
 	t.Helper()
-	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db})
+	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}
@@ -128,7 +130,7 @@ type runningHost struct {
 func openTestDatabase(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -163,7 +165,7 @@ func (r *durableHostRig) build(executor TurnExecutor) {
 	}
 	deps := r.cfg
 	deps.Durable = &DurableConfig{Sessions: r.sessions, Runtime: rt}
-	deps.Events, deps.Dedupe, deps.Executor = store.NewEventStore(r.db), store.NewDedupeStore(r.db), executor
+	deps.Events, deps.Dedupe, deps.Executor = turnstore.NewEventStore(r.db), turnstore.NewDedupeStore(r.db), executor
 	deps.Logger = slog.New(slog.DiscardHandler)
 	engine, err := New(&deps)
 	if err != nil {
@@ -230,7 +232,7 @@ func TestNewEngineRefusesADurableConfigWithoutAStoreOrARuntime(t *testing.T) {
 	}
 	for name, durableCfg := range configs {
 		t.Run(name, func(t *testing.T) {
-			_, err := New(&Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default(), Durable: durableCfg})
+			_, err := New(&Deps{Events: turnstore.NewEventStore(db), Dedupe: turnstore.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: Default(), Durable: durableCfg})
 			if !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
 				t.Fatalf("New err = %v, want invalid_argument", err)
 			}
@@ -273,7 +275,7 @@ func TestNewRefusesZeroLimits(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			cfg := Default()
 			mutate(&cfg)
-			_, err := New(&Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: cfg})
+			_, err := New(&Deps{Events: turnstore.NewEventStore(db), Dedupe: turnstore.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(nil), Config: cfg})
 			if !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
 				t.Fatalf("New err = %v, want invalid_argument", err)
 			}

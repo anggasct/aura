@@ -17,7 +17,7 @@ func pluginPersona(plugins, principals, public []string) Persona {
 }
 
 func TestBuildCarriesPersonaPlugins(t *testing.T) {
-	registry, err := Build([]Persona{pluginPersona([]string{"weather", "mail-reader"}, nil, nil)}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{pluginPersona([]string{"weather", "mail-reader"}, nil, nil)}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -52,7 +52,7 @@ func TestBuildValidatesPluginToolCeilings(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := Build([]Persona{tc.override}, validTools, []string{"primary"})
+			_, err := Build([]Persona{tc.override}, validTools, validToolCatalog, []string{"primary"})
 			if tc.ok {
 				if err != nil {
 					t.Fatalf("Build: %v", err)
@@ -67,7 +67,7 @@ func TestBuildValidatesPluginToolCeilings(t *testing.T) {
 }
 
 func TestPublicCeilingNeverContainsPluginTools(t *testing.T) {
-	registry, err := Build([]Persona{pluginPersona([]string{"weather"}, []string{"plugin_weather"}, nil)}, validTools, []string{"primary"})
+	registry, err := Build([]Persona{pluginPersona([]string{"weather"}, []string{"plugin_weather"}, nil)}, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

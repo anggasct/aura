@@ -8,7 +8,7 @@ import (
 
 func routerFixture(t *testing.T, bindings []Binding) *Router {
 	t.Helper()
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestRouterNoMatchWithoutAccountDefault(t *testing.T) {
 }
 
 func TestRouterRejectsUnregisteredPersonas(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestRouterChatBindingNeverMatchesDiscordScopes(t *testing.T) {
 }
 
 func TestRouterEmailAccountRoutesToItsPersona(t *testing.T) {
-	registry, err := Build(nil, validTools, []string{"primary"})
+	registry, err := Build(nil, validTools, validToolCatalog, []string{"primary"})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

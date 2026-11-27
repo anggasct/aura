@@ -10,10 +10,10 @@ import (
 	"sync"
 	"testing"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
-	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
+	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func suiteBody(t *testing.T, action string, pull int, sha string) []byte {
@@ -33,29 +33,29 @@ func suiteBody(t *testing.T, action string, pull int, sha string) []byte {
 
 type fakeCorrelations struct {
 	mu   sync.Mutex
-	rows map[string]workflow.Correlation
-	runs map[string]*workflow.RunSummary
+	rows map[string]Correlation
+	runs map[string]string
 }
 
 func correlationKey(source, eventType, externalID, dedupeKey string) string {
 	return strings.Join([]string{source, eventType, externalID, dedupeKey}, "\x00")
 }
 
-func (f *fakeCorrelations) BindCorrelation(_ context.Context, correlation *workflow.Correlation) error {
+func (f *fakeCorrelations) BindCorrelation(_ context.Context, correlation *Correlation) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	key := correlationKey(correlation.Source, correlation.EventType, correlation.ExternalID, correlation.DedupeKey)
 	if _, exists := f.rows[key]; exists {
-		return &workflow.Error{Code: workflow.ErrorCodeCorrelationConflict, Detail: "duplicate"}
+		return fault.New(ErrorCodeCorrelationConflict, "duplicate")
 	}
 	if f.rows == nil {
-		f.rows = map[string]workflow.Correlation{}
+		f.rows = map[string]Correlation{}
 	}
 	f.rows[key] = *correlation
 	return nil
 }
 
-func (f *fakeCorrelations) ResolveCorrelation(_ context.Context, source, eventType, externalID, dedupeKey string) (workflow.Correlation, error) {
+func (f *fakeCorrelations) ResolveCorrelation(_ context.Context, source, eventType, externalID, dedupeKey string) (Correlation, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	for _, row := range f.rows {
@@ -63,7 +63,7 @@ func (f *fakeCorrelations) ResolveCorrelation(_ context.Context, source, eventTy
 			return row, nil
 		}
 	}
-	return workflow.Correlation{}, &workflow.Error{Code: workflow.ErrorCodeCorrelationUnmatched, Detail: "no match"}
+	return Correlation{}, fault.New(ErrorCodeCorrelationUnmatched, "no match")
 }
 
 func (f *fakeCorrelations) DeleteCorrelation(_ context.Context, source, eventType, externalID, dedupeKey string) error {
@@ -71,20 +71,20 @@ func (f *fakeCorrelations) DeleteCorrelation(_ context.Context, source, eventTyp
 	defer f.mu.Unlock()
 	key := correlationKey(source, eventType, externalID, dedupeKey)
 	if _, exists := f.rows[key]; !exists {
-		return &workflow.Error{Code: workflow.ErrorCodeCorrelationUnmatched, Detail: "nothing to delete"}
+		return fault.New(ErrorCodeCorrelationUnmatched, "nothing to delete")
 	}
 	delete(f.rows, key)
 	return nil
 }
 
-func (f *fakeCorrelations) Run(_ context.Context, runID string) (*workflow.RunSummary, error) {
+func (f *fakeCorrelations) RunDurableKey(_ context.Context, runID string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	summary, ok := f.runs[runID]
+	key, ok := f.runs[runID]
 	if !ok {
-		return nil, &workflow.Error{Code: workflow.ErrorCodeRunNotFound, Detail: "no such run"}
+		return "", errors.New("no such run")
 	}
-	return summary, nil
+	return key, nil
 }
 
 func (f *fakeCorrelations) deliveryCount() int {
@@ -139,10 +139,10 @@ func testAdapter(t *testing.T, store *fakeCorrelations, runtime *countingRuntime
 
 func seedBinding(store *fakeCorrelations, runID, durableKey string) {
 	if store.runs == nil {
-		store.runs = map[string]*workflow.RunSummary{}
+		store.runs = map[string]string{}
 	}
-	store.runs[runID] = &workflow.RunSummary{ID: runID, DurableKey: durableKey}
-	_ = store.BindCorrelation(context.Background(), &workflow.Correlation{
+	store.runs[runID] = durableKey
+	_ = store.BindCorrelation(context.Background(), &Correlation{
 		Source: "github", EventType: "check_suite.completed", ExternalID: "org/repo#42",
 		RunID: runID, SignalName: "wait.hold", DedupeKey: "",
 	})

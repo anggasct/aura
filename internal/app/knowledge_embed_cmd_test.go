@@ -16,7 +16,6 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
@@ -202,7 +201,8 @@ func (r *embedRig) fingerprint(t *testing.T) string {
 	if err != nil {
 		t.Fatalf("appconfig.Load: %v", err)
 	}
-	fingerprint, err := embedding.Fingerprint(loaded.Config.Knowledge.Embedding)
+	clientCfg := loaded.Config.Knowledge.Embedding.ClientConfig()
+	fingerprint, err := embedding.Fingerprint(&clientCfg)
 	if err != nil {
 		t.Fatalf("Fingerprint: %v", err)
 	}
@@ -655,7 +655,7 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
 		t.Fatalf("embedding reached no loopback server: %v", err)
 	}
-	client := newKnowledgeHTTPClient(nil)
+	client := knowledge.NewHTTPClient(nil)
 	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, strings.Replace(rig.provider.server.URL, "http://", "https://", 1), http.NoBody)
 	if err != nil {
 		t.Fatalf("request: %v", err)
@@ -669,14 +669,14 @@ func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 }
 
 func TestEmbeddingCredentialIsAnOptionalSecretThatJoinsTheVaultWhenResolved(t *testing.T) {
-	cfg := &appconfig.Config{Knowledge: &config.Knowledge{Embedding: &config.KnowledgeEmbedding{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
-	var found *configuredSecret
+	cfg := &appconfig.Config{Knowledge: &knowledge.Config{Embedding: &knowledge.EmbeddingConfig{CredentialRef: secrettest.Ref("env://KB_EMBED_VAULT_ENTRY")}}}
+	var found *appconfig.ConfiguredSecret
 	for _, entry := range additionalConfiguredSecrets(cfg) {
-		if entry.name == "knowledge_embedding_credential" {
+		if entry.Name == "knowledge_embedding_credential" {
 			found = &entry
 		}
 	}
-	if found == nil || !found.optional {
+	if found == nil || !found.Optional {
 		t.Fatalf("embedding credential entry = %+v, want an optional entry", found)
 	}
 	if _, err := buildStrictSecretVault(cfg); err != nil {

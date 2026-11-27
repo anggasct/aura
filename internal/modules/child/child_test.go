@@ -6,6 +6,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeRegistry struct {
@@ -92,7 +94,7 @@ func TestSpawnChildRoundTrip(t *testing.T) {
 	altered.Task = "different work"
 	if _, _, err := service.SpawnChild(t.Context(), altered, now); err == nil {
 		t.Fatal("altered replay must conflict")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -120,7 +122,7 @@ func TestSpawnChildIgnoresCallerDigest(t *testing.T) {
 	altered.ContextDigest = "forged-digest"
 	if _, _, err := service.SpawnChild(t.Context(), altered, now); err == nil {
 		t.Fatal("altered task with shared explicit digest must conflict")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	same := testSpec()

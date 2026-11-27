@@ -9,8 +9,10 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeMemoryCLIConfig(t *testing.T) string {
@@ -42,11 +44,12 @@ children:
 
 func runMemoryCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	gf := &globalFlags{configPath: cfg}
-	cmd := newMemoryCmd(gf)
+	restoreDefaultLogger(t)
+	gf := &GlobalFlags{ConfigPath: cfg}
+	cmd := memory.Commands(memoryOpener(gf))[0]
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -63,12 +66,12 @@ func seedMemoryDoc(t *testing.T, cfgPath, id, owner, session, content string, se
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
-	_ = sessions.Create(t.Context(), &store.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
-	memoryStore := store.NewMemoryStore(db)
-	document := &store.MemoryDocument{
-		ID: id, OwnerID: owner, SessionID: session, Kind: store.MemoryKindEventText,
+	_ = sessions.Create(t.Context(), &turn.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
+	memoryStore := newTestMemoryStore(t, db)
+	document := &memory.StoredDocument{
+		ID: id, OwnerID: owner, SessionID: session, Kind: memory.KindEventText,
 		FromSequence: seq, ToSequence: seq, Content: content,
 		TrustLabel: "owner_input", CreatedAt: now,
 	}
@@ -88,12 +91,12 @@ func seedMemorySummary(t *testing.T, cfgPath, id, owner, session string, expires
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
-	_ = sessions.Create(t.Context(), &store.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
-	memoryStore := store.NewMemoryStore(db)
-	document := &store.MemoryDocument{
-		ID: id, OwnerID: owner, SessionID: session, Kind: store.MemoryKindSummary,
+	_ = sessions.Create(t.Context(), &turn.Session{ID: session, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)})
+	memoryStore := newTestMemoryStore(t, db)
+	document := &memory.StoredDocument{
+		ID: id, OwnerID: owner, SessionID: session, Kind: memory.KindSummary,
 		FromSequence: seq, ToSequence: seq, Content: "old summary content",
 		TrustLabel: "owner_input", CreatedAt: now, ExpiresAt: &expires,
 	}
@@ -241,21 +244,11 @@ func TestMemoryCLIPurgeBounded(t *testing.T) {
 func TestMemoryCLIForgetRequiresScope(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	_, err := runMemoryCommand(t, cfg, "forget", "--apply")
-	if err == nil {
-		t.Error("scope-less forget accepted")
+	if !command.IsUsageError(err) {
+		t.Errorf("scope-less forget = %v, want usage error", err)
 	}
 	_, err = runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--id", "mem-a1")
-	if err == nil {
-		t.Error("dual-scope forget accepted")
-	}
-}
-
-func TestMemoryInspectLinesNameThePersona(t *testing.T) {
-	lines := memoryInspectLines([]memory.StoredDocument{{
-		ID: "mem-1", AgentID: "kuma", SessionID: "kuma/discord:home/dm:1", Kind: memory.KindEventText,
-		FromSequence: 1, ToSequence: 1, TrustLabel: "owner_input", Content: "hello",
-	}})
-	if len(lines) != 1 || !strings.Contains(lines[0], "mem-1 agent=kuma session=kuma/discord:home/dm:1 ") {
-		t.Fatalf("lines = %q, want the persona after the document id", lines)
+	if !command.IsUsageError(err) {
+		t.Errorf("dual-scope forget = %v, want usage error", err)
 	}
 }

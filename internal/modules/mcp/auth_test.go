@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
@@ -161,17 +161,22 @@ func TestOAuthRequiresStoredToken(t *testing.T) {
 	provider := oauthTestProvider(t, fake, NewMemoryTokenStore())
 	if _, err := provider.Handler(t.Context()); err == nil {
 		t.Fatal("missing token accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
 
-func oauthStreamableConfig(name, serverURL, tokenStore string) *config.MCPServer {
-	return &config.MCPServer{
-		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
-		Auth:           &config.MCPAuth{OAuth: &config.MCPOAuth{ClientIDEnv: "OAUTH_TEST_ID", ClientSecretEnv: "OAUTH_TEST_SECRET", TokenStore: tokenStore}},
+func oauthStreamableConfig(t *testing.T, name, serverURL, tokenStore string) *ServerConfig {
+	t.Helper()
+	return &ServerConfig{
+		Name: name, Transport: TransportStreamableHTTP, URL: serverURL,
+		Auth: &AuthConfig{OAuth: &OAuthConfig{
+			ClientIDRef:     mustSecretRef(t, "env://OAUTH_TEST_ID"),
+			ClientSecretRef: mustSecretRef(t, "env://OAUTH_TEST_SECRET"),
+			TokenStore:      tokenStore,
+		}},
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
@@ -193,9 +198,10 @@ func TestOAuthProvisionedConnect(t *testing.T) {
 		t.Fatalf("ExchangeCode(): %v", err)
 	}
 
-	client, err := NewClient(oauthStreamableConfig("oauth-prov", fake.server.URL+"/mcp", tokenFile), nil,
+	client, err := NewClient(oauthStreamableConfig(t, "oauth-prov", fake.server.URL+"/mcp", tokenFile), nil,
 		WithHTTPClient(fakeHTTPClient()),
 		WithEndpointPolicy(stubEndpointPolicy{}),
+		WithSecretResolver(NewSecretResolver()),
 	)
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
@@ -236,10 +242,11 @@ func TestOAuthAutoFlowOnChallenge(t *testing.T) {
 	if err := seed.Store(TokenRecord{AccessToken: "wrong-access", TokenType: "Bearer", Expiry: time.Now().Add(time.Hour)}); err != nil {
 		t.Fatalf("Store(): %v", err)
 	}
-	serverCfg := oauthStreamableConfig("oauth-auto", fake.server.URL+"/mcp", tokenFile)
+	serverCfg := oauthStreamableConfig(t, "oauth-auto", fake.server.URL+"/mcp", tokenFile)
 	client, err := NewClient(serverCfg, nil,
 		WithHTTPClient(fakeHTTPClient()),
 		WithEndpointPolicy(stubEndpointPolicy{}),
+		WithSecretResolver(NewSecretResolver()),
 		WithOAuthCodeFetcher(codeFetcher(t)),
 	)
 	if err != nil {
@@ -272,9 +279,10 @@ func TestOAuthNoTokenFailsClosed(t *testing.T) {
 	t.Setenv("OAUTH_TEST_ID", "test-client-id")
 	t.Setenv("OAUTH_TEST_SECRET", "test-client-secret")
 
-	client, err := NewClient(oauthStreamableConfig("oauth-empty", fake.server.URL+"/mcp", ""), nil,
+	client, err := NewClient(oauthStreamableConfig(t, "oauth-empty", fake.server.URL+"/mcp", ""), nil,
 		WithHTTPClient(fakeHTTPClient()),
 		WithEndpointPolicy(stubEndpointPolicy{}),
+		WithSecretResolver(NewSecretResolver()),
 	)
 	if err != nil {
 		t.Fatalf("NewClient(): %v", err)
@@ -282,7 +290,7 @@ func TestOAuthNoTokenFailsClosed(t *testing.T) {
 	defer func() { _ = client.Close(t.Context()) }()
 	if err := client.Connect(ctx, nil); err == nil {
 		t.Fatal("tokenless connect accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Fatalf("code = %v, %v", code, ok)
 	}
 	if hits := fake.tokenHits.Load(); hits != 0 {
@@ -350,7 +358,7 @@ func TestStaticAuthHeaderModes(t *testing.T) {
 	}
 	if err == nil {
 		t.Error("missing credential accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Errorf("code = %v, %v", code, ok)
 	}
 }
@@ -385,7 +393,27 @@ func TestAuthErrorsCarryNoSecrets(t *testing.T) {
 			t.Errorf("secret %q in error %q", canary, tokenErr.Error())
 		}
 	}
-	if code, ok := CodeOf(tokenErr); !ok || code != ErrAuthRequired {
+	if code, ok := fault.CodeOf[ErrorCode](tokenErr); !ok || code != ErrAuthRequired {
 		t.Errorf("code = %v, %v", code, ok)
+	}
+}
+
+func TestOAuthWithoutSecretResolverFailsClosed(t *testing.T) {
+	ctx := t.Context()
+	fake := newFakeAuthorizationServer(t)
+	fake.attachMCPServer(t, "/mcp")
+	t.Setenv("OAUTH_TEST_ID", "test-client-id")
+	t.Setenv("OAUTH_TEST_SECRET", "test-client-secret")
+
+	client, err := NewClient(oauthStreamableConfig(t, "oauth-no-resolver", fake.server.URL+"/mcp", ""), nil,
+		WithHTTPClient(fakeHTTPClient()),
+		WithEndpointPolicy(stubEndpointPolicy{}),
+	)
+	if err != nil {
+		t.Fatalf("NewClient(): %v", err)
+	}
+	defer func() { _ = client.Close(ctx) }()
+	if err := client.Connect(ctx, nil); !fault.HasCode(err, ErrAuthRequired) {
+		t.Fatalf("Connect without resolver = %v, want %s", err, ErrAuthRequired)
 	}
 }

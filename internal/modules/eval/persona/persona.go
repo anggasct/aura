@@ -25,8 +25,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/history"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -35,7 +35,6 @@ const (
 	KindApprovalRouted  = "approval_routed"
 	KindFixedReply      = "fixed_reply"
 	KindBehavior        = "behavior"
-	ErrorCodeInvalid    = "persona_eval_invalid"
 	MarkerOwnerContext  = "AURA-EVAL-OWNER-CONTEXT-7f3a"
 	MarkerProfile       = "AURA-EVAL-OWNER-PROFILE-7f3a"
 	MarkerRecall        = "AURA-EVAL-OWNER-MEMORY-7f3a"
@@ -69,10 +68,6 @@ type Report struct {
 }
 
 func (r *Report) Passed() bool { return r.Total > 0 && r.Failed == 0 }
-
-func invalid(format string, args ...any) error {
-	return fmt.Errorf("%s: %s", ErrorCodeInvalid, fmt.Sprintf(format, args...))
-}
 
 func LoadCases(dir string) ([]Case, error) {
 	root, err := os.OpenRoot(dir)
@@ -157,6 +152,10 @@ func ImplicitCases(definition *auraagent.Definition) []Case {
 }
 
 func Run(ctx context.Context, definition *auraagent.Definition, cases []Case, capturer Capturer) (Report, error) {
+	return RunWithCatalog(ctx, definition, cases, capturer, nil)
+}
+
+func RunWithCatalog(ctx context.Context, definition *auraagent.Definition, cases []Case, capturer Capturer, catalog []tools.Definition) (Report, error) {
 	if capturer == nil {
 		return Report{}, invalid("persona eval needs a turn capturer")
 	}
@@ -182,7 +181,7 @@ func Run(ctx context.Context, definition *auraagent.Definition, cases []Case, ca
 	for i := range all {
 		c := &all[i]
 		report.Total++
-		ok, err := runCase(ctx, definition, c, captures, capturer)
+		ok, err := runCaseWithCatalog(ctx, definition, c, captures, capturer, catalog)
 		if err != nil {
 			return Report{}, err
 		}
@@ -193,7 +192,7 @@ func Run(ctx context.Context, definition *auraagent.Definition, cases []Case, ca
 	}
 	for i := range abuse {
 		report.Total++
-		broker, err := newBroker(definition, nil, nil)
+		broker, err := newBroker(definition, nil, nil, catalog)
 		if err != nil {
 			return Report{}, err
 		}
@@ -205,20 +204,20 @@ func Run(ctx context.Context, definition *auraagent.Definition, cases []Case, ca
 	return report, nil
 }
 
-func runCase(ctx context.Context, definition *auraagent.Definition, c *Case, captures map[principal.Class]*Capture, capturer Capturer) (bool, error) {
+func runCaseWithCatalog(ctx context.Context, definition *auraagent.Definition, c *Case, captures map[principal.Class]*Capture, capturer Capturer, catalog []tools.Definition) (bool, error) {
 	switch c.Kind {
 	case KindFixedReply:
 		return definition.Message(c.Key) == c.Text, nil
 	case KindApprovalRouted:
-		return approvalRouted(ctx, definition, c)
+		return approvalRouted(ctx, definition, c, catalog)
 	}
 	captured, ok := captures[c.Class]
 	if !ok {
-		turn, err := capturer(ctx, definition, c.Class)
+		capture, err := capturer(ctx, definition, c.Class)
 		if err != nil {
 			return false, err
 		}
-		captured = &turn
+		captured = &capture
 		captures[c.Class] = captured
 	}
 	switch c.Kind {
@@ -274,18 +273,31 @@ func (definitionPolicy) StandingGrant(context.Context, string, string, string, s
 	return false, nil
 }
 
-func newBroker(definition *auraagent.Definition, decider toolbroker.ApprovalDecider, effects *effect.Executor) (*toolbroker.Broker, error) {
-	adapters := map[string]toolbroker.Adapter{}
+func newBroker(definition *auraagent.Definition, decider toolbroker.ApprovalDecider, effects *effect.Executor, catalog []tools.Definition) (*toolbroker.Broker, error) {
 	var catalogCapabilities []string
-	listed := tools.Builtins()
-	for i := range listed {
-		builtin := &listed[i]
-		catalogCapabilities = append(catalogCapabilities, builtin.RequiredCapabilities...)
-		adapters[builtin.Key()] = func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
-			return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: json.RawMessage(`{}`)}, nil
+	for i := range catalog {
+		catalogCapabilities = append(catalogCapabilities, catalog[i].RequiredCapabilities...)
+	}
+	broker, err := toolbroker.New(&toolbroker.Options{
+		ApprovalDecider:  decider,
+		Access:           definitionPolicy{definition: definition},
+		Effects:          effects,
+		HostCapabilities: catalogCapabilities,
+	})
+	if err != nil {
+		return nil, err
+	}
+	stub := func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+		return toolbroker.ToolResult{Class: toolbroker.ResultOK, Output: json.RawMessage(`{}`)}, nil
+	}
+	for i := range catalog {
+		builtin := catalog[i]
+		rule := toolbroker.DefaultRule(&builtin)
+		if err := broker.RegisterTool(&builtin, stub, &rule); err != nil {
+			return nil, err
 		}
 	}
-	return toolbroker.New(&toolbroker.Options{Adapters: adapters, ApprovalDecider: decider, Access: definitionPolicy{definition: definition}, Effects: effects, HostCapabilities: catalogCapabilities})
+	return broker, nil
 }
 
 func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.DB) (T, error)) (T, error) {
@@ -300,23 +312,36 @@ func WithEvalDB[T any](ctx context.Context, principalID string, fn func(db *sql.
 		return zero, err
 	}
 	defer func() { _ = db.Close() }()
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
+	migrations, err := sqlite.Baseline(turnstore.Schema(), effect.Schema())
+	if err != nil {
 		return zero, err
 	}
-	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: SessionID, OwnerID: principalID, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
+		return zero, err
+	}
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: SessionID, OwnerID: principalID, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		return zero, err
 	}
 	return fn(db)
 }
 
-func approvalRouted(ctx context.Context, definition *auraagent.Definition, c *Case) (bool, error) {
+func approvalRouted(ctx context.Context, definition *auraagent.Definition, c *Case, catalog []tools.Definition) (bool, error) {
 	return WithEvalDB(ctx, "discord:eval", func(db *sql.DB) (bool, error) {
-		return approvalRoutedWith(ctx, db, definition, c)
+		return approvalRoutedWith(ctx, db, definition, c, catalog)
 	})
 }
 
-func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, c *Case) (bool, error) {
-	journal, err := effect.NewJournal(db, effect.Options{})
+func lookupToolDefinition(catalog []tools.Definition, key string) (tools.Definition, bool) {
+	for i := range catalog {
+		if catalog[i].Key() == key {
+			return catalog[i], true
+		}
+	}
+	return tools.Definition{}, false
+}
+
+func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.Definition, c *Case, catalog []tools.Definition) (bool, error) {
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		return false, err
 	}
@@ -328,12 +353,12 @@ func approvalRoutedWith(ctx context.Context, db *sql.DB, definition *auraagent.D
 	broker, err := newBroker(definition, func(_ context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 		prompted = append(prompted, prompt.ToolName)
 		return false, nil
-	}, effects)
+	}, effects, catalog)
 	if err != nil {
 		return false, err
 	}
 	key := c.Tool + "@" + tools.Version
-	builtin, ok := tools.DefinitionsByKey()[key]
+	builtin, ok := lookupToolDefinition(catalog, key)
 	if !ok {
 		return false, invalid("case %q tool %q is not a builtin", c.Name, c.Tool)
 	}

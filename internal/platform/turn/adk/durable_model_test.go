@@ -7,13 +7,50 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/durable"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
+
+type journalInvocation struct {
+	mu      sync.Mutex
+	journal map[string][]byte
+}
+
+func (j *journalInvocation) Run() durable.RunRef { return durable.RunRef{} }
+func (j *journalInvocation) Payload() []byte     { return nil }
+func (j *journalInvocation) Signal(context.Context, string) ([]byte, bool) {
+	return nil, false
+}
+func (j *journalInvocation) Sleep(time.Duration) error            { return nil }
+func (j *journalInvocation) Timer(time.Duration) <-chan time.Time { return nil }
+func (j *journalInvocation) Wait(context.Context, string, time.Duration) (payload []byte, timedOut, ok bool) {
+	return nil, false, false
+}
+
+func (j *journalInvocation) RunAction(ctx context.Context, key string, fn func(ctx context.Context) ([]byte, error)) ([]byte, error) {
+	j.mu.Lock()
+	if out, ok := j.journal[key]; ok {
+		j.mu.Unlock()
+		return out, nil
+	}
+	j.mu.Unlock()
+	out, err := fn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	if j.journal == nil {
+		j.journal = map[string][]byte{}
+	}
+	j.journal[key] = out
+	return out, nil
+}
 
 func journaledRequest() *adkmodel.LLMRequest {
 	return &adkmodel.LLMRequest{Contents: []*genai.Content{{Role: genai.RoleUser, Parts: []*genai.Part{{Text: "hi"}}}}}
@@ -158,13 +195,13 @@ func TestJournaledModelStopsCleanlyWhenTheConsumerStops(t *testing.T) {
 }
 
 func TestDurableExecutorStreamsPartialsWithoutChangingTheJournal(t *testing.T) {
-	run := func(t *testing.T, streamPartial bool, inv *journalInvocation, model *streamingADKModel) []store.RuntimeEvent {
+	run := func(t *testing.T, streamPartial bool, inv *journalInvocation, model *streamingADKModel) []turn.Event {
 		t.Helper()
 		modelName, models := streamingModelSet(model)
 		executor, db, _ := newADKTestExecutor(t, modelName, models, &fakeBroker{})
 		mustCreateSession(t, db, "session-1")
 		req := streamTurn("turn-1", streamPartial, 0)
-		var events []store.RuntimeEvent
+		var events []turn.Event
 		for ev, err := range executor.Execute(scopedContext(t, inv), req) {
 			if err != nil {
 				t.Fatalf("Execute: %v", err)

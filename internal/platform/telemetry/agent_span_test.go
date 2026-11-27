@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
@@ -14,7 +13,7 @@ import (
 func TestTurnSpanCarriesAgentID(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, nil, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -50,7 +49,7 @@ func TestTurnSpanCarriesAgentID(t *testing.T) {
 func TestTurnSpanCarriesDefaultAgentID(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, nil, nil, WithDefaultAgentID("main"))
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)

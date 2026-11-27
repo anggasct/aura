@@ -6,11 +6,13 @@ import (
 	"log/slog"
 	"testing"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func TestWorkflowStartCarriesTheCallerTaint(t *testing.T) {
@@ -27,12 +29,24 @@ func TestWorkflowStartCarriesTheCallerTaint(t *testing.T) {
 			controller, runs, db := workflowToolFixture(t, "book_visit")
 			cfg := mustLoadConfig(t, writePersonaEvalConfig(t, "x", "web_search"))
 			approveAll := func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return true, nil }
-			executor, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, t.TempDir(), capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, approveAll, nil,
-				toolsbuiltin.WithApprovalReachable(func(string) bool { return true }))
+			executor, err := newTestToolExecutor(&toolExecutorInput{
+				result:       &appconfig.LoadResult{Config: cfg, CapabilityReport: capabilitytest.All(t)},
+				db:           db,
+				artifactRoot: t.TempDir(),
+				logger:       slog.New(slog.DiscardHandler),
+				wiring:       &toolWiring{decider: approveAll, reachable: func(string) bool { return true }},
+				events:       turn.NewEventBus(slog.New(slog.DiscardHandler)),
+			})
 			if err != nil {
-				t.Fatalf("toolsbuiltin.New: %v", err)
+				t.Fatalf("newTestToolExecutor: %v", err)
 			}
-			executor.SetWorkflowController(controller)
+			provider, err := workflow.NewToolProvider(controller)
+			if err != nil {
+				t.Fatalf("NewToolProvider: %v", err)
+			}
+			if err := executor.Broker().RegisterProvider(provider); err != nil {
+				t.Fatalf("RegisterProvider: %v", err)
+			}
 			result, err := executor.Broker().Execute(t.Context(), &toolbroker.ToolRequest{
 				RequestID: "request-1", TurnID: "turn-1", SessionID: "lobby/terminal:owner", PrincipalID: principal.OwnerID,
 				PrincipalClass: principal.ClassOwner, AgentID: "lobby", ToolName: "workflow_start", ToolVersion: "v1",

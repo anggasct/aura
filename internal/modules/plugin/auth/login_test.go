@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/plugin/auth/authtest"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func getURL(ctx context.Context, target string) (*http.Response, error) {
@@ -23,7 +24,7 @@ func getURL(ctx context.Context, target string) (*http.Response, error) {
 
 func requireCode(t *testing.T, err error, want ErrorCode) {
 	t.Helper()
-	got, ok := CodeOf(err)
+	got, ok := fault.CodeOf[ErrorCode](err)
 	if !ok || got != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}

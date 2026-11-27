@@ -20,7 +20,6 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -28,9 +27,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type effectIntentIDs struct {
@@ -109,12 +110,16 @@ func (p *toolProbe) seen() []*toolbroker.ToolRequest {
 
 func registerToolProbe(t *testing.T, runner workflow.ToolRunner) *toolProbe {
 	t.Helper()
-	toolRunner, ok := runner.(*workflowToolRunner)
+	toolRunner, ok := runner.(*workflow.ToolStepRunner)
 	if !ok {
-		t.Fatalf("runner is %T, want *workflowToolRunner", runner)
+		t.Fatalf("runner is %T, want *workflow.ToolStepRunner", runner)
+	}
+	broker, ok := toolRunner.Broker().(*toolbroker.Broker)
+	if !ok {
+		t.Fatalf("broker is %T, want *toolbroker.Broker", toolRunner.Broker())
 	}
 	probe := &toolProbe{}
-	toolbrokertest.Register(t, toolRunner.broker, toolbrokertest.Stub{
+	toolbrokertest.Register(t, broker, toolbrokertest.Stub{
 		Name: probeTool, Effectful: true,
 		Run: func(_ context.Context, req *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
 			captured := *req
@@ -227,7 +232,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 				before := len(probe.seen())
 				_, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("label"+strconv.Itoa(index)))
 				if tc.code != "" {
-					if code, ok := workflow.CodeOf(err); !ok || code != tc.code {
+					if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != tc.code {
 						t.Fatalf("Invoke error = %v, want %s", err, tc.code)
 					}
 					if len(probe.seen()) != before {
@@ -264,7 +269,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 		ghost.Origin.AgentID = "ghost"
 		before = len(probe.seen())
 		_, err := runner.Invoke(stepContextFor(t, db, ghost), probeTool, probeArgs("ghost"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodePersonaMissing {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodePersonaMissing {
 			t.Fatalf("Invoke error = %v, want %s", err, workflow.ErrorCodePersonaMissing)
 		}
 		if len(probe.seen()) != before {
@@ -288,7 +293,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 		}
 		before = len(probe.seen())
 		_, err := runner.Invoke(workflow.WithStepCall(t.Context(), call), probeTool, probeArgs("deadline"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 			t.Fatalf("Invoke without a deadline error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 		}
 		if len(probe.seen()) != before {
@@ -358,7 +363,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 
 	t.Run("a call without a step call is refused", func(t *testing.T) {
 		_, err := runner.Invoke(t.Context(), "write_file", writeFileArgs(t, "c.txt", "one"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 			t.Fatalf("Invoke error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 		}
 		if _, err := os.Stat(filepath.Join(workspace, "c.txt")); !os.IsNotExist(err) {
@@ -373,7 +378,7 @@ func TestWorkflowToolStepCarriesItsOrigin(t *testing.T) {
 		}
 		for name, ctx := range contexts {
 			_, err := runner.Invoke(ctx, "write_file", json.RawMessage(`{}`))
-			if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeStepFailed {
+			if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeStepFailed {
 				t.Fatalf("%s: Invoke error = %v, want %s", name, err, workflow.ErrorCodeStepFailed)
 			}
 		}
@@ -394,16 +399,10 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 	}
 	seed := func(t *testing.T, runID, owner, agent string) context.Context {
 		t.Helper()
-		tx, err := db.BeginTx(t.Context(), nil)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		if err := store.CreateSessionTx(t.Context(), tx, &store.Session{ID: workflow.RunSessionID(runID), OwnerID: owner, AgentID: agent}); err != nil {
+		if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+			return turnstore.NewTurnStore(db).CreateSession(ctx, &turn.Session{ID: workflow.RunSessionID(runID), OwnerID: owner, AgentID: agent})
+		}); err != nil {
 			t.Fatalf("create run session: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
 		}
 		ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 		t.Cleanup(cancel)
@@ -416,7 +415,7 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 			t.Fatalf("delete run session: %v", err)
 		}
 		_, err := runner.Invoke(ctx, probeTool, probeArgs("deleted"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeSessionInvalid {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeSessionInvalid {
 			t.Fatalf("Invoke error = %v, want %s", err, workflow.ErrorCodeSessionInvalid)
 		}
 		if n := sessionCount(t, "run-deleted"); n != 0 {
@@ -437,7 +436,7 @@ func TestWorkflowStepRefusesAMissingRunSession(t *testing.T) {
 			runID := "run-" + strings.ReplaceAll(tc.name, " ", "-")
 			ctx := seed(t, runID, tc.owner, tc.agent)
 			_, err := runner.Invoke(ctx, probeTool, probeArgs(runID))
-			if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeSessionInvalid {
+			if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeSessionInvalid {
 				t.Fatalf("Invoke error = %v, want %s", err, workflow.ErrorCodeSessionInvalid)
 			}
 		})
@@ -480,9 +479,9 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	disk := workflow.NewStore(db)
+	disk := mustWorkflowStore(t, db)
 	fake := durabletest.NewFake()
-	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{Tools: runner, Logger: slog.Default()})
+	interpreter := mustWorkflowInterpreter(t, disk, fake, &workflow.Options{Tools: runner, Logger: slog.Default()})
 	tool := "write_file"
 	spec := &workflow.Spec{
 		ID: "write-note", Goal: "Write a note", Version: 1, Source: workflow.SourceDefined,
@@ -496,19 +495,19 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	}
 	deps := &workflow.ValidationDeps{
 		Agents:         registry,
-		KnownTools:     toolsbuiltin.DefinitionNames(),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     definitionNames(),
+		EffectfulTools: effectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
 		StepAllowed:    acceptStepAllowed,
 	}
 	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	controller, err := newWorkflowToolController(interpreter, disk, registry, nil)
+	controller, err := workflow.NewController(&workflow.ControllerDeps{Interpreter: interpreter, Runs: disk, Registry: registry})
 	if err != nil {
-		t.Fatalf("newWorkflowToolController: %v", err)
+		t.Fatalf("NewController: %v", err)
 	}
-	state, err := controller.Start(t.Context(), &toolsbuiltin.WorkflowCaller{
+	state, err := controller.Start(t.Context(), &workflow.Caller{
 		PrincipalID: "discord:111", PrincipalClass: principal.ClassTrusted, AgentID: "kantor", SessionID: "kantor/discord:office/dm:111",
 	}, "write-note", "")
 	if err != nil {
@@ -544,7 +543,7 @@ func TestDelegatedWorkflowStartNoLongerRunsAsOwner(t *testing.T) {
 	call := ownerStepCall(state.RunID, "write", 0)
 	call.Origin = run.Origin
 	_, err = runner.Invoke(stepContextFor(t, db, call), tool, writeFileArgs(t, "note.txt", "delegated"))
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
 		t.Fatalf("Invoke as the delegated origin error = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
 	}
 	steps, err := disk.Steps(t.Context(), state.RunID)

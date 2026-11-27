@@ -13,12 +13,19 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 type e2eRunner struct {
@@ -55,11 +62,11 @@ func (r e2eRunner) Run(ctx context.Context, req *terminal.Request) iter.Seq2[ter
 }
 
 type e2eSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s e2eSessions) Create(ctx context.Context, owner, agentID string) (terminal.Session, error) {
-	internal := &store.Session{ID: "e2e-session", OwnerID: owner, AgentID: agentID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
+	internal := &turn.Session{ID: "e2e-session", OwnerID: owner, AgentID: agentID, CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}
 	if err := s.sessions.Create(ctx, internal); err != nil {
 		return terminal.Session{}, err
 	}
@@ -84,29 +91,33 @@ func (s e2eSessions) ListEvents(ctx context.Context, sessionID string, after uin
 }
 
 func TestTerminalVerticalSlice(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), model.Schema(), storage.Schema())
 
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
-		{Kind: store.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
+		{Kind: turnstore.EventKindADK, Payload: json.RawMessage(`{"content":{"role":"model","parts":[{"text":"hello from the slice"}]},"partial":false}`)},
 	})
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
 
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := terminal.NewConsole(
-		e2eRunner{engine: engine},
-		e2eSessions{sessions: sessions},
-		terminal.PlainRenderer{},
-		bytes.NewBufferString("hi\n"),
-		out, diag,
-		terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: time.Second},
-		"e2e-owner",
-	)
+	console, err := terminal.New(&terminal.Deps{
+		Runner:    e2eRunner{engine: engine},
+		Sessions:  e2eSessions{sessions: sessions},
+		Renderer:  terminal.PlainRenderer{},
+		In:        bytes.NewBufferString("hi\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    terminal.Config{MaxInputBytes: 1024, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)},
+		Principal: "e2e-owner",
+	})
+	if err != nil {
+		t.Fatalf("terminal.New: %v", err)
+	}
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("console run: %v", err)
 	}
@@ -130,19 +141,19 @@ func TestTerminalVerticalSlice(t *testing.T) {
 }
 
 func TestTerminalReplayCompletedEventWins(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	events := store.NewEventStore(db)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), model.Schema(), storage.Schema())
+	sessions := turnstore.NewSessionService(db)
+	events := turnstore.NewEventStore(db)
 	executor := turntest.NewFakeExecutor([]turntest.FakeStep{
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"partial "}]}}`)},
 		{Kind: turn.EventKindModelDelta, Payload: json.RawMessage(`{"content":{"parts":[{"text":"stream"}]}}`)},
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"content":{"parts":[{"text":"durable answer"}]}}`)},
 	})
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: runtimeengine.Default()})
 	if err != nil {
 		t.Fatalf("new engine: %v", err)
 	}
-	if err := sessions.Create(context.Background(), &store.Session{ID: "e2e-replay", OwnerID: "e2e-owner", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := sessions.Create(context.Background(), &turn.Session{ID: "e2e-replay", OwnerID: "e2e-owner", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
 	runner := e2eRunner{engine: engine}

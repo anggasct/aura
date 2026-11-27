@@ -22,9 +22,8 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/email"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -37,7 +36,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -50,7 +50,7 @@ const (
 )
 
 func surfacePersonas(cfg *appconfig.Config) {
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
+	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}}
 	withProbePersona(cfg)
 	cfg.Agents.Definitions = append(cfg.Agents.Definitions,
 		auraagent.Persona{
@@ -87,13 +87,16 @@ func startGitHubCommentStub(t *testing.T) *gitHubCommentStub {
 func (r *surfaceRig) pointGitHubAtTheStub(t *testing.T) {
 	t.Helper()
 	for _, name := range github.ToolNames() {
-		r.executor.UnregisterTool(name, github.ToolVersion)
+		r.executor.Broker().UnregisterTool(name, github.ToolVersion)
 	}
-	err := github.Register(r.executor, &github.ToolOptions{
+	provider, err := github.NewToolProvider(&github.ToolOptions{
 		BaseURL: os.Getenv("AURA_TEST_GITHUB_BASE"), HTTPClient: &http.Client{},
 		Credentials: []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://" + gitHubToken)}},
 	})
 	if err != nil {
+		t.Fatalf("build the github tools on the stub: %v", err)
+	}
+	if err := r.executor.Broker().RegisterProvider(provider); err != nil {
 		t.Fatalf("register the github tools on the stub: %v", err)
 	}
 }
@@ -127,7 +130,7 @@ func (g *recordedGrants) sent() []toolbroker.ToolRequest {
 func (r *surfaceRig) registerRecordingStub(t *testing.T) *recordedGrants {
 	t.Helper()
 	recorded := &recordedGrants{}
-	toolbrokertest.Register(t, r.runner.broker, toolbrokertest.Stub{
+	toolbrokertest.Register(t, r.executor.Broker(), toolbrokertest.Stub{
 		Name: recordedTool, RequiresApproval: true,
 		Run: func(_ context.Context, req *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
 			recorded.mu.Lock()
@@ -172,7 +175,7 @@ func (r *surfaceRig) seedProposal(t *testing.T, call *workflow.StepCall, claimed
 	t.Helper()
 	now := time.Now().UTC()
 	session := "proposal-session-" + call.RunID
-	if err := store.NewSessionService(r.db).Create(t.Context(), &store.Session{ID: session, OwnerID: principal.OwnerID, AgentID: opsPersona, CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(r.db).Create(t.Context(), &turn.Session{ID: session, OwnerID: principal.OwnerID, AgentID: opsPersona, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create proposal session: %v", err)
 	}
 	tool := "write_file"
@@ -183,7 +186,7 @@ func (r *surfaceRig) seedProposal(t *testing.T, call *workflow.StepCall, claimed
 		ID: call.Approval.ProposalID, SessionID: session, AgentID: opsPersona, PrincipalID: principal.OwnerID,
 		Tainted: true, Spec: spec, Digest: "d", PlanText: "plan", CreatedAt: now,
 	}
-	if err := workflow.NewStore(r.db).CreateProposal(t.Context(), proposal); err != nil {
+	if err := mustWorkflowStore(t, r.db).CreateProposal(t.Context(), proposal); err != nil {
 		t.Fatalf("CreateProposal: %v", err)
 	}
 	if claimedRun != "" {
@@ -234,7 +237,7 @@ func (l *observationLog) last() toolbroker.Observation {
 
 func codeIs(t *testing.T, err error, want workflow.ErrorCode) {
 	t.Helper()
-	if code, ok := workflow.CodeOf(err); !ok || code != want {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != want {
 		t.Fatalf("error = %v, want %s", err, want)
 	}
 }
@@ -437,7 +440,7 @@ func TestDelegatedInstalledGitHubStepAsksTheOwnerPerCall(t *testing.T) {
 	owner := &workflowOwnerCards{}
 	rig := newSurfaceRig(t, &surfaceRigOptions{configure: surfacePersonas, owner: owner})
 	rig.pointGitHubAtTheStub(t)
-	wantText, err := rig.runner.broker.ExactCallText(github.ToolComment, commentArgs())
+	wantText, err := rig.runner.Broker().ExactCallText(github.ToolComment, commentArgs())
 	if err != nil {
 		t.Fatalf("ExactCallText: %v", err)
 	}
@@ -603,7 +606,7 @@ func TestAttachedGrantIsBoundToTheStepAttempt(t *testing.T) {
 	}
 	replay := recorded.sent()[0]
 	replay.Approval = &grants[0]
-	_, err := rig.runner.broker.Execute(t.Context(), &replay)
+	_, err := rig.runner.Broker().Execute(t.Context(), &replay)
 	if err == nil {
 		t.Fatal("a consumed grant was accepted a second time")
 	}
@@ -615,7 +618,7 @@ func TestAttachedGrantIsBoundToTheStepAttempt(t *testing.T) {
 func TestUnshowableCallIsNotGranted(t *testing.T) {
 	rig := newSurfaceRig(t, &surfaceRigOptions{configure: surfacePersonas})
 	const secret = "s3cr3t-registered-later"
-	rig.runner.broker.RegisterSecret(secret)
+	rig.executor.Broker().RegisterSecret(secret)
 	call := surfaceCall("run-unshowable", ownerOrigin, workflow.ApprovalProposal)
 	before := len(rig.observed.all())
 	_, err := rig.runner.Invoke(stepContextFor(t, rig.db, call), "write_file", writeFileArgs(t, "leak.txt", "token "+secret))
@@ -678,9 +681,9 @@ type driveStep struct {
 
 func driveToolRun(t *testing.T, rig *surfaceRig, id string, origin *workflow.RunOrigin, step *driveStep) []*workflow.StepRun {
 	t.Helper()
-	disk := workflow.NewStore(rig.db)
+	disk := mustWorkflowStore(t, rig.db)
 	fake := durabletest.NewFake()
-	interpreter := workflow.NewInterpreter(disk, fake, &workflow.Options{Tools: rig.runner, Logger: slog.New(slog.DiscardHandler)})
+	interpreter := mustWorkflowInterpreter(t, disk, fake, &workflow.Options{Tools: rig.runner, Logger: slog.New(slog.DiscardHandler)})
 	tool := step.tool
 	spec := &workflow.Spec{
 		ID: id, Goal: "Drive a tool step", Version: 1, Source: workflow.SourceDefined,
@@ -695,8 +698,8 @@ func driveToolRun(t *testing.T, rig *surfaceRig, id string, origin *workflow.Run
 	}
 	deps := &workflow.ValidationDeps{
 		Agents:         rig.registry,
-		KnownTools:     append(toolsbuiltin.DefinitionNames(), recordedTool),
-		EffectfulTools: toolsbuiltin.EffectfulToolNames(),
+		KnownTools:     append(definitionNames(), recordedTool),
+		EffectfulTools: effectfulToolNames(),
 		CheckToolCall:  acceptToolCall,
 		StepAllowed:    acceptStepAllowed,
 	}
@@ -779,7 +782,7 @@ func TestWorkflowEmailSendIsRefusedBeforeTheBroker(t *testing.T) {
 	for _, origin := range []surfaceOrigin{ownerOrigin, trustedOrigin} {
 		t.Run(string(origin.class), func(t *testing.T) {
 			call := surfaceCall("run-email-"+string(origin.class), origin, workflow.ApprovalInstalled)
-			_, err := rig.runner.Invoke(stepContextFor(t, rig.db, call), toolsbuiltin.EmailSendToolName, args)
+			_, err := rig.runner.Invoke(stepContextFor(t, rig.db, call), email.SendToolName, args)
 			codeIs(t, err, workflow.ErrorCodeCapabilityUnavailable)
 			if got := len(rig.observed.all()); got != 0 {
 				t.Fatalf("the broker saw %d calls, want none", got)
@@ -892,40 +895,39 @@ func TestWorkflowStepRefusalsAreLogged(t *testing.T) {
 
 func TestNewWorkflowToolRunnerFailsClosedWithoutItsDependencies(t *testing.T) {
 	rig := newSurfaceRig(t, &surfaceRigOptions{configure: surfacePersonas})
-	full := func() *workflowToolRunnerInput {
-		return &workflowToolRunnerInput{
-			Executor: rig.executor, Sessions: store.NewSessionService(rig.db), Registry: rig.registry, Runs: workflow.NewStore(rig.db),
+	full := func() *workflow.ToolStepRunnerDeps {
+		return &workflow.ToolStepRunnerDeps{
+			Broker: rig.executor.Broker(), Sessions: turnstore.NewSessionService(rig.db), Registry: rig.registry, Runs: mustWorkflowStore(t, rig.db),
 		}
 	}
 	tests := []struct {
 		name    string
-		mutate  func(in *workflowToolRunnerInput)
+		mutate  func(in *workflow.ToolStepRunnerDeps)
 		wantErr bool
 	}{
-		{name: "every dependency present without a route", mutate: func(*workflowToolRunnerInput) {}},
-		{name: "a nil executor", mutate: func(in *workflowToolRunnerInput) { in.Executor = nil }, wantErr: true},
-		{name: "an executor without a broker", mutate: func(in *workflowToolRunnerInput) { in.Executor = &toolsbuiltin.Executor{} }, wantErr: true},
-		{name: "nil sessions", mutate: func(in *workflowToolRunnerInput) { in.Sessions = nil }, wantErr: true},
-		{name: "a nil registry", mutate: func(in *workflowToolRunnerInput) { in.Registry = nil }, wantErr: true},
-		{name: "a nil workflow store", mutate: func(in *workflowToolRunnerInput) { in.Runs = nil }, wantErr: true},
+		{name: "every dependency present without a route", mutate: func(*workflow.ToolStepRunnerDeps) {}},
+		{name: "a nil broker", mutate: func(in *workflow.ToolStepRunnerDeps) { in.Broker = nil }, wantErr: true},
+		{name: "nil sessions", mutate: func(in *workflow.ToolStepRunnerDeps) { in.Sessions = nil }, wantErr: true},
+		{name: "a nil registry", mutate: func(in *workflow.ToolStepRunnerDeps) { in.Registry = nil }, wantErr: true},
+		{name: "a nil workflow store", mutate: func(in *workflow.ToolStepRunnerDeps) { in.Runs = nil }, wantErr: true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			in := full()
 			tc.mutate(in)
-			runner, err := newWorkflowToolRunner(in)
+			runner, err := workflow.NewToolStepRunner(in)
 			if tc.wantErr {
 				if err == nil || runner != nil {
-					t.Fatalf("newWorkflowToolRunner = %v, %v; want a construction error", runner, err)
+					t.Fatalf("NewToolStepRunner = %v, %v; want a construction error", runner, err)
 				}
 				return
 			}
 			if err != nil || runner == nil {
-				t.Fatalf("newWorkflowToolRunner = %v, %v; want a runner", runner, err)
+				t.Fatalf("NewToolStepRunner = %v, %v; want a runner", runner, err)
 			}
 		})
 	}
-	if _, err := newWorkflowToolRunner(nil); err == nil {
-		t.Fatal("newWorkflowToolRunner accepted a nil input")
+	if _, err := workflow.NewToolStepRunner(nil); err == nil {
+		t.Fatal("NewToolStepRunner accepted a nil input")
 	}
 }

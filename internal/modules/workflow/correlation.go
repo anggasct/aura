@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 type Correlation struct {
@@ -28,7 +31,7 @@ func (s *Store) BindCorrelation(ctx context.Context, correlation *Correlation) e
 		return codedError(ErrorCodeExecutorInvalid, "correlation binding requires run and signal")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	_, err := s.db.ExecContext(ctx,
+	_, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`INSERT INTO workflow_correlation (source, event_type, external_id, run_id, signal_name, dedupe_key, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		correlation.Source, correlation.EventType, correlation.ExternalID,
@@ -38,7 +41,7 @@ func (s *Store) BindCorrelation(ctx context.Context, correlation *Correlation) e
 		if isConstraintUnique(err) {
 			return codedError(ErrorCodeCorrelationConflict, "correlation binding already exists for this provider event")
 		}
-		return codedError(ErrorCodeStepFailed, "persist correlation binding: "+err.Error())
+		return sqlite.Classify(fmt.Errorf("persist correlation binding: %w", err))
 	}
 	return nil
 }
@@ -46,7 +49,7 @@ func (s *Store) BindCorrelation(ctx context.Context, correlation *Correlation) e
 func (s *Store) ResolveCorrelation(ctx context.Context, source, eventType, externalID, dedupeKey string) (Correlation, error) {
 	var correlation Correlation
 	var createdAt string
-	err := s.db.QueryRowContext(ctx,
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT source, event_type, external_id, run_id, signal_name, dedupe_key, created_at
 		 FROM workflow_correlation WHERE source = ? AND event_type = ? AND external_id = ? AND dedupe_key = ?`,
 		source, eventType, externalID, dedupeKey,
@@ -56,7 +59,7 @@ func (s *Store) ResolveCorrelation(ctx context.Context, source, eventType, exter
 		if errors.Is(err, sql.ErrNoRows) {
 			return Correlation{}, codedError(ErrorCodeCorrelationUnmatched, "no workflow waits for this provider event")
 		}
-		return Correlation{}, codedError(ErrorCodeStepFailed, "resolve correlation binding: "+err.Error())
+		return Correlation{}, sqlite.Classify(fmt.Errorf("resolve correlation binding: %w", err))
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, createdAt)
 	if err != nil {
@@ -67,16 +70,16 @@ func (s *Store) ResolveCorrelation(ctx context.Context, source, eventType, exter
 }
 
 func (s *Store) DeleteCorrelation(ctx context.Context, source, eventType, externalID, dedupeKey string) error {
-	result, err := s.db.ExecContext(ctx,
+	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`DELETE FROM workflow_correlation WHERE source = ? AND event_type = ? AND external_id = ? AND dedupe_key = ?`,
 		source, eventType, externalID, dedupeKey,
 	)
 	if err != nil {
-		return codedError(ErrorCodeStepFailed, "delete correlation binding: "+err.Error())
+		return sqlite.Classify(fmt.Errorf("delete correlation binding: %w", err))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return codedError(ErrorCodeStepFailed, "delete correlation binding: "+err.Error())
+		return sqlite.Classify(fmt.Errorf("delete correlation binding: %w", err))
 	}
 	if affected == 0 {
 		return codedError(ErrorCodeCorrelationUnmatched, "no correlation binding to delete")
@@ -85,13 +88,13 @@ func (s *Store) DeleteCorrelation(ctx context.Context, source, eventType, extern
 }
 
 func (s *Store) ListCorrelationsByRun(ctx context.Context, runID string) ([]Correlation, error) {
-	rows, err := s.db.QueryContext(ctx,
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT source, event_type, external_id, run_id, signal_name, dedupe_key, created_at
 		 FROM workflow_correlation WHERE run_id = ? ORDER BY created_at, event_type, external_id`,
 		runID,
 	)
 	if err != nil {
-		return nil, codedError(ErrorCodeStepFailed, "list correlation bindings: "+err.Error())
+		return nil, sqlite.Classify(fmt.Errorf("list correlation bindings: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 	var correlations []Correlation
@@ -100,7 +103,7 @@ func (s *Store) ListCorrelationsByRun(ctx context.Context, runID string) ([]Corr
 		var createdAt string
 		if err := rows.Scan(&correlation.Source, &correlation.EventType, &correlation.ExternalID,
 			&correlation.RunID, &correlation.SignalName, &correlation.DedupeKey, &createdAt); err != nil {
-			return nil, codedError(ErrorCodeStepFailed, "scan correlation binding: "+err.Error())
+			return nil, sqlite.Classify(fmt.Errorf("scan correlation binding: %w", err))
 		}
 		parsed, err := time.Parse(time.RFC3339Nano, createdAt)
 		if err != nil {
@@ -110,7 +113,7 @@ func (s *Store) ListCorrelationsByRun(ctx context.Context, runID string) ([]Corr
 		correlations = append(correlations, correlation)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, codedError(ErrorCodeStepFailed, "list correlation bindings: "+err.Error())
+		return nil, sqlite.Classify(fmt.Errorf("list correlation bindings: %w", err))
 	}
 	return correlations, nil
 }

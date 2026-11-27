@@ -9,7 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type Origin string
@@ -93,13 +92,6 @@ type UntrustedDocument struct {
 	Content      string
 }
 
-type KnowledgeEvidence struct {
-	Block     string
-	ChunkIDs  []string
-	Retrieved int
-	Mode      string
-}
-
 type UntrustedRecall struct {
 	Query     string
 	Summary   string
@@ -120,8 +112,6 @@ const (
 	EventKindTurnFailed       = "turn.failed"
 	EventKindTurnCancelled    = "turn.cancelled"
 	EventKindSkillActivated   = "skill.activated.v1"
-
-	EventKindKnowledgeRetrieved = "kb.retrieved.v1"
 )
 
 const AuthorSystem = "system"
@@ -152,13 +142,10 @@ const (
 
 	SkillContextStart = "[untrusted_skill_context"
 	SkillContextEnd   = "[/untrusted_skill_context]"
-
-	KnowledgeContextStart = "[untrusted_knowledge"
-	KnowledgeContextEnd   = "[/untrusted_knowledge]"
 )
 
 type AgentRuntime interface {
-	Run(ctx context.Context, req *TurnRequest) iter.Seq2[store.RuntimeEvent, error]
+	Run(ctx context.Context, req *TurnRequest) iter.Seq2[Event, error]
 }
 
 type ToolBroker interface {

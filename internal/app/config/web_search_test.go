@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/search"
 )
 
 const webSearchBase = "version: 1\ntools:\n  workspace: /srv/aura/workspace\n%s\nskills:\n  roots: [/srv/aura/skills]\ncontext:\n  recent_complete_turns: 5\nprofile:\n  prompt_version: v1\nchildren:\n  recovery: interrupt\nvision: {}\n"
@@ -16,11 +16,11 @@ func webSearchConfig(section string) string {
 	return strings.Replace(webSearchBase, "%s", "  web_search:\n"+section, 1)
 }
 
-func loadWebSearch(t *testing.T, section string) (legacyconfig.ToolWebSearch, error) {
+func loadWebSearch(t *testing.T, section string) (search.Config, error) {
 	t.Helper()
 	result, err := LoadWithOptions(writeTempConfig(t, webSearchConfig(section)), execLinuxOptions(t))
 	if err != nil {
-		return legacyconfig.ToolWebSearch{}, err
+		return search.Config{}, err
 	}
 	return result.Config.Tools.WebSearch, nil
 }
@@ -30,7 +30,7 @@ func TestWebSearchDefaultsToDuckDuckGoWithoutCredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.Provider != legacyconfig.WebSearchProviderDuckDuckGo || !got.CredentialRef.IsZero() || got.Endpoint != "" || got.MaxResults != 5 {
+	if got.Provider != search.ProviderDuckDuckGo || !got.CredentialRef.IsZero() || got.Endpoint != "" || got.MaxResults != 5 {
 		t.Fatalf("WebSearch = %+v", got)
 	}
 	defaults := Default()
@@ -74,7 +74,7 @@ func TestWebSearchProviderAndCredentialFromEnvironment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if got.Provider != legacyconfig.WebSearchProviderTavily || got.CredentialRef.String() != "env://AURA_TAVILY_API_KEY" {
+	if got.Provider != search.ProviderTavily || got.CredentialRef.String() != "env://AURA_TAVILY_API_KEY" {
 		t.Fatalf("WebSearch = %+v", got)
 	}
 }

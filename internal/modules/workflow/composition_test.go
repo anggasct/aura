@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func toolSpec(id string) *Spec {
@@ -92,8 +93,7 @@ func TestCompositionValidatesReferencesDepthAndCycles(t *testing.T) {
 }
 
 func hasCode(err error, want ErrorCode) bool {
-	code, ok := CodeOf(err)
-	return ok && code == want
+	return fault.HasCode(err, want)
 }
 
 func TestLoaderReadsTheWorkflowExecutor(t *testing.T) {
@@ -174,7 +174,7 @@ func TestComposedRunDrivesChildrenInProcess(t *testing.T) {
 
 func TestFailedChildFailsTheComposingStep(t *testing.T) {
 	disk := newTestStore(t)
-	interpreter := NewInterpreter(disk, durabletest.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
+	interpreter := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{Driver: DriverConcurrent, MaxConcurrentSteps: 2, Tools: failingTools{}})
 	installAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
 	summary, err := interpreter.Start(context.Background(), "top", nil, ownerOrigin())
 	if err != nil {

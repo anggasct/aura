@@ -4,13 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 	if id == "" {
 		return false, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
-	res, err := j.db.ExecContext(ctx, `
+	res, err := sqlite.Conn(ctx, j.db).ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?, updated_at = ?
 		WHERE id = ? AND state = ?`,
@@ -104,7 +106,7 @@ func (j *Journal) ValidateResumeEffects(ctx context.Context, sessionID, turnID s
 	if err != nil {
 		return fmt.Errorf("effect: encode pending tool calls: %w", err)
 	}
-	rows, err := j.db.QueryContext(ctx, query, sessionID, turnID, string(idsJSON))
+	rows, err := sqlite.Conn(ctx, j.db).QueryContext(ctx, query, sessionID, turnID, string(idsJSON))
 	if err != nil {
 		return fmt.Errorf("effect: list pending resume effects: %w", err)
 	}

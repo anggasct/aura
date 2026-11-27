@@ -4,11 +4,10 @@ import (
 	"context"
 	"encoding/json"
 
-	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type SkillRenderer interface {
@@ -23,11 +22,11 @@ func (e *Engine) renderSkillActivation(ctx context.Context, req *turn.TurnReques
 	}
 	caveat, body, err := e.deps.Skills.RenderSkill(ctx, req.SessionID, req.Skill)
 	if err != nil {
-		if code, ok := skills.CodeOf(err); ok && code == skills.ErrorCodeSkillUnavailable {
+		if fault.HasCode(err, turn.ErrorCodeSkillUnavailable) {
 			e.logger.WarnContext(ctx, "skill activation unavailable", "component", "skills", "skill_id", req.Skill.SkillID, "turn_id", req.TurnID, "error", err)
 			return nil, codedError(turn.ErrorCodeSkillUnavailable, "skill is not available", nil)
 		}
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && (code == store.ErrorCodeStorageUnavailable || code == store.ErrorCodeStorageBusy) {
+		if _, ok := fault.CodeOf[sqlite.ErrorCode](err); ok {
 			return nil, codedError(turn.ErrorCodeStorageUnavailable, "read the pinned skill activation", err)
 		}
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "render the pinned skill activation", err)
@@ -72,7 +71,7 @@ func journaledSkillActivation(scope *durable.TurnScope, render skillActivationRe
 	}
 }
 
-func (e *Engine) persistSkillActivation(ctx context.Context, req *turn.TurnRequest, render skillActivationRender, persist func(context.Context, *store.RuntimeEvent) error) error {
+func (e *Engine) persistSkillActivation(ctx context.Context, req *turn.TurnRequest, render skillActivationRender, persist func(context.Context, *turn.Event) error) error {
 	if req.Skill == nil {
 		return nil
 	}
@@ -80,7 +79,7 @@ func (e *Engine) persistSkillActivation(ctx context.Context, req *turn.TurnReque
 	if err != nil {
 		return err
 	}
-	return persist(ctx, &store.RuntimeEvent{
+	return persist(ctx, &turn.Event{
 		Kind:    turn.EventKindSkillActivated,
 		Author:  turn.AuthorSystem,
 		Payload: payload,

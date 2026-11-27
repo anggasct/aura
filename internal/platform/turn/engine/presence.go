@@ -7,7 +7,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func presenceDeliveryRequest(req *turn.TurnRequest) *runtimechannelhost.DeliveryRequest {
@@ -78,11 +78,11 @@ func (e *Engine) currentPresence(req *turn.TurnRequest) (runtimechannelhost.Pres
 	return presenceAdapterFor(req, e.adapters)
 }
 
-func extractPresenceActivity(ev *store.RuntimeEvent) (text, args string, ok bool) {
+func extractPresenceActivity(ev *turn.Event) (text, args string, ok bool) {
 	if ev == nil {
 		return "", "", false
 	}
-	if ev.Kind != store.EventKindADK {
+	if ev.Kind != turnstore.EventKindADK {
 		return "", "", false
 	}
 	if !hasToolActivity(ev.Payload) {
@@ -154,8 +154,8 @@ func hasToolActivity(payload json.RawMessage) bool {
 	return false
 }
 
-func isPresenceFailureEvent(ev *store.RuntimeEvent) bool {
-	if ev == nil || ev.Kind != store.EventKindADK {
+func isPresenceFailureEvent(ev *turn.Event) bool {
+	if ev == nil || ev.Kind != turnstore.EventKindADK {
 		return false
 	}
 	var decoded struct {

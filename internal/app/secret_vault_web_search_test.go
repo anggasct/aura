@@ -4,13 +4,13 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 )
 
-func webSearchSecretEntry(cfg *appconfig.Config) *configuredSecret {
-	for _, entry := range additionalConfiguredSecrets(cfg) {
-		if entry.name == "web_search_credential" {
+func webSearchSecretEntry(cfg *appconfig.Config) *appconfig.ConfiguredSecret {
+	for _, entry := range appconfig.AdditionalConfiguredSecrets(cfg) {
+		if entry.Name == "web_search_credential" {
 			return &entry
 		}
 	}
@@ -35,13 +35,13 @@ func TestWebSearchCredentialIsOptionalOnlyAtTheSelectedProvidersDefaultReference
 	}
 	for name, test := range tests {
 		t.Run(name, func(t *testing.T) {
-			cfg := &appconfig.Config{Tools: &config.Tools{WebSearch: config.ToolWebSearch{Provider: test.provider, CredentialRef: secrettest.Ref(test.ref)}}}
+			cfg := &appconfig.Config{Tools: &appconfig.Tools{WebSearch: search.Config{Provider: test.provider, CredentialRef: secrettest.Ref(test.ref)}}}
 			entry := webSearchSecretEntry(cfg)
 			if (entry != nil) != test.present {
 				t.Fatalf("entry = %+v, want present %v", entry, test.present)
 			}
-			if entry != nil && entry.optional != test.optional {
-				t.Fatalf("optional = %v, want %v", entry.optional, test.optional)
+			if entry != nil && entry.Optional != test.optional {
+				t.Fatalf("optional = %v, want %v", entry.Optional, test.optional)
 			}
 		})
 	}

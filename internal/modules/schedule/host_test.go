@@ -13,7 +13,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -73,7 +74,7 @@ func newScheduleHost(t *testing.T, mutate func(*JobSpec)) *scheduleHost {
 		mutate(spec)
 	}
 	h := &scheduleHost{
-		t: t, db: storetest.OpenMigrated(t), clock: durabletest.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)),
+		t: t, db: sqlitetest.OpenMigrated(t, turnstore.Schema(), sqlite.Schema(), Schema()), clock: durabletest.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)),
 		store: newFakeJobStore(), turns: &fakeTurnRunner{}, notify: &fakeNotifier{}, log: &invocationLog{},
 	}
 	service, err := NewService(h.store)

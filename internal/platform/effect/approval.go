@@ -9,11 +9,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const (
@@ -69,65 +69,66 @@ func (j *Journal) Approve(ctx context.Context, req *ApprovalRequest) (*Approval,
 		return nil, err
 	}
 
-	tx, err := j.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("effect: begin approval transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
+	var intent *Intent
+	var approval *Approval
+	err := sqlite.RunInTx(ctx, j.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, j.db)
+		var err error
+		intent, err = scanIntent(q.QueryRowContext(ctx, selectIntentByIDSQL, request.IntentID))
+		if errors.Is(err, sql.ErrNoRows) {
+			return codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", request.IntentID), nil)
+		}
+		if err != nil {
+			return fmt.Errorf("effect: read intent %s: %w", request.IntentID, err)
+		}
+		if intent.State != StateUnknown {
+			return codedError(ErrorCodeTransitionInvalid,
+				fmt.Sprintf("effect: intent %s is %s, approval requires unknown", request.IntentID, intent.State), nil)
+		}
 
-	intent, err := scanIntent(tx.QueryRowContext(ctx, selectIntentByIDSQL, request.IntentID))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", request.IntentID), nil)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("effect: read intent %s: %w", request.IntentID, err)
-	}
-	if intent.State != StateUnknown {
-		return nil, codedError(ErrorCodeTransitionInvalid,
-			fmt.Sprintf("effect: intent %s is %s, approval requires unknown", request.IntentID, intent.State), nil)
-	}
-
-	var ownerID string
-	if err := tx.QueryRowContext(ctx, `SELECT owner_id FROM session WHERE id = ?`, intent.SessionID).Scan(&ownerID); err != nil {
-		return nil, fmt.Errorf("effect: read owner for intent %s: %w", req.IntentID, err)
-	}
-	token, err := randomToken()
+		ownerID, err := j.turns.SessionOwner(ctx, intent.SessionID)
+		if err != nil {
+			return fmt.Errorf("effect: read owner for intent %s: %w", req.IntentID, err)
+		}
+		token, err := randomToken()
+		if err != nil {
+			return err
+		}
+		now := j.now().UTC()
+		expiresAt := now.Add(request.ExpiresIn)
+		approvalID, err := randomID()
+		if err != nil {
+			return err
+		}
+		_, err = q.ExecContext(ctx, `
+			INSERT INTO effect_approval (
+			    id, intent_id, action, request_digest, owner_id, reason, token_hash,
+			    issued_at, expires_at, consumed_at
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
+			approvalID, intent.ID, string(request.Action), intent.RequestDigest, ownerID, request.Reason,
+			hashToken(token), fmtTime(now), fmtTime(expiresAt),
+		)
+		if err != nil {
+			return fmt.Errorf("effect: insert approval: %w", err)
+		}
+		approval = &Approval{
+			ID:            approvalID,
+			IntentID:      intent.ID,
+			Action:        request.Action,
+			RequestDigest: intent.RequestDigest,
+			OwnerID:       ownerID,
+			Reason:        request.Reason,
+			IssuedAt:      now,
+			ExpiresAt:     expiresAt,
+			Token:         token,
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-	now := j.now().UTC()
-	expiresAt := now.Add(request.ExpiresIn)
-	approvalID, err := randomID()
-	if err != nil {
-		return nil, err
-	}
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO effect_approval (
-		    id, intent_id, action, request_digest, owner_id, reason, token_hash,
-		    issued_at, expires_at, consumed_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`,
-		approvalID, intent.ID, string(request.Action), intent.RequestDigest, ownerID, request.Reason,
-		hashToken(token), fmtTime(now), fmtTime(expiresAt),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("effect: insert approval: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("effect: commit approval: %w", err)
 	}
 	j.observe(ctx, intent, "approval_issued")
-
-	return &Approval{
-		ID:            approvalID,
-		IntentID:      intent.ID,
-		Action:        request.Action,
-		RequestDigest: intent.RequestDigest,
-		OwnerID:       ownerID,
-		Reason:        request.Reason,
-		IssuedAt:      now,
-		ExpiresAt:     expiresAt,
-		Token:         token,
-	}, nil
+	return approval, nil
 }
 
 func (j *Journal) MarkWithApproval(ctx context.Context, id string, succeeded bool, reason, token string) (*Intent, error) {
@@ -161,92 +162,90 @@ func (j *Journal) consumeApproval(ctx context.Context, id string, action Approva
 		return nil, codedError(ErrorCodeInvalidArgument, "effect: resolution reason must not be empty", nil)
 	}
 
-	tx, err := j.db.BeginTx(ctx, nil)
-	if err != nil {
-		return nil, fmt.Errorf("effect: begin approved operation: %w", err)
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	approval, ownerID, err := readApproval(ctx, tx, hashToken(token))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, codedError(ErrorCodeApprovalInvalid, "effect: approval token is invalid", nil)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("effect: read approval: %w", err)
-	}
-	if approval.ConsumedAt != nil {
-		return nil, codedError(ErrorCodeApprovalConsumed, "effect: approval token was already consumed", nil)
-	}
-	intent, err := scanIntent(tx.QueryRowContext(ctx, selectIntentByIDSQL, id))
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", id), nil)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("effect: read intent %s: %w", id, err)
-	}
-	if approval.IntentID != intent.ID || approval.Action != action || approval.RequestDigest != intent.RequestDigest || approval.OwnerID != ownerID {
-		return nil, codedError(ErrorCodeApprovalInvalid, "effect: approval token binding does not match intent", nil)
-	}
-	now := j.now().UTC()
-	if !now.Before(approval.ExpiresAt) {
-		return nil, codedError(ErrorCodeApprovalExpired, "effect: approval token has expired", nil)
-	}
-	if action != ApprovalActionRetry && approval.Reason != reason {
-		return nil, codedError(ErrorCodeApprovalInvalid, "effect: approval reason does not match", nil)
-	}
-	if intent.State != StateUnknown {
-		return nil, codedError(ErrorCodeTransitionInvalid,
-			fmt.Sprintf("effect: intent %s is %s, approval requires unknown", id, intent.State), nil)
-	}
-
 	var resolved *Intent
-	if action == ApprovalActionRetry {
-		resolved, err = createApprovedRetry(ctx, tx, intent, ownerID, now)
-	} else {
-		state := StateFailed
-		safeErrorCode := "effect_owner_resolved_failed"
-		if action == ApprovalActionMarkSucceeded {
-			state = StateSucceeded
-			safeErrorCode = ""
+	err := sqlite.RunInTx(ctx, j.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, j.db)
+		approval, ownerID, err := readApproval(ctx, q, j.turns, hashToken(token))
+		if errors.Is(err, sql.ErrNoRows) {
+			return codedError(ErrorCodeApprovalInvalid, "effect: approval token is invalid", nil)
 		}
-		result, updateErr := tx.ExecContext(ctx, `
-			UPDATE effect_intent
-			SET state = ?, updated_at = ?, finished_at = ?, reconciled_at = ?, safe_error_code = ?
-			WHERE id = ? AND state = ?`,
-			string(state), fmtTime(now), fmtTime(now), fmtTime(now), nullableString(safeErrorCode), id, string(StateUnknown),
-		)
-		err = updateErr
-		if err == nil {
-			var affected int64
-			affected, err = result.RowsAffected()
-			if err == nil && affected != 1 {
-				err = codedError(ErrorCodeTransitionInvalid, "effect: intent changed before approved resolution", nil)
+		if err != nil {
+			return fmt.Errorf("effect: read approval: %w", err)
+		}
+		if approval.ConsumedAt != nil {
+			return codedError(ErrorCodeApprovalConsumed, "effect: approval token was already consumed", nil)
+		}
+		intent, err := scanIntent(q.QueryRowContext(ctx, selectIntentByIDSQL, id))
+		if errors.Is(err, sql.ErrNoRows) {
+			return codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", id), nil)
+		}
+		if err != nil {
+			return fmt.Errorf("effect: read intent %s: %w", id, err)
+		}
+		if approval.IntentID != intent.ID || approval.Action != action || approval.RequestDigest != intent.RequestDigest || approval.OwnerID != ownerID {
+			return codedError(ErrorCodeApprovalInvalid, "effect: approval token binding does not match intent", nil)
+		}
+		now := j.now().UTC()
+		if !now.Before(approval.ExpiresAt) {
+			return codedError(ErrorCodeApprovalExpired, "effect: approval token has expired", nil)
+		}
+		if action != ApprovalActionRetry && approval.Reason != reason {
+			return codedError(ErrorCodeApprovalInvalid, "effect: approval reason does not match", nil)
+		}
+		if intent.State != StateUnknown {
+			return codedError(ErrorCodeTransitionInvalid,
+				fmt.Sprintf("effect: intent %s is %s, approval requires unknown", id, intent.State), nil)
+		}
+
+		if action == ApprovalActionRetry {
+			resolved, err = createApprovedRetry(ctx, q, j.turns, intent, ownerID, now)
+		} else {
+			state := StateFailed
+			safeErrorCode := "effect_owner_resolved_failed"
+			if action == ApprovalActionMarkSucceeded {
+				state = StateSucceeded
+				safeErrorCode = ""
+			}
+			result, updateErr := q.ExecContext(ctx, `
+				UPDATE effect_intent
+				SET state = ?, updated_at = ?, finished_at = ?, reconciled_at = ?, safe_error_code = ?
+				WHERE id = ? AND state = ?`,
+				string(state), fmtTime(now), fmtTime(now), fmtTime(now), nullableString(safeErrorCode), id, string(StateUnknown),
+			)
+			err = updateErr
+			if err == nil {
+				var affected int64
+				affected, err = result.RowsAffected()
+				if err == nil && affected != 1 {
+					err = codedError(ErrorCodeTransitionInvalid, "effect: intent changed before approved resolution", nil)
+				}
+			}
+			if err == nil {
+				resolved = &Intent{ID: id, State: state}
 			}
 		}
-		if err == nil {
-			resolved = &Intent{ID: id, State: state}
+		if err != nil {
+			return err
 		}
-	}
+
+		result, err := q.ExecContext(ctx,
+			`UPDATE effect_approval SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`,
+			fmtTime(now), approval.ID,
+		)
+		if err != nil {
+			return fmt.Errorf("effect: consume approval: %w", err)
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("effect: read approval consumption: %w", err)
+		}
+		if affected != 1 {
+			return codedError(ErrorCodeApprovalConsumed, "effect: approval token was consumed concurrently", nil)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
-	}
-
-	result, err := tx.ExecContext(ctx,
-		`UPDATE effect_approval SET consumed_at = ? WHERE id = ? AND consumed_at IS NULL`,
-		fmtTime(now), approval.ID,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("effect: consume approval: %w", err)
-	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("effect: read approval consumption: %w", err)
-	}
-	if affected != 1 {
-		return nil, codedError(ErrorCodeApprovalConsumed, "effect: approval token was consumed concurrently", nil)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("effect: commit approved operation: %w", err)
 	}
 
 	if action == ApprovalActionRetry {
@@ -261,21 +260,23 @@ func (j *Journal) consumeApproval(ctx context.Context, id string, action Approva
 	return resolved, nil
 }
 
-func readApproval(ctx context.Context, q queryer, tokenHash string) (*approvalRecord, string, error) {
+func readApproval(ctx context.Context, q queryer, turns TurnStore, tokenHash string) (*approvalRecord, string, error) {
 	var record approvalRecord
-	var action, expiresAt string
+	var action, expiresAt, sessionID string
 	var consumedAt sql.NullString
-	var ownerID string
 	err := q.QueryRowContext(ctx, `
 		SELECT a.id, a.intent_id, a.action, a.request_digest, a.owner_id, a.reason,
-		       a.expires_at, a.consumed_at, s.owner_id
+		       a.expires_at, a.consumed_at, i.session_id
 		FROM effect_approval a
 		JOIN effect_intent i ON i.id = a.intent_id
-		JOIN session s ON s.id = i.session_id
 		WHERE a.token_hash = ?`, tokenHash).Scan(
 		&record.ID, &record.IntentID, &action, &record.RequestDigest, &record.OwnerID, &record.Reason,
-		&expiresAt, &consumedAt, &ownerID,
+		&expiresAt, &consumedAt, &sessionID,
 	)
+	if err != nil {
+		return nil, "", err
+	}
+	ownerID, err := turns.SessionOwner(ctx, sessionID)
 	if err != nil {
 		return nil, "", err
 	}
@@ -294,7 +295,7 @@ func readApproval(ctx context.Context, q queryer, tokenHash string) (*approvalRe
 	return &record, ownerID, nil
 }
 
-func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerID string, now time.Time) (*Intent, error) {
+func createApprovedRetry(ctx context.Context, q sqlite.Querier, turns TurnStore, intent *Intent, ownerID string, now time.Time) (*Intent, error) {
 	normalizedRequest, err := normalizeRequest(intent.RequestJSON)
 	if err != nil {
 		return nil, err
@@ -311,18 +312,9 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 	if err != nil {
 		return nil, err
 	}
-	var maxSequence sql.NullInt64
-	if err := tx.QueryRowContext(ctx,
-		`SELECT MAX(sequence) FROM runtime_event WHERE session_id = ?`, intent.SessionID,
-	).Scan(&maxSequence); err != nil {
-		return nil, fmt.Errorf("effect: read retry event sequence: %w", err)
-	}
-	sequence := int64(1)
-	if maxSequence.Valid {
-		if maxSequence.Int64 == math.MaxInt64 {
-			return nil, errors.New("effect: retry event sequence exhausted")
-		}
-		sequence = maxSequence.Int64 + 1
+	sequence, err := turns.AllocateSequence(ctx, intent.SessionID)
+	if err != nil {
+		return nil, fmt.Errorf("effect: allocate retry event sequence: %w", err)
 	}
 	payload, err := json.Marshal(toolRequestedPayload{
 		EffectIntentID: newID,
@@ -341,10 +333,10 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 	if err != nil {
 		return nil, err
 	}
-	if err := store.AppendEventTx(ctx, tx, &store.RuntimeEvent{
+	if err := turns.AppendEvent(ctx, &turn.Event{
 		ID:            eventID,
 		SessionID:     intent.SessionID,
-		Sequence:      uint64(sequence),
+		Sequence:      sequence,
 		TurnID:        intent.TurnID,
 		InvocationID:  retryInvocationID,
 		Branch:        "",
@@ -356,7 +348,7 @@ func createApprovedRetry(ctx context.Context, tx *sql.Tx, intent *Intent, ownerI
 	}); err != nil {
 		return nil, fmt.Errorf("effect: append retry event: %w", err)
 	}
-	_, err = tx.ExecContext(ctx, insertIntentSQLWithRetry,
+	_, err = q.ExecContext(ctx, insertIntentSQLWithRetry,
 		newID, intent.SessionID, intent.TurnID, intent.ToolCallID, newKey, intent.Provider, intent.Operation,
 		string(intent.Classification), string(StatePrepared), requestDigest, string(normalizedRequest), intent.ID,
 		fmtTime(now), fmtTime(now),

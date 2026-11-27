@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
@@ -83,11 +84,11 @@ func TestDurableTurnKnowledgeFailureKeepsTheTurn(t *testing.T) {
 		t.Errorf("model calls = %d, want 1", len(requests))
 	}
 	for i, rec := range requests {
-		if strings.Contains(rec.Text, turn.KnowledgeContextStart) {
+		if strings.Contains(rec.Text, knowledge.ContextStart) {
 			t.Errorf("model request %d holds a knowledge block:\n%s", i+1, rec.Text)
 		}
 	}
-	if n := countKind(events, turn.EventKindKnowledgeRetrieved); n != 1 {
+	if n := countKind(events, knowledge.EventKindRetrieved); n != 1 {
 		t.Errorf("kb.retrieved.v1 events = %d, want 1", n)
 	}
 }

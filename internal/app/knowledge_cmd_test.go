@@ -5,7 +5,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"net"
 	"net/http"
 	"os"
@@ -16,23 +15,28 @@ import (
 	"github.com/spf13/cobra"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newKBCmd(&globalFlags{configPath: cfg})
+	restoreDefaultLogger(t)
+	cmds := knowledge.Commands(knowledgeOpener(&GlobalFlags{ConfigPath: cfg}))
+	cmd := cmds[0]
 	out := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errBuf)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -40,7 +44,7 @@ func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 
 func requireKBCode(t *testing.T, err error, want knowledge.ErrorCode) {
 	t.Helper()
-	code, ok := knowledge.CodeOf(err)
+	code, ok := fault.CodeOf[knowledge.ErrorCode](err)
 	if !ok || code != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}
@@ -103,7 +107,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list --json: %v", err)
 	}
-	var listed kbListOutput
+	var listed knowledge.ListOutput
 	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Collections) != 1 || listed.Collections[0].ID != "support" || listed.Collections[0].Chunks != 2 {
 		t.Fatalf("list --json = %q, %v", out, err)
 	}
@@ -286,7 +290,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 	cfg, db, _ := kbTestStorage(t, cfgPath)
 	const secretValue = "kb-webhook-secret-value-0123456789"
 	t.Setenv("KB_TEST_WEBHOOK_SECRET", secretValue)
-	cfg.Webhook.Keys = []config.WebhookKey{{ID: "hook", SecretEnv: "KB_TEST_WEBHOOK_SECRET"}}
+	cfg.Webhook.Keys = []platformwebhook.Key{{ID: "hook", SecretEnv: "KB_TEST_WEBHOOK_SECRET"}}
 	service, err := newKnowledgeService(cfg, db, nil)
 	if err != nil {
 		t.Fatalf("newKnowledgeService: %v", err)
@@ -307,7 +311,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 		t.Errorf("rejected source left %d chunks", chunks)
 	}
 
-	cfg.Webhook.Keys = []config.WebhookKey{{ID: "hook", SecretEnv: "KB_TEST_UNSET_SECRET_VARIABLE"}}
+	cfg.Webhook.Keys = []platformwebhook.Key{{ID: "hook", SecretEnv: "KB_TEST_UNSET_SECRET_VARIABLE"}}
 	_, err = service.Add(t.Context(), "support", writeKBDocument(t, "other.md", "harmless text"))
 	requireKBCode(t, err, knowledge.ErrorCodeSecretUnavailable)
 	if !strings.Contains(err.Error(), "webhook_hook") {
@@ -321,11 +325,11 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 func TestStrictSecretVaultNamesEveryUnresolvedReferenceAndMatchesTheLenientVault(t *testing.T) {
 	cfg := appconfig.Default()
 	t.Setenv("KB_TEST_SET_SECRET", "set-secret-value")
-	cfg.Webhook.Keys = []config.WebhookKey{
+	cfg.Webhook.Keys = []platformwebhook.Key{
 		{ID: "set", SecretEnv: "KB_TEST_SET_SECRET"},
 		{ID: "unset", SecretEnv: "KB_TEST_UNSET_SECRET_ONE"},
 	}
-	cfg.Tools = &config.Tools{WebSearch: config.ToolWebSearch{CredentialRef: secrettest.Ref("env://KB_TEST_UNSET_SECRET_TWO")}}
+	cfg.Tools = &appconfig.Tools{WebSearch: search.Config{CredentialRef: secrettest.Ref("env://KB_TEST_UNSET_SECRET_TWO")}}
 
 	_, err := buildStrictSecretVault(&cfg)
 	if err == nil || !strings.Contains(err.Error(), "webhook_unset") || !strings.Contains(err.Error(), "web_search_credential") {
@@ -456,10 +460,13 @@ func TestKBCommandsRejectBadArguments(t *testing.T) {
 func TestKnowledgeStoreAdapterTranslatesStoreErrors(t *testing.T) {
 	cfgPath := writeMemoryCLIConfig(t)
 	_, db, _ := kbTestStorage(t, cfgPath)
-	adapter := &knowledgeStore{store: store.NewKBStore(db)}
-	_, err := adapter.RemoveSource(t.Context(), "support", "/missing.md", false)
+	kbStore, err := knowledge.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	_, err = kbStore.RemoveSource(t.Context(), "support", "/missing.md", false)
 	requireKBCode(t, err, knowledge.ErrorCodeSourceNotFound)
-	if _, err := adapter.ReplaceSource(t.Context(), nil); err == nil {
+	if _, err := kbStore.ReplaceSource(t.Context(), nil); err == nil {
 		t.Fatal("ReplaceSource accepted nil")
 	}
 }
@@ -500,8 +507,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err = cmd.RunE(cmd, nil)
-	var coded *exitCodeError
-	if errors.As(err, &coded) && coded.code == exitCommand {
+	if code, ok := clikit.ExitCodeOf(err); ok && code == exitCommand {
 		t.Fatalf("status failed as a command error on a pre-knowledge database: %v", err)
 	}
 	if strings.Contains(out.String(), "no such table") || strings.Contains(out.String(), "kb_") {
@@ -513,7 +519,7 @@ func TestStatusToleratesADatabaseWithoutTheKnowledgeSchema(t *testing.T) {
 }
 
 func TestKnowledgeHTTPClientRefusesRedirectsToDeniedDestinations(t *testing.T) {
-	client := newKnowledgeHTTPClient(privateResolver{})
+	client := knowledge.NewHTTPClient(privateResolver{})
 	cases := []struct {
 		name   string
 		target string

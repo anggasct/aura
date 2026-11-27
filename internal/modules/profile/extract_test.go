@@ -3,6 +3,8 @@ package profile
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type stubScanner struct {
@@ -88,7 +90,7 @@ func TestParseCandidatesRejects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ParseCandidates(text); err == nil {
 				t.Errorf("expected rejection")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileInvalid {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileInvalid {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})

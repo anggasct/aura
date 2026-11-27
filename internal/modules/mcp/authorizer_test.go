@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const plantedProviderText = "PLANTED-PROVIDER-TEXT-91c2"
@@ -54,11 +54,11 @@ func (s *stubAuthorizer) callCount() int {
 	return s.calls
 }
 
-func pluginHTTPConfig(name, serverURL string) *config.MCPServer {
-	return &config.MCPServer{
-		Name: name, Transport: config.MCPTransportStreamableHTTP, URL: serverURL,
+func pluginHTTPConfig(name, serverURL string) *ServerConfig {
+	return &ServerConfig{
+		Name: name, Transport: TransportStreamableHTTP, URL: serverURL,
 		RequestTimeout: configkit.Duration(10 * time.Second),
-		ConnectTimeout: configkit.Duration(10 * time.Second),
+		ConnectTimeout: durationPtr(10 * time.Second),
 		StartupTimeout: configkit.Duration(10 * time.Second),
 		MaxMessageSize: 1 << 20,
 	}
@@ -187,7 +187,7 @@ func TestClientCarriesTheAuthorizerBearerAndFollowsRotation(t *testing.T) {
 }
 
 func TestClientRefusesAnAuthorizerNextToConfiguredAuth(t *testing.T) {
-	cfg := staticStreamableConfig("plugin-mailer", "http://127.0.0.1:1/mcp")
+	cfg := staticStreamableConfig(t, "plugin-mailer", "http://127.0.0.1:1/mcp")
 	client, err := NewClient(cfg, nil,
 		WithHTTPClient(&http.Client{}),
 		WithEndpointPolicy(stubEndpointPolicy{}),
@@ -199,7 +199,7 @@ func TestClientRefusesAnAuthorizerNextToConfiguredAuth(t *testing.T) {
 	}
 	defer func() { _ = client.Close(t.Context()) }()
 	err = client.Connect(t.Context(), nil)
-	if code, ok := CodeOf(err); !ok || code != ErrConfigInvalid {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrConfigInvalid {
 		t.Fatalf("Connect error = %v", err)
 	}
 }
@@ -258,7 +258,7 @@ func TestManagerRunsAPluginThroughItsAuthorizer(t *testing.T) {
 			server := *pluginHTTPConfig("mailer", httpServer.URL+"/mcp")
 			server.Capabilities = nil
 			mgr, err := NewManager(&ManagerOptions{
-				Config:         &config.MCP{},
+				Config:         &Config{},
 				Broker:         broker,
 				TrustRegistry:  NewMemoryTrustRegistry(),
 				HTTPClient:     &http.Client{},
@@ -303,7 +303,7 @@ func TestAuthorizerFailureOnACallKeepsTheSession(t *testing.T) {
 	}
 	authorizer.setError(errors.New("plugin_auth_unavailable: the token endpoint is unavailable"))
 	_, err = client.CallTool(ctx, "echo", args)
-	if code, ok := CodeOf(err); !ok || code != ErrAuthRequired {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrAuthRequired {
 		t.Fatalf("CallTool error = %v, want %s", err, ErrAuthRequired)
 	}
 	if !client.Connected() {

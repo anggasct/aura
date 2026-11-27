@@ -10,7 +10,6 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func writesOutputs(t *testing.T, files map[string]string) func(context.Context, *sandbox.Spec) {
@@ -186,12 +185,12 @@ func TestAdapterListsArtifactsBetweenTheDurationAndTheTruncationFlags(t *testing
 
 func TestAdapterKeepsEveryArtifactEntryWhenOutputIsHuge(t *testing.T) {
 	rig := newRig(t, func(l *Limits) {
-		l.MaxStdoutBytes, l.MaxStderrBytes, l.MaxOutputFiles = 1<<20, 1<<20, tools.MaxCodeOutputFiles
+		l.MaxStdoutBytes, l.MaxStderrBytes, l.MaxOutputFiles = 1<<20, 1<<20, MaxCodeOutputFiles
 	})
-	files := make(map[string]string, tools.MaxCodeOutputFiles)
-	names := make([]string, 0, tools.MaxCodeOutputFiles)
-	for i := range tools.MaxCodeOutputFiles {
-		name := strings.Repeat("n", tools.MaxCodeOutputNameBytes-4) + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".x"
+	files := make(map[string]string, MaxCodeOutputFiles)
+	names := make([]string, 0, MaxCodeOutputFiles)
+	for i := range MaxCodeOutputFiles {
+		name := strings.Repeat("n", MaxCodeOutputNameBytes-4) + string(rune('a'+i/26)) + string(rune('a'+i%26)) + ".x"
 		files[name] = "content " + name
 		names = append(names, name)
 	}

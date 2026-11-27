@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -19,12 +19,12 @@ type replyReference struct {
 	Artifacts []media.ArtifactSummary `json:"artifacts,omitempty"`
 }
 
-func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) (*runtimeingress.IngressEnvelope, dropReason, error) {
+func normalizeMessage(account *Account, owners *principal.Resolver, selfID string, access authorAccess, msg *messagePayload) (*runtimeingress.IngressEnvelope, dropReason, error) {
 	if account == nil || msg == nil {
-		return nil, "", Errorf(ErrorCodeInvalidArgument, "account and message must not be nil")
+		return nil, "", fault.New(ErrorCodeInvalidArgument, "account and message must not be nil")
 	}
 	if msg.ID == "" || msg.ChannelID == "" || msg.Author.ID == "" {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "message is missing id, channel, or author")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "message is missing id, channel, or author")
 	}
 	if reason := authorDrop(account, owners, selfID, access, msg); reason != "" {
 		return nil, reason, nil
@@ -55,7 +55,7 @@ func normalizeMessage(account *config.DiscordAccount, owners *principal.Resolver
 		GuildID:   msg.GuildID,
 	})
 	if err != nil {
-		return nil, "", Errorf(ErrorCodeProtocolInvalid, "reply reference is not serializable")
+		return nil, "", fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
 	return &runtimeingress.IngressEnvelope{
 		Source:         "discord:" + account.Name,
@@ -74,7 +74,7 @@ type authorAccess struct {
 	granted      func(authorID string) bool
 }
 
-func resolveAuthor(account *config.DiscordAccount, owners *principal.Resolver, authorID string, access authorAccess) (string, principal.Class, bool) {
+func resolveAuthor(account *Account, owners *principal.Resolver, authorID string, access authorAccess) (string, principal.Class, bool) {
 	allowlisted := slices.Contains(account.AllowedUserIDs, authorID)
 	if !allowlisted && access.granted != nil && authorID != "" && !owners.IsOwnerIdentity(principal.ChannelDiscord, authorID) {
 		allowlisted = access.granted(authorID)

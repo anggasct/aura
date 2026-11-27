@@ -2,9 +2,10 @@ package app
 
 import (
 	"bytes"
-	"errors"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/clikit"
 )
 
 func writeBindingsCLIConfig(t *testing.T) string {
@@ -53,7 +54,7 @@ bindings:
 
 func runBindingsExplain(t *testing.T, configPath string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newBindingsCmd(&globalFlags{configPath: configPath})
+	cmd := newBindingsCmd(&GlobalFlags{ConfigPath: configPath})
 	cmd.SilenceUsage = true
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -113,9 +114,11 @@ func TestBindingsExplainPrintsWinningBinding(t *testing.T) {
 
 func TestBindingsExplainNoPersonaExitsThree(t *testing.T) {
 	out, err := runBindingsExplain(t, writeBindingsCLIConfig(t), "--channel", "discord", "--account", "kuma", "--channel-id", "123")
-	var coded *exitCodeError
-	if !errors.As(err, &coded) || coded.code != exitNoPersona {
+	if code, ok := clikit.ExitCodeOf(err); !ok || code != exitNoPersona {
 		t.Fatalf("error = %v, want exit code %d", err, exitNoPersona)
+	}
+	if code := ExitCode(nil, nil, err); code != exitNoPersona {
+		t.Fatalf("ExitCode = %d, want %d", code, exitNoPersona)
 	}
 	if strings.TrimSpace(out) != "no persona" {
 		t.Fatalf("output = %q, want no persona", out)
@@ -138,8 +141,7 @@ func TestBindingsExplainRejectsBadScope(t *testing.T) {
 	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
 			_, err := runBindingsExplain(t, path, args...)
-			var usage *usageError
-			if !errors.As(err, &usage) {
+			if !clikit.IsUsageError(err) {
 				t.Fatalf("error = %v, want usage error", err)
 			}
 		})
@@ -181,8 +183,7 @@ bindings:
 			t.Errorf("error = %v, want it to contain %q", err, want)
 		}
 	}
-	var usage *usageError
-	if errors.As(err, &usage) {
+	if clikit.IsUsageError(err) {
 		t.Fatal("a config validation failure must not be a usage error")
 	}
 }

@@ -12,9 +12,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/history"
 )
 
 type Trajectory struct {
@@ -29,16 +28,21 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 		return nil, nil, fmt.Errorf("eval: open store: %w", err)
 	}
 	cleanup := func() { _ = db.Close() }
-	if err := sqlite.Migrate(ctx, db, history.Migrations()); err != nil {
+	migrations, err := sqlite.Baseline(turnstore.Schema())
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("eval: baseline: %w", err)
+	}
+	if err := sqlite.Migrate(ctx, db, migrations); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: migrate: %w", err)
 	}
-	session := store.Session{ID: SessionID, OwnerID: "eval"}
-	if err := store.NewSessionService(db).Create(ctx, &session); err != nil {
+	session := turn.Session{ID: SessionID, OwnerID: "eval"}
+	if err := turnstore.NewSessionService(db).Create(ctx, &session); err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: create session: %w", err)
 	}
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: store.NewEventStore(db), Dedupe: store.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(script), Config: runtimeengine.Default()})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: turnstore.NewEventStore(db), Dedupe: turnstore.NewDedupeStore(db), Executor: turntest.NewFakeExecutor(script), Config: runtimeengine.Default()})
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("eval: build engine: %w", err)
@@ -46,9 +50,9 @@ func ScriptedRuntime(ctx context.Context, dir string, script []turntest.FakeStep
 	return engine, cleanup, nil
 }
 
-func RunTrajectory(ctx context.Context, rt turn.AgentRuntime, turnID string) ([]store.RuntimeEvent, error) {
+func RunTrajectory(ctx context.Context, rt turn.AgentRuntime, turnID string) ([]turn.Event, error) {
 	req := &turn.TurnRequest{TurnID: turnID, SessionID: SessionID, PrincipalID: "eval", Origin: turn.OriginInternal}
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range rt.Run(ctx, req) {
 		if err != nil {
 			return events, err
@@ -58,7 +62,7 @@ func RunTrajectory(ctx context.Context, rt turn.AgentRuntime, turnID string) ([]
 	return events, nil
 }
 
-func CheckTrajectory(events []store.RuntimeEvent, want []string) error {
+func CheckTrajectory(events []turn.Event, want []string) error {
 	got := make([]string, len(events))
 	for i := range events {
 		got[i] = events[i].Kind

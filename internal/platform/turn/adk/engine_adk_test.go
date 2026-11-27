@@ -7,7 +7,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func engineLimits(active, pending int) runtimeengine.Config {
@@ -25,7 +25,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	dedupe := store.NewDedupeStore(db)
+	dedupe := turnstore.NewDedupeStore(db)
 	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: dedupe, Executor: executor, Config: engineLimits(2, 4)})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
@@ -40,7 +40,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	var adkCount int
 	var sawInvocation bool
 	for ev := range eventsCh {
-		if ev.Kind == store.EventKindADK {
+		if ev.Kind == turnstore.EventKindADK {
 			adkCount++
 			if ev.InvocationID != "" {
 				sawInvocation = true
@@ -66,7 +66,7 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	}
 	var storedADK int
 	for i := range stored {
-		if stored[i].Kind == store.EventKindADK {
+		if stored[i].Kind == turnstore.EventKindADK {
 			storedADK++
 			if stored[i].InvocationID == "" {
 				t.Error("stored ADK event lost its invocation id")
@@ -78,8 +78,8 @@ func TestEnginePersistsADKEventFidelity(t *testing.T) {
 	}
 }
 
-func collectStream(engine *runtimeengine.Engine, req *turn.TurnRequest) (eventsCh <-chan store.RuntimeEvent, errCh <-chan error) {
-	events := make(chan store.RuntimeEvent, 64)
+func collectStream(engine *runtimeengine.Engine, req *turn.TurnRequest) (eventsCh <-chan turn.Event, errCh <-chan error) {
+	events := make(chan turn.Event, 64)
 	errs := make(chan error, 1)
 	go func() {
 		for ev, err := range engine.Run(context.Background(), req) {
@@ -104,7 +104,7 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	dedupe := store.NewDedupeStore(db)
+	dedupe := turnstore.NewDedupeStore(db)
 	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: dedupe, Executor: executor, Config: engineLimits(2, 4)})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
@@ -115,7 +115,7 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 		TurnID: "turn-1", SessionID: "session-1", PrincipalID: "user-1", Origin: turn.OriginTerminal,
 		Parts: []runtimeingress.InputPart{{Text: "hi"}},
 	}
-	var streamed []store.RuntimeEvent
+	var streamed []turn.Event
 	for ev, err := range engine.Run(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -130,14 +130,14 @@ func TestEngineSingleWriterForADKEvents(t *testing.T) {
 	var streamedADK, storedADK int
 	seen := map[string]int{}
 	for _, ev := range stored {
-		if ev.Kind != store.EventKindADK {
+		if ev.Kind != turnstore.EventKindADK {
 			continue
 		}
 		storedADK++
 		seen[ev.ID]++
 	}
 	for _, ev := range streamed {
-		if ev.Kind != store.EventKindADK {
+		if ev.Kind != turnstore.EventKindADK {
 			continue
 		}
 		streamedADK++

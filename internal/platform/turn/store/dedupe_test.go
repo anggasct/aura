@@ -1,0 +1,331 @@
+package turnstore
+
+import (
+	"context"
+	"database/sql"
+	"errors"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/turn"
+)
+
+func TestDedupeAcceptClaimsAndReplays(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	dedupe := NewDedupeStore(db)
+
+	accepted := newEvent("session-1", 1)
+	accepted.TurnID = "turn-1"
+	accepted.Kind = "turn.accepted"
+
+	turnID, created, err := dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(time.Hour), &accepted)
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if !created || turnID != "turn-1" {
+		t.Fatalf("Accept = (%q, %v), want (turn-1, true)", turnID, created)
+	}
+
+	events, err := dedupe.ListTurnEvents(ctx, "session-1", "turn-1")
+	if err != nil {
+		t.Fatalf("ListTurnEvents: %v", err)
+	}
+	if len(events) != 1 || events[0].TurnID != "turn-1" {
+		t.Fatalf("events = %+v, want the accepted event", events)
+	}
+
+	duplicate := newEvent("session-1", 2)
+	duplicate.TurnID = "turn-2"
+	duplicate.Kind = "turn.accepted"
+	turnID, created, err = dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(time.Hour), &duplicate)
+	if err != nil {
+		t.Fatalf("duplicate Accept: %v", err)
+	}
+	if created || turnID != "turn-1" {
+		t.Fatalf("duplicate Accept = (%q, %v), want (turn-1, false)", turnID, created)
+	}
+	events, err = dedupe.ListTurnEvents(ctx, "session-1", "turn-1")
+	if err != nil {
+		t.Fatalf("ListTurnEvents after duplicate: %v", err)
+	}
+	if len(events) != 1 {
+		t.Errorf("events after duplicate = %d, want 1 — a duplicate must not create a second sequence", len(events))
+	}
+}
+
+func TestDedupeAcceptHonorsExpiry(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	dedupe := NewDedupeStore(db)
+
+	first := newEvent("session-1", 1)
+	first.TurnID = "turn-1"
+	first.Kind = "turn.accepted"
+	if _, created, err := dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(-time.Second), &first); err != nil || !created {
+		t.Fatalf("first Accept = (%v, %v)", created, err)
+	}
+
+	second := newEvent("session-1", 2)
+	second.TurnID = "turn-2"
+	second.Kind = "turn.accepted"
+	turnID, created, err := dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(time.Hour), &second)
+	if err != nil {
+		t.Fatalf("reclaim Accept: %v", err)
+	}
+	if !created || turnID != "turn-2" {
+		t.Fatalf("reclaim Accept = (%q, %v), want (turn-2, true) after expiry", turnID, created)
+	}
+}
+
+func TestDedupeAcceptRejectsBadKey(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	dedupe := NewDedupeStore(db)
+
+	accepted := newEvent("session-1", 1)
+	if _, _, err := dedupe.Accept(ctx, "", "ext-1", time.Now().Add(time.Hour), &accepted); err == nil {
+		t.Fatal("empty source accepted")
+	}
+	if _, _, err := dedupe.Accept(ctx, "telegram", "", time.Now().Add(time.Hour), &accepted); err == nil {
+		t.Fatal("empty external id accepted")
+	}
+	if _, _, err := dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(time.Hour), nil); err == nil {
+		t.Fatal("nil accepted event accepted")
+	}
+}
+
+func TestDedupeClaimedReportsLiveKeysOnly(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+	mustCreateSession(t, db, "session-1")
+	dedupe := NewDedupeStore(db)
+
+	claimed, err := dedupe.Claimed(ctx, "telegram", "ext-1")
+	if err != nil || claimed {
+		t.Fatalf("Claimed before accept = (%v, %v), want (false, nil)", claimed, err)
+	}
+	live := newEvent("session-1", 1)
+	live.TurnID = "turn-1"
+	live.Kind = "turn.accepted"
+	if _, _, err := dedupe.Accept(ctx, "telegram", "ext-1", time.Now().Add(time.Hour), &live); err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	expired := newEvent("session-1", 2)
+	expired.TurnID = "turn-2"
+	expired.Kind = "turn.accepted"
+	if _, _, err := dedupe.Accept(ctx, "telegram", "ext-2", time.Now().Add(-time.Hour), &expired); err != nil {
+		t.Fatalf("Accept expired: %v", err)
+	}
+	cases := []struct {
+		name       string
+		source     string
+		externalID string
+		want       bool
+	}{
+		{name: "live key", source: "telegram", externalID: "ext-1", want: true},
+		{name: "expired key", source: "telegram", externalID: "ext-2", want: false},
+		{name: "other source", source: "discord", externalID: "ext-1", want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := dedupe.Claimed(ctx, tc.source, tc.externalID)
+			if err != nil || got != tc.want {
+				t.Errorf("Claimed = (%v, %v), want (%v, nil)", got, err, tc.want)
+			}
+		})
+	}
+	if _, err := dedupe.Claimed(ctx, "", "ext-1"); err == nil {
+		t.Error("Claimed with an empty source succeeded")
+	}
+}
+
+func claimInTx(t *testing.T, db *sql.DB, claim *turn.DedupeClaim) (string, bool) {
+	t.Helper()
+	var turnID string
+	var created bool
+	if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		var err error
+		turnID, created, err = NewTurnStore(db).ClaimDedupe(ctx, claim)
+		return err
+	}); err != nil {
+		t.Fatalf("ClaimDedupe(%s, %s): %v", claim.ExternalID, claim.TurnID, err)
+	}
+	return turnID, created
+}
+
+func TestClaimDedupeClaimsOncePerWindow(t *testing.T) {
+	db := newTestDB(t)
+	ts := NewTurnStore(db)
+	start := time.Date(2030, 1, 2, 3, 4, 0, 0, time.UTC)
+	window := &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-1", Now: start, ExpiresAt: start.Add(time.Hour)}
+	if turnID, created := claimInTx(t, db, window); !created || turnID != "turn-1" {
+		t.Fatalf("first claim = (%q, %v), want (turn-1, true)", turnID, created)
+	}
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-2", Now: start.Add(time.Minute), ExpiresAt: start.Add(2 * time.Hour)}); created || turnID != "turn-1" {
+		t.Fatalf("second claim = (%q, %v), want (turn-1, false)", turnID, created)
+	}
+	later := start.Add(2 * time.Hour)
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-1", TurnID: "turn-3", Now: later, ExpiresAt: later.Add(time.Hour)}); !created || turnID != "turn-3" {
+		t.Fatalf("claim after expiry = (%q, %v), want (turn-3, true)", turnID, created)
+	}
+	var storedTurn, acceptedAt string
+	if err := db.QueryRowContext(t.Context(), `SELECT turn_id, accepted_at FROM ingress_dedupe WHERE source = 'telegram' AND external_id = 'ext-1'`).Scan(&storedTurn, &acceptedAt); err != nil {
+		t.Fatalf("read claim: %v", err)
+	}
+	if storedTurn != "turn-3" || acceptedAt != later.Format(time.RFC3339Nano) {
+		t.Fatalf("stored claim = (%q, %q), want (turn-3, %q)", storedTurn, acceptedAt, later.Format(time.RFC3339Nano))
+	}
+
+	second := time.Date(2030, 1, 2, 5, 0, 0, 0, time.UTC)
+	claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-a", Now: second.Add(-time.Hour), ExpiresAt: second.Add(100 * time.Millisecond)})
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-b", Now: second, ExpiresAt: second.Add(time.Hour)}); created || turnID != "turn-a" {
+		t.Fatalf("claim at the whole second before a fractional expiry = (%q, %v), want (turn-a, false)", turnID, created)
+	}
+	if turnID, created := claimInTx(t, db, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-2", TurnID: "turn-c", Now: second.Add(200 * time.Millisecond), ExpiresAt: second.Add(time.Hour)}); !created || turnID != "turn-c" {
+		t.Fatalf("claim after a fractional expiry = (%q, %v), want (turn-c, true)", turnID, created)
+	}
+
+	rollbackErr := errors.New("rollback")
+	if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		if _, created, err := ts.ClaimDedupe(ctx, &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-3", TurnID: "turn-x", Now: start, ExpiresAt: later}); err != nil || !created {
+			t.Fatalf("claim in a rolled back transaction = (%v, %v)", created, err)
+		}
+		return rollbackErr
+	}); !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx err = %v, want rollbackErr", err)
+	}
+	var kept int
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM ingress_dedupe WHERE external_id = 'ext-3'`).Scan(&kept); err != nil || kept != 0 {
+		t.Fatalf("rows after rollback = %d (%v), want 0", kept, err)
+	}
+
+	invalid := []struct {
+		name  string
+		claim *turn.DedupeClaim
+	}{
+		{name: "nil claim"},
+		{name: "empty source", claim: &turn.DedupeClaim{ExternalID: "ext-4", TurnID: "turn-4", Now: start, ExpiresAt: later}},
+		{name: "empty external id", claim: &turn.DedupeClaim{Source: "telegram", TurnID: "turn-4", Now: start, ExpiresAt: later}},
+		{name: "zero now", claim: &turn.DedupeClaim{Source: "telegram", ExternalID: "ext-4", TurnID: "turn-4", ExpiresAt: later}},
+	}
+	for _, tc := range invalid {
+		t.Run(tc.name, func(t *testing.T) {
+			err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+				_, _, err := ts.ClaimDedupe(ctx, tc.claim)
+				return err
+			})
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
+				t.Fatalf("err = %v, want %s", err, ErrorCodeInvalidArgument)
+			}
+		})
+	}
+}
+
+func TestListTurnEventsReadsOnlyTheNamedSession(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDB(t)
+	events := NewEventStore(db)
+	for _, sessionID := range []string{"session-a", "session-b"} {
+		mustCreateSession(t, db, sessionID)
+	}
+	written := []struct {
+		sessionID string
+		sequence  uint64
+		turnID    string
+	}{
+		{"session-a", 1, "turn-1"},
+		{"session-a", 2, "turn-2"},
+		{"session-a", 3, "turn-1"},
+		{"session-b", 1, "turn-1"},
+	}
+	for _, w := range written {
+		ev := newEvent(w.sessionID, w.sequence)
+		ev.TurnID = w.turnID
+		if err := events.Append(ctx, &ev); err != nil {
+			t.Fatalf("append %s/%d: %v", w.sessionID, w.sequence, err)
+		}
+	}
+	dedupe := NewDedupeStore(db)
+	reads := []struct {
+		sessionID string
+		want      []string
+	}{
+		{"session-a", []string{"session-a-event-1", "session-a-event-3"}},
+		{"session-b", []string{"session-b-event-1"}},
+		{"session-c", nil},
+	}
+	for _, read := range reads {
+		t.Run(read.sessionID, func(t *testing.T) {
+			got, err := dedupe.ListTurnEvents(ctx, read.sessionID, "turn-1")
+			if err != nil {
+				t.Fatalf("ListTurnEvents: %v", err)
+			}
+			var ids []string
+			for i := range got {
+				ids = append(ids, got[i].ID)
+			}
+			if !slices.Equal(ids, read.want) {
+				t.Fatalf("event ids = %v, want %v", ids, read.want)
+			}
+		})
+	}
+	missing := []struct {
+		name, sessionID, turnID string
+	}{
+		{"no session", "", "turn-1"},
+		{"no turn", "session-a", ""},
+	}
+	for _, m := range missing {
+		t.Run(m.name, func(t *testing.T) {
+			_, err := dedupe.ListTurnEvents(ctx, m.sessionID, m.turnID)
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
+				t.Fatalf("ListTurnEvents err = %v, want invalid_argument", err)
+			}
+		})
+	}
+}
+
+func TestTurnReadsUseTheTurnIndex(t *testing.T) {
+	db := newTestDB(t)
+	statements := []struct {
+		name, query string
+		args        []any
+		search      string
+	}{
+		{"by turn", `SELECT 1 FROM runtime_event WHERE turn_id = ?`, []any{"turn-1"}, "(turn_id=?)"},
+		{"by session and turn", `SELECT ` + selectRuntimeEventColumns + ` FROM runtime_event WHERE session_id = ? AND turn_id = ? ORDER BY sequence ASC`, []any{"session-1", "turn-1"}, "(turn_id=? AND session_id=?)"},
+	}
+	for _, s := range statements {
+		t.Run(s.name, func(t *testing.T) {
+			rows, err := db.QueryContext(t.Context(), `EXPLAIN QUERY PLAN `+s.query, s.args...)
+			if err != nil {
+				t.Fatalf("explain: %v", err)
+			}
+			defer func() { _ = rows.Close() }()
+			var details []string
+			for rows.Next() {
+				var id, parent, unused int
+				var detail string
+				if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+					t.Fatalf("scan plan: %v", err)
+				}
+				details = append(details, detail)
+			}
+			if err := rows.Err(); err != nil {
+				t.Fatalf("read plan: %v", err)
+			}
+			want := "INDEX runtime_event_turn_idx " + s.search
+			if len(details) != 1 || !strings.HasPrefix(details[0], "SEARCH runtime_event USING ") || !strings.HasSuffix(details[0], want) {
+				t.Fatalf("plan = %q, want one search ending in %q", details, want)
+			}
+		})
+	}
+}

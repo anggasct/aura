@@ -9,8 +9,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/session"
 )
@@ -24,9 +25,9 @@ type ADKSessionService struct {
 }
 
 type SessionPort interface {
-	Create(ctx context.Context, sess *store.Session) error
-	Get(ctx context.Context, sessionID string) (store.Session, error)
-	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]store.RuntimeEvent, error)
+	Create(ctx context.Context, sess *turn.Session) error
+	Get(ctx context.Context, sessionID string) (turn.Session, error)
+	ListEvents(ctx context.Context, sessionID string, afterSequence uint64, limit int) ([]turn.Event, error)
 }
 
 func NewADKSessionService(sessions SessionPort) (*ADKSessionService, error) {
@@ -198,7 +199,7 @@ func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateReque
 		return nil, fmt.Errorf("marshal adk session state: %w", err)
 	}
 	now := time.Now().UTC()
-	stored := &store.Session{
+	stored := &turn.Session{
 		ID:        id,
 		OwnerID:   req.UserID,
 		Metadata:  metadata,
@@ -257,7 +258,7 @@ func (s *ADKSessionService) AppendEvent(ctx context.Context, cur session.Session
 	if ev == nil {
 		return invalidArgument("event must not be nil")
 	}
-	if _, err := store.RuntimeEventFromADK(cur.ID(), "", ev); err != nil {
+	if _, err := turnstore.RuntimeEventFromADK(cur.ID(), "", ev); err != nil {
 		return err
 	}
 	if inner, ok := cur.(*adkSession); ok {
@@ -273,13 +274,13 @@ func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([
 	}
 	events := make([]*session.Event, 0, len(stored))
 	for i := range stored {
-		if stored[i].Kind != store.EventKindADK {
+		if stored[i].Kind != turnstore.EventKindADK {
 			continue
 		}
 		if s.leaveOutTurn != "" && stored[i].TurnID == s.leaveOutTurn {
 			continue
 		}
-		ev, err := store.RuntimeEventToADK(&stored[i])
+		ev, err := turnstore.RuntimeEventToADK(&stored[i])
 		if err != nil {
 			return nil, err
 		}

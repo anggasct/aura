@@ -188,8 +188,8 @@ func (f *commandFixture) newAdapter(t *testing.T) *Adapter {
 	t.Helper()
 	adapter := newThreadAdapter(t, f.sink, f.sessions, f.stub)
 	adapter.account.AllowedUserIDs = append(adapter.account.AllowedUserIDs, "112")
-	adapter.SetPrincipalResolver(testOwners(t, "discord:111"))
-	adapter.SetSessionResolver(f.resolver)
+	adapter.owners = testOwners(t, "discord:111")
+	adapter.resolver = f.resolver
 	adapter.logger = slog.New(slog.NewTextHandler(f.logs, nil))
 	registry, err := command.New(CommandBinding())
 	if err != nil {
@@ -199,7 +199,7 @@ func (f *commandFixture) newAdapter(t *testing.T) *Adapter {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	adapter.SetCommands(dispatcher)
+	adapter.commands = dispatcher
 	return adapter
 }
 

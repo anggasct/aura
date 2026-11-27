@@ -1,12 +1,13 @@
 package profile
 
 import (
+	stdcontext "context"
 	"log/slog"
 	"strings"
 	"sync/atomic"
 	"time"
 
-	stdcontext "context"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type ModelProducer struct {
@@ -88,22 +89,22 @@ func WithObserver(observer Observer) ExtractorOption {
 
 func NewExtractor(service *Service, caller ModelCaller, scanner SecretScanner, task, promptVersion string, maxOutputTokens, queueCapacity int, logger *slog.Logger, opts ...ExtractorOption) (*Extractor, error) {
 	if service == nil {
-		return nil, errNilArgument("service")
+		return nil, fault.New(ErrorCodeInvalidArgument, "service must not be nil")
 	}
 	if caller == nil {
-		return nil, errNilArgument("caller")
+		return nil, fault.New(ErrorCodeInvalidArgument, "caller must not be nil")
 	}
 	if scanner == nil {
-		return nil, errNilArgument("scanner")
+		return nil, fault.New(ErrorCodeInvalidArgument, "scanner must not be nil")
 	}
 	if strings.TrimSpace(task) == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "extraction task must not be empty")
+		return nil, fault.New(ErrorCodeInvalidArgument, "extraction task must not be empty")
 	}
 	if maxOutputTokens <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "output bound must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "output bound must be positive")
 	}
 	if queueCapacity <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "queue capacity must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "queue capacity must be positive")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -140,21 +141,21 @@ func (e *Extractor) DroppedJobs() int64 {
 
 func (e *Extractor) Enqueue(ctx stdcontext.Context, job Job) error {
 	if strings.TrimSpace(job.OwnerID) == "" || strings.TrimSpace(job.SessionID) == "" || len(job.Events) == 0 {
-		return Errorf(ErrorCodeInvalidArgument, "extraction job is not complete")
+		return fault.New(ErrorCodeInvalidArgument, "extraction job is not complete")
 	}
 	seen := make(map[uint64]bool, len(job.Events))
 	for _, event := range job.Events {
 		if strings.TrimSpace(event.ID) == "" || event.Sequence == 0 {
-			return Errorf(ErrorCodeInvalidArgument, "extraction job carries an unidentified event")
+			return fault.New(ErrorCodeInvalidArgument, "extraction job carries an unidentified event")
 		}
 		if seen[event.Sequence] {
-			return Errorf(ErrorCodeInvalidArgument, "extraction job carries a duplicate sequence")
+			return fault.New(ErrorCodeInvalidArgument, "extraction job carries a duplicate sequence")
 		}
 		seen[event.Sequence] = true
 	}
 	ticket := queuedJob{job: job, enqueuedAt: time.Now().UTC()}
 	if ctx == nil {
-		return Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	select {
 	case e.queue <- ticket:
@@ -166,7 +167,7 @@ func (e *Extractor) Enqueue(ctx stdcontext.Context, job Job) error {
 			Result: ResultDropped,
 		})
 		e.logger.WarnContext(ctx, "profile extraction queue is full", "component", "profile")
-		return Errorf(ErrorCodeProfileUnavailable, "extraction queue is full")
+		return fault.New(ErrorCodeProfileUnavailable, "extraction queue is full")
 	}
 }
 
@@ -241,7 +242,7 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job, queueAge time.Durati
 				ObservedAt:    now,
 			}, now)
 			if err != nil {
-				if code, ok := CodeOf(err); ok && code == ErrorCodeProfileConflict {
+				if fault.HasCode(err, ErrorCodeProfileConflict) {
 					continue
 				}
 				break
@@ -286,7 +287,7 @@ func (e *Extractor) callWithRetry(ctx stdcontext.Context, sources []ExtractSourc
 		}
 	}
 	if err == nil {
-		return nil, attempts, Errorf(ErrorCodeProfileUnavailable, "extractor returned no result")
+		return nil, attempts, fault.New(ErrorCodeProfileUnavailable, "extractor returned no result")
 	}
 	return nil, attempts, err
 }

@@ -10,13 +10,13 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 	ctx := context.Background()
 	db := newMemoryTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	const (
 		alice  = "discord:601"
 		bob    = "discord:602"
@@ -26,21 +26,21 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 		return "main/discord:owner/channel:333/principal:" + principalID
 	}
 	for id, owner := range map[string]string{channelSession(alice): alice, channelSession(bob): bob, thread: alice} {
-		if err := sessions.Create(ctx, &store.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+		if err := sessions.Create(ctx, &turn.Session{ID: id, OwnerID: owner, Metadata: json.RawMessage(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}
-	service, err := memory.NewService(&memoryDocumentStore{store: store.NewMemoryStore(db)}, nil, &memory.Config{FallbackMaxDocuments: 5, FallbackTokenBudget: 2000})
+	service, err := memory.NewService(newTestMemoryStore(t, db), nil, &memory.ServiceOptions{FallbackMaxDocuments: 5, FallbackTokenBudget: 2000})
 	if err != nil {
 		t.Fatalf("NewService(): %v", err)
 	}
-	hook := buildMemoryHook(service, nil, nil, nil)
+	hook := memory.NewTurnHook(service, nil, nil, nil)
 	project := func(sessionID, principalID, eventID, text string) {
 		t.Helper()
 		turnRequest := &turn.TurnRequest{TurnID: "turn-" + eventID, SessionID: sessionID, PrincipalID: principalID, PrincipalClass: principal.ClassPublic, Origin: "discord:owner", AgentID: "main"}
-		if err := hook(ctx, turnRequest, []store.RuntimeEvent{{
+		if err := hook.AfterTurn(ctx, turnRequest, []turn.Event{{
 			ID: eventID, SessionID: sessionID, Sequence: 1, TurnID: turnRequest.TurnID, Author: "user",
-			Kind: store.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
+			Kind: turnstore.EventKindADK, SchemaVersion: 1, Payload: journalPayload(t, "user", text), CreatedAt: time.Now().UTC().Add(-time.Minute),
 		}}); err != nil {
 			t.Fatalf("hook(%s): %v", eventID, err)
 		}

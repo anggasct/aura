@@ -1,9 +1,8 @@
 package discord
 
 import (
-	"errors"
-	"fmt"
-
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -22,41 +21,17 @@ const (
 	ErrorCodeThreadUnavailable   ErrorCode = "thread_unavailable"
 	ErrorCodeApprovalUnavailable ErrorCode = "approval_unavailable"
 	ErrorCodeApprovalTimeout     ErrorCode = "approval_timeout"
+	ErrorCodeResumeInvalid       ErrorCode = "channel_resume_invalid"
 )
 
-type Error struct {
-	Code   ErrorCode
-	Detail string
-	Cause  error
+func deliveryAmbiguous(detail string) error {
+	return fault.Wrap(ErrorCodeDeliveryAmbiguous, detail, runtimechannelhost.ErrDeliveryAmbiguous)
 }
 
-func (e *Error) Error() string {
-	if e.Cause == nil {
-		return fmt.Sprintf("%s: %s", e.Code, e.Detail)
-	}
-	return fmt.Sprintf("%s: %s: %v", e.Code, e.Detail, e.Cause)
+func approvalUnavailable(detail string) error {
+	return fault.Wrap(ErrorCodeApprovalUnavailable, detail, approval.ErrUnavailable)
 }
 
-func (e *Error) Unwrap() error {
-	return e.Cause
-}
-
-func (e *Error) Is(target error) bool {
-	return target == runtimechannelhost.ErrDeliveryAmbiguous && e.Code == ErrorCodeDeliveryAmbiguous
-}
-
-func CodeOf(err error) (ErrorCode, bool) {
-	var target *Error
-	if !errors.As(err, &target) {
-		return "", false
-	}
-	return target.Code, true
-}
-
-func Errorf(code ErrorCode, format string, args ...any) error {
-	return &Error{Code: code, Detail: fmt.Sprintf(format, args...)}
-}
-
-func ErrorWrapf(code ErrorCode, cause error, format string, args ...any) error {
-	return &Error{Code: code, Detail: fmt.Sprintf(format, args...), Cause: cause}
+func approvalTimeout(detail string) error {
+	return fault.Wrap(ErrorCodeApprovalTimeout, detail, approval.ErrTimeout)
 }

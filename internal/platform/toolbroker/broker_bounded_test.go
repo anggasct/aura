@@ -13,9 +13,14 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/egress"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func oversizedAdapter(output json.RawMessage) map[string]Adapter {
@@ -31,7 +36,7 @@ func oversizedOutput(size int) json.RawMessage {
 }
 
 func TestBrokerMapsEgressDenialToPolicyDenied(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 		"web_fetch@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			return ToolResult{}, egress.Errorf(egress.ErrorCodeEgressDenied, "loopback address 127.0.0.1")
 		},
@@ -85,7 +90,7 @@ func TestBrokerPreservesAdapterResultClasses(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 					tc.tool + "@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 						return ToolResult{}, tc.adapterErr
@@ -111,7 +116,7 @@ func TestBrokerPreservesAdapterResultClasses(t *testing.T) {
 }
 
 func TestBrokerRedactsAdapterErrorDetail(t *testing.T) {
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 			"web_search@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{}, errorf(ResultExecutionFailed, "provider rejected token search-secret")
@@ -136,7 +141,7 @@ func TestBrokerRedactsAdapterErrorDetail(t *testing.T) {
 
 func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 	output := oversizedOutput(8192)
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096})
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -171,13 +176,13 @@ func TestBrokerOversizedOutputReturnsDecodableTruncationEnvelope(t *testing.T) {
 
 func TestBrokerOversizedOutputSpillsToArtifact(t *testing.T) {
 	output := oversizedOutput(8192)
-	db := storetest.OpenMigrated(t)
-	sessions := store.NewSessionService(db)
-	if err := sessions.Create(context.Background(), &store.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema())
+	sessions := turnstore.NewSessionService(db)
+	if err := sessions.Create(context.Background(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 1<<20)
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096, Artifacts: artifacts})
+	artifacts := storage.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 1<<20)
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Adapters: oversizedAdapter(output), MaxInlineResultBytes: 4096, Artifacts: artifacts})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

@@ -32,7 +32,7 @@ func NewEngine(policy Policy, handler Handler, hostCapabilities []string) (*Engi
 	}
 	clonedRules := make(map[string]Rule, len(policy.Rules))
 	for k, v := range policy.Rules {
-		clonedRules[k] = v
+		clonedRules[k] = cloneRule(&v)
 	}
 	policyCopy := policy
 	policyCopy.Rules = clonedRules
@@ -49,10 +49,30 @@ func NewEngine(policy Policy, handler Handler, hostCapabilities []string) (*Engi
 	}, nil
 }
 
+func cloneRule(rule *Rule) Rule {
+	cloned := *rule
+	cloned.RequiredCapabilities = slices.Clone(rule.RequiredCapabilities)
+	cloned.AllowedTrust = slices.Clone(rule.AllowedTrust)
+	return cloned
+}
+
 func (e *Engine) PolicyVersion() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.policy.Version
+}
+
+func (e *Engine) Policy() Policy {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	rules := make(map[string]Rule, len(e.policy.Rules))
+	for k, v := range e.policy.Rules {
+		rules[k] = cloneRule(&v)
+	}
+	return Policy{
+		Version: e.policy.Version,
+		Rules:   rules,
+	}
 }
 
 func validateContext(ctx context.Context) error {
@@ -129,7 +149,7 @@ func (e *Engine) decide(ctx context.Context, request *ToolRequest) (PolicyDecisi
 	}, nil
 }
 
-func (e *Engine) RegisterRule(rule *Rule) error {
+func validateRule(rule *Rule) error {
 	if rule == nil {
 		return Errorf(ErrorCodeInvalidArgument, "rule must not be nil")
 	}
@@ -149,13 +169,46 @@ func (e *Engine) RegisterRule(rule *Rule) error {
 	if rule.Constraints.MaxOutputBytes < 0 || rule.Constraints.Timeout < 0 {
 		return Errorf(ErrorCodeInvalidArgument, "rule %q has negative constraints", rule.ToolName)
 	}
+	return nil
+}
+
+func (e *Engine) RegisterRule(rule *Rule) error {
+	if err := validateRule(rule); err != nil {
+		return err
+	}
 
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	if e.policy.Rules == nil {
 		e.policy.Rules = make(map[string]Rule)
 	}
-	e.policy.Rules[rule.ToolName] = *rule
+	e.policy.Rules[rule.ToolName] = cloneRule(rule)
+	return nil
+}
+
+func (e *Engine) RegisterRules(rules []Rule) error {
+	if len(rules) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(rules))
+	for i := range rules {
+		if err := validateRule(&rules[i]); err != nil {
+			return err
+		}
+		if _, dup := seen[rules[i].ToolName]; dup {
+			return Errorf(ErrorCodeInvalidArgument, "duplicate rule for tool %q", rules[i].ToolName)
+		}
+		seen[rules[i].ToolName] = struct{}{}
+	}
+
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.policy.Rules == nil {
+		e.policy.Rules = make(map[string]Rule, len(rules))
+	}
+	for i := range rules {
+		e.policy.Rules[rules[i].ToolName] = cloneRule(&rules[i])
+	}
 	return nil
 }
 

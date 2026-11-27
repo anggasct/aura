@@ -6,11 +6,10 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-const identityInvalidCode = legacyconfig.ErrorCode(principal.ErrorCodeIdentityInvalid)
+const identityInvalidCode = ErrorCode(principal.ErrorCodeIdentityInvalid)
 
 func writeOwnerConfig(t *testing.T, content string) string {
 	t.Helper()
@@ -142,7 +141,7 @@ owner:
 		t.Fatal("secret-bearing owner name accepted")
 	}
 	code, ok := codeOf(err)
-	if !ok || code != legacyconfig.ErrorCodeOwnerSecret {
+	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid", code, ok)
 	}
 	if !strings.Contains(err.Error(), "owner.name") {
@@ -170,7 +169,7 @@ owner:
 		t.Fatal("secret-bearing preference accepted")
 	}
 	code, ok := codeOf(err)
-	if !ok || code != legacyconfig.ErrorCodeOwnerSecret {
+	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid", code, ok)
 	}
 	if !strings.Contains(err.Error(), "owner.preferences") {
@@ -198,7 +197,7 @@ owner:
 		t.Fatal("secret-bearing preference key accepted")
 	}
 	code, ok := codeOf(err)
-	if !ok || code != legacyconfig.ErrorCodeOwnerSecret {
+	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid", code, ok)
 	}
 	if strings.Contains(err.Error(), ownerSecretFixture) {

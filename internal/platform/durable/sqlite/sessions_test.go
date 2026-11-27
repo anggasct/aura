@@ -16,10 +16,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 var _ runtimeengine.SessionStore = (*SessionStore)(nil)
@@ -51,7 +52,7 @@ func newSessionFixture(t *testing.T) *sessionFixture {
 
 func newSessionStore(t *testing.T, db *sql.DB, clock durable.Clock) *SessionStore {
 	t.Helper()
-	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db, Clock: clock})
+	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db, Clock: clock, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore: %v", err)
 	}
@@ -60,7 +61,7 @@ func newSessionStore(t *testing.T, db *sql.DB, clock durable.Clock) *SessionStor
 
 func createSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: id, OwnerID: testSessionOwner}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: testSessionOwner}); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
@@ -244,13 +245,22 @@ func TestNewSessionStoreRejectsMissingOptions(t *testing.T) {
 			requireCode(t, err, ErrorCodeInvalidArgument)
 		})
 	}
-	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db})
+	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewSessionStore without a clock: %v", err)
 	}
 	if sessions.clock == nil {
 		t.Fatal("a nil clock was not replaced by the real clock")
 	}
+}
+
+func TestSessionStoreRequiresATurnStore(t *testing.T) {
+	db := openDB(t, newDatabaseFile(t))
+	sessions, err := NewSessionStore(&SessionStoreOptions{DB: db})
+	if sessions != nil {
+		t.Fatal("NewSessionStore returned a store without a turn store")
+	}
+	requireCode(t, err, ErrorCodeInvalidArgument)
 }
 
 func TestSessionStoreValidatesIds(t *testing.T) {
@@ -492,8 +502,8 @@ func TestAdmitValidatesItsRequest(t *testing.T) {
 	}
 	t.Run("unknown session", func(t *testing.T) {
 		_, err := f.sessions.Admit(t.Context(), admitRequest(turnSpec{turnID: "turn-1", key: "key-1", sessionID: "session-missing"}))
-		if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeSessionNotFound {
-			t.Fatalf("err = %v, want store code %s", err, store.ErrorCodeSessionNotFound)
+		if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeSessionNotFound {
+			t.Fatalf("err = %v, want store code %s", err, turnstore.ErrorCodeSessionNotFound)
 		}
 		requireUnchanged(t, f.db, before)
 	})
@@ -818,12 +828,14 @@ func TestErasingASessionDropsItsTurns(t *testing.T) {
 	f := newSessionFixture(t)
 	f.admit(t, turnSpec{turnID: "turn-1", key: "key-1"})
 	f.admit(t, turnSpec{turnID: "turn-2"})
-	counts, err := store.ErasePrincipal(t.Context(), f.db, testSessionOwner, true, store.ErasureOptions{})
+	report, err := principal.Erase(t.Context(), f.db, principal.ErasureScope{PrincipalID: testSessionOwner, Apply: true}, []principal.Eraser{
+		turnstore.NewSessionEraser(f.db, false),
+	})
 	if err != nil {
-		t.Fatalf("ErasePrincipal: %v", err)
+		t.Fatalf("Erase: %v", err)
 	}
-	if counts.Sessions != 1 {
-		t.Fatalf("erased sessions = %d, want 1", counts.Sessions)
+	if report.Count(principal.ErasureLineSessions) != 1 {
+		t.Fatalf("erased sessions = %d, want 1", report.Count(principal.ErasureLineSessions))
 	}
 	if n := countRows(t, f.db, `SELECT COUNT(*) FROM durable_session_turn`); n != 0 {
 		t.Fatalf("turn rows after erasure = %d, want 0", n)

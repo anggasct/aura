@@ -14,7 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/tool"
@@ -71,7 +71,7 @@ func TestADKExecutorRunsTurnThroughResolvedDefinition(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
 		}
-		if ev.Kind == store.EventKindADK {
+		if ev.Kind == turnstore.EventKindADK {
 			final = string(ev.Payload)
 		}
 	}
@@ -186,7 +186,7 @@ func TestBuildAgentCarriesDefinitionSurface(t *testing.T) {
 }
 
 func TestRegistryBuiltinsResolvePerCapability(t *testing.T) {
-	registry, err := auraagent.Build(nil, []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, []string{"primary"})
+	registry, err := auraagent.Build(nil, []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}, nil, []string{"primary"})
 	if err != nil {
 		t.Fatalf("agent.Build: %v", err)
 	}

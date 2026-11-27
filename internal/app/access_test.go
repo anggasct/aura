@@ -7,16 +7,15 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func runGrantsCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newGrantsCmd(&globalFlags{configPath: cfg})
+	cmd := newGrantsCmd(&GlobalFlags{ConfigPath: cfg})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -37,7 +36,7 @@ func accessEventCount(t *testing.T, cfg, action string) int {
 	}
 	defer func() { _ = db.Close() }()
 	var count int
-	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, store.AccessOwnerActionEventKind, action).Scan(&count); err != nil {
+	if err := db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM runtime_event WHERE kind = ? AND json_extract(payload_json, '$.action') = ?`, principal.AccessOwnerActionEventKind, action).Scan(&count); err != nil {
 		t.Fatalf("count owner actions: %v", err)
 	}
 	return count
@@ -54,12 +53,12 @@ func recordTestGrant(t *testing.T, cfg string) string {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if err := newStandingGrantRecorder(db).RecordStandingGrant(t.Context(), &discord.StandingGrantRequest{
+	if err := newStandingGrantRecorder(db).RecordStandingGrant(t.Context(), &approval.StandingGrantRequest{
 		PrincipalID: "discord:111", AgentID: "kantor", ToolName: "write_file", OwnerID: "discord:777", TTL: 168 * time.Hour,
 	}); err != nil {
 		t.Fatalf("RecordStandingGrant: %v", err)
 	}
-	grants, err := store.NewStandingGrantStore(db).List(t.Context(), "", time.Now().UTC())
+	grants, err := principal.NewStandingGrantStore(db).List(t.Context(), "", time.Now().UTC())
 	if err != nil || len(grants) != 1 {
 		t.Fatalf("grants = %+v, %v", grants, err)
 	}
@@ -117,7 +116,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "kantor", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted,
 		Tools: []string{"read_file", "write_file", "exec"}, PrincipalTools: []string{"write_file"},
-	}}, []string{"read_file", "write_file", "exec"}, nil)
+	}}, []string{"read_file", "write_file", "exec"}, appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -129,9 +128,9 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 		t.Fatal("unknown persona reported a ceiling")
 	}
 	now := time.Now().UTC()
-	grants := store.NewStandingGrantStore(db)
+	grants := principal.NewStandingGrantStore(db)
 	for _, tool := range []string{"write_file", "exec"} {
-		if _, err := grants.Grant(t.Context(), &store.StandingGrant{PrincipalID: "discord:111", AgentID: "kantor", ToolName: tool, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		if _, err := grants.Grant(t.Context(), &principal.StandingGrant{PrincipalID: "discord:111", AgentID: "kantor", ToolName: tool, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
 			t.Fatalf("Grant %s: %v", tool, err)
 		}
 	}
@@ -141,7 +140,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "exec", ""); active {
 		t.Fatal("standing grant for a tool outside principal_tools still applied")
 	}
-	policy.now = func() time.Time { return now.Add(2 * time.Hour) }
+	policy.WithClock(func() time.Time { return now.Add(2 * time.Hour) })
 	if active, _ := policy.StandingGrant(t.Context(), "discord:111", "kantor", "write_file", ""); active {
 		t.Fatal("expired standing grant still applied")
 	}
@@ -150,7 +149,7 @@ func TestAccessPolicyHonorsPrincipalToolsAndExpiry(t *testing.T) {
 func TestDiscordAccessSettingsUseTheAccessSection(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Access.ApprovalTimeout = configkit.Duration(10 * time.Minute)
-	settings := discordAccessSettings(&cfg, nil, nil, nil)
+	settings := channelAccessSettings(&cfg, nil, nil, nil)
 	if settings.ApprovalTimeout != 10*time.Minute || settings.StandingGrantTTL != 168*time.Hour || settings.Grants == nil {
 		t.Fatalf("settings = %+v", settings)
 	}

@@ -8,7 +8,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 var canaryValues = map[string]string{
@@ -42,7 +41,7 @@ var canaryValues = map[string]string{
 func TestPrivacyCanaryTurnSpan(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, nil, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -91,7 +90,7 @@ func TestPrivacyCanaryTurnSpan(t *testing.T) {
 func TestPrivacyCanaryModelSpan(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, nil, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)
@@ -121,7 +120,7 @@ func TestPrivacyCanaryModelSpan(t *testing.T) {
 func TestPrivacyCanaryToolSpan(t *testing.T) {
 	exporter := tracetest.NewInMemoryExporter()
 	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
-	fr := &fakeRuntime{events: []store.RuntimeEvent{{Kind: turn.EventKindTurnCompleted}}}
+	fr := &fakeRuntime{events: []turn.Event{{Kind: turn.EventKindTurnCompleted}}}
 	inst, err := InstrumentRuntime(fr, tp, nil, nil)
 	if err != nil {
 		t.Fatalf("InstrumentRuntime: %v", err)

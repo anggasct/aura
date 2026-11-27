@@ -127,22 +127,22 @@ func decodeStrict(raw []byte, target any) error {
 	return nil
 }
 
-func peek(raw []byte) (string, *Error) {
+func peek(raw []byte) (string, *callFailure) {
 	var head envelope
 	if err := json.Unmarshal(raw, &head); err != nil {
-		return "", Errorf(ErrRPCInvalid, "the connector sent a message that is not a json object")
+		return "", failf(ErrRPCInvalid, "the connector sent a message that is not a json object")
 	}
 	if head.V != Version {
-		return "", Errorf(ErrRPCInvalid, "the connector sent a message with the wrong version")
+		return "", failf(ErrRPCInvalid, "the connector sent a message with the wrong version")
 	}
 	return head.Type, nil
 }
 
-func invalid() *Error {
-	return Errorf(ErrRPCInvalid, "the connector sent a message that does not match the contract")
+func invalid() *callFailure {
+	return failf(ErrRPCInvalid, "the connector sent a message that does not match the contract")
 }
 
-func decodeTools(raw []byte) (*description, *Error) {
+func decodeTools(raw []byte) (*description, *callFailure) {
 	kind, fail := peek(raw)
 	if fail != nil {
 		return nil, fail
@@ -152,7 +152,7 @@ func decodeTools(raw []byte) (*description, *Error) {
 		return nil, invalid()
 	}
 	if len(message.Tools) > maxDescribedTools {
-		return nil, Errorf(ErrRPCInvalid, "the connector described too many tools")
+		return nil, failf(ErrRPCInvalid, "the connector described too many tools")
 	}
 	if fail := checkCapabilities(message.Capabilities); fail != nil {
 		return nil, fail
@@ -171,14 +171,14 @@ func decodeTools(raw []byte) (*description, *Error) {
 	return &description{tools: message.Tools, capabilities: message.Capabilities}, nil
 }
 
-func checkCapabilities(names []string) *Error {
+func checkCapabilities(names []string) *callFailure {
 	if len(names) > maxCapabilities {
-		return Errorf(ErrRPCInvalid, "the connector declared too many capabilities")
+		return failf(ErrRPCInvalid, "the connector declared too many capabilities")
 	}
 	seen := make(map[string]bool, len(names))
 	for _, name := range names {
 		if !capabilityPattern.MatchString(name) || seen[name] {
-			return Errorf(ErrRPCInvalid, "the connector declared a capability that is not valid")
+			return failf(ErrRPCInvalid, "the connector declared a capability that is not valid")
 		}
 		seen[name] = true
 	}
@@ -206,7 +206,7 @@ type reply struct {
 	code   string
 }
 
-func decodeReply(raw []byte, call string, maxOutput int64) (*reply, *Error) {
+func decodeReply(raw []byte, call string, maxOutput int64) (*reply, *callFailure) {
 	kind, fail := peek(raw)
 	if fail != nil {
 		return nil, fail
@@ -224,7 +224,7 @@ func decodeReply(raw []byte, call string, maxOutput int64) (*reply, *Error) {
 			return nil, invalid()
 		}
 		if int64(len(message.Output)) > maxOutput {
-			return nil, Errorf(ErrRPCLimit, "the connector output exceeds the message bound")
+			return nil, failf(ErrRPCLimit, "the connector output exceeds the message bound")
 		}
 		return &reply{result: message.Output}, nil
 	case typeError:
@@ -238,16 +238,16 @@ func decodeReply(raw []byte, call string, maxOutput int64) (*reply, *Error) {
 	}
 }
 
-func decodeBody(encoded string) ([]byte, *Error) {
+func decodeBody(encoded string) ([]byte, *callFailure) {
 	if base64.StdEncoding.DecodedLen(len(encoded)) > maxBodyBytes+2 {
-		return nil, Errorf(ErrRPCLimit, "the request body exceeds the size bound")
+		return nil, failf(ErrRPCLimit, "the request body exceeds the size bound")
 	}
 	body, err := base64.StdEncoding.Strict().DecodeString(encoded)
 	if err != nil {
 		return nil, invalid()
 	}
 	if len(body) > maxBodyBytes {
-		return nil, Errorf(ErrRPCLimit, "the request body exceeds the size bound")
+		return nil, failf(ErrRPCLimit, "the request body exceeds the size bound")
 	}
 	return body, nil
 }

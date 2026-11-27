@@ -8,7 +8,7 @@ import (
 )
 
 func TestNewToolExecutorRefusesANilEventBus(t *testing.T) {
-	executor, err := newToolExecutor(&toolExecutorInput{result: &appconfig.LoadResult{}, wiring: &toolWiring{}})
+	executor, err := newTestToolExecutor(&toolExecutorInput{result: &appconfig.LoadResult{}, wiring: &toolWiring{}})
 	if executor != nil {
 		t.Fatalf("newToolExecutor returned %v without an event bus", executor)
 	}

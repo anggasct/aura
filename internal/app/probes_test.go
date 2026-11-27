@@ -16,13 +16,13 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -36,18 +36,17 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 	cfg.Models.Definitions = map[string]model.Definition{
 		"primary": {Protocol: "anthropic", Model: "claude-sonnet-4"},
 	}
-	listener, err := buildProbeListener(&cfg, nil, store.NewEventStore(db), store.NewSessionService(db))
-	if err != nil {
-		t.Fatalf("buildProbeListener: %v", err)
-	}
-
 	bind, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("bind: %v", err)
 	}
 	addr := bind.Addr().String()
 	_ = bind.Close()
-	listener.listen = addr
+	cfg.Health.Listen = addr
+	listener, err := buildProbeServer(&cfg, nil, turnstore.NewEventStore(db), turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("buildProbeServer: %v", err)
+	}
 
 	ctx, cancel := context.WithCancel(t.Context())
 	done := make(chan error, 1)
@@ -84,7 +83,7 @@ func TestProbeListenerServesLivezAndReadyz(t *testing.T) {
 }
 
 func TestProbeListenerRejectsNilConfig(t *testing.T) {
-	if _, err := buildProbeListener(nil, nil, nil, nil); err == nil {
+	if _, err := buildProbeServer(nil, nil, nil, nil); err == nil {
 		t.Fatal("nil config must be rejected")
 	}
 }

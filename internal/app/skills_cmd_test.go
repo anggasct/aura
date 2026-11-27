@@ -10,6 +10,8 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/skills"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeSkillsCLIConfig(t *testing.T, skillsSection string) string {
@@ -48,11 +50,13 @@ func skillsCLIConfig(t *testing.T) string {
 
 func runSkillsCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	gf := &globalFlags{configPath: cfg}
-	cmd := newSkillsCmd(gf)
+	restoreDefaultLogger(t)
+	cmds := skills.Commands(skillsOpener(&GlobalFlags{ConfigPath: cfg}))
+	cmd := cmds[0]
 	out := &bytes.Buffer{}
+	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errBuf)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -186,10 +190,15 @@ func TestSkillsRetentionWiringThroughCLIHelper(t *testing.T) {
 		t.Fatalf("storage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	engine, err := buildSkillsEngine(t.Context(), result.Config.Skills, db, nil)
+	mod, err := skills.New(t.Context(), &skills.ModuleDeps{
+		Config:      result.Config.Skills,
+		DB:          db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(db)},
+	})
 	if err != nil {
 		t.Fatalf("engine: %v", err)
 	}
+	engine := mod.Engine()
 	stale, err := engine.StageDraft(t.Context(), "stale-one", "Stale draft.", root)
 	if err != nil {
 		t.Fatalf("stage stale: %v", err)
@@ -251,9 +260,12 @@ func TestSkillsCommandUsage(t *testing.T) {
 	if _, err := runSkillsCommand(t, cfg, "create", "--name", "x"); err == nil {
 		t.Errorf("missing description should fail")
 	} else {
-		var ue *usageError
-		if !errors.As(err, &ue) {
+		var ue interface{ UsageError() bool }
+		if !errors.As(err, &ue) || !ue.UsageError() {
 			t.Errorf("err = %v, want usage error", err)
+		}
+		if code := ExitCode(NewRootCommand(), []string{"skills", "create", "--name", "x"}, err); code != 2 {
+			t.Errorf("exit code = %d, want 2 (err = %v)", code, err)
 		}
 	}
 	if _, err := runSkillsCommand(t, cfg, "list", "--state", "flying"); err == nil {

@@ -5,8 +5,6 @@ import (
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const fuzzSecretLength = 64
@@ -28,7 +26,7 @@ func FuzzCodeExecuteRequest(f *testing.F) {
 	}
 	limits := rigLimits()
 	runner := &Runner{limits: limits}
-	definition := tools.DefinitionsByKey()[auditToolKey]
+	definition := ToolDefinition()
 	f.Fuzz(func(t *testing.T, raw []byte) {
 		checked := runner.ArgumentCheck(json.RawMessage(raw))
 		decoded, decodeErr := decodeArguments(json.RawMessage(raw))
@@ -39,7 +37,7 @@ func FuzzCodeExecuteRequest(f *testing.F) {
 			if int64(len(decoded.Source)) > limits.MaxSourceBytes || int64(len(decoded.Stdin)) > limits.MaxStdinBytes {
 				t.Fatalf("ArgumentCheck accepted source %d or stdin %d above the limits", len(decoded.Source), len(decoded.Stdin))
 			}
-			if err := tools.ValidateCodeOutputFiles(decoded.OutputFiles, int(limits.MaxOutputFiles)); err != nil {
+			if err := ValidateCodeOutputFiles(decoded.OutputFiles, int(limits.MaxOutputFiles)); err != nil {
 				t.Fatalf("ArgumentCheck accepted an invalid output list: %v", err)
 			}
 		} else {

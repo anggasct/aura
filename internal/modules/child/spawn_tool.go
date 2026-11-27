@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -89,7 +91,7 @@ func SpawnArgsErrorDetail(err error) string {
 	if err == nil {
 		return ""
 	}
-	if code, ok := CodeOf(err); ok {
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
 		return fmt.Sprintf("%s: %s", code, err.Error())
 	}
 	return err.Error()

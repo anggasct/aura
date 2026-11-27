@@ -24,17 +24,20 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/channels/kit/access"
+	"github.com/anggasct/aura/internal/channels/kit/approval"
+	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/modules/handoff"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -227,22 +230,30 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	name := "email-access"
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	decider := channelApprovalDecider(approvalChannels(approvers, route))
-	builtin, err := toolsbuiltin.New(cfg.Tools, cfg.Storage.ArtifactQuota, db, h.artifacts, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, decider, newAccessPolicy(registry, db, nil), toolsbuiltin.WithLiveEvents(liveEvents))
+	decider := approval.Decider(approvalChannels(approvers, route))
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: cfg, CapabilityReport: capabilitytest.All(t)},
+		db:           db,
+		artifactRoot: h.artifacts,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring:       &toolWiring{decider: decider, access: newAccessPolicy(registry, db, nil)},
+		events:       liveEvents,
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
-	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}
-	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], h.mail, h.submissions,
-		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		&emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}}, slog.New(slog.DiscardHandler))
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
 	if err != nil {
-		t.Fatalf("email.New: %v", err)
+		t.Fatalf("NewSessionEnsurer: %v", err)
 	}
-	h.adapter = adapter
+	mediaStore, err := media.NewArtifactStore(storage.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota)))
+	if err != nil {
+		t.Fatalf("NewArtifactStore: %v", err)
+	}
 	router, err := auraagent.NewRouter(registry, channelAccounts(&cfg.Channels), cfg.Bindings)
 	if err != nil {
 		t.Fatalf("NewRouter: %v", err)
@@ -251,16 +262,40 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	if err != nil {
 		t.Fatalf("ownerResolver: %v", err)
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(router)
-	settings := discordAccessSettings(cfg, db, nil, nil)
-	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure})
-	adapter.SetMediaStore(&channelMediaStore{store: store.NewArtifactStore(db, h.artifacts, int64(cfg.Storage.ArtifactQuota))})
-	mailboxes := wireEmailOwnerAccess([]runtimechannelhost.ChannelPort{adapter}, route, approvers)
-	builtin.SetEmailOutbox(&emailOutbox{adapters: mailboxes})
-	builtin.SetHandoffOpener(newHandoffService(db, []handoffNotifier{adapter}))
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, store.NewSessionService(db), builtin, nil, nil,
+	cursors, err := email.NewSQLiteCursorStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
+	settings := channelAccessSettings(cfg, db, nil, nil)
+	adapter, err := email.New(&email.Deps{
+		Config:            &cfg.Channels.Email,
+		Account:           &cfg.Channels.Email.Accounts[0],
+		Connector:         h.mail,
+		Mailer:            h.submissions,
+		Cursors:           cursors,
+		Effects:           effects,
+		Sessions:          sessions,
+		Logger:            slog.New(slog.DiscardHandler),
+		PrincipalResolver: owners,
+		PersonaRouter:     router,
+		Access:            &email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals, Handoffs: settings.Handoffs, Erasure: settings.Erasure},
+		Media:             mediaStore,
+		OwnerRoute:        route,
+		HandoffNotifier:   newEmailHandoffNotifier(approvers),
+	})
+	if err != nil {
+		t.Fatalf("email.New: %v", err)
+	}
+	h.adapter = adapter
+	if err := builtin.Broker().RegisterProvider(email.NewToolProvider(adapter)); err != nil {
+		t.Fatalf("RegisterProvider(email): %v", err)
+	}
+	handoffService := mustHandoffService(t, db, []handoff.Notifier{&channelHandoffNotifier{target: adapter}})
+	if err := builtin.Broker().RegisterProvider(handoff.NewToolProvider(handoffService)); err != nil {
+		t.Fatalf("RegisterProvider(handoff): %v", err)
+	}
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, turnstore.NewSessionService(db), builtin, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -269,11 +304,11 @@ func newEmailAccessHarness(t *testing.T, options emailAccessOptions) *emailAcces
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		LiveEvents:     liveEvents,
 		Channels:       []runtimechannelhost.ChannelPort{adapter},
 	})
@@ -452,8 +487,8 @@ func TestEmailSendTool(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newEmailAccessHarness(t, emailAccessOptions{approvers: tc.approvers})
 			if tc.standing {
-				grant := store.StandingGrant{PrincipalID: "email:" + tc.from, AgentID: "desk", ToolName: "email_send", GrantedBy: principal.OwnerID, GrantedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)}
-				if _, err := store.NewStandingGrantStore(h.db).Grant(t.Context(), &grant); err != nil {
+				grant := principal.StandingGrant{PrincipalID: "email:" + tc.from, AgentID: "desk", ToolName: "email_send", GrantedBy: principal.OwnerID, GrantedAt: time.Now().UTC(), ExpiresAt: time.Now().UTC().Add(time.Hour)}
+				if _, err := principal.NewStandingGrantStore(h.db).Grant(t.Context(), &grant); err != nil {
 					t.Fatalf("Grant: %v", err)
 				}
 			}
@@ -584,7 +619,7 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 	h := newEmailAccessHarness(t, emailAccessOptions{approvers: acceptingOwner(true, nil)})
 	var delivered []email.TextReply
 	previous := deliverEmailText
-	deliverEmailText = func(_ context.Context, account *config.EmailAccount, reply *email.TextReply) error {
+	deliverEmailText = func(_ context.Context, account *email.Account, reply *email.TextReply) error {
 		if account.Name != "work" {
 			t.Errorf("handoff delivery used account %q", account.Name)
 		}
@@ -604,11 +639,11 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 		t.Fatalf("sessions = %v", sessions)
 	}
 	session := sessions[0]
-	handoff, found, err := store.NewHandoffStore(h.db).Get(t.Context(), session)
-	if err != nil || !found || handoff.Channel != store.HandoffChannelEmail || handoff.Account != "work" || handoff.ReplyChannelID != accessStranger {
-		t.Fatalf("handoff = %+v, %v, %v", handoff, found, err)
+	hRecord, found, err := mustHandoffStore(t, h.db).Get(t.Context(), session)
+	if err != nil || !found || hRecord.Channel != handoff.ChannelEmail || hRecord.Account != "work" || hRecord.ReplyChannelID != accessStranger {
+		t.Fatalf("handoff = %+v, %v, %v", hRecord, found, err)
 	}
-	if thread := email.ParseThreadReference(handoff.ReplyThreadID); thread.MessageID != first || thread.Subject != "Refund" {
+	if thread := email.ParseThreadReference(hRecord.ReplyThreadID); thread.MessageID != first || thread.Subject != "Refund" {
 		t.Fatalf("handoff thread = %+v, want the opening message", thread)
 	}
 
@@ -622,13 +657,13 @@ func TestEmailHandoffHoldsReleasesAndAnswersThroughAuraReply(t *testing.T) {
 		t.Errorf("mails to the held sender = %d, want only the pre-handoff reply: a held sender gets no mail", got)
 	}
 
-	if _, err := runAccessCommand(t, newReplyCmd, h.configPath, session, "Your", "refund", "is", "approved."); err != nil {
+	if _, err := runReplyCommand(t, h.configPath, session, "Your", "refund", "is", "approved."); err != nil {
 		t.Fatalf("aura reply: %v", err)
 	}
 	if len(delivered) != 1 || delivered[0].To != accessStranger || delivered[0].Text != "Your refund is approved." || delivered[0].Thread.MessageID != first {
 		t.Fatalf("delivered = %+v", delivered)
 	}
-	if _, err := runAccessCommand(t, newHandoffCmd, h.configPath, "release", session); err != nil {
+	if _, err := runHandoffCommand(t, h.configPath, "release", session); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if len(delivered) != 2 || delivered[1].Text != auraagent.PersonaMessageDefaults()[auraagent.MessageHandoffClosed] {

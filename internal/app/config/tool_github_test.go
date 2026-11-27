@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -42,7 +42,7 @@ func githubEntry(name, ref string) string {
 	return fmt.Sprintf("      - name: %q\n        ref: %q\n", name, ref)
 }
 
-func loadGitHubConfig(t *testing.T, section string) (*legacyconfig.Tools, error) {
+func loadGitHubConfig(t *testing.T, section string) (*Tools, error) {
 	t.Helper()
 	body := strings.Replace(webSearchBase, "%s\n", section, 1)
 	result, err := LoadWithOptions(writeTempConfig(t, body), execLinuxOptions(t))
@@ -67,7 +67,7 @@ func TestToolsGitHubCredentialsLoadInOrder(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	loaded = result.Config.Tools
-	want := []legacyconfig.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TOKEN")}, {Name: "release", Ref: secrettest.Ref("file:///etc/aura/github-release-token")}}
+	want := []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://GITHUB_TOKEN")}, {Name: "release", Ref: secrettest.Ref("file:///etc/aura/github-release-token")}}
 	if got := loaded.GitHub.Credentials; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 		t.Fatalf("Credentials = %+v, want %+v", got, want)
 	}
@@ -149,7 +149,7 @@ func TestOwnerPreferencesMayNotRepeatAGitHubCredential(t *testing.T) {
 	body := strings.Replace(webSearchBase, "%s\n", githubConfigSection(githubEntry("ci", "env://AURA_TEST_GITHUB_TOKEN")), 1)
 	_, err := LoadWithOptions(writeTempConfig(t, body+"owner:\n  preferences:\n    note: \""+token+"\"\n"), execLinuxOptions(t))
 	code, ok := codeOf(err)
-	if !ok || code != legacyconfig.ErrorCodeOwnerSecret {
+	if !ok || code != ErrorCodeOwnerSecret {
 		t.Fatalf("code = %v, %v, want owner_secret_invalid (err %v)", code, ok, err)
 	}
 	if strings.Contains(err.Error(), token) {

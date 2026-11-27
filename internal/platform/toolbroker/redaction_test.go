@@ -221,7 +221,7 @@ func TestRedactingTwiceChangesNothing(t *testing.T) {
 
 func newRedactingBroker(t *testing.T, adapter Adapter) *Broker {
 	t.Helper()
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{"read_file@v1": adapter},
 	})

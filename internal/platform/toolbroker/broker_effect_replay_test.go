@@ -16,10 +16,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -71,15 +75,15 @@ type replayHarness struct {
 
 func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema())
 	now := time.Now().UTC()
 	for _, id := range []string{"session-1", "session-2"} {
-		if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+		if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}
 	observed := &effectOutcomes{}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: observed})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: observed, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("new journal: %v", err)
 	}
@@ -102,16 +106,16 @@ func newReplayHarness(t *testing.T, config *replayConfig) *replayHarness {
 		},
 	}
 	if config.unlimited {
-		policy := DefaultPolicy()
+		policy := fixturePolicy()
 		rule := policy.Rules["exec"]
 		rule.Constraints.MaxOutputBytes = 0
 		policy.Rules["exec"] = rule
 		options.Policy = policy
 	}
 	if config.artifacts {
-		options.Artifacts = store.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 8<<20)
+		options.Artifacts = storage.NewArtifactStore(db, filepath.Join(t.TempDir(), "artifacts"), 8<<20)
 	}
-	broker, err := New(options)
+	broker, err := newFixtureBrokerOrErr(t, options)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

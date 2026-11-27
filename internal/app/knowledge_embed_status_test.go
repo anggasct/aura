@@ -4,43 +4,50 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func embeddingFindings(t *testing.T, rig *kbRetrievalRig) []health.Finding {
 	t.Helper()
-	registry, err := buildHealthRegistry(rig.cfg, nil, func() (bool, string) { return true, "ok" }, func() (health.ProcessStatus, bool) { return health.ProcessStatus{}, false })
+	extra, err := knowledgeStatusChecks(rig.cfg)
+	if err != nil {
+		t.Fatalf("knowledgeStatusChecks: %v", err)
+	}
+	registry, err := buildHealthRegistry(rig.cfg, nil, func() (bool, string) { return true, "ok" }, func() (health.ProcessStatus, bool) { return health.ProcessStatus{}, false }, extra...)
 	if err != nil {
 		t.Fatalf("buildHealthRegistry: %v", err)
 	}
 	var found []health.Finding
 	all := registry.Evaluate(t.Context())
 	for i := range all {
-		if all[i].Component == health.ComponentKnowledgeEmbedding {
+		if all[i].Component == knowledge.ComponentKnowledgeEmbedding {
 			found = append(found, all[i])
 		}
 	}
 	return found
 }
 
-func statusEmbeddingConfig() *config.Knowledge {
-	return &config.Knowledge{Embedding: &config.KnowledgeEmbedding{
+func statusEmbeddingConfig() *knowledge.Config {
+	return &knowledge.Config{Embedding: &knowledge.EmbeddingConfig{
 		BaseURL: "https://api.example.com/v1", Model: "status-model", Dimensions: 4, DimensionsField: "dimensions",
-		RoleStyle: config.EmbeddingRoleNone, BatchSize: 96, MaxMemory: config.DefaultEmbeddingMaxMemory,
+		RoleStyle: knowledge.EmbeddingRoleNone, BatchSize: 96, MaxMemory: knowledge.DefaultEmbeddingMaxMemory,
 	}}
 }
 
 func embedChunksForStatus(t *testing.T, rig *kbRetrievalRig, collection string, count int) {
 	t.Helper()
-	fingerprint, err := embedding.Fingerprint(rig.cfg.Knowledge.Embedding)
+	clientCfg := rig.cfg.Knowledge.Embedding.ClientConfig()
+	fingerprint, err := embedding.Fingerprint(&clientCfg)
 	if err != nil {
 		t.Fatalf("Fingerprint: %v", err)
 	}
-	vectors := store.NewKBEmbeddingStore(rig.db)
+	vectors, err := knowledge.NewSQLiteStore(rig.db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
 	if err := vectors.StartEmbedding(t.Context(), collection, fingerprint); err != nil {
 		t.Fatalf("StartEmbedding: %v", err)
 	}
@@ -48,9 +55,9 @@ func embedChunksForStatus(t *testing.T, rig *kbRetrievalRig, collection string, 
 	if err != nil {
 		t.Fatalf("PendingChunks: %v", err)
 	}
-	writes := make([]store.KBVectorWrite, 0, len(pending))
+	writes := make([]knowledge.VectorWrite, 0, len(pending))
 	for i := range pending {
-		writes = append(writes, store.KBVectorWrite{RowID: pending[i].RowID, ContentSHA256: pending[i].SHA256, Vector: []float32{1, 0, 0, 0}})
+		writes = append(writes, knowledge.VectorWrite{RowID: pending[i].RowID, ContentSHA256: pending[i].SHA256, Vector: []float32{1, 0, 0, 0}})
 	}
 	if _, err := vectors.CommitVectors(t.Context(), collection, fingerprint, writes); err != nil {
 		t.Fatalf("CommitVectors: %v", err)

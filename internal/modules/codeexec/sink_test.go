@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 type recordedPut struct {
@@ -53,15 +53,15 @@ func (s *memorySink) recorded() []recordedPut {
 }
 
 type storeSink struct {
-	store store.ArtifactStore
+	store storage.ArtifactStore
 }
 
 func (s storeSink) Put(ctx context.Context, content io.Reader, meta *ArtifactMeta) (ArtifactReceipt, error) {
-	ref, err := s.store.Put(ctx, content, &store.ArtifactMetadata{
+	ref, err := s.store.Put(ctx, content, &storage.ArtifactMetadata{
 		ID: meta.ID, SessionID: meta.SessionID, Filename: meta.Filename, MediaType: meta.MediaType, Metadata: meta.Metadata,
 	})
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
+		if code, ok := fault.CodeOf[storage.ErrorCode](err); ok && code == storage.ErrorCodeArtifactQuotaExceeded {
 			return ArtifactReceipt{}, Errorf(ErrorCodeArtifactQuota, "the artifact quota is exhausted")
 		}
 		return ArtifactReceipt{}, err

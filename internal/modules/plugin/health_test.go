@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/health"
 )
 
@@ -17,7 +16,7 @@ func TestDriftMatrix(t *testing.T) {
 		{ID: "old", State: StateActive, Version: "1.0.0", ApprovedVersion: "1.0.0"},
 		{ID: "pending", State: StateActive, Version: "1.1.0", ApprovedVersion: "1.0.0"},
 	}
-	desired := &config.Plugins{Desired: []config.PluginDesired{
+	desired := &Config{Desired: []Desired{
 		{ID: "weather", Version: "1.0.0", Enabled: true},
 		{ID: "mail", Version: "2.0.0", Enabled: true},
 		{ID: "gone", Version: "1.0.0", Enabled: true},
@@ -43,7 +42,7 @@ func TestDriftMatrix(t *testing.T) {
 
 func TestDriftVersionAndUndeclared(t *testing.T) {
 	installed := []Record{{ID: "weather", State: StateActive, Version: "1.0.0", ApprovedVersion: "1.0.0"}, {ID: "extra", State: StateDisabled, Version: "1.0.0"}}
-	desired := &config.Plugins{Desired: []config.PluginDesired{{ID: "weather", Version: "1.2.0", Enabled: true}}}
+	desired := &Config{Desired: []Desired{{ID: "weather", Version: "1.2.0", Enabled: true}}}
 	got := Drift(desired, installed)
 	if len(got) != 2 || got[0].ID != "extra" || got[0].Reason != "installed but not declared" || got[1].ID != "weather" || !strings.Contains(got[1].Reason, "differs") {
 		t.Fatalf("drift = %v", got)
@@ -51,7 +50,7 @@ func TestDriftVersionAndUndeclared(t *testing.T) {
 	if Drift(nil, installed) != nil {
 		t.Fatal("drift reported without a declared list")
 	}
-	if got := Drift(&config.Plugins{Desired: []config.PluginDesired{{ID: "weather", Version: "1.0.0", Enabled: true}}}, installed[:1]); len(got) != 0 {
+	if got := Drift(&Config{Desired: []Desired{{ID: "weather", Version: "1.0.0", Enabled: true}}}, installed[:1]); len(got) != 0 {
 		t.Fatalf("matching state drifts: %v", got)
 	}
 }
@@ -72,7 +71,7 @@ func TestCheckerReportsHeldToolDriftAndDesiredDrift(t *testing.T) {
 	env.approve("weather", env.install(baseManifest, serverFiles()))
 	checker := newCheckerForTest(t, env, &CheckerOptions{
 		Held:    []Held{{ID: "mail", Code: ErrTampered, Detail: "bundle changed"}, {ID: "calendar", Code: ErrSurfacePending, Detail: "capability network is waiting for review"}},
-		Desired: &config.Plugins{Desired: []config.PluginDesired{{ID: "weather", Version: "1.0.0", Enabled: false}}},
+		Desired: &Config{Desired: []Desired{{ID: "weather", Version: "1.0.0", Enabled: false}}},
 		Runtime: func(context.Context) []RuntimeStatus {
 			return []RuntimeStatus{
 				{ID: "weather", Running: true, Drift: []string{"export_all", "bad name!"}},
@@ -108,7 +107,7 @@ func TestCheckerReportsUpWhenEverythingMatches(t *testing.T) {
 	env := newTestEnv(t)
 	env.approve("weather", env.install(baseManifest, serverFiles()))
 	checker := newCheckerForTest(t, env, &CheckerOptions{
-		Desired: &config.Plugins{Desired: []config.PluginDesired{{ID: "weather", Version: "1.0.0", Enabled: true}}},
+		Desired: &Config{Desired: []Desired{{ID: "weather", Version: "1.0.0", Enabled: true}}},
 		Runtime: func(context.Context) []RuntimeStatus { return []RuntimeStatus{{ID: "weather", Running: true}} },
 	})
 	findings := checker.Check(t.Context())

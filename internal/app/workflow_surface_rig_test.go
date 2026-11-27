@@ -17,15 +17,15 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	kitapproval "github.com/anggasct/aura/internal/channels/kit/approval"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type workflowCard struct {
@@ -70,8 +70,8 @@ type surfaceInput struct {
 }
 
 type surfaceRig struct {
-	runner       *workflowToolRunner
-	executor     *toolsbuiltin.Executor
+	runner       *workflow.ToolStepRunner
+	executor     *runtimeadk.BrokerExecutor
 	db           *sql.DB
 	workspace    string
 	registry     *auraagent.Registry
@@ -118,15 +118,15 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 	}
 	record := toolObserver(recorder)
 	var route *kitapproval.OwnerRoute
-	var targets []approvalChannel
+	var targets []kitapproval.Channel
 	if in.owner != nil {
-		route, err = kitapproval.NewOwnerRoute(&workflowOwnerApprover{owners: in.owner, now: time.Now})
+		route, err = kitapproval.NewOwnerRoute(kitapproval.NewWorkflowApprover(in.owner, time.Now))
 		if err != nil {
 			t.Fatalf("NewOwnerRoute: %v", err)
 		}
 		targets = append(targets, route)
 	}
-	inner := channelApprovalDecider(targets)
+	inner := kitapproval.Decider(targets)
 	wiring := &toolWiring{
 		observer: func(ctx context.Context, observation toolbroker.Observation) {
 			rig.observed.record(observation)
@@ -140,25 +140,22 @@ func buildSurface(t *testing.T, in *surfaceInput) *surfaceRig {
 			return inner(ctx, prompt)
 		},
 		access:    newAccessPolicy(registry, in.db, nil),
-		reachable: channelApprovalReachable(targets),
+		reachable: kitapproval.Reachable(targets),
 	}
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: result, db: in.db, artifactRoot: artifactRoot, logger: slog.New(slog.DiscardHandler), wiring: wiring,
 		events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
-		t.Fatalf("newToolExecutor: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
-	built, err := newWorkflowToolRunner(&workflowToolRunnerInput{
-		Executor: executor, Sessions: store.NewSessionService(in.db), Registry: registry, Runs: workflow.NewStore(in.db),
-		Route: route, Logger: logger,
+	registerGitHubModule(t, executor, result.Config)
+	runner, err := workflow.NewToolStepRunner(&workflow.ToolStepRunnerDeps{
+		Broker: executor.Broker(), Sessions: turnstore.NewSessionService(in.db), Registry: registry, Runs: mustWorkflowStore(t, in.db),
+		Route: newWorkflowOwnerRoute(route), Logger: logger,
 	})
 	if err != nil {
-		t.Fatalf("newWorkflowToolRunner: %v", err)
-	}
-	runner, ok := built.(*workflowToolRunner)
-	if !ok {
-		t.Fatalf("newWorkflowToolRunner returned %T, want *workflowToolRunner", built)
+		t.Fatalf("NewToolStepRunner: %v", err)
 	}
 	rig.runner, rig.executor, rig.route, rig.workspace = runner, executor, route, result.Config.Tools.Workspace
 	return rig
@@ -183,7 +180,7 @@ func newSurfaceRig(t *testing.T, opts *surfaceRigOptions) *surfaceRig {
 	if opts.configure != nil {
 		opts.configure(&cfg)
 	}
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)

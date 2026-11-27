@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/durable"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const pruneSecondLayout = "2006-01-02T15:04:05"
@@ -33,7 +36,7 @@ func (r *Runtime) PruneEnded(ctx context.Context, req PruneRequest) (int, error)
 	if err != nil {
 		return 0, fmt.Errorf("durable prune: encode handler names: %w", err)
 	}
-	res, err := r.db.ExecContext(ctx, pruneEndedSQL, string(names), req.Before.UTC().Format(pruneSecondLayout), req.Limit)
+	res, err := dbsqlite.Conn(ctx, r.db).ExecContext(ctx, pruneEndedSQL, string(names), req.Before.UTC().Format(pruneSecondLayout), req.Limit)
 	if err != nil {
 		return 0, fmt.Errorf("durable prune: %w", err)
 	}
@@ -56,4 +59,94 @@ func validatePrune(req *PruneRequest) error {
 		problems = append(problems, invalidArgument("durable prune limit must be positive"))
 	}
 	return errors.Join(problems...)
+}
+
+func (r *Runtime) RunsOf(ctx context.Context, handler string) ([]durable.HandlerRun, error) {
+	rows, err := dbsqlite.Conn(ctx, r.db).QueryContext(ctx,
+		`SELECT key, payload FROM durable_run WHERE handler = ? ORDER BY key`, handler,
+	)
+	if err != nil {
+		return nil, dbsqlite.Classify(fmt.Errorf("durable list runs: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var runs []durable.HandlerRun
+	for rows.Next() {
+		var run durable.HandlerRun
+		if err := rows.Scan(&run.Key, &run.Payload); err != nil {
+			return nil, dbsqlite.Classify(fmt.Errorf("durable list runs: %w", err))
+		}
+		runs = append(runs, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, dbsqlite.Classify(fmt.Errorf("durable list runs: %w", err))
+	}
+	return runs, nil
+}
+
+func (r *Runtime) DeleteRuns(ctx context.Context, keys []string) (int, error) {
+	if len(keys) == 0 {
+		return 0, nil
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return 0, fmt.Errorf("durable delete runs: %w", err)
+	}
+	res, err := dbsqlite.Conn(ctx, r.db).ExecContext(ctx,
+		`DELETE FROM durable_run WHERE key IN (SELECT value FROM json_each(?))`, string(encoded),
+	)
+	if err != nil {
+		return 0, dbsqlite.Classify(fmt.Errorf("durable delete runs: %w", err))
+	}
+	deleted, err := res.RowsAffected()
+	if err != nil {
+		return 0, dbsqlite.Classify(fmt.Errorf("durable delete runs: %w", err))
+	}
+	return int(deleted), nil
+}
+
+func (r *Runtime) RunStatesByKeys(ctx context.Context, handler string, keys []string) (map[string]string, error) {
+	states := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return states, nil
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return nil, fmt.Errorf("durable run states: encode keys: %w", err)
+	}
+	rows, err := dbsqlite.Conn(ctx, r.db).QueryContext(ctx,
+		`SELECT key, state FROM durable_run WHERE handler = ? AND key IN (SELECT value FROM json_each(?))`,
+		handler, string(encoded),
+	)
+	if err != nil {
+		return nil, dbsqlite.Classify(fmt.Errorf("durable run states: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key, state string
+		if err := rows.Scan(&key, &state); err != nil {
+			return nil, dbsqlite.Classify(fmt.Errorf("durable run states: %w", err))
+		}
+		states[key] = state
+	}
+	if err := rows.Err(); err != nil {
+		return nil, dbsqlite.Classify(fmt.Errorf("durable run states: %w", err))
+	}
+	return states, nil
+}
+
+func (r *Runtime) DeleteHandlerRuns(ctx context.Context, handler string, keys []string) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	encoded, err := json.Marshal(keys)
+	if err != nil {
+		return fmt.Errorf("durable delete handler runs: encode keys: %w", err)
+	}
+	if _, err := dbsqlite.Conn(ctx, r.db).ExecContext(ctx,
+		`DELETE FROM durable_run WHERE handler = ? AND key IN (SELECT value FROM json_each(?))`,
+		handler, string(encoded),
+	); err != nil {
+		return dbsqlite.Classify(fmt.Errorf("durable delete handler runs: %w", err))
+	}
+	return nil
 }

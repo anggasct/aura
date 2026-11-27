@@ -12,7 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -42,23 +42,23 @@ func TestBuildRelaysAnEffectfulToolRequestToTheTurnSubscriber(t *testing.T) {
 		}
 	}
 	now := time.Now().UTC()
-	if err := store.NewSessionService(b.db).Create(t.Context(), &store.Session{
+	if err := turnstore.NewSessionService(b.db).Create(t.Context(), &turn.Session{
 		ID: liveEventsSession, OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("create the session: %v", err)
 	}
-	grant := store.StandingGrant{
+	grant := principal.StandingGrant{
 		PrincipalID: liveEventsPrincipal, AgentID: "desk", ToolName: "write_file",
 		GrantedBy: principal.OwnerID, GrantedAt: now, ExpiresAt: now.Add(time.Hour),
 	}
-	if _, err := store.NewStandingGrantStore(b.db).Grant(t.Context(), &grant); err != nil {
+	if _, err := principal.NewStandingGrantStore(b.db).Grant(t.Context(), &grant); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if err := b.group.Start(t.Context()); err != nil {
 		t.Fatalf("start: %v", err)
 	}
 
-	kinds := make(chan store.RuntimeEvent, 64)
+	kinds := make(chan turn.Event, 64)
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 	go func() {

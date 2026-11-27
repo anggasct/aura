@@ -3,6 +3,8 @@ package compaction
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func validSummaryJSON() string {
@@ -44,7 +46,7 @@ func TestValidateContentRejects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := ValidateContent(text, 2048); err == nil {
 				t.Errorf("expected rejection")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSummaryInvalid {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryInvalid {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})
@@ -54,7 +56,7 @@ func TestValidateContentRejects(t *testing.T) {
 func TestValidateContentRespectsOutputBound(t *testing.T) {
 	if _, err := ValidateContent(validSummaryJSON(), 1); err == nil {
 		t.Errorf("expected bound rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeSummaryInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSummaryInvalid {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }

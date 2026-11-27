@@ -11,7 +11,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/model"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func writeModelsConfig(t *testing.T, extraRoutes string) string {
@@ -49,7 +48,7 @@ models:
 	return path
 }
 
-func runModelsCommand(t *testing.T, gf *globalFlags, args ...string) (string, error) {
+func runModelsCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	cmd := newModelsCmd(gf)
 	out := &bytes.Buffer{}
@@ -68,7 +67,7 @@ func TestModelsRoutesCmd(t *testing.T) {
     retry_delay_budget: 15s
     cost_budget_usd: 1.50
 `
-	gf := &globalFlags{configPath: writeModelsConfig(t, routesConfig)}
+	gf := &GlobalFlags{ConfigPath: writeModelsConfig(t, routesConfig)}
 	out, err := runModelsCommand(t, gf, "routes")
 	if err != nil {
 		t.Fatalf("models routes: %v", err)
@@ -86,7 +85,7 @@ func TestModelsRoutesCmd(t *testing.T) {
 }
 
 func TestModelsCircuitsAndResetCmd(t *testing.T) {
-	gf := &globalFlags{configPath: writeModelsConfig(t, "")}
+	gf := &GlobalFlags{ConfigPath: writeModelsConfig(t, "")}
 	ctx := context.Background()
 
 	out, err := runModelsCommand(t, gf, "circuits")
@@ -97,7 +96,7 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 		t.Fatalf("initial circuits output missing expected content:\n%s", out)
 	}
 
-	loadRes, err := appconfig.Load(gf.configPath)
+	loadRes, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}
@@ -105,17 +104,17 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open storage: %v", err)
 	}
-	checkpointStore := store.NewCircuitCheckpointStore(db)
+	checkpointStore := model.NewSQLiteCircuitCheckpointStore(db)
 	openUntil := time.Now().Add(5 * time.Minute)
 	candDef := loadRes.Config.Models.Definitions["cand1"]
 	candResolved, err := loadRes.Config.Models.ResolveDefinition(&candDef)
 	if err != nil {
 		t.Fatalf("resolve cand1: %v", err)
 	}
-	err = checkpointStore.Save(ctx, &store.CircuitCheckpoint{
+	err = checkpointStore.Save(ctx, &model.CircuitCheckpoint{
 		CircuitKey:          "cand1",
 		ConfigDigest:        model.ComputeConfigDigest(&candDef, candResolved),
-		State:               string(model.CircuitStateOpen),
+		State:               model.CircuitStateOpen,
 		ConsecutiveFailures: 3,
 		OpenUntil:           &openUntil,
 		UpdatedAt:           time.Now(),
@@ -148,10 +147,10 @@ func TestModelsCircuitsAndResetCmd(t *testing.T) {
 }
 
 func TestModelsCircuitsStorageFailure(t *testing.T) {
-	gf := &globalFlags{configPath: writeModelsConfig(t, "")}
+	gf := &GlobalFlags{ConfigPath: writeModelsConfig(t, "")}
 	ctx := t.Context()
 
-	loadRes, err := appconfig.Load(gf.configPath)
+	loadRes, err := appconfig.Load(gf.ConfigPath)
 	if err != nil {
 		t.Fatalf("load config: %v", err)
 	}

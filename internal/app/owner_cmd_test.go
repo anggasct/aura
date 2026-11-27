@@ -9,9 +9,10 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -48,7 +49,7 @@ channels:
 
 func runOwnerCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	cmd := newOwnerCmd(&globalFlags{configPath: cfg})
+	cmd := newOwnerCmd(&GlobalFlags{ConfigPath: cfg})
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(out)
@@ -108,7 +109,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openStorage: %v", err)
 	}
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
 	for id, owner := range map[string]string{
 		"terminal-1":                 current.Username,
@@ -116,7 +117,7 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 		"dm:" + testOwnerDiscordID:   testOwnerDiscordID,
 		"dm:" + testTrustedDiscordID: testTrustedDiscordID,
 	} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: owner, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("create session %s: %v", id, err)
 		}
 	}
@@ -191,21 +192,21 @@ func TestOwnerRekeyDryRunApplyAndAudit(t *testing.T) {
 func TestOwnerRekeyMoves(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Owner = &principal.Owner{Identities: []string{"discord:" + testOwnerDiscordID}}
-	cfg.Channels.Discord.Accounts = []config.DiscordAccount{
+	cfg.Channels.Discord.Accounts = []discord.Account{
 		{Name: "owner", AllowedUserIDs: []string{testOwnerDiscordID}},
 		{Name: "kuma", AllowedUserIDs: []string{testTrustedDiscordID, testOwnerDiscordID}},
 	}
 	cases := map[string]struct {
 		osUser string
-		want   []store.OwnerMove
+		want   []principal.OwnerMove
 	}{
-		"os user moves to owner": {osUser: "kuma", want: []store.OwnerMove{
+		"os user moves to owner": {osUser: "kuma", want: []principal.OwnerMove{
 			{From: "kuma", To: principal.OwnerID},
 			{From: "cron", To: principal.OwnerID},
 			{From: testOwnerDiscordID, To: principal.OwnerID},
 			{From: testTrustedDiscordID, To: "discord:" + testTrustedDiscordID},
 		}},
-		"os user already canonical": {osUser: principal.OwnerID, want: []store.OwnerMove{
+		"os user already canonical": {osUser: principal.OwnerID, want: []principal.OwnerMove{
 			{From: "cron", To: principal.OwnerID},
 			{From: testOwnerDiscordID, To: principal.OwnerID},
 			{From: testTrustedDiscordID, To: "discord:" + testTrustedDiscordID},

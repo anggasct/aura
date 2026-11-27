@@ -3,16 +3,15 @@ package plugin
 import (
 	"context"
 	"crypto/rand"
-	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/plugin/auth"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
@@ -61,17 +60,17 @@ type InstallResult struct {
 
 func (s *Service) openPlugins() (*os.Root, error) {
 	if err := os.MkdirAll(s.dir, dirMode); err != nil {
-		return nil, Wrap(ErrStorage, err, "the plugin directory cannot be created")
+		return nil, fault.New(ErrStorage, "the plugin directory cannot be created")
 	}
 	root, err := os.OpenRoot(s.dir)
 	if err != nil {
-		return nil, Wrap(ErrStorage, err, "the plugin directory cannot be opened")
+		return nil, fault.New(ErrStorage, "the plugin directory cannot be opened")
 	}
 	return root, nil
 }
 
 func bundleRel(id, version string) (string, error) {
-	if !auraagent.ValidPluginID(id) || !config.ValidPluginVersion(version) {
+	if !auraagent.ValidPluginID(id) || !ValidVersion(version) {
 		return "", Errorf(ErrPathInvalid, "a plugin id or version is not valid")
 	}
 	return id + "/" + version, nil
@@ -97,7 +96,7 @@ func (s *Service) Install(ctx context.Context, source string) (*InstallResult, e
 	defer func() { _ = plugins.Close() }()
 	staging := stagingPrefix + rand.Text()
 	if err := plugins.Mkdir(staging, dirMode); err != nil {
-		return nil, Wrap(ErrStorage, err, "the staging directory cannot be created")
+		return nil, fault.New(ErrStorage, "the staging directory cannot be created")
 	}
 	defer func() { _ = plugins.RemoveAll(staging) }()
 	insp, err := s.stage(plugins, src, staging)
@@ -113,7 +112,7 @@ func (s *Service) Install(ctx context.Context, source string) (*InstallResult, e
 func (s *Service) stage(plugins, src *os.Root, staging string) (*Inspection, error) {
 	stage, err := plugins.OpenRoot(staging)
 	if err != nil {
-		return nil, Wrap(ErrStorage, err, "the staging directory cannot be opened")
+		return nil, fault.New(ErrStorage, "the staging directory cannot be opened")
 	}
 	defer func() { _ = stage.Close() }()
 	if err := copyTree(src, stage); err != nil {
@@ -157,13 +156,13 @@ func (s *Service) register(ctx context.Context, plugins *os.Root, staging string
 		return nil, err
 	}
 	if err := plugins.MkdirAll(manifest.ID, dirMode); err != nil {
-		return nil, Wrap(ErrStorage, err, "the plugin directory cannot be created")
+		return nil, fault.New(ErrStorage, "the plugin directory cannot be created")
 	}
 	if err := plugins.RemoveAll(final); err != nil {
-		return nil, Wrap(ErrStorage, err, "an unregistered bundle cannot be replaced")
+		return nil, fault.New(ErrStorage, "an unregistered bundle cannot be replaced")
 	}
 	if err := plugins.Rename(staging, final); err != nil {
-		return nil, Wrap(ErrStorage, err, "the bundle cannot be placed")
+		return nil, fault.New(ErrStorage, "the bundle cannot be placed")
 	}
 	if err := s.registry.Install(ctx, &record); err != nil {
 		_ = plugins.RemoveAll(final)
@@ -229,8 +228,7 @@ func (s *Service) approvedSurface(ctx context.Context, record *Record) (Surface,
 }
 
 func isCode(err error, code ErrorCode) bool {
-	got, ok := CodeOf(err)
-	return ok && got == code
+	return fault.HasCode(err, code)
 }
 
 func (s *Service) verify(plugins *os.Root, row *VersionRecord) error {
@@ -245,7 +243,7 @@ func (s *Service) verify(plugins *os.Root, row *VersionRecord) error {
 	defer func() { _ = bundle.Close() }()
 	insp, err := Inspect(bundle)
 	if err != nil {
-		return Wrap(ErrTampered, err, fmt.Sprintf("the bundle of %s %s no longer validates", row.ID, row.Version))
+		return Errorf(ErrTampered, "the bundle of %s %s no longer validates", row.ID, row.Version)
 	}
 	if insp.Digest != row.Digest {
 		return Errorf(ErrTampered, "the bundle of %s %s no longer matches its digest", row.ID, row.Version)
@@ -460,7 +458,7 @@ func (s *Service) Logout(ctx context.Context, id string) error {
 		return err
 	}
 	if err := s.auth.Erase(id); err != nil {
-		return Wrap(ErrStorage, err, "the plugin secrets cannot be erased")
+		return fault.New(ErrStorage, "the plugin secrets cannot be erased")
 	}
 	return nil
 }
@@ -494,10 +492,10 @@ func (s *Service) Remove(ctx context.Context, id string, apply bool) (*RemovePla
 	}
 	defer func() { _ = plugins.Close() }()
 	if err := plugins.RemoveAll(id); err != nil {
-		return nil, Wrap(ErrStorage, err, "the bundle cannot be removed")
+		return nil, fault.New(ErrStorage, "the bundle cannot be removed")
 	}
 	if err := s.auth.Erase(id); err != nil {
-		return nil, Wrap(ErrStorage, err, "the plugin secrets cannot be erased")
+		return nil, fault.New(ErrStorage, "the plugin secrets cannot be erased")
 	}
 	plan.Applied = true
 	return plan, nil

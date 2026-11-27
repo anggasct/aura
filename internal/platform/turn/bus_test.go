@@ -11,25 +11,24 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestEventBusDeliversEachEventToEverySubscriberInOrder(t *testing.T) {
 	bus := NewEventBus(slog.New(slog.DiscardHandler))
 	var seen []string
 	for _, name := range []string{"first", "second", "third"} {
-		if err := bus.Subscribe(func(ev *store.RuntimeEvent) { seen = append(seen, name+":"+ev.ID) }); err != nil {
+		if err := bus.Subscribe(func(ev *Event) { seen = append(seen, name+":"+ev.ID) }); err != nil {
 			t.Fatalf("Subscribe(%s): %v", name, err)
 		}
 	}
 
-	bus.Publish(&store.RuntimeEvent{ID: "one"})
+	bus.Publish(&Event{ID: "one"})
 	want := []string{"first:one", "second:one", "third:one"}
 	if !slices.Equal(seen, want) {
 		t.Fatalf("after the first publish seen = %v, want %v", seen, want)
 	}
 
-	bus.Publish(&store.RuntimeEvent{ID: "two"})
+	bus.Publish(&Event{ID: "two"})
 	want = append(want, "first:two", "second:two", "third:two")
 	if !slices.Equal(seen, want) {
 		t.Fatalf("after the second publish seen = %v, want %v", seen, want)
@@ -39,15 +38,15 @@ func TestEventBusDeliversEachEventToEverySubscriberInOrder(t *testing.T) {
 func TestEventBusKeepsDeliveringAfterAPanickingSubscriber(t *testing.T) {
 	var logs bytes.Buffer
 	bus := NewEventBus(slog.New(slog.NewJSONHandler(&logs, nil)))
-	if err := bus.Subscribe(func(*store.RuntimeEvent) { panic("subscriber failure") }); err != nil {
+	if err := bus.Subscribe(func(*Event) { panic("subscriber failure") }); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	var received *store.RuntimeEvent
-	if err := bus.Subscribe(func(ev *store.RuntimeEvent) { received = ev }); err != nil {
+	var received *Event
+	if err := bus.Subscribe(func(ev *Event) { received = ev }); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
 
-	bus.Publish(&store.RuntimeEvent{
+	bus.Publish(&Event{
 		ID: "evt-1", SessionID: "session-1", TurnID: "turn-1", Kind: EventKindToolRequested,
 		Payload: json.RawMessage(`{"secret":"payload-marker"}`),
 	})
@@ -81,11 +80,11 @@ func TestEventBusRefusesANilHandlerAndFallsBackFromANilLogger(t *testing.T) {
 		t.Fatalf("Subscribe(nil) = %v, want code %q", err, ErrorCodeInvalidArgument)
 	}
 
-	var received *store.RuntimeEvent
-	if err := bus.Subscribe(func(ev *store.RuntimeEvent) { received = ev }); err != nil {
+	var received *Event
+	if err := bus.Subscribe(func(ev *Event) { received = ev }); err != nil {
 		t.Fatalf("Subscribe: %v", err)
 	}
-	bus.Publish(&store.RuntimeEvent{ID: "evt-1"})
+	bus.Publish(&Event{ID: "evt-1"})
 	if received == nil || received.ID != "evt-1" {
 		t.Fatalf("subscriber received %+v, want evt-1", received)
 	}
@@ -105,7 +104,7 @@ func TestEventBusPublishesWhileHandlersSubscribe(t *testing.T) {
 	var wg sync.WaitGroup
 	for k := range workers {
 		wg.Go(func() {
-			if err := bus.Subscribe(func(ev *store.RuntimeEvent) { seen[k].Store(ev.ID, true) }); err != nil {
+			if err := bus.Subscribe(func(ev *Event) { seen[k].Store(ev.ID, true) }); err != nil {
 				t.Errorf("Subscribe: %v", err)
 			}
 			close(ready[k])
@@ -123,7 +122,7 @@ func TestEventBusPublishesWhileHandlersSubscribe(t *testing.T) {
 					default:
 					}
 				}
-				bus.Publish(&store.RuntimeEvent{ID: id})
+				bus.Publish(&Event{ID: id})
 				for _, k := range subscribed {
 					if _, ok := seen[k].Load(id); !ok {
 						t.Errorf("handler %d subscribed before %s was published and did not receive it", k, id)

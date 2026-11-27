@@ -9,10 +9,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/checkpoint"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const checkpointSchemaVersion uint16 = 1
+
+type checkpointAppender interface {
+	AppendCheckpoint(context.Context, *turn.Event) error
+}
 
 func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *turn.Checkpoint) error {
 	if ctx == nil {
@@ -47,7 +51,7 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *turn.Checkpoint
 			return codedError(turn.ErrorCodeCheckpointStale, "checkpoint boundary is ahead of the event log", nil)
 		}
 		eventID := checkpoint.RunID + ".checkpoint." + strconv.FormatUint(checkpoint.ResumeGeneration, 10)
-		appender, ok := e.events.(runtimecheckpoint.CheckpointAppender)
+		appender, ok := e.events.(checkpointAppender)
 		if !ok {
 			return codedError(turn.ErrorCodeStorageUnavailable, "event store cannot atomically append checkpoints", nil)
 		}
@@ -55,7 +59,7 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *turn.Checkpoint
 		if err != nil {
 			return codedError(turn.ErrorCodeStorageUnavailable, "allocate checkpoint event sequence", err)
 		}
-		event := &store.RuntimeEvent{
+		event := &turn.Event{
 			ID:            eventID,
 			SessionID:     checkpoint.SessionID,
 			Sequence:      sequence,
@@ -69,7 +73,7 @@ func (e *Engine) SaveCheckpoint(ctx context.Context, checkpoint *turn.Checkpoint
 			CreatedAt:     time.Now().UTC(),
 		}
 		if err := appender.AppendCheckpoint(ctx, event); err != nil {
-			if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeEventSequenceConflict {
+			if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeEventSequenceConflict {
 				return codedError(turn.ErrorCodeCheckpointStale, "checkpoint id is already bound to different state", err)
 			}
 			return codedError(turn.ErrorCodeStorageUnavailable, "append checkpoint event", err)

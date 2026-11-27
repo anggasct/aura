@@ -7,13 +7,14 @@ import (
 
 	stdcontext "context"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func recordingService() (*Service, *fakeRegistry, *[]OwnerAction) {
 	registry := newFakeRegistry()
 	actions := &[]OwnerAction{}
-	service, err := NewService(registry, Config{MinConfidence: 0.70, Actions: &recordingSink{actions}})
+	service, err := NewService(registry, ServiceOptions{MinConfidence: 0.70, Actions: &recordingSink{actions}})
 	if err != nil {
 		panic(err)
 	}
@@ -67,7 +68,7 @@ func TestOwnerAcceptCannotDisplaceVerified(t *testing.T) {
 	}
 	if _, err := service.AcceptFact(t.Context(), "owner-1", rival.ID, now); err == nil {
 		t.Fatalf("expected verified-slot refusal")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	winner, _, _ := registry.Get(t.Context(), owner.ID)
@@ -114,14 +115,14 @@ func TestOwnerSetDemotesPriorActive(t *testing.T) {
 func TestOwnerSetScreensSensitive(t *testing.T) {
 	service, _, _ := recordingService()
 	now := time.Now().UTC()
-	scannerService, err := NewService(newFakeRegistry(), Config{MinConfidence: 0.70, Scanner: &stubScanner{secrets: []string{"sk-live-abc"}}})
+	scannerService, err := NewService(newFakeRegistry(), ServiceOptions{MinConfidence: 0.70, Scanner: &stubScanner{secrets: []string{"sk-live-abc"}}})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
 	_ = service
 	if _, err := scannerService.SetFact(t.Context(), "owner-1", "tool", "db password", "hunter2", nil, now); err == nil {
 		t.Errorf("expected trait refusal")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileInvalid {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 	if _, err := scannerService.SetFact(t.Context(), "owner-1", "preference", "api", "key sk-live-abc", nil, now); err == nil {
@@ -141,7 +142,7 @@ func TestOwnerRejectBlocksResurrection(t *testing.T) {
 	}
 	if _, err := service.ProposeFact(t.Context(), "owner-1", "habit", "standup", "async", testEvidence("d1"), now); err == nil {
 		t.Errorf("same-evidence resurrection accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileConflict {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileConflict {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 	reaccepted, err := service.AcceptFact(t.Context(), "owner-1", fact.ID, now)
@@ -341,7 +342,7 @@ func TestDeleteEmitsOwnerAction(t *testing.T) {
 	}
 	if err := service.DeleteFact(t.Context(), "owner-2", fact.ID, now); err == nil {
 		t.Errorf("expected cross-owner delete denial")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileNotFound {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -358,7 +359,7 @@ func TestGetFactEnforcesOwner(t *testing.T) {
 	}
 	if _, err := service.GetFact(t.Context(), "owner-2", fact.ID); err == nil {
 		t.Fatalf("expected cross-owner read denial")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeProfileNotFound {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeProfileNotFound {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -397,7 +398,7 @@ func TestRetrieveUsesCallerClock(t *testing.T) {
 func TestRetrieveVerifiedOnlyStatedKeysAndServeScreen(t *testing.T) {
 	registry := newFakeRegistry()
 	var observed []Observation
-	service, err := NewService(registry, Config{
+	service, err := NewService(registry, ServiceOptions{
 		MinConfidence: 0.70,
 		Scanner:       &stubScanner{secrets: []string{"sk-live-abc123"}},
 		Observer: func(_ stdcontext.Context, observation *Observation) {

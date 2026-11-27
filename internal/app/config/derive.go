@@ -1,7 +1,8 @@
 package config
 
 import (
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/mcp"
+	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
@@ -12,7 +13,11 @@ func deriveDefaults(cfg *Config) {
 	deriveWebSearchCredential(cfg.Tools)
 	if cfg.MCP != nil {
 		for i := range cfg.MCP.Servers {
-			legacyconfig.ApplyMCPServerDefaults(&cfg.MCP.Servers[i])
+			s := &cfg.MCP.Servers[i]
+			if s.Transport == mcp.TransportStreamableHTTP && s.ConnectTimeout == nil {
+				ct := mcp.DefaultConnectTimeout
+				s.ConnectTimeout = &ct
+			}
 		}
 	}
 }
@@ -45,9 +50,9 @@ func deriveModelRoutes(cfg *Config) {
 	}
 }
 
-func deriveWebSearchCredential(tools *legacyconfig.Tools) {
+func deriveWebSearchCredential(tools *Tools) {
 	if tools == nil || !tools.WebSearch.CredentialRef.IsZero() {
 		return
 	}
-	tools.WebSearch.CredentialRef = legacyconfig.DefaultWebSearchCredentialRef(tools.WebSearch.Provider)
+	tools.WebSearch.CredentialRef = search.DefaultCredentialRef(tools.WebSearch.Provider)
 }

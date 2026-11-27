@@ -11,6 +11,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type fakeRunner struct {
@@ -119,26 +122,48 @@ func (s *fakeSessions) ListEvents(ctx context.Context, sessionID string, afterSe
 }
 
 func newConsoleForTest(runner Runner, sess *fakeSessions, in string) (console *Console, out, diag *bytes.Buffer, cancel context.CancelFunc) {
-	out = &bytes.Buffer{}
-	diag = &bytes.Buffer{}
-	_, cancel = context.WithCancel(context.Background())
-	console = NewConsole(runner, sess, PlainRenderer{}, bytes.NewBufferString(in), out, diag, Config{
-		MaxInputBytes:       1000,
-		InMemoryHistory:     100,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
-	return console, out, diag, cancel
+	return newConsoleForTestWithDeps(nil, &Deps{Runner: runner, Sessions: sess}, in)
 }
 
-func newConsolePipeTest(runner Runner, sess *fakeSessions, in io.Reader) (console *Console, out, diag *bytes.Buffer, cancel context.CancelFunc) {
+func newConsoleForTestWithDeps(t *testing.T, base *Deps, in string) (console *Console, out, diag *bytes.Buffer, cancel context.CancelFunc) {
+	if t != nil {
+		t.Helper()
+	}
+	return newConsolePipeTestWithDeps(t, base, bytes.NewBufferString(in))
+}
+
+func newConsolePipeTestWithDeps(t *testing.T, base *Deps, in io.Reader) (console *Console, out, diag *bytes.Buffer, cancel context.CancelFunc) {
+	if t != nil {
+		t.Helper()
+	}
 	out = &bytes.Buffer{}
 	diag = &bytes.Buffer{}
 	_, cancel = context.WithCancel(context.Background())
-	console = NewConsole(runner, sess, PlainRenderer{}, in, out, diag, Config{
-		MaxInputBytes:       1000,
-		InMemoryHistory:     100,
-		SecondInterruptTime: 2 * time.Second,
-	}, "owner")
+	deps := *base
+	if deps.Renderer == nil {
+		deps.Renderer = PlainRenderer{}
+	}
+	deps.In = in
+	deps.Out = out
+	deps.Diag = diag
+	if deps.Config == (Config{}) {
+		deps.Config = Config{
+			MaxInputBytes:       1000,
+			InMemoryHistory:     100,
+			SecondInterruptTime: configkit.Duration(2 * time.Second),
+		}
+	}
+	if deps.Principal == "" {
+		deps.Principal = "owner"
+	}
+	var err error
+	console, err = New(&deps)
+	if err != nil {
+		if t != nil {
+			t.Fatalf("New: %v", err)
+		}
+		panic(err)
+	}
 	return console, out, diag, cancel
 }
 
@@ -312,9 +337,8 @@ func TestSessionSwitchAdoptsSessionPersona(t *testing.T) {
 	sessions := newFakeSessions()
 	sessions.sessions["sess_eng"] = Session{ID: "sess_eng", OwnerID: "owner", AgentID: "engineer"}
 	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
-	console, _, _, cancel := newConsoleForTest(runner, sessions, "/session sess_eng\nprompt\n/new\nafter-new\n")
+	console, _, _, cancel := newConsoleForTestWithDeps(t, &Deps{Runner: runner, Sessions: sessions, AgentID: "main"}, "/session sess_eng\nprompt\n/new\nafter-new\n")
 	defer cancel()
-	console.SetAgentID("main")
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -336,10 +360,8 @@ func TestConfiguredSessionAdoptsSessionPersona(t *testing.T) {
 	sessions := newFakeSessions()
 	sessions.sessions["sess_eng"] = Session{ID: "sess_eng", OwnerID: "owner", AgentID: "engineer"}
 	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
-	console, _, _, cancel := newConsoleForTest(runner, sessions, "prompt\n")
+	console, _, _, cancel := newConsoleForTestWithDeps(t, &Deps{Runner: runner, Sessions: sessions, SessionID: "sess_eng", AgentID: "main"}, "prompt\n")
 	defer cancel()
-	console.SetSessionID("sess_eng")
-	console.SetAgentID("main")
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -352,9 +374,8 @@ func TestConfiguredSessionIsUsed(t *testing.T) {
 	sessions := newFakeSessions()
 	sessions.sessions["sess_resume"] = Session{ID: "sess_resume", OwnerID: "owner"}
 	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
-	console, _, _, cancel := newConsoleForTest(runner, sessions, "prompt\n")
+	console, _, _, cancel := newConsoleForTestWithDeps(t, &Deps{Runner: runner, Sessions: sessions, SessionID: "sess_resume"}, "prompt\n")
 	defer cancel()
-	console.SetSessionID("sess_resume")
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -398,11 +419,10 @@ func TestSecondInterruptWithinWindowEscalates(t *testing.T) {
 		return []Event{{Kind: "turn.completed"}}
 	}}
 	pr, pw := io.Pipe()
-	console, _, _, cancel := newConsolePipeTest(runner, newFakeSessions(), pr)
+	interrupts := make(chan struct{}, 2)
+	console, _, _, cancel := newConsolePipeTestWithDeps(t, &Deps{Runner: runner, Sessions: newFakeSessions(), Interrupts: interrupts}, pr)
 	defer cancel()
 	defer func() { _ = pw.Close() }()
-	interrupts := make(chan struct{}, 2)
-	console.SetInterrupts(interrupts)
 
 	done := make(chan error, 1)
 	go func() { done <- console.Run(context.Background()) }()
@@ -413,6 +433,37 @@ func TestSecondInterruptWithinWindowEscalates(t *testing.T) {
 	}
 }
 
+func TestRunWithInterruptsEscalatesOnSecondInterrupt(t *testing.T) {
+	runner := &fakeRunner{eventsFor: func(string) []Event {
+		return []Event{{Kind: "turn.completed"}}
+	}}
+	pr, pw := io.Pipe()
+	console, _, _, _ := newConsolePipeTestWithDeps(t, &Deps{
+		Runner:     runner,
+		Sessions:   newFakeSessions(),
+		CloseInput: func() { _ = pr.Close() },
+	}, pr)
+	defer func() { _ = pw.Close() }()
+	interrupts := make(chan struct{}, 2)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- console.RunWithInterrupts(ctx, interrupts) }()
+	interrupts <- struct{}{}
+	interrupts <- struct{}{}
+	select {
+	case err := <-done:
+		if !errors.Is(err, ErrInterrupted) {
+			t.Fatalf("RunWithInterrupts = %v, want ErrInterrupted", err)
+		}
+	case <-time.After(time.Second):
+		cancel()
+		<-done
+		t.Fatal("RunWithInterrupts did not escalate on second interrupt")
+	}
+}
+
 func TestClosedInterruptSourceStopsWatcher(t *testing.T) {
 	interrupts := make(chan struct{})
 	close(interrupts)
@@ -420,11 +471,11 @@ func TestClosedInterruptSourceStopsWatcher(t *testing.T) {
 		interrupts: interrupts,
 		escalated:  make(chan struct{}, 1),
 		now:        time.Now,
-		config:     Config{SecondInterruptTime: time.Hour},
+		config:     Config{SecondInterruptTime: configkit.Duration(time.Hour)},
 	}
 	done := make(chan struct{})
 	go func() {
-		c.watchInterrupts(context.Background())
+		c.watchInterrupts(context.Background(), interrupts)
 		close(done)
 	}()
 	select {
@@ -444,10 +495,9 @@ func TestFirstInterruptCancelsActiveTurnOnly(t *testing.T) {
 		return []Event{{Kind: "model.delta", Payload: delta("thinking")}, {Kind: "turn.completed"}}
 	}}
 	pr, pw := io.Pipe()
-	console, _, _, cancel := newConsolePipeTest(runner, newFakeSessions(), pr)
-	defer cancel()
 	interrupts := make(chan struct{}, 2)
-	console.SetInterrupts(interrupts)
+	console, _, _, cancel := newConsolePipeTestWithDeps(t, &Deps{Runner: runner, Sessions: newFakeSessions(), Interrupts: interrupts}, pr)
+	defer cancel()
 
 	done := make(chan error, 1)
 	go func() {
@@ -471,11 +521,23 @@ func TestFirstInterruptCancelsActiveTurnOnly(t *testing.T) {
 
 func TestOverlongLineRejected(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
-	config := Config{MaxInputBytes: 5, InMemoryHistory: 100, SecondInterruptTime: time.Second}
+	config := Config{MaxInputBytes: 5, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)}
 	out := &bytes.Buffer{}
 	diag := &bytes.Buffer{}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("toolong\n"), out, diag, config, "owner")
-	err := console.Run(context.Background())
+	console, err := New(&Deps{
+		Runner:    runner,
+		Sessions:  newFakeSessions(),
+		Renderer:  PlainRenderer{},
+		In:        bytes.NewBufferString("toolong\n"),
+		Out:       out,
+		Diag:      diag,
+		Config:    config,
+		Principal: "owner",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	err = console.Run(context.Background())
 	if err == nil {
 		t.Fatal("expected overlong-line error")
 	}
@@ -483,8 +545,20 @@ func TestOverlongLineRejected(t *testing.T) {
 
 func TestOverlongUnterminatedLineRejected(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event { return []Event{{Kind: "turn.completed"}} }}
-	config := Config{MaxInputBytes: 5, InMemoryHistory: 100, SecondInterruptTime: time.Second}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("123456"), &bytes.Buffer{}, &bytes.Buffer{}, config, "owner")
+	config := Config{MaxInputBytes: 5, InMemoryHistory: 100, SecondInterruptTime: configkit.Duration(time.Second)}
+	console, err := New(&Deps{
+		Runner:    runner,
+		Sessions:  newFakeSessions(),
+		Renderer:  PlainRenderer{},
+		In:        bytes.NewBufferString("123456"),
+		Out:       &bytes.Buffer{},
+		Diag:      &bytes.Buffer{},
+		Config:    config,
+		Principal: "owner",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if err := console.Run(context.Background()); err == nil {
 		t.Fatal("expected overlong-line error")
 	}
@@ -492,10 +566,13 @@ func TestOverlongUnterminatedLineRejected(t *testing.T) {
 
 func TestCancellationStopsCloseableReader(t *testing.T) {
 	pr, pw := io.Pipe()
-	console, _, _, _ := newConsolePipeTest(&fakeRunner{eventsFor: func(string) []Event {
-		return []Event{{Kind: "turn.completed"}}
-	}}, newFakeSessions(), pr)
-	console.SetInputCloser(func() { _ = pr.Close() })
+	console, _, _, _ := newConsolePipeTestWithDeps(t, &Deps{
+		Runner: &fakeRunner{eventsFor: func(string) []Event {
+			return []Event{{Kind: "turn.completed"}}
+		}},
+		Sessions:   newFakeSessions(),
+		CloseInput: func() { _ = pr.Close() },
+	}, pr)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan error, 1)
 	go func() { done <- console.Run(ctx) }()
@@ -523,12 +600,24 @@ func (r *closeTrackingReader) Close() error {
 
 func TestRunDoesNotCloseCallerReader(t *testing.T) {
 	reader := &closeTrackingReader{Reader: bytes.NewReader(nil)}
-	console := NewConsole(&fakeRunner{eventsFor: func(string) []Event {
-		return []Event{{Kind: "turn.completed"}}
-	}}, newFakeSessions(), PlainRenderer{}, reader, &bytes.Buffer{}, &bytes.Buffer{}, Config{
-		MaxInputBytes:       100,
-		SecondInterruptTime: time.Second,
-	}, "owner")
+	console, err := New(&Deps{
+		Runner: &fakeRunner{eventsFor: func(string) []Event {
+			return []Event{{Kind: "turn.completed"}}
+		}},
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       reader,
+		Out:      &bytes.Buffer{},
+		Diag:     &bytes.Buffer{},
+		Config: Config{
+			MaxInputBytes:       100,
+			SecondInterruptTime: configkit.Duration(time.Second),
+		},
+		Principal: "owner",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if err := console.Run(context.Background()); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -629,12 +718,58 @@ func TestOutputWriteFailureIsReturned(t *testing.T) {
 	runner := &fakeRunner{eventsFor: func(string) []Event {
 		return []Event{{Kind: "model.delta", Payload: delta("reply")}, {Kind: "turn.completed"}}
 	}}
-	console := NewConsole(runner, newFakeSessions(), PlainRenderer{}, bytes.NewBufferString("prompt\n"), failingWriter{}, &bytes.Buffer{}, Config{
-		MaxInputBytes:       100,
-		SecondInterruptTime: time.Second,
-	}, "owner")
+	console, err := New(&Deps{
+		Runner:   runner,
+		Sessions: newFakeSessions(),
+		Renderer: PlainRenderer{},
+		In:       bytes.NewBufferString("prompt\n"),
+		Out:      failingWriter{},
+		Diag:     &bytes.Buffer{},
+		Config: Config{
+			MaxInputBytes:       100,
+			SecondInterruptTime: configkit.Duration(time.Second),
+		},
+		Principal: "owner",
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	if err := console.Run(context.Background()); err == nil {
 		t.Fatal("expected output write error")
+	}
+}
+
+func TestTerminalNewRefusesMissingRequiredDeps(t *testing.T) {
+	valid := func() Deps {
+		return Deps{
+			Runner:   &fakeRunner{eventsFor: func(string) []Event { return nil }},
+			Sessions: newFakeSessions(),
+			In:       bytes.NewBufferString(""),
+			Out:      &bytes.Buffer{},
+			Diag:     &bytes.Buffer{},
+		}
+	}
+	if _, err := New(nil); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("New(nil) = %v, want invalid_argument", err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*Deps)
+	}{
+		{"nil runner", func(d *Deps) { d.Runner = nil }},
+		{"nil sessions", func(d *Deps) { d.Sessions = nil }},
+		{"nil in", func(d *Deps) { d.In = nil }},
+		{"nil out", func(d *Deps) { d.Out = nil }},
+		{"nil diag", func(d *Deps) { d.Diag = nil }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			d := valid()
+			tc.mutate(&d)
+			if _, err := New(&d); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+				t.Errorf("New(%s) = %v, want invalid_argument", tc.name, err)
+			}
+		})
 	}
 }
 

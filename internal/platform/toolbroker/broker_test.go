@@ -29,8 +29,22 @@ func brokerRequest(name, arguments string, capabilities ...string) *ToolRequest 
 	}
 }
 
+func TestNewBrokerStartsEmpty(t *testing.T) {
+	broker, err := New(&Options{})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	if got := len(broker.Definitions()); got != 0 {
+		t.Fatalf("Definitions = %d, want 0", got)
+	}
+	policy := broker.Policy()
+	if policy.Version != "builtin-tools-v1" || len(policy.Rules) != 0 {
+		t.Fatalf("Policy = %+v, want version builtin-tools-v1 with no rules", policy)
+	}
+}
+
 func TestBrokerExposesAllBuiltins(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -41,7 +55,7 @@ func TestBrokerExposesAllBuiltins(t *testing.T) {
 
 func TestBrokerRejectsUnknownArgumentsBeforeAdapter(t *testing.T) {
 	calls := 0
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 		"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			calls++
 			return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
@@ -60,7 +74,7 @@ func TestBrokerRejectsUnknownArgumentsBeforeAdapter(t *testing.T) {
 }
 
 func TestBrokerReportsMissingExecCapability(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 		"exec@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			t.Fatal("exec adapter reached without exec-linux capability")
 			return ToolResult{}, nil
@@ -77,7 +91,7 @@ func TestBrokerReportsMissingExecCapability(t *testing.T) {
 
 func TestBrokerObserverReceivesMetadataOnly(t *testing.T) {
 	var observations []Observation
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Adapters: map[string]Adapter{
 			"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 				return ToolResult{Output: json.RawMessage(`{"content":"untrusted"}`)}, nil
@@ -98,7 +112,7 @@ func TestBrokerObserverReceivesMetadataOnly(t *testing.T) {
 }
 
 func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1": func(_ context.Context, request *ToolRequest, _ approval.Constraints) (ToolResult, error) {
@@ -144,7 +158,7 @@ func classOf(err error) ResultClass {
 }
 
 func TestBrokerRegisterAndUnregisterTool(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -211,7 +225,7 @@ func TestBrokerRunsTheToolArgumentCheckBeforeAnyEffect(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			calls, checked := 0, 0
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t),
 				Adapters: map[string]Adapter{"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 					calls++
@@ -244,7 +258,7 @@ func TestBrokerRunsTheToolArgumentCheckBeforeAnyEffect(t *testing.T) {
 
 func TestBrokerSkipsTheArgumentCheckOfOtherTools(t *testing.T) {
 	checked := 0
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t),
 		Adapters: map[string]Adapter{"read_file@v1": func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error) {
 			return ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
@@ -263,7 +277,7 @@ func TestBrokerSkipsTheArgumentCheckOfOtherTools(t *testing.T) {
 }
 
 func TestBrokerDefinitionReturnsACopy(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t)})
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -293,7 +307,7 @@ func TestBrokerDefinitionReturnsACopy(t *testing.T) {
 }
 
 func TestGrantUntilExpiresAtTheGivenTime(t *testing.T) {
-	broker, err := New(&Options{HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t)})
+	broker, err := newFixtureBrokerOrErr(t, &Options{HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

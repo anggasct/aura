@@ -5,7 +5,6 @@ package app
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,14 +13,14 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type githubHarness struct {
@@ -39,7 +38,7 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	if err := os.MkdirAll(cfg.Tools.Workspace, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	cfg.Agents = &auraagent.Config{Definitions: []auraagent.Persona{{
 		ID: "ops", Description: "operator", Instructions: "You plan work.", Tools: []string{"github_comment", "workflow_propose"},
 	}}}
@@ -51,19 +50,21 @@ func githubProposalFixture(t *testing.T) *githubHarness {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.controller.interpreter.LoadAll(t.Context(), nil, deps); err != nil {
+	if err := h.interpreter.LoadAll(t.Context(), nil, deps); err != nil {
 		t.Fatal(err)
 	}
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, &cfg), db: h.db, artifactRoot: filepath.Join(dir, "artifacts"), logger: slog.New(slog.DiscardHandler),
 		wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	h.controller.registry = registry
+	registerGitHubModule(t, executor, &cfg)
+	h.registry = registry
 	h.cfg = &cfg
-	h.controller.enableCallDisplay(executor.Broker().ExactCallText)
+	h.showCall = executor.Broker().ExactCallText
+	h.rebuildController(t)
 	h.secrets = executor.Broker().RegisterSecret
 	return h
 }
@@ -101,8 +102,7 @@ func TestProposalPlanUsesTheToolsApprovalDisplay(t *testing.T) {
 	t.Run("a call that does not fit the display is refused at propose time", func(t *testing.T) {
 		h := githubProposalFixture(t)
 		_, err := h.controller.Propose(t.Context(), h.owner, commentProposal(t, strings.Repeat("x", 2000)))
-		var rejection *toolsbuiltin.WorkflowRejection
-		if !errors.As(err, &rejection) || rejection.Code != string(workflow.ErrorCodePlanUnshowable) || !strings.Contains(rejection.Detail, `step "comment"`) {
+		if !fault.HasCode(err, workflow.ErrorCodePlanUnshowable) || !strings.Contains(err.Error(), `step "comment"`) {
 			t.Fatalf("Propose = %v, want a %s rejection naming the step", err, workflow.ErrorCodePlanUnshowable)
 		}
 		if got := proposalCount(t, h.runs); got != 0 {
@@ -130,63 +130,63 @@ func TestApprovalBindsToTheStoredPlanText(t *testing.T) {
 	t.Run("the card path approves the plan it showed", func(t *testing.T) {
 		h := githubProposalFixture(t)
 		proposal := approved(t, h, "looks good")
-		runID, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, h.controller.showCall, time.Now())
+		runID, err := workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposal.ID, h.showCall, time.Now())
 		if err != nil || runID == "" {
-			t.Fatalf("approveRenderedProposal = %q, %v, want a run", runID, err)
+			t.Fatalf("ApproveRenderedProposal = %q, %v, want a run", runID, err)
 		}
 	})
 	t.Run("the card path refuses a plan that renders differently now", func(t *testing.T) {
 		h := githubProposalFixture(t)
 		proposal := approved(t, h, "looks good")
 		h.secrets("looks")
-		_, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, h.controller.showCall, time.Now())
+		_, err := workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposal.ID, h.showCall, time.Now())
 		if !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
-			t.Fatalf("approveRenderedProposal after a new secret = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
+			t.Fatalf("ApproveRenderedProposal after a new secret = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
 		}
 	})
 	t.Run("the card path refuses without a renderer", func(t *testing.T) {
 		h := githubProposalFixture(t)
 		proposal := approved(t, h, "looks good")
-		_, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, nil, time.Now())
+		_, err := workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposal.ID, nil, time.Now())
 		if !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
-			t.Fatalf("approveRenderedProposal without a renderer = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
+			t.Fatalf("ApproveRenderedProposal without a renderer = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
 		}
 	})
 	t.Run("the command path refuses step arguments that hold a configured secret", func(t *testing.T) {
 		h := githubProposalFixture(t)
 		proposal := approved(t, h, "token tok-4471")
-		_, err := approveStoredProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, []string{"tok-4471"}, time.Now())
+		_, err := workflow.ApproveStoredProposal(t.Context(), h.interpreter, h.runs, proposal.ID, []string{"tok-4471"}, time.Now())
 		if !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
-			t.Fatalf("approveStoredProposal with a configured secret in the arguments = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
+			t.Fatalf("ApproveStoredProposal with a configured secret in the arguments = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
 		}
-		runID, err := approveStoredProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, []string{"unrelated-secret"}, time.Now())
+		runID, err := workflow.ApproveStoredProposal(t.Context(), h.interpreter, h.runs, proposal.ID, []string{"unrelated-secret"}, time.Now())
 		if err != nil || runID == "" {
-			t.Fatalf("approveStoredProposal without a held secret = %q, %v, want a run", runID, err)
+			t.Fatalf("ApproveStoredProposal without a held secret = %q, %v, want a run", runID, err)
 		}
 	})
 	t.Run("a proposal without a stored plan is refused on both paths", func(t *testing.T) {
 		h := githubProposalFixture(t)
 		proposal := unplannedProposal(t, h.runs, h.db)
-		if _, err := approveRenderedProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, h.controller.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
-			t.Fatalf("approveRenderedProposal of an unplanned proposal = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
+		if _, err := workflow.ApproveRenderedProposal(t.Context(), h.interpreter, h.runs, proposal.ID, h.showCall, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
+			t.Fatalf("ApproveRenderedProposal of an unplanned proposal = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
 		}
-		if _, err := approveStoredProposal(t.Context(), h.cfg, h.controller.interpreter, h.runs, proposal.ID, nil, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
-			t.Fatalf("approveStoredProposal of an unplanned proposal = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
+		if _, err := workflow.ApproveStoredProposal(t.Context(), h.interpreter, h.runs, proposal.ID, nil, time.Now()); !hasWorkflowCode(err, workflow.ErrorCodePlanUnshowable) {
+			t.Fatalf("ApproveStoredProposal of an unplanned proposal = %v, want %s", err, workflow.ErrorCodePlanUnshowable)
 		}
 	})
 	t.Run("proposal show prints the stored plan byte for byte", func(t *testing.T) {
 		gf := writeWorkflowFixtures(t, validWorkflowYAML)
-		db := openAccessDB(t, gf.configPath)
+		db := openAccessDB(t, gf.ConfigPath)
 		const plan = "1. approve — wait for owner approval\n2. write — run tool write_file (after approve)\n    path: note.md\n    content: [redacted]"
-		planned := unplannedProposal(t, workflow.NewStore(db), db, plan)
+		planned := unplannedProposal(t, mustWorkflowStore(t, db), db, plan)
 		out, err := runWorkflowCommand(t, gf, "proposal", "show", planned.ID)
 		if err != nil || !strings.HasSuffix(strings.TrimRight(out, "\n"), plan) {
 			t.Fatalf("proposal show = %q, %v, want the stored plan %q", out, err, plan)
 		}
-		unplanned := unplannedProposal(t, workflow.NewStore(db), db)
+		unplanned := unplannedProposal(t, mustWorkflowStore(t, db), db)
 		out, err = runWorkflowCommand(t, gf, "proposal", "show", unplanned.ID)
-		if err != nil || !strings.Contains(out, planNotStoredLine) {
-			t.Fatalf("proposal show without a stored plan = %q, %v, want %q", out, err, planNotStoredLine)
+		if err != nil || !strings.Contains(out, "plan: not stored; this proposal predates plan storage; propose it again") {
+			t.Fatalf("proposal show without a stored plan = %q, %v", out, err)
 		}
 	})
 }
@@ -213,7 +213,7 @@ func unplannedProposal(t *testing.T, runs *workflow.Store, db *sql.DB, plan ...s
 		ID: workflow.NewProposalID(), SessionID: "ops/terminal:" + spec.ID, AgentID: "ops", PrincipalID: principal.OwnerID,
 		Spec: spec, PlanText: strings.Join(plan, ""), Digest: digest, CreatedAt: time.Now().UTC(),
 	}
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: proposal.SessionID, OwnerID: principal.OwnerID, Metadata: []byte(`{}`), CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC()}); err != nil {
 		t.Fatal(err)
 	}
 	if err := runs.CreateProposal(t.Context(), proposal); err != nil {

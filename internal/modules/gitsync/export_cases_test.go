@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func exportRootsFor(source *memSource) map[string]string {
@@ -108,7 +110,7 @@ func TestExportRootsRejects(t *testing.T) {
 			if err == nil {
 				t.Fatal("export must fail")
 			}
-			if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+			if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 				t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 			}
 		})
@@ -163,7 +165,7 @@ func TestExportSameSizeFlipFails(t *testing.T) {
 	if err == nil {
 		t.Fatal("same-length concurrent write must fail export")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 }
@@ -182,7 +184,7 @@ func TestExportFileCountBound(t *testing.T) {
 	if err == nil {
 		t.Fatal("one file over the bound must fail")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 }
@@ -203,7 +205,7 @@ func TestExportFileCountBoundTotalAcrossRoots(t *testing.T) {
 	if err == nil {
 		t.Fatal("total one file over the bound must fail")
 	}
-	if code, ok := CodeOf(err); !ok || code != ErrorCodePathDenied {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodePathDenied {
 		t.Fatalf("code = %v,%v want sync_path_denied", code, ok)
 	}
 }

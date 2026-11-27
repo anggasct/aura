@@ -3,6 +3,7 @@
 package app
 
 import (
+	"github.com/anggasct/aura/internal/platform/fault"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,7 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
@@ -20,7 +21,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 	if err := os.MkdirAll(workspace, 0o700); err != nil {
 		t.Fatalf("mkdir workspace: %v", err)
 	}
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -61,7 +62,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		call := callAs("run-ceiling")
 		call.StepID = "step-2"
 		_, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("after"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
 			t.Fatalf("Invoke = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
 		}
 		if got := len(probe.seen()); got != 0 {
@@ -74,7 +75,7 @@ func TestWorkflowStepOutsideTheCeilingIsRefused(t *testing.T) {
 		call := callAs("run-ceiling")
 		call.StepID = "step-3"
 		_, err := runner.Invoke(stepContextFor(t, db, call), probeTool, probeArgs("gone"))
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodePersonaMissing {
+		if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodePersonaMissing {
 			t.Fatalf("Invoke = %v, want %s", err, workflow.ErrorCodePersonaMissing)
 		}
 		if got := len(probe.seen()); got != 0 {

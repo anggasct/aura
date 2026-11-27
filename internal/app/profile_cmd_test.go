@@ -2,7 +2,6 @@ package app
 
 import (
 	"bytes"
-	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -10,8 +9,10 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeProfileCLIConfig(t *testing.T) string {
@@ -45,11 +46,13 @@ func writeFileForTest(path, content string) error {
 
 func runProfileCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
-	gf := &globalFlags{configPath: cfg}
-	cmd := newProfileCmd(gf)
+	restoreDefaultLogger(t)
+	gf := &GlobalFlags{ConfigPath: cfg}
+	cmd := profile.Commands(profileOpener(gf))[0]
 	out := &bytes.Buffer{}
+	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(out)
+	cmd.SetErr(errOut)
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -113,11 +116,8 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 	out, err = runProfileCommand(t, cfg, "delete", id)
 	if err == nil {
 		t.Errorf("delete guard = %q, want usage error", out)
-	} else {
-		var ue *usageError
-		if !errors.As(err, &ue) {
-			t.Errorf("delete guard err = %v (%q), want usage error", err, out)
-		}
+	} else if !command.IsUsageError(err) {
+		t.Errorf("delete guard err = %v (%q), want usage error", err, out)
 	}
 	out, err = runProfileCommand(t, cfg, "delete", id, "--force")
 	if err != nil || strings.TrimSpace(out) != "deleted: "+id {
@@ -136,20 +136,24 @@ func seedProfileCandidate(t *testing.T, cfg string) string {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-prof", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-prof", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	events := store.NewEventStore(db)
-	if _, err := events.AppendSequenced(t.Context(), "sess-prof", &store.RuntimeEvent{
+	events := turnstore.NewEventStore(db)
+	if _, err := events.AppendSequenced(t.Context(), "sess-prof", &turn.Event{
 		ID: "evt-prof-1", SessionID: "sess-prof", TurnID: "t1", InvocationID: "inv-1",
 		Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 		Payload: []byte(`{"text":"i use neovim"}`), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("AppendSequenced: %v", err)
 	}
-	service, err := profile.NewService(newProfileRegistry(db), profile.Config{MinConfidence: 0.99})
+	store, err := profile.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	service, err := profile.NewService(store, profile.ServiceOptions{MinConfidence: 0.99})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -174,20 +178,24 @@ func seedProfileConflictingCandidate(t *testing.T, cfg string) string {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-conf", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-conf", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	events := store.NewEventStore(db)
-	if _, err := events.AppendSequenced(t.Context(), "sess-conf", &store.RuntimeEvent{
+	events := turnstore.NewEventStore(db)
+	if _, err := events.AppendSequenced(t.Context(), "sess-conf", &turn.Event{
 		ID: "evt-conf-1", SessionID: "sess-conf", TurnID: "t1", InvocationID: "inv-1",
 		Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 		Payload: []byte(`{"text":"switching to rust"}`), CreatedAt: now,
 	}); err != nil {
 		t.Fatalf("AppendSequenced: %v", err)
 	}
-	service, err := profile.NewService(newProfileRegistry(db), profile.Config{MinConfidence: 0.99})
+	store, err := profile.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	service, err := profile.NewService(store, profile.ServiceOptions{MinConfidence: 0.99})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -259,7 +267,10 @@ func TestProfileActionSinkRecordsEvents(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	sink := newProfileActionSink(db, principal.OwnerID)
+	sink, err := profile.NewActionSink(turnstore.NewSessionService(db), turnstore.NewEventStore(db))
+	if err != nil {
+		t.Fatalf("NewActionSink: %v", err)
+	}
 	action := &profile.OwnerAction{OwnerID: principal.OwnerID, FactID: "pf-1", Action: "accept", Category: "tool", Key: "editor", At: time.Now().UTC()}
 	if err := sink.RecordOwnerAction(t.Context(), action); err != nil {
 		t.Fatalf("RecordOwnerAction: %v", err)

@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"math"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const DefaultTerminalRetention = 30 * 24 * time.Hour
@@ -19,46 +21,46 @@ func (j *Journal) Prune(ctx context.Context, before time.Time) (RetentionReport,
 	if before.IsZero() {
 		return RetentionReport{}, codedError(ErrorCodeInvalidArgument, "effect: retention cutoff must not be zero", nil)
 	}
-	tx, err := j.db.BeginTx(ctx, nil)
+	var report RetentionReport
+	err := sqlite.RunInTx(ctx, j.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, j.db)
+		var preserved int64
+		if err := q.QueryRowContext(ctx, `
+			SELECT COUNT(*)
+			FROM effect_intent i
+			WHERE i.state IN (?, ?)
+			  AND i.finished_at IS NOT NULL
+			  AND i.finished_at < ?
+			  AND EXISTS (SELECT 1 FROM effect_approval a WHERE a.intent_id = i.id)`,
+			string(StateSucceeded), string(StateFailed), fmtTime(before.UTC()),
+		).Scan(&preserved); err != nil {
+			return fmt.Errorf("effect: count retained audits: %w", err)
+		}
+		result, err := q.ExecContext(ctx, `
+			DELETE FROM effect_intent
+			WHERE state IN (?, ?)
+			  AND finished_at IS NOT NULL
+			  AND finished_at < ?
+			  AND NOT EXISTS (SELECT 1 FROM effect_approval a WHERE a.intent_id = effect_intent.id)`,
+			string(StateSucceeded), string(StateFailed), fmtTime(before.UTC()),
+		)
+		if err != nil {
+			return fmt.Errorf("effect: prune terminal intents: %w", err)
+		}
+		deleted, err := result.RowsAffected()
+		if err != nil {
+			return fmt.Errorf("effect: read pruned intents: %w", err)
+		}
+		if deleted > math.MaxInt || preserved > math.MaxInt {
+			return errors.New("effect: retention report exceeds host integer range")
+		}
+		report = RetentionReport{Deleted: int(deleted), PreservedAudits: int(preserved)}
+		return nil
+	})
 	if err != nil {
-		return RetentionReport{}, fmt.Errorf("effect: begin retention: %w", err)
+		return RetentionReport{}, err
 	}
-	defer func() { _ = tx.Rollback() }()
-
-	var preserved int64
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*)
-		FROM effect_intent i
-		WHERE i.state IN (?, ?)
-		  AND i.finished_at IS NOT NULL
-		  AND i.finished_at < ?
-		  AND EXISTS (SELECT 1 FROM effect_approval a WHERE a.intent_id = i.id)`,
-		string(StateSucceeded), string(StateFailed), fmtTime(before.UTC()),
-	).Scan(&preserved); err != nil {
-		return RetentionReport{}, fmt.Errorf("effect: count retained audits: %w", err)
-	}
-	result, err := tx.ExecContext(ctx, `
-		DELETE FROM effect_intent
-		WHERE state IN (?, ?)
-		  AND finished_at IS NOT NULL
-		  AND finished_at < ?
-		  AND NOT EXISTS (SELECT 1 FROM effect_approval a WHERE a.intent_id = effect_intent.id)`,
-		string(StateSucceeded), string(StateFailed), fmtTime(before.UTC()),
-	)
-	if err != nil {
-		return RetentionReport{}, fmt.Errorf("effect: prune terminal intents: %w", err)
-	}
-	deleted, err := result.RowsAffected()
-	if err != nil {
-		return RetentionReport{}, fmt.Errorf("effect: read pruned intents: %w", err)
-	}
-	if deleted > math.MaxInt || preserved > math.MaxInt {
-		return RetentionReport{}, errors.New("effect: retention report exceeds host integer range")
-	}
-	if err := tx.Commit(); err != nil {
-		return RetentionReport{}, fmt.Errorf("effect: commit retention: %w", err)
-	}
-	return RetentionReport{Deleted: int(deleted), PreservedAudits: int(preserved)}, nil
+	return report, nil
 }
 
 type Status struct {
@@ -67,7 +69,7 @@ type Status struct {
 }
 
 func (j *Journal) Status(ctx context.Context) (Status, error) {
-	rows, err := j.db.QueryContext(ctx, `
+	rows, err := sqlite.Conn(ctx, j.db).QueryContext(ctx, `
 		SELECT state, COUNT(*), MIN(updated_at)
 		FROM effect_intent
 		GROUP BY state`)

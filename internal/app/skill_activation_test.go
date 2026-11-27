@@ -13,18 +13,19 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/modules/skills"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/adk"
 	"github.com/anggasct/aura/internal/platform/turn/engine"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/agent"
 	adkmodel "google.golang.org/adk/v2/model"
@@ -95,15 +96,15 @@ func (r skillRequest) joined() string { return strings.Join(r.texts, "\n") }
 
 type skillHarness struct {
 	db      *sql.DB
-	runtime *skillRuntime
+	module  *skills.Module
 	engine  *runtimeengine.Engine
 	model   *skillCapturingModel
 	skillID string
 }
 
-func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills) *skillHarness {
+func newSkillHarness(t *testing.T, bodies map[string]string, cfg *skills.Config) *skillHarness {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	root := t.TempDir()
 	for name, body := range bodies {
 		dir := filepath.Join(root, name)
@@ -116,17 +117,25 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 		}
 	}
 	cfg.Enabled, cfg.Roots = true, []string{root}
-	rt, err := buildSkillRuntime(t.Context(), cfg, db, nil)
+	mod, err := skills.New(t.Context(), &skills.ModuleDeps{
+		Config:      cfg,
+		DB:          db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(db)},
+	})
 	if err != nil {
-		t.Fatalf("buildSkillRuntime: %v", err)
+		t.Fatalf("skills.New: %v", err)
 	}
-	records, err := (&skillStoreRegistry{inner: store.NewSkillStore(db)}).ListAll(t.Context(), 16)
+	skillStore, err := skills.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("new skill store: %v", err)
+	}
+	records, err := skillStore.ListAll(t.Context(), 16)
 	if err != nil {
 		t.Fatalf("list skills: %v", err)
 	}
-	h := &skillHarness{db: db, runtime: rt, model: &skillCapturingModel{}}
+	h := &skillHarness{db: db, module: mod, model: &skillCapturingModel{}}
 	for i := range records {
-		if _, err := rt.engine.Accept(t.Context(), records[i].ID, records[i].Digest, nil); err != nil {
+		if _, err := mod.Engine().Accept(t.Context(), records[i].ID, records[i].Digest, nil); err != nil {
 			t.Fatalf("accept %s: %v", records[i].Name, err)
 		}
 		if records[i].Name == "review-pr" {
@@ -141,17 +150,17 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 	if err != nil {
 		t.Fatalf("tool: %v", err)
 	}
-	sessions, events := store.NewSessionService(db), store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminalBroker{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
-		runtimeadk.WithSkillContext(rt.context))
+	sessions, events := turnstore.NewSessionService(db), turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: h.model}, sessions, terminal.DenyPolicy{}, []tool.Tool{sampleTool}, slog.New(slog.DiscardHandler),
+		runtimeadk.WithContextProvider(mod))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: store.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: rt.context, LiveEvents: turn.NewEventBus(nil)})
+	h.engine, err = runtimeengine.New(&runtimeengine.Deps{Events: events, Dedupe: turnstore.NewDedupeStore(db), Executor: executor, Config: engineLimits(2, 4), Skills: mod.Renderer(), LiveEvents: turn.NewEventBus(nil)})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess_skill", OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`)}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess_skill", OwnerID: principal.OwnerID, Metadata: json.RawMessage(`{}`)}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	return h
@@ -159,7 +168,7 @@ func newSkillHarness(t *testing.T, bodies map[string]string, cfg *config.Skills)
 
 func (h *skillHarness) pin(t *testing.T, name string) *command.SkillPin {
 	t.Helper()
-	pin, err := h.runtime.bridge.Activate(t.Context(), name)
+	pin, err := h.module.ChatCommands().Activate(t.Context(), name)
 	if err != nil {
 		t.Fatalf("activate %s: %v", name, err)
 	}
@@ -190,15 +199,15 @@ func (h *skillHarness) turn(t *testing.T, text string, class principal.Class, pi
 
 func (h *skillHarness) activations(t *testing.T) []turn.SkillActivation {
 	t.Helper()
-	activations, err := (&skillActivationLog{events: store.NewEventKindReader(h.db)}).Activations(t.Context(), "sess_skill", 16)
+	activations, err := (&skillActivationLog{events: turnstore.NewEventKindReader(h.db)}).Activations(t.Context(), "sess_skill", 16)
 	if err != nil {
 		t.Fatalf("activations: %v", err)
 	}
 	return activations
 }
 
-func defaultSkillConfig() *config.Skills {
-	return &config.Skills{MaxIndexedSkills: 16, MaxInstructionTokens: 100, MaxSessionContextTokens: 300, MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1)}
+func defaultSkillConfig() *skills.Config {
+	return &skills.Config{MaxIndexedSkills: 16, MaxInstructionTokens: 100, MaxSessionContextTokens: 300, MaxResourceBytes: 8388608, QuarantineRetention: configkit.Duration(1)}
 }
 
 func TestSkillActivationReachesTheModelAndPersistsInTheSession(t *testing.T) {
@@ -244,14 +253,14 @@ func TestSkillActivationReachesTheModelAndPersistsInTheSession(t *testing.T) {
 		t.Fatal("skill block reached a non-owner turn")
 	}
 
-	if err := h.runtime.engine.Disable(t.Context(), h.skillID); err != nil {
+	if err := h.module.Engine().Disable(t.Context(), h.skillID); err != nil {
 		t.Fatalf("disable: %v", err)
 	}
 	h.turn(t, "after quarantine", principal.ClassOwner, nil)
 	if after := h.model.last(t); strings.Contains(after.joined(), skillBodyMarker) {
 		t.Fatalf("disabled skill still injected:\n%s", after.joined())
 	}
-	if _, err := h.runtime.bridge.Activate(t.Context(), "review-pr"); err == nil {
+	if _, err := h.module.ChatCommands().Activate(t.Context(), "review-pr"); err == nil {
 		t.Fatal("disabled skill activated")
 	}
 }
@@ -278,12 +287,16 @@ func TestSkillSessionBudgetEvictsTheOldestActivation(t *testing.T) {
 }
 
 func TestBuildSkillRuntimeRejectsASessionBoundBelowOneActivation(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	cfg := defaultSkillConfig()
 	cfg.Enabled, cfg.Roots, cfg.MaxSessionContextTokens = true, []string{t.TempDir()}, 99
-	if _, err := buildSkillRuntime(t.Context(), cfg, db, nil); err == nil {
+	if _, err := skills.New(t.Context(), &skills.ModuleDeps{
+		Config:      cfg,
+		DB:          db,
+		Activations: &skillActivationLog{events: turnstore.NewEventKindReader(db)},
+	}); err == nil {
 		t.Fatal("session bound below max_instruction_tokens accepted")
-	} else if code, ok := skills.CodeOf(err); !ok || code != skills.ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[skills.ErrorCode](err); !ok || code != skills.ErrorCodeInvalidArgument {
 		t.Fatalf("err = %v", err)
 	}
 }

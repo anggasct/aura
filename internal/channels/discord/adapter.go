@@ -14,10 +14,11 @@ import (
 
 	"golang.org/x/net/websocket"
 
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	"github.com/anggasct/aura/internal/config"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -74,9 +75,51 @@ type threadRoute struct {
 	persona string
 }
 
+type Deps struct {
+	Config            *Config
+	Account           *Account
+	Resumes           ResumeStore
+	Effects           EffectRunner
+	Media             MediaStore
+	Sessions          SessionEnsurer
+	Logger            *slog.Logger
+	SessionResolver   SessionResolver
+	PersonaRouter     PersonaRouter
+	PrincipalResolver *principal.Resolver
+	Commands          *command.Dispatcher
+	SecretVault       *secret.Vault
+	Vision            *vision.Service
+	Access            *access.Settings
+	OnAdmitted        func(context.Context, principal.Class)
+	OnDropped         func(context.Context, string)
+}
+
+type Adapters []*Adapter
+
+var _ health.HealthProvider = Adapters(nil)
+
+func (adapters Adapters) Check(ctx context.Context) []health.Finding {
+	findings := make([]health.Finding, 0, len(adapters))
+	for _, adapter := range adapters {
+		findings = append(findings, adapter.Check(ctx)...)
+	}
+	return findings
+}
+
+func (adapters Adapters) HealthChecks() []health.RegisteredCheck {
+	if len(adapters) == 0 {
+		return nil
+	}
+	return []health.RegisteredCheck{{
+		ID:          "discord",
+		Checker:     adapters,
+		Remediation: RemediationReviewGateway,
+	}}
+}
+
 type Adapter struct {
-	cfg            *config.Discord
-	account        *config.DiscordAccount
+	cfg            *Config
+	account        *Account
 	tokenRef       secret.Reference
 	digest         string
 	resumes        ResumeStore
@@ -128,27 +171,6 @@ type Adapter struct {
 	gap            atomic.Bool
 }
 
-func (a *Adapter) SetVisionService(svc *vision.Service) {
-	if a == nil {
-		return
-	}
-	a.images.Store(svc)
-}
-
-func (a *Adapter) SetPrincipalResolver(owners *principal.Resolver) {
-	if a == nil {
-		return
-	}
-	a.owners = owners
-}
-
-func (a *Adapter) SetSessionResolver(resolver SessionResolver) {
-	if a == nil {
-		return
-	}
-	a.resolver = resolver
-}
-
 func (a *Adapter) activeSession(ctx context.Context, conversationKey string) (string, error) {
 	if a.resolver == nil {
 		return conversationKey, nil
@@ -163,13 +185,6 @@ func (a *Adapter) activeSession(ctx context.Context, conversationKey string) (st
 	return active, nil
 }
 
-func (a *Adapter) SetPersonaRouter(router PersonaRouter) {
-	if a == nil {
-		return
-	}
-	a.router = router
-}
-
 func (a *Adapter) Account() string {
 	if a == nil || a.account == nil {
 		return ""
@@ -181,13 +196,6 @@ func (a *Adapter) source() string {
 	return "discord:" + a.account.Name
 }
 
-func (a *Adapter) SetAdmissionObserver(observe func(ctx context.Context, class principal.Class)) {
-	if a == nil {
-		return
-	}
-	a.admitted = observe
-}
-
 func (a *Adapter) visionService() *vision.Service {
 	if a == nil {
 		return nil
@@ -195,50 +203,61 @@ func (a *Adapter) visionService() *vision.Service {
 	return a.images.Load()
 }
 
-func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStore, effects EffectRunner, media MediaStore, sessions SessionEnsurer, logger *slog.Logger) (*Adapter, error) {
-	if cfg == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "discord config must not be nil")
+func New(deps *Deps) (*Adapter, error) {
+	if deps == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "discord deps must not be nil")
 	}
-	if account == nil || account.Name == "" {
-		return nil, Errorf(ErrorCodeInvalidArgument, "discord account must not be nil or unnamed")
+	if deps.Config == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "discord config must not be nil")
 	}
-	if resumes == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "resume store must not be nil")
+	if deps.Account == nil || deps.Account.Name == "" {
+		return nil, fault.New(ErrorCodeInvalidArgument, "discord account must not be nil or unnamed")
 	}
-	if effects == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "effect runner must not be nil")
+	if deps.Resumes == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "resume store must not be nil")
 	}
-	if media == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "media store must not be nil")
+	if deps.Effects == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "effect runner must not be nil")
 	}
-	if sessions == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "session ensurer must not be nil")
+	if deps.Media == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "media store must not be nil")
 	}
+	if deps.Sessions == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "session ensurer must not be nil")
+	}
+	logger := deps.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
-	tokenRef, err := parseTokenRef(account.BotTokenRef)
+	tokenRef, err := parseTokenRef(deps.Account.BotTokenRef)
 	if err != nil {
 		return nil, err
 	}
 	approvals, err := approval.NewRegistry()
 	if err != nil {
-		return nil, ErrorWrapf(ErrorCodeConnectionFailed, err, "approval token key is unavailable")
+		return nil, fault.Wrap(ErrorCodeConnectionFailed, "approval token key is unavailable", err)
 	}
 	adapter := &Adapter{
-		cfg:            cfg,
-		account:        account,
+		cfg:            deps.Config,
+		account:        deps.Account,
 		tokenRef:       tokenRef,
-		digest:         digestDiscordConfig(cfg, account),
-		resumes:        resumes,
-		effects:        effects,
-		media:          media,
-		sessions:       sessions,
+		digest:         digestDiscordConfig(deps.Config, deps.Account),
+		resumes:        deps.Resumes,
+		effects:        deps.Effects,
+		media:          deps.Media,
+		sessions:       deps.Sessions,
 		logger:         logger,
+		resolver:       deps.SessionResolver,
+		router:         deps.PersonaRouter,
+		owners:         deps.PrincipalResolver,
+		commands:       deps.Commands,
+		secretVault:    deps.SecretVault,
+		admitted:       deps.OnAdmitted,
+		dropped:        deps.OnDropped,
 		gatewayURL:     gatewayURL,
 		restBase:       discordRestBase,
 		httpClient:     &http.Client{Timeout: mediaTimeout},
-		gate:           newEditGate(time.Duration(cfg.MinEditInterval)),
+		gate:           newEditGate(time.Duration(deps.Config.MinEditInterval)),
 		posted:         map[string][]string{},
 		approvals:      approvals,
 		targets:        map[string]approvalBinding{},
@@ -251,18 +270,24 @@ func New(cfg *config.Discord, account *config.DiscordAccount, resumes ResumeStor
 		invalidDelay:   invalidWait,
 		rateCap:        rateLimitCap,
 	}
+	if deps.Vision != nil {
+		adapter.images.Store(deps.Vision)
+	}
+	if deps.Access != nil {
+		adapter.access = *deps.Access
+	}
 	adapter.state.Store(int32(stateDown))
 	return adapter, nil
 }
 
 func parseTokenRef(ref secret.Ref) (secret.Reference, error) {
 	if ref.IsZero() {
-		return secret.Reference{}, Errorf(ErrorCodeInvalidArgument, "bot token reference must use env:// or file://")
+		return secret.Reference{}, fault.New(ErrorCodeInvalidArgument, "bot token reference must use env:// or file://")
 	}
 	return ref.Reference(), nil
 }
 
-func digestDiscordConfig(cfg *config.Discord, account *config.DiscordAccount) string {
+func digestDiscordConfig(cfg *Config, account *Account) string {
 	ids := make([]string, 0, len(account.AllowedUserIDs)+len(account.AllowedGuildIDs)+len(account.AllowedChannelIDs))
 	ids = append(ids, account.AllowedUserIDs...)
 	ids = append(ids, account.AllowedGuildIDs...)
@@ -278,7 +303,7 @@ func digestDiscordConfig(cfg *config.Discord, account *config.DiscordAccount) st
 
 func (a *Adapter) Start(ctx context.Context, sink runtimeingress.IngressSink) error {
 	if sink == nil {
-		return Errorf(ErrorCodeInvalidArgument, "ingress sink must not be nil")
+		return fault.New(ErrorCodeInvalidArgument, "ingress sink must not be nil")
 	}
 	a.sink = sink
 	if a.dial == nil {

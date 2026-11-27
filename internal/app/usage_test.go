@@ -3,7 +3,6 @@ package app
 import (
 	"bytes"
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,9 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/usage"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func writeUsageConfig(t *testing.T, dataRoot string) string {
@@ -30,7 +30,7 @@ func writeUsageConfig(t *testing.T, dataRoot string) string {
 func seedUsage(t *testing.T, dataRoot string) {
 	t.Helper()
 	ctx := context.Background()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(ctx, filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -104,8 +104,7 @@ func TestUsageStatusByPersona(t *testing.T) {
 	root.SetOut(&buf)
 	root.SetErr(&buf)
 	root.SetArgs([]string{"usage", "status", "--by", "model", "--config", cfg})
-	var ue *usageError
-	if err := root.Execute(); !errors.As(err, &ue) {
+	if err := root.Execute(); !clikit.IsUsageError(err) {
 		t.Fatalf("--by model error = %v, want a usage error", err)
 	}
 }
@@ -139,8 +138,7 @@ func TestUsageEntriesNegativeLimitRejected(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a usage error for negative --limit")
 	}
-	var ue *usageError
-	if !errors.As(err, &ue) {
+	if !clikit.IsUsageError(err) {
 		t.Errorf("negative --limit must be a usage error (exit 2), got %T: %v", err, err)
 	}
 }
@@ -155,8 +153,7 @@ func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
 			if err == nil {
 				t.Fatalf("usage %s stray: expected an error, got nil (out: %q)", sub, out)
 			}
-			var ue *usageError
-			if !errors.As(err, &ue) {
+			if !clikit.IsUsageError(err) {
 				t.Errorf("usage %s stray: must be a usage error (exit 2), got %T: %v", sub, err, err)
 			}
 			if code := exitCodeOf(t, "usage", sub, "--config", cfg, "stray"); code != 2 {
@@ -168,7 +165,7 @@ func TestUsageSubcommandsRejectPositionalArgs(t *testing.T) {
 
 func TestUsageEntriesEmpty(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeUsageConfig(t, dataRoot)
 
 	out, err := execute(t, "usage", "entries", "--config", cfg)
@@ -182,7 +179,7 @@ func TestUsageEntriesEmpty(t *testing.T) {
 
 func TestUsagePrices(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeUsageConfig(t, dataRoot)
 	prices := filepath.Join(t.TempDir(), "prices.yaml")
 	content := "version: 1\nprices:\n  - model_definition_id: primary\n    currency: USD\n" +
@@ -205,7 +202,7 @@ func TestUsagePrices(t *testing.T) {
 
 func TestUsagePricesMissingExplicitFile(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeUsageConfig(t, dataRoot)
 	_, err := execute(t, "usage", "prices", "--config", cfg, "--prices", filepath.Join(t.TempDir(), "nope.yaml"))
 	if err == nil {

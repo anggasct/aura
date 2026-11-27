@@ -14,7 +14,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writePersonaCLIConfig(t *testing.T, soul string) string {
@@ -52,7 +52,7 @@ func personaRegistry(t *testing.T, configPath string) *auraagent.Registry {
 }
 
 func TestPersonaListShowsSoulSourceAndDigest(t *testing.T) {
-	gf := &globalFlags{configPath: writePersonaCLIConfig(t, "You are Kuma.")}
+	gf := &GlobalFlags{ConfigPath: writePersonaCLIConfig(t, "You are Kuma.")}
 	cmd := newPersonaCmd(gf)
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -78,18 +78,18 @@ func TestPersonaListShowsSoulSourceAndDigest(t *testing.T) {
 
 func TestPersonaFingerprintFollowsSoulFile(t *testing.T) {
 	path := writePersonaCLIConfig(t, "You are Kuma.")
-	before, ok := registryPersonas{registry: personaRegistry(t, path)}.Fingerprint("kuma")
+	before, ok := auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}.Fingerprint("kuma")
 	if !ok {
 		t.Fatal("kuma has no fingerprint")
 	}
 	if err := os.WriteFile(filepath.Join(filepath.Dir(path), "personas", "kuma.md"), []byte("You are Kuma, now formal."), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	after, _ := registryPersonas{registry: personaRegistry(t, path)}.Fingerprint("kuma")
+	after, _ := auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}.Fingerprint("kuma")
 	if after.SoulSHA256 == before.SoulSHA256 || after.ToolsSHA256 != before.ToolsSHA256 || after.AgentID != "kuma" {
 		t.Fatalf("fingerprint before %+v after %+v, want only the soul digest to change", before, after)
 	}
-	if _, ok := (registryPersonas{registry: personaRegistry(t, path)}).Fingerprint("ghost"); ok {
+	if _, ok := (auraagent.RegistryPersonas{Registry: personaRegistry(t, path)}).Fingerprint("ghost"); ok {
 		t.Fatal("unknown persona has a fingerprint")
 	}
 }
@@ -97,9 +97,9 @@ func TestPersonaFingerprintFollowsSoulFile(t *testing.T) {
 func TestResolveChatPersona(t *testing.T) {
 	registry := personaRegistry(t, writePersonaCLIConfig(t, "You are Kuma."))
 	db := discordTestDB(t)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	now := time.Now().UTC()
-	if err := sessions.Create(t.Context(), &store.Session{ID: "term-kuma", OwnerID: "local-owner", AgentID: "kuma", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "term-kuma", OwnerID: "local-owner", AgentID: "kuma", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
@@ -132,7 +132,10 @@ func TestResolveChatPersona(t *testing.T) {
 
 func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 	engine := &captureEngine{}
-	runner := &terminalRunner{engine: engine, agentID: "main"}
+	runner, err := terminal.NewRuntimeRunner(engine, "main")
+	if err != nil {
+		t.Fatalf("NewRuntimeRunner: %v", err)
+	}
 	for range runner.Run(t.Context(), &terminal.Request{SessionID: "sess-1", PrincipalID: "local-owner", AgentID: "engineer", Parts: []terminal.Input{{Text: "hi"}}}) {
 	}
 	if engine.got == nil || engine.got.AgentID != "engineer" {
@@ -140,8 +143,11 @@ func TestTerminalRunsAndRecordsChosenPersona(t *testing.T) {
 	}
 
 	db := discordTestDB(t)
-	svc := store.NewSessionService(db)
-	sessions := &terminalSessions{sessions: svc, agentID: "engineer"}
+	svc := turnstore.NewSessionService(db)
+	sessions, err := terminal.NewTurnSessions(svc, "engineer")
+	if err != nil {
+		t.Fatalf("NewTurnSessions: %v", err)
+	}
 	created, err := sessions.Create(t.Context(), "local-owner", "")
 	if err != nil {
 		t.Fatalf("Create: %v", err)

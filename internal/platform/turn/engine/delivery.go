@@ -10,7 +10,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func (e *Engine) channelAdapterFor(req *turn.TurnRequest) (runtimechannelhost.ChannelPort, bool) {
@@ -81,12 +81,12 @@ func (e *Engine) hasDelivered(turnID string) bool {
 	return true
 }
 
-func extractDeliveryTexts(events []store.RuntimeEvent) []string {
+func extractDeliveryTexts(events []turn.Event) []string {
 	var texts []string
 	for i := range events {
 		ev := &events[i]
 		switch ev.Kind {
-		case store.EventKindADK:
+		case turnstore.EventKindADK:
 			if text := adkAnswerText(ev.Payload, false); strings.TrimSpace(text) != "" {
 				texts = append(texts, text)
 			}
@@ -101,7 +101,7 @@ func extractDeliveryTexts(events []store.RuntimeEvent) []string {
 	if len(texts) == 0 {
 		for i := range events {
 			ev := &events[i]
-			if ev.Kind != store.EventKindADK {
+			if ev.Kind != turnstore.EventKindADK {
 				continue
 			}
 			if text := adkAnswerText(ev.Payload, true); strings.TrimSpace(text) != "" {
@@ -201,7 +201,7 @@ type plannedDelivery struct {
 	request *runtimechannelhost.DeliveryRequest
 }
 
-func (e *Engine) planDelivery(req *turn.TurnRequest, events []store.RuntimeEvent) (plannedDelivery, error) {
+func (e *Engine) planDelivery(req *turn.TurnRequest, events []turn.Event) (plannedDelivery, error) {
 	if req == nil {
 		return plannedDelivery{}, invalidArgument("turn request must not be nil")
 	}
@@ -227,7 +227,7 @@ func (e *Engine) planDelivery(req *turn.TurnRequest, events []store.RuntimeEvent
 	}}, nil
 }
 
-func (e *Engine) deliverCompletedTurn(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+func (e *Engine) deliverCompletedTurn(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 	if req == nil {
 		return invalidArgument("turn request must not be nil")
 	}
@@ -267,7 +267,7 @@ type deliveryRecord struct {
 
 type endedTurn struct {
 	req    *turn.TurnRequest
-	events []store.RuntimeEvent
+	events []turn.Event
 }
 
 func (e *Engine) deliverOnce(ctx context.Context, done *endedTurn) deliveryRecord {
@@ -308,6 +308,6 @@ func (r deliveryRecord) terminal(agentID string) (kind string, payload []byte) {
 	return turn.EventKindTurnFailed, failedPayload(r.Code, detail, nil, agentID)
 }
 
-func DeliveryTexts(events []store.RuntimeEvent) []string {
+func DeliveryTexts(events []turn.Event) []string {
 	return extractDeliveryTexts(events)
 }

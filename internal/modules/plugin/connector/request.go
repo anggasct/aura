@@ -54,7 +54,7 @@ func (h *host) credentialHost(target *url.URL) bool {
 	return h.credited[strings.ToLower(target.Hostname())+":"+port]
 }
 
-func requestHeaders(supplied map[string]string) (http.Header, *Error) {
+func requestHeaders(supplied map[string]string) (http.Header, *callFailure) {
 	if len(supplied) > maxHeaders {
 		return nil, invalid()
 	}
@@ -76,13 +76,13 @@ func requestHeaders(supplied map[string]string) (http.Header, *Error) {
 	return headers, nil
 }
 
-func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callState, message *httpMessage) (*httpResultMessage, *Error) {
+func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callState, message *httpMessage) (*httpResultMessage, *callFailure) {
 	if !slices.Contains(allowedMethods, message.Method) || message.URL == "" || len(message.URL) > maxURLBytes {
 		return nil, invalid()
 	}
 	mutating := !slices.Contains(safeMethods, message.Method)
 	if !tool.Effect && mutating {
-		return nil, Errorf(ErrTierViolation, "a read tool asked for a request that can change state")
+		return nil, failf(ErrTierViolation, "a read tool asked for a request that can change state")
 	}
 	body, fail := decodeBody(message.BodyB64)
 	if fail != nil {
@@ -145,7 +145,7 @@ func (h *host) perform(callCtx, ctx context.Context, tool *Tool, state *callStat
 	return result, nil
 }
 
-func classifyMutation(state *callState, status int) *Error {
+func classifyMutation(state *callState, status int) *callFailure {
 	switch {
 	case status >= 200 && status < 300:
 		state.sent = true
@@ -156,20 +156,20 @@ func classifyMutation(state *callState, status int) *Error {
 		return nil
 	}
 	state.sent = true
-	return Errorf(ErrRequestFailed, "the outcome of the request cannot be confirmed")
+	return failf(ErrRequestFailed, "the outcome of the request cannot be confirmed")
 }
 
-func (h *host) interrupted(ctx, callCtx context.Context) *Error {
+func (h *host) interrupted(ctx, callCtx context.Context) *callFailure {
 	switch {
 	case ctx.Err() != nil:
-		return Wrap(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
+		return wrapFailure(ErrBackendUnavailable, ctx.Err(), "the call was cancelled")
 	case callCtx.Err() != nil:
-		return Errorf(ErrRPCLimit, "the call exceeded its time limit")
+		return failf(ErrRPCLimit, "the call exceeded its time limit")
 	}
 	return nil
 }
 
-func (h *host) transportFailure(ctx, callCtx context.Context, state *callState, mutating bool, err error) (*httpResultMessage, *Error) {
+func (h *host) transportFailure(ctx, callCtx context.Context, state *callState, mutating bool, err error) (*httpResultMessage, *callFailure) {
 	denied := fault.HasCode(err, egress.ErrorCodeEgressDenied)
 	if mutating && !denied && !neverReachedTheServer(err) {
 		state.sent = true
@@ -183,7 +183,7 @@ func (h *host) transportFailure(ctx, callCtx context.Context, state *callState, 
 	case !mutating:
 		return &httpResultMessage{V: Version, Type: typeHTTPResult, Call: state.id, Error: httpErrorRequestFailed}, nil
 	}
-	return nil, Errorf(ErrRequestFailed, "the request could not be completed")
+	return nil, failf(ErrRequestFailed, "the request could not be completed")
 }
 
 func neverReachedTheServer(err error) bool {
@@ -195,10 +195,10 @@ func neverReachedTheServer(err error) bool {
 	return errors.As(err, &verification)
 }
 
-func authFailure(err error) *Error {
+func authFailure(err error) *callFailure {
 	code, coded := authCode(err)
 	if !coded {
-		return Errorf(ErrAuthUnavailable, "the plugin authorization is unavailable")
+		return failf(ErrAuthUnavailable, "the plugin authorization is unavailable")
 	}
-	return Errorf(code, "the plugin authorization is not usable")
+	return failf(code, "the plugin authorization is not usable")
 }

@@ -13,7 +13,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -21,7 +21,7 @@ const (
 	finishModelStop = "STOP"
 )
 
-func deltaEvent(index uint64, text string) store.RuntimeEvent {
+func deltaEvent(index uint64, text string) turn.Event {
 	payload, err := turn.EncodeModelDelta(turn.ModelDelta{Text: text, Index: index})
 	if err != nil {
 		panic(err)
@@ -31,7 +31,7 @@ func deltaEvent(index uint64, text string) store.RuntimeEvent {
 	return event
 }
 
-func modelEvent(text, finish string, calls bool) store.RuntimeEvent {
+func modelEvent(text, finish string, calls bool) turn.Event {
 	parts := []map[string]any{{"text": text}}
 	if calls {
 		parts = append(parts, map[string]any{"functionCall": map[string]any{"name": "web_search"}})
@@ -44,21 +44,21 @@ func modelEvent(text, finish string, calls bool) store.RuntimeEvent {
 	if err != nil {
 		panic(err)
 	}
-	event := turnEvent(store.EventKindADK)
+	event := turnEvent(turnstore.EventKindADK)
 	event.Payload = raw
 	return event
 }
 
-func toolResultEvent() store.RuntimeEvent {
-	event := turnEvent(store.EventKindADK)
+func toolResultEvent() turn.Event {
+	event := turnEvent(turnstore.EventKindADK)
 	event.Payload = json.RawMessage(`{"content":{"role":"user","parts":[{"functionResponse":{"name":"web_search"}}]}}`)
 	return event
 }
 
-func modelAnswerTexts(events []store.RuntimeEvent) []string {
+func modelAnswerTexts(events []turn.Event) []string {
 	var texts []string
 	for i := range events {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
 		var decoded struct {
@@ -124,38 +124,38 @@ func finishReasonOf(t *testing.T, frames []string) string {
 	return ""
 }
 
-func accepted() store.RuntimeEvent { return turnEvent(turn.EventKindTurnAccepted) }
+func accepted() turn.Event { return turnEvent(turn.EventKindTurnAccepted) }
 
-func completed() store.RuntimeEvent { return turnEvent(turn.EventKindTurnCompleted) }
+func completed() turn.Event { return turnEvent(turn.EventKindTurnCompleted) }
 
 func TestStreamForwardsModelDeltasAsTheyArrive(t *testing.T) {
 	cases := map[string]struct {
-		streamed  []store.RuntimeEvent
-		whole     []store.RuntimeEvent
+		streamed  []turn.Event
+		whole     []turn.Event
 		wantText  string
 		wantWhole string
 		wantParts []string
 	}{
 		"one message in token chunks": {
-			streamed:  []store.RuntimeEvent{accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo "), deltaEvent(2, "world"), modelEvent("Hello world", finishModelStop, false), completed()},
-			whole:     []store.RuntimeEvent{accepted(), modelEvent("Hello world", finishModelStop, false), completed()},
+			streamed:  []turn.Event{accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo "), deltaEvent(2, "world"), modelEvent("Hello world", finishModelStop, false), completed()},
+			whole:     []turn.Event{accepted(), modelEvent("Hello world", finishModelStop, false), completed()},
 			wantText:  "Hello world",
 			wantWhole: "Hello world",
 			wantParts: []string{"Hel", "lo ", "world"},
 		},
 		"completed message restores the unstreamed rest": {
-			streamed:  []store.RuntimeEvent{accepted(), deltaEvent(0, "Hel"), modelEvent("Hello world", finishModelStop, false), completed()},
-			whole:     []store.RuntimeEvent{accepted(), modelEvent("Hello world", finishModelStop, false), completed()},
+			streamed:  []turn.Event{accepted(), deltaEvent(0, "Hel"), modelEvent("Hello world", finishModelStop, false), completed()},
+			whole:     []turn.Event{accepted(), modelEvent("Hello world", finishModelStop, false), completed()},
 			wantText:  "Hello world",
 			wantWhole: "Hello world",
 			wantParts: []string{"Hel", "lo world"},
 		},
 		"two messages around a tool call": {
-			streamed: []store.RuntimeEvent{
+			streamed: []turn.Event{
 				accepted(), deltaEvent(0, "on"), deltaEvent(1, "e"), modelEvent("one", finishModelStop, false),
 				turnEvent(turn.EventKindToolStarted), toolResultEvent(),
 				deltaEvent(2, "tw"), deltaEvent(3, "o"), modelEvent("two", finishModelStop, false), completed()},
-			whole: []store.RuntimeEvent{
+			whole: []turn.Event{
 				accepted(), modelEvent("one", finishModelStop, false), turnEvent(turn.EventKindToolStarted), toolResultEvent(),
 				modelEvent("two", finishModelStop, false), completed()},
 			wantText:  "one\n\ntwo",
@@ -163,18 +163,18 @@ func TestStreamForwardsModelDeltasAsTheyArrive(t *testing.T) {
 			wantParts: []string{"on", "e", "\n\ntw", "o"},
 		},
 		"text streamed before a tool call stays on the wire": {
-			streamed: []store.RuntimeEvent{
+			streamed: []turn.Event{
 				accepted(), deltaEvent(0, "Let me check."), modelEvent("Let me check.", "", true), toolResultEvent(),
 				deltaEvent(1, "Done"), modelEvent("Done", finishModelStop, false), completed()},
-			whole: []store.RuntimeEvent{
+			whole: []turn.Event{
 				accepted(), modelEvent("Let me check.", "", true), toolResultEvent(), modelEvent("Done", finishModelStop, false), completed()},
 			wantText:  "Let me check.\n\nDone",
 			wantWhole: "Done",
 			wantParts: []string{"Let me check.", "\n\nDone"},
 		},
 		"message without deltas is sent whole": {
-			streamed:  []store.RuntimeEvent{accepted(), modelEvent("whole", finishModelStop, false), completed()},
-			whole:     []store.RuntimeEvent{accepted(), modelEvent("whole", finishModelStop, false), completed()},
+			streamed:  []turn.Event{accepted(), modelEvent("whole", finishModelStop, false), completed()},
+			whole:     []turn.Event{accepted(), modelEvent("whole", finishModelStop, false), completed()},
 			wantText:  "whole",
 			wantWhole: "whole",
 			wantParts: []string{"whole"},
@@ -212,29 +212,29 @@ func TestStreamForwardsModelDeltasAsTheyArrive(t *testing.T) {
 
 func TestStreamSurvivesDroppedModelDeltas(t *testing.T) {
 	cases := map[string]struct {
-		events    []store.RuntimeEvent
+		events    []turn.Event
 		wantParts []string
 	}{
 		"gap in the middle of a message": {
-			events:    []store.RuntimeEvent{accepted(), deltaEvent(0, "Hel"), deltaEvent(2, "o w"), deltaEvent(3, "or"), modelEvent("Hello world", finishModelStop, false), completed()},
+			events:    []turn.Event{accepted(), deltaEvent(0, "Hel"), deltaEvent(2, "o w"), deltaEvent(3, "or"), modelEvent("Hello world", finishModelStop, false), completed()},
 			wantParts: []string{"Hel", "lo world"},
 		},
 		"first delta lost": {
-			events:    []store.RuntimeEvent{accepted(), deltaEvent(1, "llo"), modelEvent("Hello", finishModelStop, false), completed()},
+			events:    []turn.Event{accepted(), deltaEvent(1, "llo"), modelEvent("Hello", finishModelStop, false), completed()},
 			wantParts: []string{"Hello"},
 		},
 		"last delta lost": {
-			events:    []store.RuntimeEvent{accepted(), deltaEvent(0, "Hel"), modelEvent("Hello", finishModelStop, false), completed()},
+			events:    []turn.Event{accepted(), deltaEvent(0, "Hel"), modelEvent("Hello", finishModelStop, false), completed()},
 			wantParts: []string{"Hel", "lo"},
 		},
 		"restarted indexes with the same text are not forwarded twice": {
-			events: []store.RuntimeEvent{
+			events: []turn.Event{
 				accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo"), deltaEvent(0, "Hel"), deltaEvent(1, "lo"),
 				modelEvent("Hello", finishModelStop, false), completed()},
 			wantParts: []string{"Hel", "lo"},
 		},
 		"next message streams again after the gap": {
-			events: []store.RuntimeEvent{
+			events: []turn.Event{
 				accepted(), deltaEvent(0, "on"), deltaEvent(2, "e"), modelEvent("one", finishModelStop, false),
 				deltaEvent(3, "tw"), deltaEvent(4, "o"), modelEvent("two", finishModelStop, false), completed()},
 			wantParts: []string{"on", "e", "\n\ntw", "o"},
@@ -262,9 +262,9 @@ func TestStreamSurvivesDroppedModelDeltas(t *testing.T) {
 func TestStreamEndsWithOneErrorWhenTheTurnFailsAfterPartialText(t *testing.T) {
 	cases := map[string]scriptRuntime{
 		"failed event": fixedTurn(accepted(), deltaEvent(0, "par"), deltaEvent(1, "tial"), failedEvent("runtime_internal")),
-		"iterator error": func(_ context.Context, yield func(store.RuntimeEvent, error) bool) {
+		"iterator error": func(_ context.Context, yield func(turn.Event, error) bool) {
 			if emit(yield, accepted(), deltaEvent(0, "par"), deltaEvent(1, "tial")) {
-				yield(store.RuntimeEvent{}, errors.New("boom with prompt text"))
+				yield(turn.Event{}, errors.New("boom with prompt text"))
 			}
 		},
 	}
@@ -294,7 +294,7 @@ func TestStreamEndsWithOneErrorWhenTheTurnFailsAfterPartialText(t *testing.T) {
 }
 
 func TestStreamDivergingFinalMessageEndsWithAnInternalError(t *testing.T) {
-	events := []store.RuntimeEvent{accepted(), deltaEvent(0, "abc"), modelEvent("xyz", finishModelStop, false), completed()}
+	events := []turn.Event{accepted(), deltaEvent(0, "abc"), modelEvent("xyz", finishModelStop, false), completed()}
 	fixture := newChatFixture(t, chatFixtureOptions{backend: fixedTurn(events...), answers: modelAnswerTexts})
 	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
 
@@ -312,29 +312,29 @@ func TestStreamDivergingFinalMessageEndsWithAnInternalError(t *testing.T) {
 
 func TestFinishReasonReportsTruncationInBothModes(t *testing.T) {
 	cases := map[string]struct {
-		events []store.RuntimeEvent
+		events []turn.Event
 		want   string
 	}{
 		"truncated answer": {
-			events: []store.RuntimeEvent{accepted(), modelEvent("cut", finishMaxTokens, false), completed()},
+			events: []turn.Event{accepted(), modelEvent("cut", finishMaxTokens, false), completed()},
 			want:   "length",
 		},
 		"complete answer": {
-			events: []store.RuntimeEvent{accepted(), modelEvent("done", finishModelStop, false), completed()},
+			events: []turn.Event{accepted(), modelEvent("done", finishModelStop, false), completed()},
 			want:   "stop",
 		},
 		"provider without a finish reason": {
-			events: []store.RuntimeEvent{accepted(), modelEvent("done", "", false), completed()},
+			events: []turn.Event{accepted(), modelEvent("done", "", false), completed()},
 			want:   "stop",
 		},
 		"only the last model message decides": {
-			events: []store.RuntimeEvent{
+			events: []turn.Event{
 				accepted(), modelEvent("cut", finishMaxTokens, true), toolResultEvent(),
 				modelEvent("done", finishModelStop, false), completed()},
 			want: "stop",
 		},
 		"truncated final message after a tool call": {
-			events: []store.RuntimeEvent{
+			events: []turn.Event{
 				accepted(), modelEvent("", finishModelStop, true), toolResultEvent(),
 				modelEvent("cut", finishMaxTokens, false), completed()},
 			want: "length",
@@ -361,7 +361,7 @@ func TestFinishReasonReportsTruncationInBothModes(t *testing.T) {
 func TestStreamUsageIgnoresModelDeltas(t *testing.T) {
 	final := modelEvent("Hello", finishModelStop, false)
 	final.ProviderUsage = json.RawMessage(testUsageJSON)
-	events := []store.RuntimeEvent{accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo"), final, completed()}
+	events := []turn.Event{accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo"), final, completed()}
 	fixture := newChatFixture(t, chatFixtureOptions{backend: fixedTurn(events...), answers: modelAnswerTexts})
 	issued := fixture.keys.add(t, principal.ClassTrusted, testPersona)
 
@@ -427,7 +427,7 @@ func TestSDKAccumulatesTokenLevelChunks(t *testing.T) {
 }
 
 func TestStreamFailsClosedWhenPartialTextIsResent(t *testing.T) {
-	cases := map[string][]store.RuntimeEvent{
+	cases := map[string][]turn.Event{
 		"restarted indexes with different text": {
 			accepted(), deltaEvent(0, "Hel"), deltaEvent(1, "lo"), deltaEvent(0, "Hey"), deltaEvent(1, "!"),
 			modelEvent("Hey!", finishModelStop, false), completed()},

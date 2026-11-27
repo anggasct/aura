@@ -9,32 +9,36 @@ import (
 	"testing"
 	"time"
 
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/usage"
 
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 )
 
-func newSessionTestDB(t *testing.T) (*sql.DB, store.SessionService, store.EventStore) {
+func newSessionTestDB(t *testing.T) (*sql.DB, turnstore.SessionService, turnstore.EventStore) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	return db, store.NewSessionService(db), store.NewEventStore(db)
+	return db, turnstore.NewSessionService(db), turnstore.NewEventStore(db)
 }
 
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	sess := store.Session{ID: id, OwnerID: "user-1"}
-	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+	sess := turn.Session{ID: id, OwnerID: "user-1"}
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
@@ -110,7 +114,7 @@ func TestADKSessionServiceAppendValidatesButDoesNotPersist(t *testing.T) {
 		t.Fatalf("events = %d, want 0 (AppendEvent must not persist)", got.Session.Events().Len())
 	}
 
-	re, err := store.RuntimeEventFromADK("session-1", "turn-1", ev)
+	re, err := turnstore.RuntimeEventFromADK("session-1", "turn-1", ev)
 	if err != nil {
 		t.Fatalf("RuntimeEventFromADK: %v", err)
 	}
@@ -161,7 +165,7 @@ func TestADKSessionHistoryIgnoresSkillActivations(t *testing.T) {
 	db, sessions, events := newSessionTestDB(t)
 	mustCreateSession(t, db, "session-1")
 	payload := []byte(`{"skill_id":"local/pdf@0123456789ab","body":"SKILL-RULES"}`)
-	if _, err := events.AppendSequenced(context.Background(), "session-1", &store.RuntimeEvent{
+	if _, err := events.AppendSequenced(context.Background(), "session-1", &turn.Event{
 		ID: "ev-skill", SessionID: "session-1", TurnID: "turn-1", Author: turn.AuthorSystem,
 		Kind: turn.EventKindSkillActivated, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
 	}); err != nil {
@@ -191,7 +195,7 @@ func TestSessionHistoryLeavesOutTheTurnBeingExecuted(t *testing.T) {
 			Author:       "model",
 		}
 		ev.Content = genai.NewContentFromText("answer of "+turnID, genai.RoleModel)
-		re, err := store.RuntimeEventFromADK("session-1", turnID, ev)
+		re, err := turnstore.RuntimeEventFromADK("session-1", turnID, ev)
 		if err != nil {
 			t.Fatalf("RuntimeEventFromADK: %v", err)
 		}

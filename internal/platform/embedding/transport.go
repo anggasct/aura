@@ -5,7 +5,6 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
 )
 
@@ -19,7 +18,7 @@ func newRemoteClient(resolver egress.Resolver) *http.Client {
 	return client
 }
 
-func newLoopbackClient(endpoint config.ServiceEndpoint) *http.Client {
+func newLoopbackClient(endpoint egress.ServiceEndpoint) *http.Client {
 	pinned := net.JoinHostPort(endpoint.Host, endpoint.Port)
 	dialer := &net.Dialer{}
 	transport := &http.Transport{

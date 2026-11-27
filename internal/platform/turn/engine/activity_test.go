@@ -7,7 +7,6 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
@@ -36,7 +35,7 @@ func TestCancelActiveCancelsOnlyTheRunningTurn(t *testing.T) {
 				t.Fatal("empty session id accepted")
 			}
 
-			results := make(chan []store.RuntimeEvent, 2)
+			results := make(chan []turn.Event, 2)
 			submit := func(id string) {
 				go func() {
 					events, _ := collect(t, engine, sampleRequest("session-a", id))

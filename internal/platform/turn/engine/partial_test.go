@@ -13,21 +13,21 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func adkPartialStep(text string) turntest.FakeStep {
 	payload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":` + strconv.Quote(text) + `}]},"partial":true}`)
-	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
+	return turntest.FakeStep{Kind: turnstore.EventKindADK, Payload: payload}
 }
 
 func adkFinalStep(text string) turntest.FakeStep {
 	payload := json.RawMessage(`{"content":{"role":"model","parts":[{"text":` + strconv.Quote(text) + `}]},"finishReason":"STOP"}`)
-	return turntest.FakeStep{Kind: store.EventKindADK, Payload: payload}
+	return turntest.FakeStep{Kind: turnstore.EventKindADK, Payload: payload}
 }
 
-func kindsOf(events []store.RuntimeEvent) []string {
+func kindsOf(events []turn.Event) []string {
 	kinds := make([]string, 0, len(events))
 	for i := range events {
 		kinds = append(kinds, events[i].Kind)
@@ -35,7 +35,7 @@ func kindsOf(events []store.RuntimeEvent) []string {
 	return kinds
 }
 
-func decodeDeltas(t *testing.T, events []store.RuntimeEvent) []turn.ModelDelta {
+func decodeDeltas(t *testing.T, events []turn.Event) []turn.ModelDelta {
 	t.Helper()
 	var deltas []turn.ModelDelta
 	for i := range events {
@@ -62,7 +62,7 @@ func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 			t.Fatalf("Run: %v", err)
 		}
 
-		wantKinds := []string{turn.EventKindTurnAccepted, turn.EventKindModelDelta, turn.EventKindModelDelta, store.EventKindADK, turn.EventKindTurnCompleted}
+		wantKinds := []string{turn.EventKindTurnAccepted, turn.EventKindModelDelta, turn.EventKindModelDelta, turnstore.EventKindADK, turn.EventKindTurnCompleted}
 		if got := kindsOf(live); !slices.Equal(got, wantKinds) {
 			t.Fatalf("live kinds = %v, want %v", got, wantKinds)
 		}
@@ -76,11 +76,11 @@ func TestPartialModelTextReachesSubscribersOnlyAsDeltas(t *testing.T) {
 			}
 		}
 
-		stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-partial")
+		stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-a", "turn-partial")
 		if err != nil {
 			t.Fatalf("ListTurnEvents: %v", err)
 		}
-		wantStored := []string{turn.EventKindTurnAccepted, store.EventKindADK, turn.EventKindTurnCompleted}
+		wantStored := []string{turn.EventKindTurnAccepted, turnstore.EventKindADK, turn.EventKindTurnCompleted}
 		if got := kindsOf(stored); !slices.Equal(got, wantStored) {
 			t.Fatalf("stored kinds = %v, want %v", got, wantStored)
 		}
@@ -157,7 +157,7 @@ func TestSlowSubscriberLosesDeltasButKeepsLifecycleEvents(t *testing.T) {
 		}
 		waitForTerminalDurable(t, db, "turn-slow")
 
-		var rest []store.RuntimeEvent
+		var rest []turn.Event
 		for {
 			ev, err, more := next()
 			if !more {
@@ -172,7 +172,7 @@ func TestSlowSubscriberLosesDeltasButKeepsLifecycleEvents(t *testing.T) {
 		if last := rest[len(rest)-1]; last.Kind != turn.EventKindTurnCompleted {
 			t.Fatalf("last event = %q, want turn.completed", last.Kind)
 		}
-		if !slices.Contains(kindsOf(rest), store.EventKindADK) {
+		if !slices.Contains(kindsOf(rest), turnstore.EventKindADK) {
 			t.Errorf("the completed message was lost: %v", kindsOf(rest))
 		}
 		deltas := decodeDeltas(t, rest)
@@ -192,11 +192,11 @@ type streamPartialExecutor struct {
 	seen []bool
 }
 
-func (e *streamPartialExecutor) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (e *streamPartialExecutor) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	e.mu.Lock()
 	e.seen = append(e.seen, req.StreamPartial)
 	e.mu.Unlock()
-	return func(func(store.RuntimeEvent, error) bool) {}
+	return func(func(turn.Event, error) bool) {}
 }
 
 func TestStreamPartialReachesTheExecutor(t *testing.T) {
@@ -275,7 +275,7 @@ type gatedPartialExecutor struct {
 	final    turntest.FakeStep
 }
 
-func (e *gatedPartialExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (e *gatedPartialExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	script := []turntest.FakeStep{e.final}
 	if req.StreamPartial {
 		script = append(slices.Clone(e.partials), e.final)
@@ -311,11 +311,11 @@ func TestDurableTurnRelaysPartialModelTextWithoutJournalingIt(t *testing.T) {
 	if lastDelta < 0 || lastDelta > terminal {
 		t.Errorf("deltas did not arrive before the turn ended: %v", kindsOf(live))
 	}
-	stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
+	stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), req.SessionID, req.TurnID)
 	if err != nil {
 		t.Fatalf("ListTurnEvents: %v", err)
 	}
-	wantStored := []string{turn.EventKindTurnAccepted, store.EventKindADK, turn.EventKindTurnCompleted}
+	wantStored := []string{turn.EventKindTurnAccepted, turnstore.EventKindADK, turn.EventKindTurnCompleted}
 	if got := kindsOf(stored); !slices.Equal(got, wantStored) {
 		t.Errorf("stored kinds = %v, want %v", got, wantStored)
 	}

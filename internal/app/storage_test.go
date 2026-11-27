@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 func writeStorageConfig(t *testing.T, dataRoot string) string {
@@ -25,7 +25,7 @@ func writeStorageConfig(t *testing.T, dataRoot string) string {
 
 func TestStorageBackupVerifyRestoreRoundTrip(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeStorageConfig(t, dataRoot)
 
 	if err := executeNoErr(t, "storage", "backup", "--config", cfg, "--output", filepath.Join(dataRoot, "backup-1")); err != nil {
@@ -49,7 +49,7 @@ func TestStorageBackupVerifyRestoreRoundTrip(t *testing.T) {
 
 func TestStorageReconcileAndGc(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeStorageConfig(t, dataRoot)
 
 	if err := executeNoErr(t, "storage", "reconcile", "--config", cfg); err != nil {
@@ -75,7 +75,7 @@ func TestStorageVerifyRequiresInput(t *testing.T) {
 
 func TestStorageGcInvalidBefore(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeStorageConfig(t, dataRoot)
 	_, err := execute(t, "storage", "gc", "--config", cfg, "--before", "not-a-time")
 	if err == nil || !strings.Contains(err.Error(), "invalid --before") {
@@ -85,7 +85,7 @@ func TestStorageGcInvalidBefore(t *testing.T) {
 
 func TestStorageVerifyDoesNotCreateLiveDB(t *testing.T) {
 	backupRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(backupRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(backupRoot, liveDatabaseFilename), Schemas()...)
 	backupCfg := writeStorageConfig(t, backupRoot)
 	backupDir := filepath.Join(backupRoot, "backup-1")
 	if err := executeNoErr(t, "storage", "backup", "--config", backupCfg, "--output", backupDir); err != nil {
@@ -104,7 +104,7 @@ func TestStorageVerifyDoesNotCreateLiveDB(t *testing.T) {
 
 func TestStorageVerifyReportsBackupInvalid(t *testing.T) {
 	dataRoot := t.TempDir()
-	storetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, liveDatabaseFilename), Schemas()...)
 	cfg := writeStorageConfig(t, dataRoot)
 
 	backupDir := filepath.Join(dataRoot, "backup-1")
@@ -118,7 +118,7 @@ func TestStorageVerifyReportsBackupInvalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("verify of a broken backup must fail")
 	}
-	if code, ok := storeCodeOf(err); !ok || code != store.ErrorCodeBackupInvalid {
+	if code, ok := storageCodeOf(err); !ok || code != storage.ErrorCodeBackupInvalid {
 		t.Errorf("verify error = %v, want code backup_invalid (got %q, %v)", err, code, ok)
 	}
 }
@@ -144,6 +144,6 @@ func executeNoErr(t *testing.T, args ...string) error {
 	return root.Execute()
 }
 
-func storeCodeOf(err error) (store.ErrorCode, bool) {
-	return fault.CodeOf[store.ErrorCode](err)
+func storageCodeOf(err error) (storage.ErrorCode, bool) {
+	return fault.CodeOf[storage.ErrorCode](err)
 }

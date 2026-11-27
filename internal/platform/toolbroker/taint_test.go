@@ -34,7 +34,7 @@ func newTaintBroker(t *testing.T, reachable func(sessionID string) bool, access 
 	for _, name := range []string{"read_file", "list_dir", "web_fetch", "web_search", "workflow_start", "workflow_propose", "exec", "write_file"} {
 		adapters[name+"@v1"] = adapter(name)
 	}
-	broker, err := New(&Options{
+	broker, err := newFixtureBrokerOrErr(t, &Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: adapters,
 		ApprovalDecider: func(_ context.Context, prompt *ApprovalPrompt) (bool, error) {

@@ -42,8 +42,8 @@ const (
 )
 
 type Credential struct {
-	Name string
-	Ref  secret.Ref
+	Name string     `json:"name"`
+	Ref  secret.Ref `json:"ref"`
 }
 
 type ToolOptions struct {
@@ -639,10 +639,6 @@ func Rules() []approval.Rule {
 	return rules
 }
 
-type ToolRegistrar interface {
-	RegisterTool(definition *tools.Definition, adapter toolbroker.Adapter, rule *approval.Rule) error
-}
-
 func credentialValidator(inner func(json.RawMessage) (json.RawMessage, error), credentials []Credential) func(json.RawMessage) (json.RawMessage, error) {
 	return func(raw json.RawMessage) (json.RawMessage, error) {
 		validated, err := inner(raw)
@@ -683,16 +679,21 @@ func CheckedDefinitions(credentials []Credential) ([]tools.Definition, error) {
 	return definitions, nil
 }
 
-func Register(registrar ToolRegistrar, options *ToolOptions) error {
-	if registrar == nil {
-		return errors.New("github tools require a registrar")
-	}
+type toolProvider struct {
+	registrations []toolbroker.ToolRegistration
+}
+
+func (p *toolProvider) Tools() []toolbroker.ToolRegistration {
+	return slices.Clone(p.registrations)
+}
+
+func NewToolProvider(options *ToolOptions) (toolbroker.ToolProvider, error) {
 	if options == nil {
-		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, optionsRequired)
+		return nil, toolbroker.Errorf(toolbroker.ResultInvalidArgument, optionsRequired)
 	}
 	definitions, err := CheckedDefinitions(options.Credentials)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	adapters := map[string]toolbroker.Adapter{
 		ToolCreatePR: CreatePRAdapter(options),
@@ -700,10 +701,13 @@ func Register(registrar ToolRegistrar, options *ToolOptions) error {
 		ToolComment:  CommentAdapter(options),
 	}
 	rules := Rules()
+	registrations := make([]toolbroker.ToolRegistration, 0, len(definitions))
 	for i := range definitions {
-		if err := registrar.RegisterTool(&definitions[i], adapters[definitions[i].Name], &rules[i]); err != nil {
-			return fmt.Errorf("register %s: %w", definitions[i].Name, err)
-		}
+		registrations = append(registrations, toolbroker.ToolRegistration{
+			Definition: definitions[i],
+			Adapter:    adapters[definitions[i].Name],
+			Rule:       rules[i],
+		})
 	}
-	return nil
+	return &toolProvider{registrations: registrations}, nil
 }

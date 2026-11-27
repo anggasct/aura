@@ -5,6 +5,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestDriverReleasesOnLaunchFailure(t *testing.T) {
@@ -44,7 +46,7 @@ func TestDriverReleasesOnKeyMismatch(t *testing.T) {
 	}
 	if _, _, err := driver.RunChild(t.Context(), testSpec(), time.Now().UTC()); err == nil {
 		t.Fatal("expected key mismatch failure")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeChildInvalid {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeChildInvalid {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	ledger.mu.Lock()
@@ -110,12 +112,12 @@ func TestDriverRejectsInvalidSpecCodes(t *testing.T) {
 	driver, _, _ := testDriver(t)
 	if _, _, err := driver.RunChild(t.Context(), nil, time.Now().UTC()); err == nil {
 		t.Fatal("expected nil spec rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	if _, _, err := driver.RunChild(t.Context(), testSpec(), time.Time{}); err == nil {
 		t.Fatal("expected zero timestamp rejection")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }

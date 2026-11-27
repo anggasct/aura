@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/status"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -121,7 +120,7 @@ func TestPresencePostOnceEditInPlace(t *testing.T) {
 		}
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 50 * time.Millisecond
@@ -161,7 +160,7 @@ func TestPresenceSilentFallback(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -196,13 +195,13 @@ func TestPresenceRedactsSecrets(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
 	vault := secret.New()
 	vault.Set("probe", "hunter2-secret-value")
-	adapter.SetSecretVault(vault)
+	adapter.secretVault = vault
 	req := presenceTestRequest("turn-secret-1")
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted(): %v", err)
@@ -227,7 +226,7 @@ func TestPresenceFailureLine(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -264,7 +263,7 @@ func TestPresenceRepeatedFailureCoalesced(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -307,7 +306,7 @@ func TestPresenceFailureUsesActivityLanguage(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -347,7 +346,7 @@ func TestPresenceThrottleCoalesces(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 3600000000000
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -387,7 +386,7 @@ func TestPresenceThrottleCoalescesInFlightPost(t *testing.T) {
 		}
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = configkit.Duration(time.Hour)
 	})
 	adapter.statusAfter = 10 * time.Millisecond
@@ -441,7 +440,7 @@ func TestPresenceDeliveryStopsClockBeforeAnswer(t *testing.T) {
 		}
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 10 * time.Millisecond
@@ -509,7 +508,7 @@ func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 		}
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -560,7 +559,7 @@ func TestPresenceScreensSecretStatusAndArgs(t *testing.T) {
 		}
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = time.Nanosecond
@@ -597,7 +596,7 @@ func TestPresenceOmitsUnparseableParallelArgs(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 30 * time.Millisecond
@@ -645,7 +644,7 @@ func TestPresenceSingleSlowToolStaysAlive(t *testing.T) {
 		}
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = 60 * time.Millisecond
@@ -713,7 +712,7 @@ func TestPresenceFailedStatusPostDoesNotBreakDelivery(t *testing.T) {
 			writeMessage(t, w, "answer-id")
 		}
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	adapter.statusAfter = time.Nanosecond
@@ -755,7 +754,7 @@ func TestLateInitialStatusNeverOverwritesANewerStatus(t *testing.T) {
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "status-id")
 	})
-	adapter, _ := newSendTestAdapter(t, stub, func(cfg *config.Discord) {
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
 		cfg.MinEditInterval = 0
 	})
 	session, _, err := adapter.ensurePresence(presenceTestRequest("turn-late-initial"))

@@ -14,8 +14,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/modules/codeexec/interpreter"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const liveSession = "session-live"
@@ -23,17 +26,17 @@ const liveSession = "session-live"
 type storedHost struct {
 	runner    *Runner
 	db        *sql.DB
-	artifacts store.ArtifactStore
+	artifacts storage.ArtifactStore
 }
 
 func (h *liveHost) storedRunner(t *testing.T, quota int64, change func(*Limits)) *storedHost {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: liveSession, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: liveSession, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	artifacts := store.NewArtifactStore(db, t.TempDir(), quota)
+	artifacts := storage.NewArtifactStore(db, t.TempDir(), quota)
 	limits := liveLimits()
 	if change != nil {
 		change(&limits)
@@ -67,7 +70,7 @@ func (s *storedHost) run(t *testing.T, runtime, source string, files ...string) 
 	return outcome
 }
 
-func (s *storedHost) read(t *testing.T, id string) ([]byte, store.ArtifactMetadata) {
+func (s *storedHost) read(t *testing.T, id string) ([]byte, storage.ArtifactMetadata) {
 	t.Helper()
 	reader, meta, err := s.artifacts.Open(t.Context(), id)
 	if err != nil {
@@ -114,7 +117,7 @@ func TestLiveDeclaredOutputsBecomeArtifacts(t *testing.T) {
 	}
 	for runtime, source := range sources {
 		t.Run(runtime, func(t *testing.T) {
-			stored := host.storedRunner(t, store.DefaultArtifactQuotaBytes, nil)
+			stored := host.storedRunner(t, storage.DefaultArtifactQuotaBytes, nil)
 			outcome := stored.run(t, runtime, source, "result.csv", "chart.png", "sub/n.txt", "missing.txt")
 			if outcome.Class != ClassOK || len(outcome.Artifacts) != 4 {
 				t.Fatalf("outcome = %+v", outcome)
@@ -182,7 +185,7 @@ func TestLiveOutputsFollowTheRunClass(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			stored := host.storedRunner(t, store.DefaultArtifactQuotaBytes, tc.change)
+			stored := host.storedRunner(t, storage.DefaultArtifactQuotaBytes, tc.change)
 			outcome := stored.run(t, tc.runtime, tc.source, "a.txt")
 			if outcome.Class != tc.want {
 				t.Fatalf("class = %s, want %s: %+v", outcome.Class, tc.want, outcome)
@@ -203,7 +206,7 @@ func TestLiveFileAtTheSizeLimitIsImported(t *testing.T) {
 	const limit = 64 << 10
 	for _, runtime := range []string{"python", "javascript", "go"} {
 		t.Run(runtime, func(t *testing.T) {
-			stored := host.storedRunner(t, store.DefaultArtifactQuotaBytes, func(l *Limits) { l.MaxFileBytes = limit })
+			stored := host.storedRunner(t, storage.DefaultArtifactQuotaBytes, func(l *Limits) { l.MaxFileBytes = limit })
 			outcome := stored.run(t, runtime, program(runtime, writeBytes(runtime, "output/a.bin", limit)), "a.bin")
 			if outcome.Class != ClassOK || len(outcome.Artifacts) != 1 || outcome.Artifacts[0].Refused != "" || outcome.Artifacts[0].Size != limit {
 				t.Fatalf("outcome = %+v", outcome)
@@ -248,7 +251,7 @@ func TestLiveSpecialFilesCannotBeMadeByTheProgram(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			stored := host.storedRunner(t, store.DefaultArtifactQuotaBytes, nil)
+			stored := host.storedRunner(t, storage.DefaultArtifactQuotaBytes, nil)
 			outcome := stored.run(t, tc.runtime, tc.source, "x")
 			created := outcome.Class == ClassOK
 			if created {
@@ -272,7 +275,7 @@ func TestLiveSweepSparesARunThatIsStillExecuting(t *testing.T) {
 	}
 	for runtime, source := range sources {
 		t.Run(runtime, func(t *testing.T) {
-			stored := host.storedRunner(t, store.DefaultArtifactQuotaBytes, nil)
+			stored := host.storedRunner(t, storage.DefaultArtifactQuotaBytes, nil)
 			done := make(chan Outcome, 1)
 			go func() { done <- stored.run(t, runtime, source, "a.txt") }()
 			host.waitForFile(t, "ready")

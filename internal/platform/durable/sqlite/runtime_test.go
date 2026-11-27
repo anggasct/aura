@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 func TestRuntimePortConformance(t *testing.T) {
@@ -287,4 +288,111 @@ func TestTurnDeadlineReadsTheActiveTurn(t *testing.T) {
 	if _, _, err := rt.TurnDeadline(t.Context(), "session-corrupt"); err == nil {
 		t.Fatal("TurnDeadline with an unparseable deadline succeeded")
 	}
+}
+
+func TestJournalWritesJoinTheCallersTransaction(t *testing.T) {
+	cases := []struct {
+		name  string
+		reuse durable.ReusePolicy
+	}{
+		{"default reuse policy", durable.ReuseNever},
+		{"reuse ended", durable.ReuseEnded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			path := newDatabaseFile(t)
+			db, err := dbsqlite.Open(t.Context(), path, dbsqlite.Options{BusyTimeout: 50 * time.Millisecond})
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			t.Cleanup(func() { _ = db.Close() })
+			rt := newRuntime(t, db, nil)
+			rt.DeclareHandlers("job")
+
+			insertAppRows := func(txCtx context.Context, suffix string) error {
+				stamp := time.Now().UTC().Format(time.RFC3339Nano)
+				q := dbsqlite.Conn(txCtx, db)
+				if _, err := q.ExecContext(txCtx, `INSERT INTO session (id, owner_id, created_at, updated_at) VALUES (?, 'owner', ?, ?)`, "sess-"+suffix, stamp, stamp); err != nil {
+					return err
+				}
+				_, err := q.ExecContext(txCtx, `INSERT INTO conversation_session (conversation_key, session_id, updated_at) VALUES (?, ?, ?)`, "conv-"+suffix, "sess-"+suffix, stamp)
+				return err
+			}
+
+			abortErr := errors.New("abort caller tx")
+			err = dbsqlite.RunInTx(t.Context(), db, func(txCtx context.Context) error {
+				if err := insertAppRows(txCtx, "rollback"); err != nil {
+					return err
+				}
+				if _, err := rt.Start(txCtx, durable.StartRequest{Key: "run-rollback", Handler: "job", Reuse: tc.reuse}); err != nil {
+					return err
+				}
+				return abortErr
+			})
+			if !errors.Is(err, abortErr) {
+				t.Fatalf("rollback tx err = %v, want %v", err, abortErr)
+			}
+			if n := countRows(t, db, `SELECT COUNT(*) FROM conversation_session WHERE conversation_key = 'conv-rollback'`); n != 0 {
+				t.Fatalf("conversation_session rows after rollback = %d, want 0", n)
+			}
+			if n := countRows(t, db, `SELECT COUNT(*) FROM durable_run WHERE key = 'run-rollback'`); n != 0 {
+				t.Fatalf("durable_run rows after rollback = %d, want 0", n)
+			}
+
+			err = dbsqlite.RunInTx(t.Context(), db, func(txCtx context.Context) error {
+				if err := insertAppRows(txCtx, "commit"); err != nil {
+					return err
+				}
+				_, err := rt.Start(txCtx, durable.StartRequest{Key: "run-commit", Handler: "job", Reuse: tc.reuse})
+				return err
+			})
+			if err != nil {
+				t.Fatalf("commit tx err = %v", err)
+			}
+			if n := countRows(t, db, `SELECT COUNT(*) FROM conversation_session WHERE conversation_key = 'conv-commit'`); n != 1 {
+				t.Fatalf("conversation_session rows after commit = %d, want 1", n)
+			}
+			if n := countRows(t, db, `SELECT COUNT(*) FROM durable_run WHERE key = 'run-commit'`); n != 1 {
+				t.Fatalf("durable_run rows after commit = %d, want 1", n)
+			}
+		})
+	}
+}
+
+func TestRuntimeCancelRefusesACallersTransaction(t *testing.T) {
+	path := newDatabaseFile(t)
+	db, err := dbsqlite.Open(t.Context(), path, dbsqlite.Options{BusyTimeout: 100 * time.Millisecond})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	rt := newRuntime(t, db, nil)
+	started := make(chan struct{}, 1)
+	rt.RegisterHandler("waiter", func(ctx context.Context, _ durable.Invocation) error {
+		started <- struct{}{}
+		<-ctx.Done()
+		return ctx.Err()
+	})
+	startHost(t, rt)
+	ref := mustStart(t, rt, durable.StartRequest{Handler: "waiter", Key: "k-cancel-tx"})
+	receive(t, started)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	err = dbsqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		cancelErr := rt.Cancel(txCtx, ref)
+		detail := requireCode(t, cancelErr, ErrorCodeInvalidArgument)
+		if detail != "durable cancel must not run inside a caller's transaction" {
+			t.Fatalf("detail = %q", detail)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("RunInTx: %v", err)
+	}
+
+	if err := rt.Cancel(t.Context(), ref); err != nil {
+		t.Fatalf("Cancel outside tx: %v", err)
+	}
+	waitState(t, rt, runWant{key: ref.Key, state: durable.RunCancelled})
 }

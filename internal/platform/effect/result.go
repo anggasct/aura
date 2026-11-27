@@ -9,6 +9,8 @@ import (
 	"errors"
 	"fmt"
 	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const MaxResultBytes = 1 << 20
@@ -42,7 +44,7 @@ func (j *Journal) RecordedResult(ctx context.Context, intent *Intent) (json.RawM
 		state             State
 		result, digest    sql.NullString
 	)
-	err := j.db.QueryRowContext(ctx, selectRecordedResultSQL, intent.ID).Scan(&id, &state, &requestDigest, &result, &digest)
+	err := sqlite.Conn(ctx, j.db).QueryRowContext(ctx, selectRecordedResultSQL, intent.ID).Scan(&id, &state, &requestDigest, &result, &digest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, codedError(ErrorCodeNotFound, fmt.Sprintf("effect: intent %s not found", intent.ID), nil)
 	}

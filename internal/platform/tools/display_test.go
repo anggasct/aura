@@ -214,7 +214,23 @@ func TestValidationRejectsDuplicateAndCaseVariantKeys(t *testing.T) {
 }
 
 func TestBuiltinToolsRejectDuplicateKeysToo(t *testing.T) {
-	definition := tools.DefinitionsByKey()["read_file@v1"]
+	definition := &tools.Definition{
+		Name:    "read_file",
+		Version: tools.Version,
+		Validator: func(raw json.RawMessage) (json.RawMessage, error) {
+			value, err := tools.DecodeObject(raw)
+			if err != nil {
+				return nil, err
+			}
+			if err := tools.RejectUnknown(value, "path"); err != nil {
+				return nil, err
+			}
+			if err := tools.ValidateString(value, "path"); err != nil {
+				return nil, err
+			}
+			return json.Marshal(value)
+		},
+	}
 	for _, raw := range []string{`{"path":"/a","path":"/etc/passwd"}`, `{"path":"/a","PATH":"/b"}`} {
 		if _, err := definition.Validate(json.RawMessage(raw)); err == nil {
 			t.Errorf("Validate(%s) accepted ambiguous arguments", raw)
@@ -368,15 +384,12 @@ func TestExactDisplayRefusesInsteadOfTruncating(t *testing.T) {
 }
 
 func TestEmailSendCardShowsTheRecipientFirst(t *testing.T) {
-	var email *tools.Definition
-	builtins := tools.Builtins()
-	for i := range builtins {
-		if builtins[i].Name == tools.EmailSendToolName {
-			email = &builtins[i]
-		}
-	}
-	if email == nil {
-		t.Fatal("email_send is not a builtin")
+	email := &tools.Definition{
+		Name:      "email_send",
+		Version:   tools.Version,
+		Effectful: true,
+		OptIn:     true,
+		Display:   []string{"to", "subject", "body"},
 	}
 	text, err := email.ApprovalText(json.RawMessage(`{"body":"hello","subject":"Hi","to":"a@mail.example"}`), nil)
 	if err != nil || text != "to: a@mail.example\nsubject: Hi\nbody: hello" {

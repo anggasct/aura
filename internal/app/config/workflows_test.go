@@ -6,19 +6,19 @@ import (
 	"strings"
 	"testing"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/modules/workflow"
 )
 
 func TestGeneratedWorkflowBudgets(t *testing.T) {
-	if got := writeConfigYAML(t, "").Config.Workflows.Generated; got != (legacyconfig.GeneratedWorkflows{MaxSteps: 20, MaxTokens: 200000}) {
+	if got := writeConfigYAML(t, "").Config.Workflows.Generated; got != (workflow.GeneratedConfig{MaxSteps: 20, MaxTokens: 200000}) {
 		t.Fatalf("defaults = %+v", got)
 	}
-	if got := writeConfigYAML(t, "workflows:\n  generated:\n    max_steps: 5\n").Config.Workflows.Generated; got != (legacyconfig.GeneratedWorkflows{MaxSteps: 5, MaxTokens: 200000}) {
+	if got := writeConfigYAML(t, "workflows:\n  generated:\n    max_steps: 5\n").Config.Workflows.Generated; got != (workflow.GeneratedConfig{MaxSteps: 5, MaxTokens: 200000}) {
 		t.Fatalf("partial override = %+v", got)
 	}
 	for label, tc := range map[string]struct {
 		body string
-		code legacyconfig.ErrorCode
+		code ErrorCode
 	}{
 		"zero steps":     {"workflows:\n  generated:\n    max_steps: 0\n", invalidCode},
 		"negative token": {"workflows:\n  generated:\n    max_tokens: -1\n", invalidCode},

@@ -3,11 +3,12 @@ package interpreter
 import (
 	"archive/tar"
 	"bytes"
-	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func fuzzLimits() extractLimits {
@@ -42,12 +43,12 @@ func FuzzExtractArchive(f *testing.F) {
 		}()
 		err = extractArchive(t.Context(), bytes.NewReader(gzipStored(t, data)), root, fuzzLimits())
 		if err != nil {
-			var coded *Error
-			if !errors.As(err, &coded) {
+			code, ok := fault.CodeOf[ErrorCode](err)
+			if !ok {
 				t.Fatalf("error without a code: %v", err)
 			}
-			if coded.Code != ErrorCodeArchiveInvalid && coded.Code != ErrorCodeIO {
-				t.Fatalf("unexpected error code %q", coded.Code)
+			if code != ErrorCodeArchiveInvalid && code != ErrorCodeIO {
+				t.Fatalf("unexpected error code %q", code)
 			}
 		}
 		siblings, readErr := os.ReadDir(outer)

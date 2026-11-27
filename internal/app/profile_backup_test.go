@@ -17,8 +17,11 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	"github.com/anggasct/aura/internal/modules/profile"
+	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
@@ -32,13 +35,13 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-bk", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	sessions := turnstore.NewSessionService(db)
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-bk", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	for i, text := range []string{"i write backends in Go", "also rust sometimes", "my editor is neovim"} {
-		if _, err := events.AppendSequenced(t.Context(), "sess-bk", &store.RuntimeEvent{
+		if _, err := events.AppendSequenced(t.Context(), "sess-bk", &turn.Event{
 			ID: fmt.Sprintf("evt-bk-%d", i+1), SessionID: "sess-bk", TurnID: "t1", InvocationID: "inv-1",
 			Author: principal.OwnerID, Kind: "message.completed", SchemaVersion: 1,
 			Payload: []byte(`{"text":"` + text + `"}`), CreatedAt: now,
@@ -46,7 +49,11 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 			t.Fatalf("AppendSequenced: %v", err)
 		}
 	}
-	service, err := profile.NewService(newProfileRegistry(db), profile.Config{MinConfidence: 0.70})
+	store, err := profile.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	service, err := profile.NewService(store, profile.ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -116,16 +123,16 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 		t.Fatalf("storagePaths: %v", err)
 	}
 	backupDir := filepath.Join(t.TempDir(), "backup")
-	if _, err := store.Backup(t.Context(), db, backupDir); err != nil {
+	if _, err := storage.Backup(t.Context(), db, backupDir); err != nil {
 		t.Fatalf("Backup: %v", err)
 	}
-	if _, err := store.VerifyRestore(t.Context(), backupDir, artifactRoot); err != nil {
+	if _, err := storage.VerifyRestore(t.Context(), backupDir, artifactRoot); err != nil {
 		t.Fatalf("VerifyRestore: %v", err)
 	}
 	if err := db.Close(); err != nil {
 		t.Fatalf("close db: %v", err)
 	}
-	if _, err := store.Restore(t.Context(), backupDir, artifactRoot, dbPath, store.RestoreOptions{Force: true}); err != nil {
+	if _, err := storage.Restore(t.Context(), backupDir, artifactRoot, dbPath, storage.RestoreOptions{Force: true}); err != nil {
 		t.Fatalf("Restore: %v", err)
 	}
 
@@ -134,7 +141,11 @@ func TestProfileBackupRestorePreservesLifecycle(t *testing.T) {
 		t.Fatalf("reopen restored db: %v", err)
 	}
 	defer func() { _ = restored.Close() }()
-	service2, err := profile.NewService(newProfileRegistry(restored), profile.Config{MinConfidence: 0.70})
+	restoredStore, err := profile.NewSQLiteStore(restored)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore restored: %v", err)
+	}
+	service2, err := profile.NewService(restoredStore, profile.ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService restored: %v", err)
 	}
@@ -214,7 +225,11 @@ func TestProfileFTSRebuild(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	service, err := profile.NewService(newProfileRegistry(db), profile.Config{MinConfidence: 0.70})
+	store, err := profile.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	service, err := profile.NewService(store, profile.ServiceOptions{MinConfidence: 0.70})
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -234,8 +249,8 @@ func TestProfileFTSRebuild(t *testing.T) {
 	if len(hits) != 0 {
 		t.Fatalf("search after wipe: %v", hits)
 	}
-	if err := RebuildProfileFTS(t.Context(), db); err != nil {
-		t.Fatalf("RebuildProfileFTS: %v", err)
+	if err := store.RebuildFTS(t.Context()); err != nil {
+		t.Fatalf("RebuildFTS: %v", err)
 	}
 	hits = retrieveProfileValues(t, service, "neovim", now)
 	if len(hits) != 1 || hits[0] != "neovim" {
@@ -258,10 +273,10 @@ func TestProfilingProducerResolves(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appconfig.Load: %v", err)
 	}
-	if _, err := profilingProducer(nil); err == nil {
-		t.Errorf("expected nil config rejection")
+	if _, err := profile.ResolveProducer(auramodel.Config{}, nil); err == nil {
+		t.Errorf("expected empty config rejection")
 	}
-	if _, err := profilingProducer(loaded.Config); err == nil {
+	if _, err := profile.ResolveProducer(loaded.Config.Models, loaded.Config.ModelRoutes); err == nil {
 		t.Errorf("expected missing route rejection")
 	}
 	routedDir := t.TempDir()
@@ -303,9 +318,9 @@ children:
 	if err != nil {
 		t.Fatalf("appconfig.Load: %v", err)
 	}
-	producer, err := profilingProducer(loadedRouted.Config)
+	producer, err := profile.ResolveProducer(loadedRouted.Config.Models, loadedRouted.Config.ModelRoutes)
 	if err != nil {
-		t.Fatalf("profilingProducer: %v", err)
+		t.Fatalf("ResolveProducer: %v", err)
 	}
 	if producer.Model != "test-model" || producer.Provider == "" {
 		t.Errorf("producer = %+v", producer)
@@ -314,7 +329,7 @@ children:
 
 func TestProfileModelCallerExtracts(t *testing.T) {
 	llm := &fakeContextLLM{texts: []string{`[{"category":"tool","key":"editor","value":"neovim","sources":[1]}]`}}
-	caller := newProfileModelCaller(llm, profile.ModelProducer{Provider: "p", Model: "m"}, 2048)
+	caller := profile.NewModelCaller(llm, profile.ModelProducer{Provider: "p", Model: "m"}, 2048)
 	var nilCtx context.Context
 	if _, err := caller.Extract(nilCtx, &profile.ExtractRequest{}); err == nil {
 		t.Errorf("expected nil context rejection")
@@ -322,7 +337,7 @@ func TestProfileModelCallerExtracts(t *testing.T) {
 	if _, err := caller.Extract(t.Context(), nil); err == nil {
 		t.Errorf("expected nil request rejection")
 	}
-	if _, err := newProfileModelCaller(nil, profile.ModelProducer{}, 2048).Extract(t.Context(), &profile.ExtractRequest{MaxOutputTokens: 64}); err == nil {
+	if _, err := profile.NewModelCaller(nil, profile.ModelProducer{}, 2048).Extract(t.Context(), &profile.ExtractRequest{MaxOutputTokens: 64}); err == nil {
 		t.Errorf("expected missing model rejection")
 	}
 	result, err := caller.Extract(t.Context(), &profile.ExtractRequest{
@@ -336,7 +351,7 @@ func TestProfileModelCallerExtracts(t *testing.T) {
 		t.Errorf("result = %+v", result)
 	}
 	oversized := &fakeContextLLM{texts: []string{strings.Repeat("x", 9000)}}
-	if _, err := newProfileModelCaller(oversized, profile.ModelProducer{}, 64).Extract(t.Context(), &profile.ExtractRequest{MaxOutputTokens: 64}); err == nil {
+	if _, err := profile.NewModelCaller(oversized, profile.ModelProducer{}, 64).Extract(t.Context(), &profile.ExtractRequest{MaxOutputTokens: 64}); err == nil {
 		t.Errorf("expected oversized rejection")
 	}
 }
@@ -356,24 +371,30 @@ func TestNewProfileRuntimeWiresTelemetry(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	if _, err := newProfileRuntime(nil, db, nil, profile.ModelProducer{}, nil, profileTestScanner{}, nil); err == nil {
-		t.Errorf("expected nil config rejection")
+	if _, err := profile.New(t.Context(), nil); err == nil {
+		t.Errorf("expected nil deps rejection")
 	}
-	if _, err := newProfileRuntime(loaded.Config, nil, nil, profile.ModelProducer{}, nil, profileTestScanner{}, nil); err == nil {
+	if _, err := profile.New(t.Context(), &profile.Deps{Config: *loaded.Config.Profile, Scanner: profileTestScanner{}}); err == nil {
 		t.Errorf("expected nil db rejection")
 	}
-	if _, err := newProfileRuntime(loaded.Config, db, nil, profile.ModelProducer{}, nil, nil, nil); err == nil {
+	if _, err := profile.New(t.Context(), &profile.Deps{Config: *loaded.Config.Profile, DB: db}); err == nil {
 		t.Errorf("expected nil scanner rejection")
 	}
-	unrouted, err := newProfileRuntime(loaded.Config, db, nil, profile.ModelProducer{}, nil, profileTestScanner{}, nil)
+	unrouted, err := profile.New(t.Context(), &profile.Deps{
+		Config:      *loaded.Config.Profile,
+		DB:          db,
+		ModelConfig: loaded.Config.Models,
+		ModelRoutes: loaded.Config.ModelRoutes,
+		Scanner:     profileTestScanner{},
+	})
 	if err != nil {
 		t.Fatalf("missing model must degrade, not fail: %v", err)
 	}
-	if unrouted.extractor != nil {
+	if unrouted.Extractor() != nil {
 		t.Errorf("extractor built without a profiling model")
 	}
-	if findings := unrouted.health.Check(t.Context()); len(findings) != 1 || findings[0].Code != "profile_extractor_unavailable" {
-		t.Errorf("findings = %+v, want profile_extractor_unavailable", findings)
+	if checks := unrouted.HealthChecks(); len(checks) != 1 || len(checks[0].Checker.Check(t.Context())) != 1 || checks[0].Checker.Check(t.Context())[0].Code != "profile_extractor_unavailable" {
+		t.Errorf("checks = %+v, want profile_extractor_unavailable", checks)
 	}
 	routedDir := t.TempDir()
 	routed := routedDir + "/routed.yaml"
@@ -420,21 +441,25 @@ children:
 	}
 	defer func() { _ = routedDB.Close() }()
 	reader := sdkmetric.NewManualReader()
-	producer, err := profilingProducer(loadedRouted.Config)
+	rt, err := profile.New(t.Context(), &profile.Deps{
+		Config:      *loadedRouted.Config.Profile,
+		DB:          routedDB,
+		Models:      auramodel.Set{"primary": &fakeContextLLM{}},
+		ModelConfig: loadedRouted.Config.Models,
+		ModelRoutes: loadedRouted.Config.ModelRoutes,
+		Scanner:     profileTestScanner{},
+		Meters:      sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)),
+	})
 	if err != nil {
-		t.Fatalf("profilingProducer: %v", err)
+		t.Fatalf("profile.New: %v", err)
 	}
-	rt, err := newProfileRuntime(loadedRouted.Config, routedDB, &fakeContextLLM{}, producer, sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)), profileTestScanner{}, nil)
-	if err != nil {
-		t.Fatalf("newProfileRuntime: %v", err)
-	}
-	if rt.extractor == nil {
+	if rt.Extractor() == nil {
 		t.Fatal("extractor missing for a routed configuration")
 	}
-	if findings := rt.health.Check(t.Context()); len(findings) != 0 {
-		t.Errorf("routed runtime findings = %+v, want none", findings)
+	if checks := rt.HealthChecks(); len(checks) != 1 || len(checks[0].Checker.Check(t.Context())) != 0 {
+		t.Errorf("routed runtime findings = %+v, want none", checks)
 	}
-	if err := rt.extractor.Enqueue(t.Context(), profile.Job{
+	if err := rt.Extractor().Enqueue(t.Context(), profile.Job{
 		OwnerID: principal.OwnerID, SessionID: "sess-wire",
 		Events: []profile.JobEvent{{ID: "evt-wire-1", Sequence: 1, Text: "hello"}},
 	}); err != nil {

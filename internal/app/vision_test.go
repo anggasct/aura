@@ -13,28 +13,28 @@ import (
 	"go.opentelemetry.io/otel/sdk/metric/metricdata"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/vision"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type fakeArtifactStore struct {
 	blobs map[string][]byte
 }
 
-func (f *fakeArtifactStore) Put(ctx context.Context, r io.Reader, meta *store.ArtifactMetadata) (store.ArtifactRef, error) {
-	return store.ArtifactRef{}, nil
+func (f *fakeArtifactStore) Put(ctx context.Context, r io.Reader, meta *storage.ArtifactMetadata) (storage.ArtifactRef, error) {
+	return storage.ArtifactRef{}, nil
 }
 
-func (f *fakeArtifactStore) Open(ctx context.Context, refID string) (io.ReadCloser, store.ArtifactMetadata, error) {
+func (f *fakeArtifactStore) Open(ctx context.Context, refID string) (io.ReadCloser, storage.ArtifactMetadata, error) {
 	data, ok := f.blobs[refID]
 	if !ok {
-		return nil, store.ArtifactMetadata{}, sql.ErrNoRows
+		return nil, storage.ArtifactMetadata{}, sql.ErrNoRows
 	}
-	return io.NopCloser(bytes.NewReader(data)), store.ArtifactMetadata{ID: refID}, nil
+	return io.NopCloser(bytes.NewReader(data)), storage.ArtifactMetadata{ID: refID}, nil
 }
 
-func (f *fakeArtifactStore) Link(ctx context.Context, link *store.ArtifactLink) error {
+func (f *fakeArtifactStore) Link(ctx context.Context, link *storage.ArtifactLink) error {
 	return nil
 }
 
@@ -42,8 +42,15 @@ func (f *fakeArtifactStore) Unlink(ctx context.Context, refID string) error {
 	return nil
 }
 
+func newTestBlobReader(store *fakeArtifactStore) *vision.BlobReader {
+	return vision.NewBlobReader(func(ctx context.Context, refID string) (io.ReadCloser, error) {
+		stream, _, err := store.Open(ctx, refID)
+		return stream, err
+	})
+}
+
 func TestVisionBlobReaderRoundTrip(t *testing.T) {
-	reader := &visionBlobReader{blobs: &fakeArtifactStore{blobs: map[string][]byte{"art-1": []byte("bytes")}}}
+	reader := newTestBlobReader(&fakeArtifactStore{blobs: map[string][]byte{"art-1": []byte("bytes")}})
 	data, err := reader.ReadBlob(context.Background(), "art-1", 1024)
 	if err != nil {
 		t.Fatalf("ReadBlob: %v", err)
@@ -54,7 +61,7 @@ func TestVisionBlobReaderRoundTrip(t *testing.T) {
 }
 
 func TestVisionBlobReaderFailsClosed(t *testing.T) {
-	reader := &visionBlobReader{blobs: &fakeArtifactStore{blobs: map[string][]byte{"art-1": []byte("bytes")}}}
+	reader := newTestBlobReader(&fakeArtifactStore{blobs: map[string][]byte{"art-1": []byte("bytes")}})
 	for name, fn := range map[string]func() error{
 		"missing":       func() error { _, err := reader.ReadBlob(context.Background(), "nope", 1024); return err },
 		"over bound":    func() error { _, err := reader.ReadBlob(context.Background(), "art-1", 2); return err },
@@ -72,7 +79,7 @@ func TestVisionBlobReaderFailsClosed(t *testing.T) {
 			}
 		})
 	}
-	var nilReader *visionBlobReader
+	var nilReader *vision.BlobReader
 	if _, err := nilReader.ReadBlob(context.Background(), "art-1", 1024); err == nil {
 		t.Fatal("expected nil store rejection")
 	}
@@ -80,7 +87,7 @@ func TestVisionBlobReaderFailsClosed(t *testing.T) {
 
 func TestVisionBlobReaderPreservesStoreCause(t *testing.T) {
 	sentinel := sql.ErrNoRows
-	reader := &visionBlobReader{blobs: &fakeArtifactStore{blobs: map[string][]byte{}}}
+	reader := newTestBlobReader(&fakeArtifactStore{blobs: map[string][]byte{}})
 	_, err := reader.ReadBlob(context.Background(), "missing", 1024)
 	if err == nil {
 		t.Fatal("expected failure")
@@ -129,14 +136,13 @@ func TestNewVisionServiceDisabledYieldsNil(t *testing.T) {
 }
 
 func TestVisionStoreAdapterFailsClosed(t *testing.T) {
-	var nilAdapter *visionStoreAdapter
-	if _, err := nilAdapter.Put(t.Context(), bytes.NewReader([]byte("x")), nil); err == nil {
-		t.Fatal("nil adapter Put must fail")
+	adapter := storage.NewVisionStore(nil)
+	if _, err := adapter.Put(t.Context(), bytes.NewReader([]byte("x")), nil); err == nil {
+		t.Fatal("nil inner Put must fail")
 	}
-	if err := nilAdapter.Unlink(t.Context(), "art-1"); err == nil {
-		t.Fatal("nil adapter Unlink must fail")
+	if err := adapter.Unlink(t.Context(), "art-1"); err == nil {
+		t.Fatal("nil inner Unlink must fail")
 	}
-	adapter := &visionStoreAdapter{}
 	var nilCtx context.Context
 	if _, err := adapter.Put(nilCtx, bytes.NewReader([]byte("x")), nil); err == nil {
 		t.Fatal("nil context must fail")
@@ -151,7 +157,7 @@ func TestVisionRecorderObserverForwardsBuckets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewVisionRecorder: %v", err)
 	}
-	observer := visionRecorderObserver(recorder)
+	observer := recorder.VisionObserver()
 	if observer == nil {
 		t.Fatal("observer is nil")
 	}

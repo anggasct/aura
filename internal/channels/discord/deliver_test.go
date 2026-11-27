@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -46,13 +47,13 @@ func TestDeliver_StartedSendIsAmbiguous(t *testing.T) {
 	doubles.effects.seedStartedPost(t, startedPost{req: req, channelID: "777006"})
 
 	_, err := adapter.Deliver(t.Context(), req)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeDeliveryAmbiguous {
+	if !fault.HasCode(err, ErrorCodeDeliveryAmbiguous) {
 		t.Fatalf("Deliver error = %v, want %s", err, ErrorCodeDeliveryAmbiguous)
 	}
 	if !errors.Is(err, runtimechannelhost.ErrDeliveryAmbiguous) {
 		t.Errorf("Deliver error = %v, want it to fulfil the port's ambiguous contract", err)
 	}
-	if refused := Errorf(ErrorCodeDeliveryFailed, "delivery settled without success"); errors.Is(refused, runtimechannelhost.ErrDeliveryAmbiguous) {
+	if refused := fault.New(ErrorCodeDeliveryFailed, "delivery settled without success"); errors.Is(refused, runtimechannelhost.ErrDeliveryAmbiguous) {
 		t.Errorf("%v fulfils the port's ambiguous contract, want a definitive failure", refused)
 	}
 	if posts := stub.postCount(); posts != 0 {

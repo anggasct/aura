@@ -3,6 +3,8 @@ package schedule
 import (
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func mustParse(t *testing.T, raw string) *Schedule {
@@ -154,7 +156,7 @@ func TestNextFireSteppedDayOfMonth(t *testing.T) {
 func TestNextFireRejectsNilSchedule(t *testing.T) {
 	if _, err := NextFire(nil, time.UTC, time.Now()); err == nil {
 		t.Error("nil schedule accepted")
-	} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Errorf("nil schedule code = %v, %v", code, ok)
 	}
 }

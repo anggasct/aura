@@ -45,7 +45,7 @@ func TestBrokerEndedRequestNeverReachesTheAdapter(t *testing.T) {
 			adapterCalls := 0
 			decisions := 0
 			var observed []Observation
-			broker, err := New(&Options{
+			broker, err := newFixtureBrokerOrErr(t, &Options{
 				HostCapabilities: capabilitytest.Host(t),
 				Effects:          executor,
 				Adapters: map[string]Adapter{

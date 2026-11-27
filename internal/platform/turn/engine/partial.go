@@ -5,11 +5,11 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func partialModelText(ev *store.RuntimeEvent) (text string, partial bool) {
-	if ev.Kind != store.EventKindADK {
+func partialModelText(ev *turn.Event) (text string, partial bool) {
+	if ev.Kind != turnstore.EventKindADK {
 		return "", false
 	}
 	var decoded struct {
@@ -21,7 +21,7 @@ func partialModelText(ev *store.RuntimeEvent) (text string, partial bool) {
 	return adkModelText(ev.Payload, true), true
 }
 
-func (e *Engine) deltaFromPartial(t *turnState, next *uint64, ev *store.RuntimeEvent) (delta *store.RuntimeEvent, partial bool, err error) {
+func (e *Engine) deltaFromPartial(t *turnState, next *uint64, ev *turn.Event) (delta *turn.Event, partial bool, err error) {
 	text, partial := partialModelText(ev)
 	if !partial || text == "" {
 		return nil, partial, nil
@@ -31,7 +31,7 @@ func (e *Engine) deltaFromPartial(t *turnState, next *uint64, ev *store.RuntimeE
 		return nil, true, codedError(turn.ErrorCodeRuntimeInternal, "failed to encode model delta", err)
 	}
 	*next++
-	return &store.RuntimeEvent{
+	return &turn.Event{
 		ID:            NewTurnID(),
 		SessionID:     t.req.SessionID,
 		TurnID:        t.turnID,

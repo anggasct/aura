@@ -16,8 +16,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 var pngHeader = []byte("\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00")
@@ -436,14 +439,14 @@ func TestRefuseInfoJudgesTheOpenDescriptor(t *testing.T) {
 }
 
 func TestImportQuotaExhaustionLeavesNoPartialArtifactInTheStore(t *testing.T) {
-	db := storetest.OpenMigrated(t)
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{
 		ID: "session-1", OwnerID: "owner-1", CreatedAt: time.Now().UTC(), UpdatedAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	artifacts := store.NewArtifactStore(db, root, 8)
+	artifacts := storage.NewArtifactStore(db, root, 8)
 	f := newImportFixture(t)
 	f.importer.sink = storeSink{store: artifacts}
 	f.write(t, "fits.txt", []byte("12345"))

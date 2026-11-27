@@ -14,9 +14,11 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools/displaytest"
 )
@@ -628,8 +630,7 @@ func TestDecideRejectsInvalidArguments(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			accepted, err := tc.decide()
-			code, ok := CodeOf(err)
-			if accepted || !ok || code != ErrorCodeInvalidArgument {
+			if accepted || !fault.HasCode(err, ErrorCodeInvalidArgument) {
 				t.Errorf("Decide() = %v, %v; want a denial with invalid_argument", accepted, err)
 			}
 		})
@@ -756,8 +757,7 @@ func TestNonOwnerRequestTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 		time.Sleep(2 * time.Second)
 		synctest.Wait()
 		outcome, done := settled(result)
-		code, coded := CodeOf(outcome.err)
-		if !done || outcome.accepted || !coded || code != ErrorCodeApprovalTimeout {
+		if !done || outcome.accepted || !fault.HasCode(outcome.err, ErrorCodeApprovalTimeout) {
 			t.Fatalf("decision = %+v (settled %v), want a denial with approval_timeout", outcome, done)
 		}
 		if got := noticesTo(rig, target.dest); !slices.Equal(got, []string{"waiting for the owner", "the owner did not answer"}) {
@@ -781,7 +781,7 @@ func TestRoutedWaitIsCappedByTheBrokerExpiry(t *testing.T) {
 		time.Sleep(6 * time.Second)
 		synctest.Wait()
 		outcome, done := settled(result)
-		if code, _ := CodeOf(outcome.err); !done || outcome.accepted || code != ErrorCodeApprovalTimeout {
+		if !done || outcome.accepted || !fault.HasCode(outcome.err, ErrorCodeApprovalTimeout) {
 			t.Fatalf("decision = %+v (settled %v), want a timeout at the broker expiry", outcome, done)
 		}
 	})
@@ -821,11 +821,11 @@ func TestStandingGrantIsOfferedOnlyToTrustedRequestsWithAStore(t *testing.T) {
 	cases := []struct {
 		name  string
 		class principal.Class
-		reset func(settings *AccessSettings)
+		reset func(settings *access.Settings)
 	}{
-		{"public requester", principal.ClassPublic, func(*AccessSettings) {}},
-		{"no ttl", principal.ClassTrusted, func(settings *AccessSettings) { settings.StandingGrantTTL = 0 }},
-		{"no store", principal.ClassTrusted, func(settings *AccessSettings) { settings.Grants = nil }},
+		{"public requester", principal.ClassPublic, func(*access.Settings) {}},
+		{"no ttl", principal.ClassTrusted, func(settings *access.Settings) { settings.StandingGrantTTL = 0 }},
+		{"no store", principal.ClassTrusted, func(settings *access.Settings) { settings.Grants = nil }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -874,31 +874,37 @@ func TestStandingGrantRecordFailureStillApproves(t *testing.T) {
 
 func TestUndeliverableOwnerCardFailsWithApprovalUnavailable(t *testing.T) {
 	cases := []struct {
-		name  string
-		setup func(t *testing.T, rig *approvalRig)
+		name   string
+		owners []string
+		setup  func(t *testing.T, rig *approvalRig)
 	}{
-		{"owner never started the bot", func(_ *testing.T, rig *approvalRig) {
+		{"owner never started the bot", nil, func(_ *testing.T, rig *approvalRig) {
 			rig.h.api.failNextOn("sendMessage", describedFailure(http.StatusForbidden, "Forbidden: bot can't initiate conversation with a user", 0))
 		}},
-		{"bot api failure", func(_ *testing.T, rig *approvalRig) {
+		{"bot api failure", nil, func(_ *testing.T, rig *approvalRig) {
 			rig.h.api.failNextOn("sendMessage", apiFailure(http.StatusInternalServerError, 0))
 		}},
-		{"no telegram owner identity", func(t *testing.T, rig *approvalRig) {
-			owners, err := principal.NewResolver([]string{"discord:123456789012345678"})
-			if err != nil {
-				t.Fatalf("NewResolver: %v", err)
-			}
-			rig.adapter.SetPrincipalResolver(owners)
-		}},
+		{"no telegram owner identity", []string{"discord:123456789012345678"}, nil},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			rig, target := routedRig(t, routedDefinition(), principal.ClassTrusted)
-			tc.setup(t, rig)
+			opts := accessOpts{definition: routedDefinition()}
+			if tc.owners != nil {
+				owners, err := principal.NewResolver(tc.owners)
+				if err != nil {
+					t.Fatalf("NewResolver: %v", err)
+				}
+				opts.owners = owners
+			}
+			rig := newApprovalRig(t, opts)
+			target := memberTarget(principal.ClassTrusted, destination{chatID: groupChatID, threadID: forumTopic})
+			if tc.setup != nil {
+				tc.setup(t, rig)
+			}
 			synctest.Test(t, func(t *testing.T) {
 				rig.adapter.rememberTarget("session-9", target)
 				accepted, err := rig.adapter.Decide(t.Context(), approvalPrompt("session-9", target.binding.Principal))
-				if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalUnavailable {
+				if accepted || !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
 					t.Fatalf("Decide() = %v, %v; want a denial with approval_unavailable", accepted, err)
 				}
 				if got := rig.routed.recorded(); !slices.Equal(got, []string{approval.RoutedUnavailable}) {
@@ -922,7 +928,7 @@ func TestMissingBotTokenDeniesWithoutPosting(t *testing.T) {
 		rig.adapter.rememberTarget("session-9", target)
 		rig.adapter.rememberTarget("session-1", ownerTarget(privateDest(ownerUserID)))
 		accepted, err := rig.adapter.Decide(t.Context(), approvalPrompt("session-9", target.binding.Principal))
-		if code, ok := CodeOf(err); accepted || !ok || code != ErrorCodeApprovalUnavailable {
+		if accepted || !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
 			t.Errorf("routed Decide() = %v, %v; want approval_unavailable", accepted, err)
 		}
 		accepted, err = rig.adapter.Decide(t.Context(), approvalPrompt("session-1", principal.OwnerID))

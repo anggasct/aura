@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 const countedPersona = "persona-a"
@@ -192,7 +191,7 @@ func TestReplayedTurnDoesNotRepeatItsPostTurnWork(t *testing.T) {
 		lives, crash := newCrashingLives(t)
 		hook, counter := &recordingHook{}, &recordingCounter{}
 		lives.cfg = Deps{
-			PostTurnHook: func(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+			PostTurnHook: func(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 				_ = hook.fn(ctx, req, events)
 				return crash.hook(ctx, req, events)
 			},
@@ -218,7 +217,7 @@ type handingHook struct {
 	crash *crashAfterDelivery
 }
 
-func (h *handingHook) fn(ctx context.Context, req *turn.TurnRequest, events []store.RuntimeEvent) error {
+func (h *handingHook) fn(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {
 	_ = h.recordingHook.fn(ctx, req, events)
 	return h.crash.hook(ctx, req, events)
 }
@@ -337,7 +336,7 @@ func TestTurnIsCountedOnceAfterItsPostTurnHook(t *testing.T) {
 		var order []string
 		engine, db, _ := newTestRuntime(t, Deps{
 			Config: testLimits(2, 4),
-			PostTurnHook: func(context.Context, *turn.TurnRequest, []store.RuntimeEvent) error {
+			PostTurnHook: func(context.Context, *turn.TurnRequest, []turn.Event) error {
 				mu.Lock()
 				defer mu.Unlock()
 				order = append(order, "hook")

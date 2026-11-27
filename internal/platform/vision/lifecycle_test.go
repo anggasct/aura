@@ -1,9 +1,12 @@
-package vision
+package vision_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
+	"image/color"
+	"image/png"
 	"io"
 	"os"
 	"path/filepath"
@@ -13,36 +16,58 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/vision"
 )
 
+func lifecycleLimits() *vision.Limits {
+	return &vision.Limits{
+		MaxEncodedBytes:      20971520,
+		MaxPixels:            40000000,
+		MaxDimension:         8192,
+		DecodeTimeout:        5 * time.Second,
+		MaxDecodeConcurrency: 4,
+		MaxTransformMemory:   268435456,
+		StripMetadata:        true,
+		OrientNormalize:      true,
+		TransformVersion:     "v1",
+	}
+}
+
+func lifecyclePNGBytes(t *testing.T, width, height int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, width, height))
+	for y := range height {
+		for x := range width {
+			img.Set(x, y, color.NRGBA{R: uint8(x), G: uint8(y), B: 128, A: 255})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatal(err)
+	}
+	return buf.Bytes()
+}
+
 type bridgeStore struct {
-	inner        store.ArtifactStore
+	inner        vision.ArtifactWriter
 	lastSourceID string
 	puts         int
 }
 
-func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
-	ref, err := b.inner.Put(ctx, r, &store.ArtifactMetadata{
-		ID:        meta.ID,
-		SessionID: meta.SessionID,
-		EventID:   meta.EventID,
-		Filename:  meta.Filename,
-		MediaType: meta.MediaType,
-		Metadata:  meta.Metadata,
-	})
+func (b *bridgeStore) Put(ctx context.Context, r io.Reader, meta *vision.ArtifactMetadata) (vision.ArtifactRef, error) {
+	ref, err := b.inner.Put(ctx, r, meta)
 	if err != nil {
-		if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeArtifactQuotaExceeded {
-			return ArtifactRef{}, wrapWithCode(ErrorCodeArtifactQuotaExceeded, "artifact quota is exhausted", err)
-		}
-		return ArtifactRef{}, err
+		return vision.ArtifactRef{}, err
 	}
 	if b.puts == 0 {
 		b.lastSourceID = ref.ID
 	}
 	b.puts++
-	return ArtifactRef{ID: ref.ID, BlobDigest: ref.BlobDigest, SizeBytes: ref.SizeBytes}, nil
+	return ref, nil
 }
 
 func (b *bridgeStore) Unlink(ctx context.Context, refID string) error {
@@ -53,7 +78,7 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -61,20 +86,20 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
-	if err := sessions.Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	sessions := turnstore.NewSessionService(db)
+	if err := sessions.Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, root, store.DefaultArtifactQuotaBytes)
-	bridged := &bridgeStore{inner: artifacts}
-	svc, err := NewService(ptrLimits(), WithStore(bridged))
+	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
+	bridged := &bridgeStore{inner: storage.NewVisionStore(artifacts)}
+	svc, err := vision.NewService(lifecycleLimits(), vision.WithStore(bridged))
 	if err != nil {
 		t.Fatal(err)
 	}
-	part, err := svc.Ingest(ctx, &IngestRequest{
-		Content:    bytes.NewReader(pngBytes(t, 16, 16)),
+	part, err := svc.Ingest(ctx, &vision.IngestRequest{
+		Content:    bytes.NewReader(lifecyclePNGBytes(t, 16, 16)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		Provenance: vision.Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
@@ -95,14 +120,14 @@ func TestLifecycleUnlinkAndCollectLeavesNoOrphan(t *testing.T) {
 			t.Fatalf("Unlink derived: %v", err)
 		}
 	}
-	report, err := store.Collect(ctx, db, root, time.Now().UTC().Add(time.Hour))
+	report, err := storage.Collect(ctx, db, root, time.Now().UTC().Add(time.Hour))
 	if err != nil {
 		t.Fatalf("Collect: %v", err)
 	}
 	if report.DeletedBlobs != 1 {
 		t.Errorf("deleted blobs = %d, want 1 (png source and derived dedupe)", report.DeletedBlobs)
 	}
-	rep, err := store.Reconcile(ctx, db, root)
+	rep, err := storage.Reconcile(ctx, db, root)
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
@@ -119,7 +144,7 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -127,23 +152,23 @@ func TestLifecycleQuotaEnforcedDuringCopy(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, root, 16)
-	bridged := &bridgeStore{inner: artifacts}
-	svc, err := NewService(ptrLimits(), WithStore(bridged))
+	artifacts := storage.NewArtifactStore(db, root, 16)
+	bridged := &bridgeStore{inner: storage.NewVisionStore(artifacts)}
+	svc, err := vision.NewService(lifecycleLimits(), vision.WithStore(bridged))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Ingest(ctx, &IngestRequest{
-		Content:    bytes.NewReader(pngBytes(t, 32, 32)),
+	if _, err := svc.Ingest(ctx, &vision.IngestRequest{
+		Content:    bytes.NewReader(lifecyclePNGBytes(t, 32, 32)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		Provenance: vision.Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	}); err == nil {
 		t.Fatal("expected quota failure")
-	} else if !fault.HasCode(err, ErrorCodeArtifactQuotaExceeded) {
-		t.Fatalf("error = %v, want code %s", err, ErrorCodeArtifactQuotaExceeded)
+	} else if !fault.HasCode(err, vision.ErrorCodeArtifactQuotaExceeded) {
+		t.Fatalf("error = %v, want code %s", err, vision.ErrorCodeArtifactQuotaExceeded)
 	}
 }
 
@@ -151,7 +176,7 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	dsn := filepath.Join(dir, "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -159,24 +184,24 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 	t.Cleanup(func() { _ = db.Close() })
 	root := filepath.Join(dir, "artifacts")
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(ctx, &store.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(ctx, &turn.Session{ID: "sess-1", OwnerID: "owner", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
-	artifacts := store.NewArtifactStore(db, root, store.DefaultArtifactQuotaBytes)
-	bridged := &bridgeStore{inner: artifacts}
-	svc, err := NewService(ptrLimits(), WithStore(bridged))
+	artifacts := storage.NewArtifactStore(db, root, storage.DefaultArtifactQuotaBytes)
+	bridged := &bridgeStore{inner: storage.NewVisionStore(artifacts)}
+	svc, err := vision.NewService(lifecycleLimits(), vision.WithStore(bridged))
 	if err != nil {
 		t.Fatal(err)
 	}
-	part, err := svc.Ingest(ctx, &IngestRequest{
-		Content:    bytes.NewReader(pngBytes(t, 12, 12)),
+	part, err := svc.Ingest(ctx, &vision.IngestRequest{
+		Content:    bytes.NewReader(lifecyclePNGBytes(t, 12, 12)),
 		SessionID:  "sess-1",
-		Provenance: Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
+		Provenance: vision.Provenance{Source: "terminal", ExternalID: "line:1", TurnID: "turn-1"},
 	})
 	if err != nil {
 		t.Fatalf("Ingest: %v", err)
 	}
-	raw, err := MarshalPart(&part)
+	raw, err := vision.MarshalPart(&part)
 	if err != nil {
 		t.Fatalf("MarshalPart: %v", err)
 	}
@@ -193,7 +218,7 @@ func TestLifecycleBackupCarriesMetadataOnly(t *testing.T) {
 		}
 	}
 	dest := filepath.Join(dir, "backup")
-	manifest, err := store.Backup(ctx, db, dest)
+	manifest, err := storage.Backup(ctx, db, dest)
 	if err != nil {
 		t.Fatalf("Backup: %v", err)
 	}

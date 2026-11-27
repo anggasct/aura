@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"slices"
 
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type Trace struct {
 	Profile string
 	Outcome string
-	Events  []store.RuntimeEvent
+	Events  []turn.Event
 }
 
 type TraceExpectation struct {
@@ -51,7 +51,7 @@ type ProfileGrade struct {
 	Error   string
 }
 
-func NewTrace(profile, outcome string, events []store.RuntimeEvent) Trace {
+func NewTrace(profile, outcome string, events []turn.Event) Trace {
 	return Trace{Profile: profile, Outcome: outcome, Events: slices.Clone(events)}
 }
 
@@ -138,7 +138,7 @@ func GradeProfiles(ctx context.Context, profiles []string, run func(context.Cont
 	return grades
 }
 
-func monotonic(events []store.RuntimeEvent) bool {
+func monotonic(events []turn.Event) bool {
 	for i := 1; i < len(events); i++ {
 		if events[i].Sequence <= events[i-1].Sequence {
 			return false
@@ -147,7 +147,7 @@ func monotonic(events []store.RuntimeEvent) bool {
 	return true
 }
 
-func containsKind(events []store.RuntimeEvent, kind string) bool {
+func containsKind(events []turn.Event, kind string) bool {
 	for i := range events {
 		if events[i].Kind == kind {
 			return true
@@ -156,7 +156,7 @@ func containsKind(events []store.RuntimeEvent, kind string) bool {
 	return false
 }
 
-func eventKinds(events []store.RuntimeEvent) []string {
+func eventKinds(events []turn.Event) []string {
 	kinds := make([]string, len(events))
 	for i := range events {
 		kinds[i] = events[i].Kind
@@ -164,7 +164,7 @@ func eventKinds(events []store.RuntimeEvent) []string {
 	return kinds
 }
 
-func matchesIdentity(events []store.RuntimeEvent, identity TraceIdentity) bool {
+func matchesIdentity(events []turn.Event, identity TraceIdentity) bool {
 	for i := range events {
 		event := &events[i]
 		if identity.SessionID != "" && event.SessionID != identity.SessionID {
@@ -183,7 +183,7 @@ func matchesIdentity(events []store.RuntimeEvent, identity TraceIdentity) bool {
 	return len(events) > 0
 }
 
-func containsSignal(events []store.RuntimeEvent, signal TraceSignal) bool {
+func containsSignal(events []turn.Event, signal TraceSignal) bool {
 	for i := range events {
 		if signalMatches(&events[i], signal) {
 			return true
@@ -192,7 +192,7 @@ func containsSignal(events []store.RuntimeEvent, signal TraceSignal) bool {
 	return false
 }
 
-func signalMatches(event *store.RuntimeEvent, signal TraceSignal) bool {
+func signalMatches(event *turn.Event, signal TraceSignal) bool {
 	if event.Kind != signal.Kind {
 		return false
 	}

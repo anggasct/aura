@@ -9,18 +9,19 @@ import (
 	"testing"
 	"time"
 
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type kbSearchRig struct {
 	*knowledgeTurnRig
-	builtin  *toolsbuiltin.Executor
-	personas registryPersonas
+	builtin  *runtimeadk.BrokerExecutor
+	personas auraagent.RegistryPersonas
 }
 
 func newKBSearchRig(t *testing.T) *kbSearchRig {
@@ -34,12 +35,21 @@ func newKBSearchRig(t *testing.T) *kbSearchRig {
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
 	}
-	builtin, err := toolsbuiltin.New(rig.cfg.Tools, rig.cfg.Storage.ArtifactQuota, rig.db, artifactRoot, capabilitytest.All(t), slog.New(slog.DiscardHandler), nil, nil, newAccessPolicy(registry, rig.db, nil))
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
+		result:       &appconfig.LoadResult{Config: rig.cfg, CapabilityReport: capabilitytest.All(t)},
+		db:           rig.db,
+		artifactRoot: artifactRoot,
+		logger:       slog.New(slog.DiscardHandler),
+		wiring:       &toolWiring{access: newAccessPolicy(registry, rig.db, nil)},
+		events:       turn.NewEventBus(slog.New(slog.DiscardHandler)),
+	})
 	if err != nil {
-		t.Fatalf("toolsbuiltin.New: %v", err)
+		t.Fatalf("newTestToolExecutor: %v", err)
 	}
-	builtin.SetKnowledgeSearcher(&knowledgeToolSearcher{retriever: rig.retriever})
-	return &kbSearchRig{knowledgeTurnRig: rig, builtin: builtin, personas: registryPersonas{registry: registry}}
+	if err := builtin.Broker().RegisterProvider(knowledge.NewToolProvider(rig.retriever)); err != nil {
+		t.Fatalf("RegisterProvider: %v", err)
+	}
+	return &kbSearchRig{knowledgeTurnRig: rig, builtin: builtin, personas: auraagent.RegistryPersonas{Registry: registry}}
 }
 
 func (r *kbSearchRig) call(t *testing.T, agent string, class principal.Class, arguments string) (kbSearchResult, error) {
@@ -118,13 +128,13 @@ func TestKBSearchToolIsScopedPerClassAndIgnoresModelSuppliedScope(t *testing.T) 
 	for _, injected := range []string{
 		`{"query":"refunds","collections":["secret"]}`,
 		`{"query":"refunds","collection":"secret"}`,
-		`{"query":"refunds","scope":"` + store.KBScope("secret") + `"}`,
+		`{"query":"refunds","scope":"` + knowledge.ScopeToken("secret") + `"}`,
 	} {
 		if _, err := rig.call(t, "lobby", principal.ClassPublic, injected); err == nil {
 			t.Errorf("%s accepted", injected)
 		}
 	}
-	scopeToken, err := rig.call(t, "lobby", principal.ClassPublic, `{"query":"refunds `+store.KBScope("secret")+` OR secret"}`)
+	scopeToken, err := rig.call(t, "lobby", principal.ClassPublic, `{"query":"refunds `+knowledge.ScopeToken("secret")+` OR secret"}`)
 	if err != nil || strings.Contains(scopeToken.texts(), "UNATTACHED") {
 		t.Errorf("scope token in the query: %v, %q", err, scopeToken.texts())
 	}

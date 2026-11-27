@@ -10,6 +10,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -191,7 +192,7 @@ func (inv *invocation) load(ctx context.Context) error {
 }
 
 func (inv *invocation) loadActions(ctx context.Context) (map[string]actionRecord, error) {
-	rows, err := inv.rt.db.QueryContext(ctx, `SELECT action_key, outcome, result, detail FROM durable_action WHERE run_key = ?`, inv.exec.key)
+	rows, err := dbsqlite.Conn(ctx, inv.rt.db).QueryContext(ctx, `SELECT action_key, outcome, result, detail FROM durable_action WHERE run_key = ?`, inv.exec.key)
 	if err != nil {
 		return nil, fmt.Errorf("load actions: %w", err)
 	}
@@ -212,7 +213,7 @@ func (inv *invocation) loadActions(ctx context.Context) (map[string]actionRecord
 }
 
 func (inv *invocation) loadWaits(ctx context.Context) (map[waitKey]waitRecord, error) {
-	rows, err := inv.rt.db.QueryContext(ctx, `SELECT name, seq, deadline, outcome FROM durable_wait WHERE run_key = ?`, inv.exec.key)
+	rows, err := dbsqlite.Conn(ctx, inv.rt.db).QueryContext(ctx, `SELECT name, seq, deadline, outcome FROM durable_wait WHERE run_key = ?`, inv.exec.key)
 	if err != nil {
 		return nil, fmt.Errorf("load waits: %w", err)
 	}
@@ -237,7 +238,7 @@ func (inv *invocation) loadWaits(ctx context.Context) (map[waitKey]waitRecord, e
 }
 
 func (inv *invocation) loadTimers(ctx context.Context) (map[int64]time.Time, error) {
-	rows, err := inv.rt.db.QueryContext(ctx, `SELECT seq, fire_at FROM durable_timer WHERE run_key = ?`, inv.exec.key)
+	rows, err := dbsqlite.Conn(ctx, inv.rt.db).QueryContext(ctx, `SELECT seq, fire_at FROM durable_timer WHERE run_key = ?`, inv.exec.key)
 	if err != nil {
 		return nil, fmt.Errorf("load timers: %w", err)
 	}
@@ -261,17 +262,17 @@ func (inv *invocation) loadTimers(ctx context.Context) (map[int64]time.Time, err
 	return timers, nil
 }
 
-func (inv *invocation) fencedTx(ctx context.Context, op string, fn func(tx *sql.Tx) error) error {
-	return inv.rt.inTx(ctx, op, func(tx *sql.Tx) error {
+func (inv *invocation) fencedTx(ctx context.Context, op string, fn func(ctx context.Context, q dbsqlite.Querier) error) error {
+	return inv.rt.inTx(ctx, func(txCtx context.Context, q dbsqlite.Querier) error {
 		var owned bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_run WHERE key = ? AND owner = ? AND claim = ? AND state = 'running')`,
+		if err := q.QueryRowContext(txCtx, `SELECT EXISTS (SELECT 1 FROM durable_run WHERE key = ? AND owner = ? AND claim = ? AND state = 'running')`,
 			inv.exec.key, inv.exec.owner, inv.exec.claim).Scan(&owned); err != nil {
 			return fmt.Errorf("%s: read owner: %w", op, err)
 		}
 		if !owned {
 			return errNotOwned
 		}
-		return fn(tx)
+		return fn(txCtx, q)
 	})
 }
 
@@ -322,10 +323,10 @@ func (inv *invocation) recordAction(ctx context.Context, key string, candidate a
 	defer cancel()
 	stored := candidate
 	won := false
-	err := inv.fencedTx(wctx, "durable record action", func(tx *sql.Tx) error {
+	err := inv.fencedTx(wctx, "durable record action", func(txCtx context.Context, q dbsqlite.Querier) error {
 		var outcome, detail string
 		var result []byte
-		err := tx.QueryRowContext(wctx, `SELECT outcome, result, detail FROM durable_action WHERE run_key = ? AND action_key = ?`, inv.exec.key, key).Scan(&outcome, &result, &detail)
+		err := q.QueryRowContext(txCtx, `SELECT outcome, result, detail FROM durable_action WHERE run_key = ? AND action_key = ?`, inv.exec.key, key).Scan(&outcome, &result, &detail)
 		if err == nil {
 			stored = actionRecord{failed: outcome == actionFailed, result: copyBytes(result), detail: detail}
 			return nil
@@ -337,7 +338,7 @@ func (inv *invocation) recordAction(ctx context.Context, key string, candidate a
 		if candidate.failed {
 			outcome = actionFailed
 		}
-		if _, err := tx.ExecContext(wctx, `INSERT INTO durable_action (run_key, action_key, outcome, result, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+		if _, err := q.ExecContext(txCtx, `INSERT INTO durable_action (run_key, action_key, outcome, result, detail, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
 			inv.exec.key, key, outcome, bytesOrEmpty(candidate.result), candidate.detail, inv.rt.stamp()); err != nil {
 			return fmt.Errorf("durable record action: write: %w", err)
 		}
@@ -412,8 +413,8 @@ func (inv *invocation) fireTime(d time.Duration) (time.Time, bool) {
 func (inv *invocation) recordTimer(ctx context.Context, seq int64, fireAt time.Time) error {
 	wctx, cancel := detached(ctx)
 	defer cancel()
-	return inv.fencedTx(wctx, "durable record timer", func(tx *sql.Tx) error {
-		if _, err := tx.ExecContext(wctx, `INSERT INTO durable_timer (run_key, seq, fire_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (run_key, seq) DO NOTHING`,
+	return inv.fencedTx(wctx, "durable record timer", func(txCtx context.Context, q dbsqlite.Querier) error {
+		if _, err := q.ExecContext(txCtx, `INSERT INTO durable_timer (run_key, seq, fire_at, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (run_key, seq) DO NOTHING`,
 			inv.exec.key, seq, fireAt.UTC().Format(time.RFC3339Nano), inv.rt.stamp()); err != nil {
 			return fmt.Errorf("durable record timer: %w", err)
 		}
@@ -499,7 +500,7 @@ func (inv *invocation) awaitSignal(ctx context.Context, name string) ([]byte, bo
 		var found bool
 		read := func(ctx context.Context) error {
 			var err error
-			payload, found, err = readSignal(ctx, inv.rt.db, ref)
+			payload, found, err = readSignal(ctx, dbsqlite.Conn(ctx, inv.rt.db), ref)
 			return err
 		}
 		if !inv.retry(ctx, read) {
@@ -568,9 +569,9 @@ func (inv *invocation) rememberWait(key waitKey, record waitRecord) {
 func (inv *invocation) recordWait(ctx context.Context, key waitKey, deadline time.Time) error {
 	wctx, cancel := detached(ctx)
 	defer cancel()
-	return inv.fencedTx(wctx, "durable record wait", func(tx *sql.Tx) error {
+	return inv.fencedTx(wctx, "durable record wait", func(txCtx context.Context, q dbsqlite.Querier) error {
 		stamp := inv.rt.stamp()
-		if _, err := tx.ExecContext(wctx, `INSERT INTO durable_wait (run_key, name, seq, deadline, outcome, created_at, updated_at)
+		if _, err := q.ExecContext(txCtx, `INSERT INTO durable_wait (run_key, name, seq, deadline, outcome, created_at, updated_at)
 VALUES (?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT (run_key, name, seq) DO NOTHING`,
 			inv.exec.key, key.name, key.seq, deadline.UTC().Format(time.RFC3339Nano), stamp, stamp); err != nil {
 			return fmt.Errorf("durable record wait: %w", err)
@@ -641,9 +642,9 @@ func (inv *invocation) decide(ctx context.Context, key waitKey, input decideInpu
 	wctx, cancel := detached(ctx)
 	defer cancel()
 	var decision waitDecision
-	err := inv.fencedTx(wctx, "durable decide wait", func(tx *sql.Tx) error {
+	err := inv.fencedTx(wctx, "durable decide wait", func(txCtx context.Context, q dbsqlite.Querier) error {
 		var outcome string
-		if err := tx.QueryRowContext(wctx, `SELECT outcome FROM durable_wait WHERE run_key = ? AND name = ? AND seq = ?`, inv.exec.key, key.name, key.seq).Scan(&outcome); err != nil {
+		if err := q.QueryRowContext(txCtx, `SELECT outcome FROM durable_wait WHERE run_key = ? AND name = ? AND seq = ?`, inv.exec.key, key.name, key.seq).Scan(&outcome); err != nil {
 			return fmt.Errorf("durable decide wait: read: %w", err)
 		}
 		ref := signalRef{runKey: inv.exec.key, name: key.name, seq: input.position}
@@ -651,7 +652,7 @@ func (inv *invocation) decide(ctx context.Context, key waitKey, input decideInpu
 			decision = waitDecision{outcome: waitTimedOut}
 			return nil
 		}
-		payload, found, err := readSignal(wctx, tx, ref)
+		payload, found, err := readSignal(txCtx, q, ref)
 		if err != nil {
 			return fmt.Errorf("durable decide wait: %w", err)
 		}
@@ -667,7 +668,7 @@ func (inv *invocation) decide(ctx context.Context, key waitKey, input decideInpu
 		if outcome != waitPending {
 			return nil
 		}
-		if _, err := tx.ExecContext(wctx, `UPDATE durable_wait SET outcome = ?, updated_at = ? WHERE run_key = ? AND name = ? AND seq = ?`,
+		if _, err := q.ExecContext(txCtx, `UPDATE durable_wait SET outcome = ?, updated_at = ? WHERE run_key = ? AND name = ? AND seq = ?`,
 			decision.outcome, inv.rt.stamp(), inv.exec.key, key.name, key.seq); err != nil {
 			return fmt.Errorf("durable decide wait: write: %w", err)
 		}

@@ -34,14 +34,14 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -380,7 +380,7 @@ func (g succeededGate) Observe(ctx context.Context, observation *effect.Observat
 
 func newGatedEffects(t *testing.T, db *sql.DB, ledger *turnLedger) *effect.Executor {
 	t.Helper()
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: succeededGate{ledger: ledger}})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: succeededGate{ledger: ledger}, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("effect.NewJournal: %v", err)
 	}
@@ -409,7 +409,7 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps}
-	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, store.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
+	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, turnstore.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -430,7 +430,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	logger := slog.New(slog.DiscardHandler)
 	ledger := &turnLedger{dir: plan.Ledger, life: plan.Life}
 	rt := newSuiteRuntime(t, db)
-	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db})
+	sessions, err := durablesqlite.NewSessionStore(&durablesqlite.SessionStoreOptions{DB: db, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("sqlite.NewSessionStore: %v", err)
 	}
@@ -440,16 +440,16 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	}
 	var opts []runtimeadk.ExecutorOption
 	if wiring.skillContext != nil {
-		opts = append(opts, runtimeadk.WithSkillContext(wiring.skillContext))
+		opts = append(opts, runtimeadk.WithContextProvider(wiring.skillContext))
 	}
 	if wiring.knowledge != nil {
-		opts = append(opts, runtimeadk.WithKnowledgeContext(wiring.knowledge))
+		opts = append(opts, runtimeadk.WithContextProvider(wiring.knowledge))
 	}
 	executor := newLedgerExecutor(t, db, &ledgerTurn{scenario: scenario, ledger: ledger, options: opts})
-	events := store.NewEventStore(db)
+	events := turnstore.NewEventStore(db)
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Logger:         logger,
 		Config:         engineLimits(4, 16),
@@ -531,13 +531,13 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 	if err := os.Mkdir(plan.Ledger, 0o700); err != nil {
 		t.Fatalf("create the ledger directory: %v", err)
 	}
-	storetest.Seed(t, plan.Database)
+	sqlitetest.Seed(t, plan.Database, Schemas()...)
 	db, err := sqlite.Open(t.Context(), plan.Database, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open the database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
 		t.Fatalf("create %s: %v", suiteSession, err)
 	}
 	return plan, db
@@ -752,7 +752,7 @@ func (s *killedSuite) requireRequestsAfterKill(t *testing.T, texts []string) {
 	}
 }
 
-func turnEvents(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func turnEvents(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
 	var sessionID string
 	err := db.QueryRowContext(t.Context(), `SELECT session_id FROM runtime_event WHERE turn_id = ? AND kind = ?`, turnID, turn.EventKindTurnAccepted).Scan(&sessionID)
@@ -762,7 +762,7 @@ func turnEvents(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
 	if err != nil {
 		t.Fatalf("read the session of %s: %v", turnID, err)
 	}
-	events, err := store.NewDedupeStore(db).ListTurnEvents(t.Context(), sessionID, turnID)
+	events, err := turnstore.NewDedupeStore(db).ListTurnEvents(t.Context(), sessionID, turnID)
 	if err != nil {
 		t.Fatalf("list the events of %s: %v", turnID, err)
 	}
@@ -777,9 +777,9 @@ func isTerminalKind(kind string) bool {
 	return false
 }
 
-func waitTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent {
+func waitTerminal(t *testing.T, db *sql.DB, turnID string) []turn.Event {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	waitUntil(t, turnID+" has a terminal event", func() bool {
 		events = turnEvents(t, db, turnID)
 		for i := range events {
@@ -792,7 +792,7 @@ func waitTerminal(t *testing.T, db *sql.DB, turnID string) []store.RuntimeEvent 
 	return events
 }
 
-func countKind(events []store.RuntimeEvent, kind string) int {
+func countKind(events []turn.Event, kind string) int {
 	n := 0
 	for i := range events {
 		if events[i].Kind == kind {
@@ -802,8 +802,8 @@ func countKind(events []store.RuntimeEvent, kind string) int {
 	return n
 }
 
-func terminalEvents(events []store.RuntimeEvent) []store.RuntimeEvent {
-	var terminals []store.RuntimeEvent
+func terminalEvents(events []turn.Event) []turn.Event {
+	var terminals []turn.Event
 	for i := range events {
 		if isTerminalKind(events[i].Kind) {
 			terminals = append(terminals, events[i])
@@ -812,7 +812,7 @@ func terminalEvents(events []store.RuntimeEvent) []store.RuntimeEvent {
 	return terminals
 }
 
-func requireCompletedOnce(t *testing.T, events []store.RuntimeEvent) {
+func requireCompletedOnce(t *testing.T, events []turn.Event) {
 	t.Helper()
 	if len(events) == 0 {
 		t.Fatal("the turn has no events")
@@ -828,14 +828,14 @@ func requireCompletedOnce(t *testing.T, events []store.RuntimeEvent) {
 	}
 }
 
-func storedUserText(t *testing.T, events []store.RuntimeEvent, text string) int {
+func storedUserText(t *testing.T, events []turn.Event, text string) int {
 	t.Helper()
 	n := 0
 	for i := range events {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
-		ev, err := store.RuntimeEventToADK(&events[i])
+		ev, err := turnstore.RuntimeEventToADK(&events[i])
 		if err != nil {
 			t.Fatalf("decode the stored ADK event %s: %v", events[i].ID, err)
 		}

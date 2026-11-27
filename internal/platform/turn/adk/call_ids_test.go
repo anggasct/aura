@@ -19,7 +19,7 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 var auraCallID = regexp.MustCompile(`^call_[a-z2-7]{26}$`)
@@ -179,8 +179,8 @@ func TestEveryFunctionCallGetsItsOwnID(t *testing.T) {
 
 type memoryRig struct {
 	db       *sql.DB
-	sessions store.SessionService
-	events   store.EventStore
+	sessions turnstore.SessionService
+	events   turnstore.EventStore
 	model    adkmodel.LLM
 	broker   turn.ToolBroker
 	builtins BuiltinToolExecutor
@@ -199,7 +199,7 @@ func (r *memoryRig) engine(t *testing.T) *runtimeengine.Engine {
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: r.events, Dedupe: store.NewDedupeStore(r.db), Executor: executor, Config: engineLimits(2, 4)})
+	engine, err := runtimeengine.New(&runtimeengine.Deps{Events: r.events, Dedupe: turnstore.NewDedupeStore(r.db), Executor: executor, Config: engineLimits(2, 4)})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
 	}
@@ -370,14 +370,14 @@ func TestRepeatedProviderCallIDsReachTheModelAsDistinctPairs(t *testing.T) {
 	}
 }
 
-func adkEventParts(t *testing.T, events []store.RuntimeEvent) requestParts {
+func adkEventParts(t *testing.T, events []turn.Event) requestParts {
 	t.Helper()
 	var stored requestParts
 	for i := range events {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
-		ev, err := store.RuntimeEventToADK(&events[i])
+		ev, err := turnstore.RuntimeEventToADK(&events[i])
 		if err != nil {
 			t.Fatalf("decode stored ADK event %s: %v", events[i].ID, err)
 		}

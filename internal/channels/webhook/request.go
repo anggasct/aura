@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strconv"
 	"time"
+
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 const (
@@ -58,7 +60,7 @@ func ParseRequestAuth(header http.Header) (RequestAuth, error) {
 		problems = append(problems, fmt.Errorf("%s must be v1=<lowercase hex HMAC-SHA256>", headerSignature))
 	}
 	if len(problems) > 0 {
-		return RequestAuth{}, Errorf(ErrorCodeInvalidRequest, "%s", errors.Join(problems...))
+		return RequestAuth{}, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidRequest, "%s", errors.Join(problems...))
 	}
 	return auth, nil
 }

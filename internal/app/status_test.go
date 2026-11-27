@@ -16,11 +16,12 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/platform/capability"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 )
 
 func TestFormatSandboxStatusAvailable(t *testing.T) {
@@ -127,12 +128,12 @@ func seedConfiguredStorage(t *testing.T, configPath string) {
 	if err != nil {
 		t.Fatalf("storagePaths: %v", err)
 	}
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 }
 
 func seedHealthyStorage(t *testing.T, dataRoot string) {
 	t.Helper()
-	storetest.Seed(t, filepath.Join(dataRoot, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dataRoot, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dataRoot, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
@@ -154,8 +155,7 @@ func TestStatusOfflineDeterministicOutputAndExitCodes(t *testing.T) {
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	err := cmd.RunE(cmd, nil)
-	var coded *exitCodeError
-	if !errors.As(err, &coded) || coded.code != exitCritical {
+	if code, ok := clikit.ExitCodeOf(err); !ok || code != exitCritical {
 		t.Fatalf("RunE err = %v, want critical exit (no db, no backup)", err)
 	}
 	text := out.String()
@@ -357,12 +357,12 @@ func TestStatusReportsEnabledCapabilityMissingDependency(t *testing.T) {
 		Registry:     registry,
 		Dependencies: capability.Dependencies{},
 	})
-	var exitErr *exitCodeError
-	if !errors.As(runErr, &exitErr) {
+	code, ok := clikit.ExitCodeOf(runErr)
+	if !ok {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
 	}
-	if exitErr.code != exitCritical {
-		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	if code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", code, exitCritical)
 	}
 	if !strings.Contains(output, "capability/exec-linux") || !strings.Contains(output, "missing dependency: process-containment") {
 		t.Fatalf("status output missing the capability finding:\n%s", output)
@@ -379,12 +379,12 @@ func TestStatusReportsEnabledCapabilityNotCompiled(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, output, runErr := statusFromLoadedConfig(t, []string{"public-web"}, appconfig.LoadOptions{Build: build, Registry: registry})
-	var exitErr *exitCodeError
-	if !errors.As(runErr, &exitErr) {
+	code, ok := clikit.ExitCodeOf(runErr)
+	if !ok {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
 	}
-	if exitErr.code != exitCritical {
-		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	if code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", code, exitCritical)
 	}
 	if !strings.Contains(output, "capability/public-web") || !strings.Contains(output, "capability_not_compiled") {
 		t.Fatalf("status output missing the not-compiled finding:\n%s", output)
@@ -422,12 +422,12 @@ func TestStatusReportsProfileExclusionReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, output, runErr := statusFromLoadedConfig(t, []string{"workspace-write"}, appconfig.LoadOptions{Build: build, Registry: registry})
-	var exitErr *exitCodeError
-	if !errors.As(runErr, &exitErr) {
+	code, ok := clikit.ExitCodeOf(runErr)
+	if !ok {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
 	}
-	if exitErr.code != exitCritical {
-		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	if code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", code, exitCritical)
 	}
 	if !strings.Contains(output, "capability/workspace-write") || !strings.Contains(output, "not included in profile core") {
 		t.Fatalf("status output missing the profile-exclusion reason:\n%s", output)
@@ -447,12 +447,12 @@ func TestStatusReportsNonLinuxReasonForEffectfulCapability(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, output, runErr := statusFromLoadedConfig(t, []string{"exec-linux"}, appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: capability.Dependencies{capability.DependencyProcessContainment: true}})
-	var exitErr *exitCodeError
-	if !errors.As(runErr, &exitErr) {
+	code, ok := clikit.ExitCodeOf(runErr)
+	if !ok {
 		t.Fatalf("runStatus error = %v, want exit code error", runErr)
 	}
-	if exitErr.code != exitCritical {
-		t.Fatalf("exit code = %d, want %d for a down capability finding", exitErr.code, exitCritical)
+	if code != exitCritical {
+		t.Fatalf("exit code = %d, want %d for a down capability finding", code, exitCritical)
 	}
 	if !strings.Contains(output, "effectful capabilities require Linux") {
 		t.Fatalf("status output missing the OS reason:\n%s", output)
@@ -470,8 +470,7 @@ func TestStatusReportsInterpreterRuntimeStates(t *testing.T) {
 	}
 	dependencies := capability.Dependencies{capability.DependencyProcessContainment: true, capability.DependencyInterpreterRuntime: true}
 	_, output, runErr := statusFromLoadedConfig(t, []string{"code-interpreter"}, appconfig.LoadOptions{Build: build, Registry: registry, Dependencies: dependencies})
-	var exitErr *exitCodeError
-	if !errors.As(runErr, &exitErr) || exitErr.code != exitDegraded {
+	if code, ok := clikit.ExitCodeOf(runErr); !ok || code != exitDegraded {
 		t.Fatalf("runStatus error = %v, want a degraded exit", runErr)
 	}
 	for _, runtime := range []string{"python", "javascript", "go"} {

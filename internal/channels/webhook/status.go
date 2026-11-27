@@ -1,30 +1,15 @@
 package webhook
 
 import (
-	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
-
-const StatusPathPrefix = "/webhook/executions/"
-
-type ExecutionStatus struct {
-	ExecutionID   string
-	TurnID        string
-	State         string
-	ResultEventID string
-	ErrorCode     string
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
-	ExpiresAt     time.Time
-}
-
-type StatusStore interface {
-	ExecutionStatus(ctx context.Context, id string) (ExecutionStatus, error)
-}
 
 type StatusHandler struct {
 	keys      *KeyRing
@@ -32,24 +17,24 @@ type StatusHandler struct {
 	clock     func() time.Time
 	tolerance time.Duration
 	logger    *slog.Logger
-	status    StatusStore
+	status    platformwebhook.StatusStore
 }
 
-func NewStatusHandler(keys *KeyRing, limiter *RateLimiter, clock func() time.Time, tolerance time.Duration, logger *slog.Logger, status StatusStore) (*StatusHandler, error) {
+func NewStatusHandler(keys *KeyRing, limiter *RateLimiter, clock func() time.Time, tolerance time.Duration, logger *slog.Logger, status platformwebhook.StatusStore) (*StatusHandler, error) {
 	if keys == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "key ring must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "key ring must not be nil")
 	}
 	if limiter == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "rate limiter must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "rate limiter must not be nil")
 	}
 	if clock == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "clock must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "clock must not be nil")
 	}
 	if tolerance <= 0 {
-		return nil, Errorf(ErrorCodeInvalidArgument, "timestamp tolerance must be positive")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "timestamp tolerance must be positive")
 	}
 	if status == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "status store must not be nil")
+		return nil, platformwebhook.Errorf(platformwebhook.ErrorCodeInvalidArgument, "status store must not be nil")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -60,13 +45,13 @@ func NewStatusHandler(keys *KeyRing, limiter *RateLimiter, clock func() time.Tim
 func (h *StatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	if r.Method != http.MethodGet {
-		writeError(w, http.StatusMethodNotAllowed, ErrorCodeInvalidRequest, "status endpoint accepts GET only")
+		writeError(w, http.StatusMethodNotAllowed, platformwebhook.ErrorCodeInvalidRequest, "status endpoint accepts GET only")
 		return
 	}
 	path := r.URL.EscapedPath()
-	id, ok := strings.CutPrefix(path, StatusPathPrefix)
+	id, ok := strings.CutPrefix(path, platformwebhook.StatusPathPrefix)
 	if !ok || id == "" || strings.Contains(id, "/") {
-		writeError(w, http.StatusNotFound, ErrorCodeExecutionNotFound, "unknown execution")
+		writeError(w, http.StatusNotFound, platformwebhook.ErrorCodeExecutionNotFound, "unknown execution")
 		return
 	}
 	auth, err := ParseRequestAuth(r.Header)
@@ -75,24 +60,24 @@ func (h *StatusHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if allowed, _ := h.limiter.Allow(auth.KeyID, remoteAddr(r)); !allowed {
-		writeError(w, http.StatusTooManyRequests, ErrorCodeRateLimited, "request budget exceeded")
+		writeError(w, http.StatusTooManyRequests, platformwebhook.ErrorCodeRateLimited, "request budget exceeded")
 		return
 	}
 	if !h.authenticate(auth, path) || !auth.WithinTolerance(h.clock(), h.tolerance) {
-		writeError(w, http.StatusUnauthorized, ErrorCodeAuthFailed, "authentication failed")
+		writeError(w, http.StatusUnauthorized, platformwebhook.ErrorCodeAuthFailed, "authentication failed")
 		return
 	}
 	execution, err := h.status.ExecutionStatus(r.Context(), id)
 	if err != nil {
-		if code, ok := CodeOf(err); ok && code == ErrorCodeExecutionNotFound {
-			writeError(w, http.StatusNotFound, ErrorCodeExecutionNotFound, "unknown execution")
+		if code, ok := fault.CodeOf[platformwebhook.ErrorCode](err); ok && code == platformwebhook.ErrorCodeExecutionNotFound {
+			writeError(w, http.StatusNotFound, platformwebhook.ErrorCodeExecutionNotFound, "unknown execution")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, ErrorCodeInvalidRequest, "status is temporarily unavailable")
+		writeError(w, http.StatusInternalServerError, platformwebhook.ErrorCodeInvalidRequest, "status is temporarily unavailable")
 		return
 	}
 	if !execution.ExpiresAt.IsZero() && !h.clock().Before(execution.ExpiresAt) {
-		writeError(w, http.StatusNotFound, ErrorCodeExecutionNotFound, "unknown execution")
+		writeError(w, http.StatusNotFound, platformwebhook.ErrorCodeExecutionNotFound, "unknown execution")
 		return
 	}
 	writeStatus(w, &execution)
@@ -122,7 +107,7 @@ type statusBody struct {
 	UpdatedAt     string  `json:"updated_at"`
 }
 
-func writeStatus(w http.ResponseWriter, execution *ExecutionStatus) {
+func writeStatus(w http.ResponseWriter, execution *platformwebhook.ExecutionStatus) {
 	body := statusBody{
 		ExecutionID: execution.ExecutionID,
 		TurnID:      execution.TurnID,

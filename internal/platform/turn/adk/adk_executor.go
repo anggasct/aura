@@ -18,9 +18,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
-	"github.com/anggasct/aura/internal/store"
 
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
@@ -53,23 +53,8 @@ type ADKExecutor struct {
 	modelForRoute     func(route string) (string, error)
 	ledger            *usage.Ledger
 	modelDefinitionID string
-	recall            RecallProvider
 	ownerContext      string
-	profile           ProfileContextProvider
-	skills            SkillContextProvider
-	knowledge         KnowledgeContextProvider
-}
-
-type RecallProvider interface {
-	RecallTurn(ctx context.Context, req *turn.TurnRequest) (*turn.UntrustedRecall, error)
-}
-
-type ProfileContextProvider interface {
-	ProfileContext(ctx context.Context, req *turn.TurnRequest) (string, error)
-}
-
-type SkillContextProvider interface {
-	SkillContext(ctx context.Context, req *turn.TurnRequest) (string, error)
+	providers         []turn.ContextProvider
 }
 
 type AgentResolver interface {
@@ -159,8 +144,8 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 			if definitions[i].OptIn {
 				e.optIn[definitions[i].Name] = true
 			}
-			if channel := auratools.ChannelOf(definitions[i].Name); channel != "" {
-				e.channelTools[definitions[i].Name] = channel
+			if definitions[i].Channel != "" {
+				e.channelTools[definitions[i].Name] = definitions[i].Channel
 			}
 			if definitions[i].Server != "" {
 				e.externalServers[definitions[i].Name] = definitions[i].Server
@@ -173,16 +158,6 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 	}
 }
 
-func WithRecallProvider(provider RecallProvider) ExecutorOption {
-	return func(e *ADKExecutor) error {
-		if provider == nil {
-			return invalidArgument("recall provider must not be nil")
-		}
-		e.recall = provider
-		return nil
-	}
-}
-
 func WithOwnerContext(block string) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		e.ownerContext = strings.TrimSpace(block)
@@ -190,31 +165,21 @@ func WithOwnerContext(block string) ExecutorOption {
 	}
 }
 
-func WithProfileContext(provider ProfileContextProvider) ExecutorOption {
+func WithContextProvider(provider turn.ContextProvider) ExecutorOption {
 	return func(e *ADKExecutor) error {
 		if provider == nil {
-			return invalidArgument("profile context provider must not be nil")
+			return invalidArgument("context provider must not be nil")
 		}
-		e.profile = provider
+		e.providers = append(e.providers, provider)
 		return nil
 	}
 }
 
-func WithSkillContext(provider SkillContextProvider) ExecutorOption {
-	return func(e *ADKExecutor) error {
-		if provider == nil {
-			return invalidArgument("skill context provider must not be nil")
-		}
-		e.skills = provider
-		return nil
-	}
-}
-
-func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		definition, err := x.resolveDefinition(req)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req, definition.ID)
@@ -229,7 +194,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		}
 		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		sessionService.historyAuthor = x.agentName(&definition)
@@ -237,45 +202,38 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			sessionService.leaveOutTurn = req.TurnID
 		}
 		recallAttached := req.UntrustedContext != nil
-		if x.recall != nil && !recallAttached {
-			evidence, rerr := x.recall.RecallTurn(runCtx, req)
-			if rerr != nil {
-				if req.RequireRecall {
-					yield(store.RuntimeEvent{}, codedError(turn.ErrorCodeStorageUnavailable, "required recall is unavailable", rerr))
-					return
-				}
-			} else if evidence != nil {
-				scoped := *req
-				scoped.UntrustedContext = evidence
-				req = &scoped
-				recallAttached = true
-			}
+		blocks, err := x.collectContextBlocks(runCtx, req)
+		if err != nil {
+			yield(turn.Event{}, err)
+			return
 		}
-		knowledgeTurn, knowledgeRan := x.knowledgeContextFor(runCtx, req)
 		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{
-			profile:        x.profileContextFor(runCtx, req),
-			skills:         x.skillContextFor(runCtx, req),
-			knowledge:      knowledgeTurn.Block,
+			blocks:         blocks,
 			knowledgeScope: req.Knowledge,
 		})
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
-		if knowledgeRan {
-			retrieved, eventErr := knowledgeRetrievedEvent(&knowledgeTurn)
-			if eventErr != nil {
-				yield(store.RuntimeEvent{}, eventErr)
-				return
-			}
-			if !yield(retrieved, nil) {
-				return
+		for i := range blocks {
+			for j := range blocks[i].Events {
+				if !yield(blocks[i].Events[j], nil) {
+					return
+				}
 			}
 		}
 
-		content, err := contentFromParts(req)
+		var userParts []string
+		for i := range blocks {
+			if blocks[i].Placement == turn.ContextPlacementUserPart {
+				if text := strings.TrimSpace(blocks[i].Content); text != "" {
+					userParts = append(userParts, text)
+				}
+			}
+		}
+		content, err := contentFromParts(req, userParts...)
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 
@@ -288,19 +246,19 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, runConfig, runOpts...) {
 			if err != nil {
 				if turnUsage.exceeded {
-					yield(store.RuntimeEvent{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
+					yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 					return
 				}
-				yield(store.RuntimeEvent{}, err)
+				yield(turn.Event{}, err)
 				return
 			}
 			if exceeded := turnUsage.add(ev); exceeded {
-				yield(store.RuntimeEvent{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
+				yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 				return
 			}
-			re, err := store.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
+			re, err := turnstore.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
 			if err != nil {
-				yield(store.RuntimeEvent{}, fmt.Errorf("map adk event: %w", err))
+				yield(turn.Event{}, fmt.Errorf("map adk event: %w", err))
 				return
 			}
 			if !yield(re, nil) {
@@ -332,47 +290,28 @@ func (x *ADKExecutor) ownerContextFor(req *turn.TurnRequest) string {
 	return x.ownerContext
 }
 
-func (x *ADKExecutor) profileContextFor(ctx context.Context, req *turn.TurnRequest) string {
-	if x.profile == nil || req.PrincipalClass != principal.ClassOwner {
-		return ""
-	}
-	block, err := x.profile.ProfileContext(ctx, req)
-	if err != nil {
-		x.logger.WarnContext(ctx, "profile context unavailable", "component", "profile", "error", err, "turn_id", req.TurnID)
-		return ""
-	}
-	return strings.TrimSpace(block)
-}
-
 type turnContext struct {
-	profile        string
-	skills         string
-	knowledge      string
+	blocks         []turn.ContextBlock
 	knowledgeScope []string
 }
 
-func (x *ADKExecutor) skillContextFor(ctx context.Context, req *turn.TurnRequest) string {
-	if x.skills == nil || req.PrincipalClass != principal.ClassOwner {
-		return ""
-	}
-	render := func(ctx context.Context) ([]byte, error) {
-		block, err := x.skills.SkillContext(ctx, req)
+func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	var blocks []turn.ContextBlock
+	for _, provider := range x.providers {
+		provided, err := provider.TurnContext(ctx, req)
 		if err != nil {
-			x.logger.WarnContext(ctx, "skill context unavailable", "component", "skills", "error", err, "turn_id", req.TurnID)
-			return []byte{}, nil
+			if provider.Required(req) {
+				return nil, codedError(turn.ErrorCodeStorageUnavailable, "required context provider is unavailable", err)
+			}
+			x.logger.WarnContext(ctx, "context provider unavailable", "component", "turn", "error", err, "turn_id", req.TurnID)
+			continue
 		}
-		return []byte(strings.TrimSpace(block)), nil
+		blocks = append(blocks, provided...)
 	}
-	if scope, ok := durable.TurnScopeFrom(ctx); ok {
-		raw, err := scope.Invocation().RunAction(ctx, "skill-context", render)
-		if err != nil {
-			x.logger.WarnContext(ctx, "skill context journal failed", "component", "skills", "error", err, "turn_id", req.TurnID)
-			return ""
-		}
-		return string(raw)
-	}
-	raw, _ := render(ctx)
-	return string(raw)
+	slices.SortStableFunc(blocks, func(a, b turn.ContextBlock) int {
+		return cmp.Compare(a.Order, b.Order)
+	})
+	return blocks, nil
 }
 
 const userAuthor = "user"
@@ -502,7 +441,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	return result, nil
 }
 
-func contentFromParts(req *turn.TurnRequest) (*genai.Content, error) {
+func contentFromParts(req *turn.TurnRequest, extraParts ...string) (*genai.Content, error) {
 	var parts []*genai.Part
 	for _, p := range req.Parts {
 		if len(p.Image) > 0 {
@@ -518,8 +457,13 @@ func contentFromParts(req *turn.TurnRequest) (*genai.Content, error) {
 		}
 		parts = append(parts, &genai.Part{Text: p.Text})
 	}
-	if block := renderUntrustedRecall(req.UntrustedContext); strings.TrimSpace(block) != "" {
+	if block := turn.RenderUntrustedRecall(req.UntrustedContext); strings.TrimSpace(block) != "" {
 		parts = append(parts, &genai.Part{Text: block})
+	}
+	for _, extra := range extraParts {
+		if strings.TrimSpace(extra) != "" {
+			parts = append(parts, &genai.Part{Text: extra})
+		}
 	}
 	if len(parts) == 0 {
 		return nil, invalidArgument("turn has no input parts")
@@ -672,22 +616,20 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 		}
 	}
 	if recallAttached {
-		instruction = strings.TrimSpace(instruction) + "\n\n" + recallEvidenceCaveat
+		instruction = strings.TrimSpace(instruction) + "\n\n" + turn.RecallEvidenceCaveat
 	}
-	if len(extra.knowledgeScope) > 0 {
-		instruction = strings.TrimSpace(instruction) + "\n\n" + knowledgeCaveat
+	var beforeModel []llmagent.BeforeModelCallback
+	for i := range extra.blocks {
+		if caveat := strings.TrimSpace(extra.blocks[i].Caveat); caveat != "" && (!recallAttached || caveat != turn.RecallEvidenceCaveat) {
+			instruction = strings.TrimSpace(instruction) + "\n\n" + caveat
+		}
+		if extra.blocks[i].Placement == turn.ContextPlacementEphemeral {
+			if content := strings.TrimSpace(extra.blocks[i].Content); content != "" {
+				beforeModel = append(beforeModel, withUntrustedContextPart(content))
+			}
+		}
 	}
 	instruction = appendStatusProtocol(instruction)
-	var beforeModel []llmagent.BeforeModelCallback
-	if extra.profile != "" {
-		beforeModel = append(beforeModel, withUntrustedContextPart(extra.profile))
-	}
-	if extra.skills != "" {
-		beforeModel = append(beforeModel, withUntrustedContextPart(extra.skills))
-	}
-	if extra.knowledge != "" {
-		beforeModel = append(beforeModel, withUntrustedContextPart(extra.knowledge))
-	}
 	return llmagent.New(llmagent.Config{
 		Name:                 name,
 		Description:          definition.Description,

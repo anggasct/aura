@@ -3,6 +3,8 @@ package compaction
 import (
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func testPlanner(counter TokenCounter) *Planner {
@@ -97,7 +99,7 @@ func TestPlanRejects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := planner.Plan(tc.capability, tc.invocation, nil); err == nil {
 				t.Errorf("expected error")
-			} else if code, ok := CodeOf(err); !ok || code != tc.code {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != tc.code {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})
@@ -117,7 +119,7 @@ func TestNewPlannerRejects(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, err := NewPlanner(args.margin, args.ratio, nil); err == nil {
 				t.Errorf("expected error")
-			} else if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+			} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 				t.Errorf("code = %v, %v (%v)", code, ok, err)
 			}
 		})
@@ -127,7 +129,7 @@ func TestNewPlannerRejects(t *testing.T) {
 func TestPlanNilPlanner(t *testing.T) {
 	var planner *Planner
 	_, err := planner.Plan(testCapability(), Invocation{}, nil)
-	if code, ok := CodeOf(err); !ok || code != ErrorCodeInvalidArgument {
+	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeInvalidArgument {
 		t.Errorf("code = %v, %v (%v)", code, ok, err)
 	}
 }

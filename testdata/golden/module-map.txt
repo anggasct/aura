@@ -1,0 +1,100 @@
+cmd/
+  cmd/aura
+  cmd/aura-connector-gmail
+
+internal/app/
+  internal/app
+  internal/app/config
+
+internal/cli/
+  internal/cli
+
+internal/platform/
+  internal/platform/agent
+  internal/platform/approval
+  internal/platform/capability
+  internal/platform/capability/capabilitytest
+  internal/platform/clikit
+  internal/platform/command
+  internal/platform/configkit
+  internal/platform/durable
+  internal/platform/durable/durabletest
+  internal/platform/durable/sqlite
+  internal/platform/effect
+  internal/platform/egress
+  internal/platform/embedding
+  internal/platform/fault
+  internal/platform/health
+  internal/platform/logging
+  internal/platform/model
+  internal/platform/principal
+  internal/platform/sandbox
+  internal/platform/secret
+  internal/platform/secret/secrettest
+  internal/platform/server
+  internal/platform/sqlite
+  internal/platform/sqlite/sqlitetest
+  internal/platform/storage
+  internal/platform/telemetry
+  internal/platform/toolbroker
+  internal/platform/toolbroker/toolbrokertest
+  internal/platform/toolcall
+  internal/platform/tools
+  internal/platform/tools/displaytest
+  internal/platform/turn
+  internal/platform/turn/adk (package runtimeadk)
+  internal/platform/turn/channelhost (package runtimechannelhost)
+  internal/platform/turn/checkpoint (package runtimecheckpoint)
+  internal/platform/turn/engine (package runtimeengine)
+  internal/platform/turn/ingress (package runtimeingress)
+  internal/platform/turn/sessions (package runtimesessions)
+  internal/platform/turn/store (package turnstore)
+  internal/platform/turn/turntest
+  internal/platform/usage
+  internal/platform/vision
+  internal/platform/wallclock
+  internal/platform/webhook
+
+internal/modules/
+  internal/modules/broadcast
+  internal/modules/child
+  internal/modules/codeexec
+  internal/modules/codeexec/interpreter
+  internal/modules/compaction
+  internal/modules/eval
+  internal/modules/eval/persona (package personaeval)
+  internal/modules/fetch
+  internal/modules/filesystem
+  internal/modules/github
+  internal/modules/gitsync
+  internal/modules/handoff
+  internal/modules/knowledge
+  internal/modules/mcp
+  internal/modules/memory
+  internal/modules/plugin
+  internal/modules/plugin/auth
+  internal/modules/plugin/auth/authtest
+  internal/modules/plugin/connector
+  internal/modules/plugin/wire
+  internal/modules/profile
+  internal/modules/schedule
+  internal/modules/search
+  internal/modules/shellexec
+  internal/modules/skills
+  internal/modules/workflow
+
+internal/channels/
+  internal/channels/discord
+  internal/channels/email
+  internal/channels/httpchat
+  internal/channels/kit/access
+  internal/channels/kit/approval
+  internal/channels/kit/chatcommand
+  internal/channels/kit/media
+  internal/channels/kit/status
+  internal/channels/telegram
+  internal/channels/terminal
+  internal/channels/webhook
+
+plugins/
+  plugins/gmail/connector

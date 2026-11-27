@@ -139,6 +139,10 @@ func withConnectionOptions(path string, opts Options) string {
 		busyMS = int(opts.BusyTimeout / time.Millisecond)
 	}
 	query.Set(busyTimeoutQueryParam, strconv.Itoa(busyMS))
+	if path == ":memory:" {
+		query.Set("mode", "memory")
+		return "file::memory:?" + query.Encode()
+	}
 	return (&url.URL{Scheme: "file", Path: path, RawQuery: query.Encode()}).String()
 }
 
@@ -205,7 +209,13 @@ func OpenReadOnly(ctx context.Context, path string) (*sql.DB, error) {
 
 func verifyConnectionPolicy(conn sqlitedriver.ExecQuerierContext, dsn string) error {
 	ctx := context.Background()
-	readOnly := strings.Contains(dsn, "mode=ro")
+	query := dsnQuery(dsn)
+	if query.Get("immutable") == "1" {
+		return nil
+	}
+	readOnly := query.Get("mode") == "ro"
+	inMemory := dsn == ":memory:" || query.Get("mode") == "memory"
+	busyTimeout := busyTimeoutFromQuery(query)
 
 	pragmas := make([]struct {
 		name string
@@ -216,11 +226,14 @@ func verifyConnectionPolicy(conn sqlitedriver.ExecQuerierContext, dsn string) er
 		name string
 		set  string
 		want string
-	}{name: "busy_timeout", set: fmt.Sprintf("PRAGMA busy_timeout = %d", busyTimeoutFromDSN(dsn)), want: strconv.Itoa(busyTimeoutFromDSN(dsn))})
+	}{name: "busy_timeout", set: fmt.Sprintf("PRAGMA busy_timeout = %d", busyTimeout), want: strconv.Itoa(busyTimeout)})
 	pragmas = append(pragmas, staticPragmaSet...)
 
 	for _, p := range pragmas {
-		if readOnly && p.name == "journal_mode" {
+		if readOnly && (p.name == "journal_mode" || p.name == "synchronous") {
+			continue
+		}
+		if inMemory && p.name == "journal_mode" {
 			continue
 		}
 		if err := execPragma(ctx, conn, p.set); err != nil {
@@ -228,7 +241,10 @@ func verifyConnectionPolicy(conn sqlitedriver.ExecQuerierContext, dsn string) er
 		}
 	}
 	for _, p := range pragmas {
-		if readOnly && p.name == "journal_mode" {
+		if readOnly && (p.name == "journal_mode" || p.name == "synchronous") {
+			continue
+		}
+		if inMemory && p.name == "journal_mode" {
 			continue
 		}
 		got, err := queryPragma(ctx, conn, p.name)
@@ -242,12 +258,16 @@ func verifyConnectionPolicy(conn sqlitedriver.ExecQuerierContext, dsn string) er
 	return nil
 }
 
-func busyTimeoutFromDSN(dsn string) int {
+func dsnQuery(dsn string) url.Values {
 	u, err := url.Parse(dsn)
 	if err != nil {
-		return defaultBusyTimeoutMS
+		return nil
 	}
-	if raw := u.Query().Get(busyTimeoutQueryParam); raw != "" {
+	return u.Query()
+}
+
+func busyTimeoutFromQuery(query url.Values) int {
+	if raw := query.Get(busyTimeoutQueryParam); raw != "" {
 		if ms, err := strconv.Atoi(raw); err == nil && ms > 0 {
 			return ms
 		}

@@ -1,7 +1,10 @@
 package compaction
 
 import (
+	"fmt"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 type GroupKind string
@@ -43,7 +46,7 @@ type Group struct {
 
 func GroupEvents(events []Event, counter TokenCounter, currentInvocationID string) ([]Group, error) {
 	if counter == nil {
-		return nil, errNilArgument("counter")
+		return nil, fault.New(ErrorCodeInvalidArgument, "counter must not be nil")
 	}
 	if len(events) == 0 {
 		return nil, nil
@@ -52,14 +55,14 @@ func GroupEvents(events []Event, counter TokenCounter, currentInvocationID strin
 	for i := range events {
 		event := &events[i]
 		if event.Sequence == 0 {
-			return nil, Errorf(ErrorCodeInvalidArgument, "event at index %d has no sequence", i)
+			return nil, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("event at index %d has no sequence", i))
 		}
 		if i > 0 && event.Sequence <= previous {
-			return nil, Errorf(ErrorCodeInvalidArgument, "events are not in ascending sequence order")
+			return nil, fault.New(ErrorCodeInvalidArgument, "events are not in ascending sequence order")
 		}
 		previous = event.Sequence
 		if strings.TrimSpace(event.TurnID) == "" {
-			return nil, Errorf(ErrorCodeInvalidArgument, "event %d carries no turn scope", event.Sequence)
+			return nil, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("event %d carries no turn scope", event.Sequence))
 		}
 	}
 	index := make(map[string]int)

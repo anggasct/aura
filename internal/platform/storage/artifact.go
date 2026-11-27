@@ -1,0 +1,306 @@
+package storage
+
+import (
+	"context"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"math"
+	"os"
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+)
+
+const DefaultArtifactQuotaBytes int64 = 5 << 30
+
+type ArtifactMetadata struct {
+	ID        string
+	SessionID string
+	EventID   string
+	Filename  string
+	MediaType string
+	Metadata  json.RawMessage
+}
+
+type ArtifactRef struct {
+	ID         string
+	BlobDigest string
+	SessionID  string
+	EventID    string
+	Filename   string
+	MediaType  string
+	SizeBytes  int64
+	Metadata   json.RawMessage
+	CreatedAt  time.Time
+}
+
+type ArtifactLink struct {
+	ID         string
+	BlobDigest string
+	SessionID  string
+	EventID    string
+	Filename   string
+	Metadata   json.RawMessage
+}
+
+type ArtifactStore interface {
+	Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error)
+	Open(ctx context.Context, refID string) (io.ReadCloser, ArtifactMetadata, error)
+	Link(ctx context.Context, link *ArtifactLink) error
+	Unlink(ctx context.Context, refID string) error
+}
+
+type sqliteArtifactStore struct {
+	db         *sql.DB
+	root       string
+	quotaBytes int64
+}
+
+func NewArtifactStore(db *sql.DB, root string, quotaBytes int64) ArtifactStore {
+	return &sqliteArtifactStore{db: db, root: root, quotaBytes: quotaBytes}
+}
+
+func (s *sqliteArtifactStore) Put(ctx context.Context, r io.Reader, meta *ArtifactMetadata) (ArtifactRef, error) {
+	if meta == nil {
+		return ArtifactRef{}, errNilArgument("artifact metadata")
+	}
+	tmpDir := filepath.Join(s.root, "tmp")
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
+		return ArtifactRef{}, fmt.Errorf("create artifact temp dir: %w", err)
+	}
+	tmp, err := os.CreateTemp(tmpDir, "blob-*")
+	if err != nil {
+		return ArtifactRef{}, fmt.Errorf("create artifact temp file: %w", err)
+	}
+	tmpPath := tmp.Name()
+	removeTmp := true
+	defer func() {
+		if removeTmp {
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	limit := s.quotaBytes
+	if limit < math.MaxInt64 {
+		limit++
+	}
+	hasher := sha256.New()
+	size, err := io.Copy(io.MultiWriter(tmp, hasher), io.LimitReader(r, limit))
+	if err != nil {
+		_ = tmp.Close()
+		return ArtifactRef{}, fmt.Errorf("write artifact content: %w", err)
+	}
+	if size > s.quotaBytes {
+		_ = tmp.Close()
+		return ArtifactRef{}, fault.New(
+			ErrorCodeArtifactQuotaExceeded,
+			fmt.Sprintf("artifact exceeds quota of %d bytes", s.quotaBytes),
+		)
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return ArtifactRef{}, fmt.Errorf("fsync artifact content: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return ArtifactRef{}, fmt.Errorf("close artifact temp file: %w", err)
+	}
+
+	digest := hex.EncodeToString(hasher.Sum(nil))
+	relPath := blobRelativePath(digest)
+	absPath := filepath.Join(s.root, filepath.FromSlash(relPath))
+	if err := os.MkdirAll(filepath.Dir(absPath), 0o700); err != nil {
+		return ArtifactRef{}, fmt.Errorf("create blob directory: %w", err)
+	}
+	if err := os.Rename(tmpPath, absPath); err != nil {
+		return ArtifactRef{}, fmt.Errorf("rename artifact into place: %w", err)
+	}
+	removeTmp = false
+
+	createdAt := time.Now().UTC()
+	ref := ArtifactRef{
+		ID:         meta.ID,
+		BlobDigest: digest,
+		SessionID:  meta.SessionID,
+		EventID:    meta.EventID,
+		Filename:   meta.Filename,
+		MediaType:  meta.MediaType,
+		SizeBytes:  size,
+		Metadata:   meta.Metadata,
+		CreatedAt:  createdAt,
+	}
+
+	if err := sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		q := sqlite.Conn(ctx, s.db)
+		var existingMediaType string
+		err := q.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&existingMediaType)
+		switch {
+		case err == nil:
+			ref.MediaType = existingMediaType
+		case errors.Is(err, sql.ErrNoRows):
+			var total sql.NullInt64
+			if err := q.QueryRowContext(ctx, `SELECT SUM(size_bytes) FROM blob`).Scan(&total); err != nil {
+				return classify(fmt.Errorf("read blob storage total: %w", err))
+			}
+			if total.Valid && size > s.quotaBytes-total.Int64 {
+				_ = os.Remove(absPath)
+				return fault.New(
+					ErrorCodeArtifactQuotaExceeded,
+					fmt.Sprintf("blob %s would exceed the storage quota of %d bytes", digest, s.quotaBytes),
+				)
+			}
+			if _, err := q.ExecContext(ctx,
+				`INSERT INTO blob (digest, size_bytes, media_type, relative_path, created_at) VALUES (?, ?, ?, ?, ?)
+				 ON CONFLICT(digest) DO NOTHING`,
+				digest, size, meta.MediaType, relPath, sqlite.FormatTime(createdAt),
+			); err != nil {
+				return classify(fmt.Errorf("insert blob %s: %w", digest, err))
+			}
+			var mediaType string
+			if err := q.QueryRowContext(ctx, `SELECT media_type FROM blob WHERE digest = ?`, digest).Scan(&mediaType); err != nil {
+				return classify(fmt.Errorf("read blob %s: %w", digest, err))
+			}
+			ref.MediaType = mediaType
+		default:
+			return classify(fmt.Errorf("read blob %s: %w", digest, err))
+		}
+
+		if _, err := q.ExecContext(ctx,
+			`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(id) DO NOTHING`,
+			meta.ID, digest, meta.SessionID, nullableString(meta.EventID), meta.Filename, jsonOrEmptyObject(meta.Metadata), sqlite.FormatTime(createdAt),
+		); err != nil {
+			if isConstraintForeignKey(err) {
+				if classified := classifyArtifactFK(ctx, q, digest, meta.SessionID, meta.EventID); classified != nil {
+					return classified
+				}
+				return fault.New(
+					ErrorCodeInvalidArgument,
+					fmt.Sprintf("artifact %s violates a foreign key constraint", meta.ID),
+				)
+			}
+			return classify(fmt.Errorf("insert artifact ref %s: %w", meta.ID, err))
+		}
+		return nil
+	}); err != nil {
+		return ArtifactRef{}, err
+	}
+	return ref, nil
+}
+
+func (s *sqliteArtifactStore) Open(ctx context.Context, refID string) (io.ReadCloser, ArtifactMetadata, error) {
+	var meta ArtifactMetadata
+	var digest, metadataJSON, mediaType, relPath string
+	var eventID sql.NullString
+
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx, `
+		SELECT ar.blob_digest, ar.session_id, ar.event_id, ar.filename, ar.metadata_json, b.media_type, b.relative_path
+		FROM artifact_ref ar
+		JOIN blob b ON b.digest = ar.blob_digest
+		WHERE ar.id = ?`, refID,
+	).Scan(&digest, &meta.SessionID, &eventID, &meta.Filename, &metadataJSON, &mediaType, &relPath)
+	if err != nil {
+		return nil, ArtifactMetadata{}, classify(fmt.Errorf("open artifact %s: %w", refID, err))
+	}
+	meta.ID = refID
+	meta.MediaType = mediaType
+	meta.Metadata = json.RawMessage(metadataJSON)
+	if eventID.Valid {
+		meta.EventID = eventID.String
+	}
+
+	absPath, err := resolveRootedPath(s.root, relPath)
+	if err != nil {
+		return nil, ArtifactMetadata{}, err
+	}
+	f, err := os.Open(absPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ArtifactMetadata{}, fault.New(
+				ErrorCodeArtifactBlobMissing,
+				fmt.Sprintf("blob %s file missing at %s", digest, relPath),
+			)
+		}
+		return nil, ArtifactMetadata{}, fmt.Errorf("open blob file for artifact %s: %w", refID, err)
+	}
+	return f, meta, nil
+}
+
+func (s *sqliteArtifactStore) Link(ctx context.Context, link *ArtifactLink) error {
+	if link == nil {
+		return errNilArgument("artifact link")
+	}
+	q := sqlite.Conn(ctx, s.db)
+	_, err := q.ExecContext(ctx,
+		`INSERT INTO artifact_ref (id, blob_digest, session_id, event_id, filename, metadata_json, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO NOTHING`,
+		link.ID, link.BlobDigest, link.SessionID, nullableString(link.EventID), link.Filename, jsonOrEmptyObject(link.Metadata), sqlite.FormatTime(time.Now()),
+	)
+	if err != nil {
+		if isConstraintForeignKey(err) {
+			if classified := classifyArtifactFK(ctx, q, link.BlobDigest, link.SessionID, link.EventID); classified != nil {
+				return classified
+			}
+			return fault.New(
+				ErrorCodeInvalidArgument,
+				fmt.Sprintf("link %s violates a foreign key constraint", link.ID),
+			)
+		}
+		return classify(fmt.Errorf("link artifact %s to blob %s: %w", link.ID, link.BlobDigest, err))
+	}
+	return nil
+}
+
+func (s *sqliteArtifactStore) Unlink(ctx context.Context, refID string) error {
+	if _, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `DELETE FROM artifact_ref WHERE id = ?`, refID); err != nil {
+		return classify(fmt.Errorf("unlink artifact %s: %w", refID, err))
+	}
+	return nil
+}
+
+func blobRelativePath(digest string) string {
+	return path.Join("blobs", digest[:2], digest)
+}
+
+func resolveRootedPath(root, rel string) (string, error) {
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fault.New(
+			ErrorCodeInvalidArgument,
+			fmt.Sprintf("relative path %q escapes the storage root", rel),
+		)
+	}
+	rootClean := filepath.Clean(root)
+	abs := filepath.Join(rootClean, clean)
+	if abs != rootClean && !strings.HasPrefix(abs, rootClean+string(filepath.Separator)) {
+		return "", fault.New(
+			ErrorCodeInvalidArgument,
+			fmt.Sprintf("relative path %q escapes the storage root", rel),
+		)
+	}
+	return abs, nil
+}
+
+func nullableString(v string) any {
+	if v == "" {
+		return nil
+	}
+	return v
+}
+
+func jsonOrEmptyObject(raw json.RawMessage) string {
+	if raw == nil {
+		return "{}"
+	}
+	return string(raw)
+}

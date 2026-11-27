@@ -8,7 +8,8 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func writeTelegramAccessConfig(t *testing.T) string {
@@ -102,11 +103,15 @@ func TestPrincipalListIncludesTelegramPrincipals(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Request: %v", err)
 	}
-	if _, _, err := store.NewPairingStore(db).Approve(t.Context(), principal.ChannelTelegram, pairingCodeDigest(issued.Code), principal.OwnerID, time.Now().UTC()); err != nil {
+	pairings, err := principal.NewPairingStore(db, turnstore.NewTurnStore(db))
+	if err != nil {
+		t.Fatalf("NewPairingStore: %v", err)
+	}
+	if _, _, err := pairings.Approve(t.Context(), principal.ChannelTelegram, pairingCodeDigest(issued.Code), principal.OwnerID, time.Now().UTC()); err != nil {
 		t.Fatalf("Approve: %v", err)
 	}
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: "main/telegram:pocket/chat:9", OwnerID: "telegram:9", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "main/telegram:pocket/chat:9", OwnerID: "telegram:9", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create session: %v", err)
 	}
 	out, err := runAccessCommand(t, newPrincipalCmd, cfg, "list")
@@ -129,11 +134,11 @@ func TestPrincipalListIncludesTelegramPrincipals(t *testing.T) {
 func TestTelegramAccessSettingsShareTheDiscordGates(t *testing.T) {
 	cfg := enabledTelegramConfig()
 	db := discordTestDB(t)
-	settings := telegramAccessSettings(&cfg, db, nil, nil)
+	settings := channelAccessSettings(&cfg, db, nil, nil)
 	if settings.Pairing == nil || settings.Budgets == nil || settings.Erasure == nil || settings.Handoffs == nil || settings.Evals == nil {
 		t.Fatalf("telegram access settings are missing gates: %+v", settings)
 	}
-	bare := telegramAccessSettings(&cfg, nil, nil, nil)
+	bare := channelAccessSettings(&cfg, nil, nil, nil)
 	if bare.Budgets != nil || bare.Erasure != nil || bare.Handoffs != nil || bare.Evals != nil {
 		t.Fatalf("settings without a database carry gates: %+v", bare)
 	}

@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -81,17 +82,17 @@ type Handler struct {
 func NewHandler(opts *Options) (*Handler, error) {
 	switch {
 	case opts == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "handler options must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "handler options must not be nil")
 	case opts.Keys == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "key store must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "key store must not be nil")
 	case opts.MaxBodyBytes < 1:
-		return nil, Errorf(ErrorCodeInvalidArgument, "body bound must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "body bound must be positive")
 	case opts.RequestsPerMinute < 1:
-		return nil, Errorf(ErrorCodeInvalidArgument, "request rate must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "request rate must be positive")
 	case opts.MaxConcurrentPerKey < 1:
-		return nil, Errorf(ErrorCodeInvalidArgument, "concurrency limit must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "concurrency limit must be positive")
 	case opts.Logger == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "logger must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "logger must not be nil")
 	}
 	h := &Handler{
 		keys:         opts.Keys,

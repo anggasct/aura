@@ -12,13 +12,16 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 func testLimits(active, pending int) Config {
@@ -37,18 +40,18 @@ func (c Config) withShutdownTimeout(timeout time.Duration) Config {
 	return c
 }
 
-func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB, store.EventStore) {
+func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *sql.DB, turnstore.EventStore) {
 	t.Helper()
 	ctx := context.Background()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	db, err := sqlite.Open(ctx, dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	events := store.NewEventStore(db)
-	dedupe := store.NewDedupeStore(db)
+	events := turnstore.NewEventStore(db)
+	dedupe := turnstore.NewDedupeStore(db)
 	deps.Events, deps.Dedupe, deps.Executor = events, dedupe, executor
 	engine, err := New(&deps)
 	if err != nil {
@@ -59,15 +62,15 @@ func newTestRuntime(t *testing.T, deps Deps, executor TurnExecutor) (*Engine, *s
 
 func mustCreateSession(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
-	sess := store.Session{ID: id, OwnerID: "user-1"}
-	if err := store.NewSessionService(db).Create(context.Background(), &sess); err != nil {
+	sess := turn.Session{ID: id, OwnerID: "user-1"}
+	if err := turnstore.NewSessionService(db).Create(context.Background(), &sess); err != nil {
 		t.Fatalf("create session %s: %v", id, err)
 	}
 }
 
-func collect(t *testing.T, engine *Engine, req *turn.TurnRequest) ([]store.RuntimeEvent, error) {
+func collect(t *testing.T, engine *Engine, req *turn.TurnRequest) ([]turn.Event, error) {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range engine.Run(context.Background(), req) {
 		if err != nil {
 			return events, err
@@ -213,7 +216,7 @@ func acceptedCount(t *testing.T, db *sql.DB, sessionID string) int {
 	return count
 }
 
-func firstEventTurn(events []store.RuntimeEvent) string {
+func firstEventTurn(events []turn.Event) string {
 	for i := range events {
 		if events[i].TurnID != "" {
 			return events[i].TurnID
@@ -324,7 +327,7 @@ func TestRunCancellationIsDurable(t *testing.T) {
 		mustCreateSession(t, db, "session-a")
 
 		ctx, cancel := context.WithCancel(context.Background())
-		events := make(chan store.RuntimeEvent, 16)
+		events := make(chan turn.Event, 16)
 		errs := make(chan error, 1)
 		go func() {
 			for ev, err := range engine.Run(ctx, sampleRequest("session-a", "turn-cancel")) {
@@ -357,7 +360,7 @@ func TestRunCancellationIsDurable(t *testing.T) {
 	})
 }
 
-func waitForTerminal(t *testing.T, events chan store.RuntimeEvent) {
+func waitForTerminal(t *testing.T, events chan turn.Event) {
 	t.Helper()
 	for ev := range events {
 		if isTerminalKind(ev.Kind) {
@@ -437,7 +440,7 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 	sub := newSubscriber()
 	defer sub.stop()
 	for range cap(sub.events) {
-		sub.events <- store.RuntimeEvent{Kind: turn.EventKindModelDelta}
+		sub.events <- turn.Event{Kind: turn.EventKindModelDelta}
 	}
 
 	cancelled := make(chan struct{})
@@ -451,7 +454,7 @@ func TestPublishDoesNotBlockControlPathsWhenSubscriberIsFull(t *testing.T) {
 
 	published := make(chan struct{})
 	go func() {
-		bus.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		bus.Publish(&turn.Event{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
 		close(published)
 	}()
 	cancelDone := make(chan struct{})
@@ -510,8 +513,8 @@ func TestEngineRelaysBusEventsToItsRunningTurn(t *testing.T) {
 	}
 	waitFor(t, func() bool { return executor.StartCount() == 1 })
 
-	bus.Publish(&store.RuntimeEvent{ID: "foreign", SessionID: "session-b", TurnID: "turn-relay", Kind: turn.EventKindToolRequested})
-	bus.Publish(&store.RuntimeEvent{ID: "relayed", SessionID: "session-a", TurnID: "turn-relay", Kind: turn.EventKindToolRequested})
+	bus.Publish(&turn.Event{ID: "foreign", SessionID: "session-b", TurnID: "turn-relay", Kind: turn.EventKindToolRequested})
+	bus.Publish(&turn.Event{ID: "relayed", SessionID: "session-a", TurnID: "turn-relay", Kind: turn.EventKindToolRequested})
 	close(gate)
 
 	var relayed, foreign int
@@ -552,7 +555,7 @@ func TestPublishAfterSubscriberCloseDoesNotPanic(t *testing.T) {
 	}
 	done := make(chan struct{})
 	go func() {
-		bus.Publish(&store.RuntimeEvent{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
+		bus.Publish(&turn.Event{SessionID: "session-a", TurnID: "turn-live", Kind: "tool.requested"})
 		close(done)
 	}()
 	select {
@@ -714,7 +717,7 @@ func TestCompletedTurnsArePruned(t *testing.T) {
 	})
 }
 
-func lastKind(events []store.RuntimeEvent) string {
+func lastKind(events []turn.Event) string {
 	if len(events) == 0 {
 		return ""
 	}
@@ -725,8 +728,8 @@ type ignoreCancelExecutor struct {
 	release chan struct{}
 }
 
-func (e ignoreCancelExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (e ignoreCancelExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		<-e.release
 	}
 }

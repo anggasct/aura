@@ -8,7 +8,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/app"
-	"github.com/anggasct/aura/internal/channels/terminal"
+	"github.com/anggasct/aura/internal/platform/logging"
 )
 
 func ExecuteContext(ctx context.Context, interrupts <-chan os.Signal, args ...string) int {
@@ -16,14 +16,14 @@ func ExecuteContext(ctx context.Context, interrupts <-chan os.Signal, args ...st
 	if len(effective) == 0 {
 		effective = os.Args[1:]
 	}
-	root := app.NewRootCommand()
+	root := NewRootCommand()
 	root.SetArgs(effective)
 	ctx = app.WithInterrupts(ctx, interrupts)
 	executionCtx, stopInterrupts := contextForCommand(ctx, root, effective, interrupts)
 	defer stopInterrupts()
 	err := root.ExecuteContext(executionCtx)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "aura:", terminal.SanitizeText(err.Error()))
+		fmt.Fprintln(os.Stderr, "aura:", logging.SanitizeText(err.Error()))
 	}
 	return app.ExitCode(root, effective, err)
 }

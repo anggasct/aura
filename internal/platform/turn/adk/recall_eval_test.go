@@ -13,7 +13,6 @@ import (
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/tool"
@@ -51,12 +50,27 @@ type stubRecallProvider struct {
 	calls    int
 }
 
-func (s *stubRecallProvider) RecallTurn(_ context.Context, _ *turn.TurnRequest) (*turn.UntrustedRecall, error) {
+func (s *stubRecallProvider) TurnContext(_ context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
+	if req != nil && req.UntrustedContext != nil {
+		return nil, nil
+	}
 	s.calls++
 	if s.err != nil {
 		return nil, s.err
 	}
-	return s.evidence, nil
+	if s.evidence == nil {
+		return nil, nil
+	}
+	return []turn.ContextBlock{{
+		Order:     turn.ContextOrderRecall,
+		Placement: turn.ContextPlacementUserPart,
+		Content:   turn.RenderUntrustedRecall(s.evidence),
+		Caveat:    turn.RecallEvidenceCaveat,
+	}}, nil
+}
+
+func (s *stubRecallProvider) Required(req *turn.TurnRequest) bool {
+	return req != nil && req.RequireRecall
 }
 
 type capturingModel struct {
@@ -99,11 +113,11 @@ func (f *capturingModel) GenerateContent(_ context.Context, req *adkmodel.LLMReq
 	}
 }
 
-func newEvalExecutor(t *testing.T, model *capturingModel, broker turn.ToolBroker, provider RecallProvider, tools ...tool.Tool) *ADKExecutor {
+func newEvalExecutor(t *testing.T, model *capturingModel, broker turn.ToolBroker, provider turn.ContextProvider, tools ...tool.Tool) *ADKExecutor {
 	t.Helper()
 	db, sessions, _ := newSessionTestDB(t)
 	modelName, models := capturingModelSet(model)
-	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, tools, nil, WithRecallProvider(provider))
+	executor, err := NewADKExecutor("aura", modelName, models, sessions, broker, tools, nil, WithContextProvider(provider))
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
@@ -123,9 +137,9 @@ func evalTurnRequest() *turn.TurnRequest {
 	}
 }
 
-func drainTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) []store.RuntimeEvent {
+func drainTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) []turn.Event {
 	t.Helper()
-	var events []store.RuntimeEvent
+	var events []turn.Event
 	for ev, err := range executor.Execute(context.Background(), req) {
 		if err != nil {
 			t.Fatalf("Execute: %v", err)
@@ -135,7 +149,7 @@ func drainTurn(t *testing.T, executor *ADKExecutor, req *turn.TurnRequest) []sto
 	return events
 }
 
-func userMessageText(t *testing.T, events []store.RuntimeEvent) string {
+func userMessageText(t *testing.T, events []turn.Event) string {
 	t.Helper()
 	for i := range events {
 		ev := &events[i]
@@ -188,7 +202,7 @@ func TestEvalRecallConfinedToUserEvidence(t *testing.T) {
 		if strings.Contains(stripped, injection) {
 			t.Errorf("injection leaked outside evidence block: %q", injection)
 		}
-		if !strings.Contains(input, quoteEvidence("prior note: "+injection)) {
+		if !strings.Contains(input, turn.QuoteUntrusted("prior note: "+injection)) {
 			t.Errorf("injection missing from evidence block: %q", injection)
 		}
 	}
@@ -285,7 +299,7 @@ func TestEvalRecallDegradesAndRequireRecallFails(t *testing.T) {
 
 func TestRenderUntrustedRecallIsDeterministic(t *testing.T) {
 	evidence := corpusEvidence()
-	first, second := renderUntrustedRecall(evidence), renderUntrustedRecall(evidence)
+	first, second := turn.RenderUntrustedRecall(evidence), turn.RenderUntrustedRecall(evidence)
 	if first == "" || first != second {
 		t.Fatalf("rendering not deterministic: %q vs %q", first, second)
 	}
@@ -294,12 +308,12 @@ func TestRenderUntrustedRecallIsDeterministic(t *testing.T) {
 	}
 	for _, document := range evidence.Documents {
 		marker := "evidence [mem_eval trust=untrusted_external seq="
-		if !strings.Contains(first, marker) || !strings.Contains(first, quoteEvidence(document.Content)) {
+		if !strings.Contains(first, marker) || !strings.Contains(first, turn.QuoteUntrusted(document.Content)) {
 			t.Errorf("provenance marker missing:\n%s", first)
 			break
 		}
 	}
-	if renderUntrustedRecall(nil) != "" {
+	if turn.RenderUntrustedRecall(nil) != "" {
 		t.Error("nil recall rendered content")
 	}
 }

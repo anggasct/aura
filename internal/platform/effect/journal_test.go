@@ -5,12 +5,17 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestPrepare_RecordsIntentAndRequestedEvent(t *testing.T) {
@@ -485,9 +490,86 @@ func TestPrepare_EventPayloadIsSafe(t *testing.T) {
 
 func TestStorePackageContract(t *testing.T) {
 	t.Parallel()
-	err := store.AppendEventTx(context.Background(), nil, &store.RuntimeEvent{})
-	if err == nil {
-		t.Fatal("expected nil-tx error")
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	_, err := NewJournal(db, Options{})
+	assertCode(t, err, ErrorCodeInvalidArgument)
+}
+
+type failingEventTurnStore struct {
+	TurnStore
+	appendErr error
+}
+
+func (f failingEventTurnStore) AppendEvent(context.Context, *turn.Event) error {
+	return f.appendErr
+}
+
+func TestJournalPrepareLeavesNoIntentWhenItsEventCannotBeWritten(t *testing.T) {
+	t.Parallel()
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	if err := seedSession(t, db); err != nil {
+		t.Fatalf("seed session: %v", err)
+	}
+	appendErr := errors.New("append failed")
+	j, err := NewJournal(db, Options{
+		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
+		Logger: slog.New(slog.DiscardHandler),
+		Turns:  failingEventTurnStore{TurnStore: turnstore.NewTurnStore(db), appendErr: appendErr},
+	})
+	if err != nil {
+		t.Fatalf("new journal: %v", err)
+	}
+	if _, err := j.Prepare(t.Context(), validPrepare(1)); !errors.Is(err, appendErr) {
+		t.Fatalf("Prepare err = %v, want appendErr", err)
+	}
+	if got := intentCount(t, db, ""); got != 0 {
+		t.Fatalf("intent rows = %d, want 0 after event append failure", got)
+	}
+}
+
+type recordingEventPublisher struct {
+	events []*turn.Event
+}
+
+func (r *recordingEventPublisher) Publish(e *turn.Event) {
+	r.events = append(r.events, e)
+}
+
+func TestJournalPublishesOnlyAfterTheOutermostCommit(t *testing.T) {
+	t.Parallel()
+	pub := &recordingEventPublisher{}
+	j, db := newTestJournalWithEvents(t, pub)
+
+	rollbackErr := errors.New("outer rollback")
+	err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		if _, err := j.Prepare(ctx, validPrepare(1)); err != nil {
+			return err
+		}
+		if len(pub.events) != 0 {
+			t.Fatalf("published %d events before commit, want 0", len(pub.events))
+		}
+		return rollbackErr
+	})
+	if !errors.Is(err, rollbackErr) {
+		t.Fatalf("RunInTx err = %v, want rollbackErr", err)
+	}
+	if len(pub.events) != 0 {
+		t.Fatalf("published %d events after rollback, want 0", len(pub.events))
+	}
+
+	if err := sqlite.RunInTx(t.Context(), db, func(ctx context.Context) error {
+		if _, err := j.Prepare(ctx, validPrepare(2)); err != nil {
+			return err
+		}
+		if len(pub.events) != 0 {
+			t.Fatalf("published %d events inside uncommitted outer tx, want 0", len(pub.events))
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("outer commit: %v", err)
+	}
+	if len(pub.events) != 1 || pub.events[0].Kind != EventKindToolRequested {
+		t.Fatalf("published events = %+v, want one tool.requested event", pub.events)
 	}
 }
 
@@ -643,4 +725,34 @@ func TestRecoverProvider_RejectsAnEmptyProvider(t *testing.T) {
 	j, _ := newTestJournal(t)
 	_, err := j.RecoverProvider(context.Background(), "")
 	assertCode(t, err, ErrorCodeInvalidArgument)
+}
+
+func TestPrepareKeepsAPrimaryKeyCollisionRaw(t *testing.T) {
+	j, db := newTestJournal(t)
+	if _, err := db.ExecContext(t.Context(), `
+CREATE TRIGGER force_effect_pk_collision
+BEFORE INSERT ON effect_intent
+WHEN NEW.idempotency_key <> 'trigger-seed'
+BEGIN
+    INSERT INTO effect_intent (
+        id, session_id, turn_id, tool_call_id, idempotency_key, provider, operation,
+        classification, state, request_digest, request_json, prepared_at, updated_at
+    ) VALUES (
+        NEW.id, NEW.session_id, NEW.turn_id, 'trigger-call', 'trigger-seed', NEW.provider, NEW.operation,
+        NEW.classification, NEW.state, NEW.request_digest, NEW.request_json, NEW.prepared_at, NEW.updated_at
+    );
+END;`); err != nil {
+		t.Fatalf("create trigger: %v", err)
+	}
+
+	_, err := j.Prepare(t.Context(), validPrepare(1))
+	if err == nil {
+		t.Fatal("expected primary-key collision error, got nil")
+	}
+	if !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintPrimaryKey) {
+		t.Fatalf("err = %v, want %s", err, sqlite.ErrorCodeConstraintPrimaryKey)
+	}
+	if code, ok := fault.CodeOf[ErrorCode](err); ok {
+		t.Fatalf("primary-key collision was remapped to effect code %s: %v", code, err)
+	}
 }

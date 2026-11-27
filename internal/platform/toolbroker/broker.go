@@ -22,9 +22,9 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type ToolRequest struct {
@@ -127,7 +127,7 @@ type Options struct {
 	Adapters             map[string]Adapter
 	Secrets              []string
 	MaxInlineResultBytes int64
-	Artifacts            store.ArtifactStore
+	Artifacts            storage.ArtifactStore
 	Effects              *effect.Executor
 	Observer             Observer
 	ApprovalDecider      ApprovalDecider
@@ -148,7 +148,7 @@ type Broker struct {
 	secretMu             sync.RWMutex
 	secrets              []string
 	maxInlineResultBytes int64
-	artifacts            store.ArtifactStore
+	artifacts            storage.ArtifactStore
 	effects              *effect.Executor
 	observer             Observer
 	decider              ApprovalDecider
@@ -162,10 +162,10 @@ func New(options *Options) (*Broker, error) {
 	if options == nil {
 		options = &Options{}
 	}
-	definitions := tools.DefinitionsByKey()
+	definitions := map[string]*tools.Definition{}
 	policy := options.Policy
 	if policy.Version == "" {
-		policy = DefaultPolicy()
+		policy = approval.Policy{Version: "builtin-tools-v1", Rules: map[string]approval.Rule{}}
 	}
 	if err := policy.Validate(); err != nil {
 		return nil, fmt.Errorf("toolbroker: invalid policy: %w", err)
@@ -179,6 +179,10 @@ func New(options *Options) (*Broker, error) {
 	if err != nil {
 		return nil, err
 	}
+	guards := make(map[string]ApprovalGuard, len(options.ApprovalGuards))
+	maps.Copy(guards, options.ApprovalGuards)
+	argumentChecks := make(map[string]ArgumentCheck, len(options.ArgumentChecks))
+	maps.Copy(argumentChecks, options.ArgumentChecks)
 	return &Broker{
 		definitions:          definitions,
 		engine:               engine,
@@ -190,35 +194,31 @@ func New(options *Options) (*Broker, error) {
 		observer:             options.Observer,
 		decider:              options.ApprovalDecider,
 		access:               options.Access,
-		guards:               maps.Clone(options.ApprovalGuards),
+		guards:               guards,
 		approvalReachable:    options.ApprovalReachable,
-		argumentChecks:       maps.Clone(options.ArgumentChecks),
+		argumentChecks:       argumentChecks,
 	}, nil
 }
 
-func DefaultPolicy() approval.Policy {
-	rules := make(map[string]approval.Rule)
-	listed := tools.Builtins()
-	for i := range listed {
-		definition := &listed[i]
-		allowedTrust := []approval.TrustLabel{
+func DefaultRule(definition *tools.Definition) approval.Rule {
+	if definition == nil {
+		return approval.Rule{}
+	}
+	return approval.Rule{
+		ToolName:             definition.Name,
+		ToolVersion:          definition.Version,
+		RequiresApproval:     definition.RequiresApproval,
+		RequiredCapabilities: slices.Clone(definition.RequiredCapabilities),
+		AllowedTrust: []approval.TrustLabel{
 			approval.TrustOwnerInput,
 			approval.TrustTrustedConfiguration,
 			approval.TrustDerivedUntrusted,
-		}
-		rules[definition.Name] = approval.Rule{
-			ToolName:             definition.Name,
-			ToolVersion:          definition.Version,
-			RequiresApproval:     definition.RequiresApproval,
-			RequiredCapabilities: slices.Clone(definition.RequiredCapabilities),
-			AllowedTrust:         allowedTrust,
-			Constraints: approval.Constraints{
-				MaxOutputBytes: 64 * 1024,
-				Timeout:        30 * time.Second,
-			},
-		}
+		},
+		Constraints: approval.Constraints{
+			MaxOutputBytes: 64 * 1024,
+			Timeout:        30 * time.Second,
+		},
 	}
-	return approval.Policy{Version: "builtin-tools-v1", Rules: rules}
 }
 
 func (b *Broker) RegisterSecret(value string) {
@@ -238,14 +238,23 @@ func (b *Broker) secretValues() []string {
 	return slices.Clone(b.secrets)
 }
 
+func cloneDefinition(definition *tools.Definition) tools.Definition {
+	definitionCopy := *definition
+	definitionCopy.Schema = slices.Clone(definition.Schema)
+	definitionCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
+	definitionCopy.Display = slices.Clone(definition.Display)
+	if definition.Plugin != nil {
+		pluginCopy := *definition.Plugin
+		definitionCopy.Plugin = &pluginCopy
+	}
+	return definitionCopy
+}
+
 func (b *Broker) Definitions() []tools.Definition {
 	b.mu.RLock()
 	definitions := make([]tools.Definition, 0, len(b.definitions))
 	for _, definition := range b.definitions {
-		definitionCopy := *definition
-		definitionCopy.Schema = slices.Clone(definition.Schema)
-		definitionCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
-		definitions = append(definitions, definitionCopy)
+		definitions = append(definitions, cloneDefinition(definition))
 	}
 	b.mu.RUnlock()
 	slices.SortFunc(definitions, func(a, c tools.Definition) int {
@@ -261,10 +270,7 @@ func (b *Broker) Definition(name, version string) (tools.Definition, bool) {
 	if !ok {
 		return tools.Definition{}, false
 	}
-	definitionCopy := *definition
-	definitionCopy.Schema = slices.Clone(definition.Schema)
-	definitionCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
-	return definitionCopy, true
+	return cloneDefinition(definition), true
 }
 
 func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rule *approval.Rule) error {
@@ -287,9 +293,7 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
-	defCopy := *definition
-	defCopy.Schema = slices.Clone(definition.Schema)
-	defCopy.RequiredCapabilities = slices.Clone(definition.RequiredCapabilities)
+	defCopy := cloneDefinition(definition)
 
 	key := defCopy.Key()
 	oldDef, hadOldDef := b.definitions[key]
@@ -321,11 +325,17 @@ func (b *Broker) UnregisterTool(toolName, toolVersion string) {
 	key := toolName + "@" + toolVersion
 	delete(b.definitions, key)
 	delete(b.adapters, key)
+	delete(b.argumentChecks, key)
+	delete(b.guards, toolName)
 	b.engine.UnregisterRule(toolName)
 }
 
 func (b *Broker) PolicyVersion() string {
 	return b.engine.PolicyVersion()
+}
+
+func (b *Broker) Policy() approval.Policy {
+	return b.engine.Policy()
 }
 
 func (b *Broker) Evaluate(ctx context.Context, request *ToolRequest) (approval.PolicyDecision, error) {
@@ -372,6 +382,9 @@ func (b *Broker) StandingApprovalAllowed(ctx context.Context, request *ToolReque
 	b.mu.RLock()
 	definition := b.definitions[canonical.ToolName+"@"+canonical.ToolVersion]
 	b.mu.RUnlock()
+	if definition == nil {
+		return false, errorf(ResultPolicyDenied, "unknown tool %q version %q", canonical.ToolName, canonical.ToolVersion)
+	}
 	guarded, err := b.guardRequires(ctx, &canonical)
 	if err != nil {
 		return false, err
@@ -431,7 +444,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	definition := b.definitions[key]
 	adapter, ok := b.adapters[key]
 	b.mu.RUnlock()
-	if !ok {
+	if !ok || definition == nil {
 		return ToolResult{}, errorf(ResultCapabilityUnavailable, "tool %q is not available in this artifact", key)
 	}
 	class := requestClass(&canonical)
@@ -592,7 +605,7 @@ func (b *Broker) boundOutput(ctx context.Context, canonical *ToolRequest, output
 		if err != nil {
 			return nil, errorf(ResultExecutionFailed, "generate artifact id: %v", err)
 		}
-		ref, err := b.artifacts.Put(ctx, strings.NewReader(string(output)), &store.ArtifactMetadata{
+		ref, err := b.artifacts.Put(ctx, strings.NewReader(string(output)), &storage.ArtifactMetadata{
 			ID:        artifactID,
 			SessionID: canonical.SessionID,
 			Filename:  canonical.ToolName + "-" + canonical.RequestID + ".json",
@@ -848,7 +861,9 @@ func (b *Broker) sessionReachable(sessionID string) bool {
 }
 
 func (b *Broker) guardRequires(ctx context.Context, request *ToolRequest) (bool, error) {
+	b.mu.RLock()
 	guard := b.guards[request.ToolName]
+	b.mu.RUnlock()
 	if guard == nil {
 		return false, nil
 	}
@@ -960,7 +975,10 @@ func (b *Broker) checkedArguments(definition *tools.Definition, raw json.RawMess
 	if err != nil {
 		return nil, errorf(ResultInvalidArgument, "%v", err)
 	}
-	if check := b.argumentChecks[definition.Key()]; check != nil {
+	b.mu.RLock()
+	check := b.argumentChecks[definition.Key()]
+	b.mu.RUnlock()
+	if check != nil {
 		if err := check(arguments); err != nil {
 			return nil, errorf(ResultInvalidArgument, "%v", err)
 		}

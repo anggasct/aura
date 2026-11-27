@@ -10,11 +10,14 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
 )
 
 var errEventWriteRefused = errors.New("event write refused")
@@ -24,21 +27,21 @@ type refusingEventStore struct {
 	kind string
 }
 
-func (s *refusingEventStore) Append(ctx context.Context, ev *store.RuntimeEvent) error {
+func (s *refusingEventStore) Append(ctx context.Context, ev *turn.Event) error {
 	if ev.Kind == s.kind {
 		return errEventWriteRefused
 	}
 	return s.EventStore.Append(ctx, ev)
 }
 
-func (s *refusingEventStore) AppendSequenced(ctx context.Context, sessionID string, ev *store.RuntimeEvent) (uint64, error) {
+func (s *refusingEventStore) AppendSequenced(ctx context.Context, sessionID string, ev *turn.Event) (uint64, error) {
 	if ev.Kind == s.kind {
 		return 0, errEventWriteRefused
 	}
 	return s.EventStore.AppendSequenced(ctx, sessionID, ev)
 }
 
-func (s *refusingEventStore) UpsertEvent(ctx context.Context, ev *store.RuntimeEvent) (sequence uint64, inserted bool, err error) {
+func (s *refusingEventStore) UpsertEvent(ctx context.Context, ev *turn.Event) (sequence uint64, inserted bool, err error) {
 	if ev.Kind == s.kind {
 		return 0, false, errEventWriteRefused
 	}
@@ -49,8 +52,8 @@ type unsequencedExecutor struct {
 	inner TurnExecutor
 }
 
-func (x unsequencedExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
-	return func(yield func(store.RuntimeEvent, error) bool) {
+func (x unsequencedExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
 		for ev, err := range x.inner.Execute(ctx, req) {
 			ev.Sequence = 0
 			if !yield(ev, err) {
@@ -63,14 +66,14 @@ func (x unsequencedExecutor) Execute(ctx context.Context, req *turn.TurnRequest)
 func newRefusingTestRuntime(t *testing.T, executor TurnExecutor, refusedKind string, live bool) (*Engine, *sql.DB) {
 	t.Helper()
 	dsn := filepath.Join(t.TempDir(), "aura.db")
-	storetest.Seed(t, dsn)
+	sqlitetest.Seed(t, dsn, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), storage.Schema())
 	db, err := sqlite.Open(t.Context(), dsn, sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	events := store.NewEventStore(db)
-	dedupe := store.NewDedupeStore(db)
+	events := turnstore.NewEventStore(db)
+	dedupe := turnstore.NewDedupeStore(db)
 	engine, err := New(&Deps{Events: &refusingEventStore{EventStore: events, kind: refusedKind}, Dedupe: dedupe, Executor: executor, Config: testLimits(4, 16)})
 	if err != nil {
 		t.Fatalf("New: %v", err)
@@ -101,12 +104,12 @@ func TestFailedEventWriteIsNeverStreamed(t *testing.T) {
 			if err != nil {
 				t.Fatalf("run: %v", err)
 			}
-			stored, err := store.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-refused", "turn-refused")
+			stored, err := turnstore.NewDedupeStore(db).ListTurnEvents(context.Background(), "session-refused", "turn-refused")
 			if err != nil {
 				t.Fatalf("list turn events: %v", err)
 			}
 
-			for _, events := range [][]store.RuntimeEvent{streamed, stored} {
+			for _, events := range [][]turn.Event{streamed, stored} {
 				for _, ev := range events {
 					if ev.Kind == turn.EventKindMessageCompleted {
 						t.Fatalf("event %s with a refused write reached the turn: %+v", ev.Kind, ev)
@@ -142,7 +145,7 @@ func TestRunStreamMatchesTheStoredTurn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	stored, err := store.NewSessionService(db).ListEvents(context.Background(), "session-entry", 0, 100)
+	stored, err := turnstore.NewSessionService(db).ListEvents(context.Background(), "session-entry", 0, 100)
 	if err != nil {
 		t.Fatalf("list events: %v", err)
 	}

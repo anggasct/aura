@@ -15,6 +15,7 @@ import (
 	"time"
 
 	policy "github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -116,18 +117,18 @@ type Registry struct {
 func NewRegistry() (*Registry, error) {
 	registry := &Registry{pending: map[string]*Pending{}, seen: map[string]struct{}{}}
 	if _, err := rand.Read(registry.key[:]); err != nil {
-		return nil, ErrorWrapf(ErrorCodeEntropyUnavailable, err, "approval token key is unavailable")
+		return nil, fault.Wrap(ErrorCodeEntropyUnavailable, "approval token key is unavailable", err)
 	}
 	return registry, nil
 }
 
 func (r *Registry) Issue(binding *Binding, expiresAt time.Time) (tokenID string, pending *Pending, err error) {
 	if r == nil || binding == nil {
-		return "", nil, Errorf(ErrorCodeInvalidArgument, "approval registry and binding must not be nil")
+		return "", nil, fault.New(ErrorCodeInvalidArgument, "approval registry and binding must not be nil")
 	}
 	var raw [tokenBytes]byte
 	if _, err := rand.Read(raw[:]); err != nil {
-		return "", nil, ErrorWrapf(ErrorCodeEntropyUnavailable, err, "approval token mint failed")
+		return "", nil, fault.Wrap(ErrorCodeEntropyUnavailable, "approval token mint failed", err)
 	}
 	tokenID = hex.EncodeToString(raw[:])
 	pending = &Pending{binding: *binding, expiresAt: expiresAt, result: make(chan Outcome, 1)}
@@ -278,7 +279,7 @@ func scopeMatches(binding *Binding, presser *Presser) bool {
 
 func (r *Registry) Await(ctx context.Context, tokenID string, pending *Pending) (outcome Outcome, timedOut bool, err error) {
 	if r == nil || pending == nil {
-		return Outcome{}, false, Errorf(ErrorCodeInvalidArgument, "approval registry and pending approval must not be nil")
+		return Outcome{}, false, fault.New(ErrorCodeInvalidArgument, "approval registry and pending approval must not be nil")
 	}
 	timer := time.NewTimer(time.Until(pending.expiresAt))
 	defer timer.Stop()
@@ -297,13 +298,7 @@ type StandingGrantRecorder interface {
 	RecordStandingGrant(ctx context.Context, grant *StandingGrantRequest) error
 }
 
-type StandingGrantRequest struct {
-	PrincipalID string
-	AgentID     string
-	ToolName    string
-	OwnerID     string
-	TTL         time.Duration
-}
+type StandingGrantRequest = principal.StandingGrantRequest
 
 type StandingOffer struct {
 	Grants StandingGrantRecorder

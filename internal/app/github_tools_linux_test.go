@@ -23,8 +23,6 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
 	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -36,12 +34,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
@@ -58,20 +56,21 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	cfg := appconfig.Default()
 	cfg.Tools.Workspace = workspace
 	cfg.Storage.Path = dir
-	cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, &cfg), db: db, artifactRoot: filepath.Join(dir, "artifacts"), logger: slog.Default(),
 		wiring: &toolWiring{}, events: turn.NewEventBus(slog.Default()),
 	})
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, executor, &cfg)
 	output, err := executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: "read_file", ToolVersion: "v1", Arguments: json.RawMessage(`{"path":"note.txt"}`),
@@ -91,7 +90,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 		return json.RawMessage(`{"repo":"org/repo","number":7,"body":"hi","credential_name":"` + credential + `"}`)
 	}
 	runner, db, _ := newWorkflowToolRunnerFixtureWith(t, func(cfg *appconfig.Config) {
-		cfg.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+		cfg.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 		cfg.Agents.Definitions = append(cfg.Agents.Definitions, auraagent.Persona{
 			ID: "reviewer", Description: "d", Instructions: "i", Tools: []string{github.ToolComment},
 		})
@@ -111,7 +110,7 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 	}
 	bare, bareDB, _ := newWorkflowToolRunnerFixture(t)
 	_, err = bare.Invoke(stepCallContext(t, bareDB), github.ToolComment, comment("ci"))
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeCapabilityExceeded {
 		t.Errorf("no credentials err = %v, want %s", err, workflow.ErrorCodeCapabilityExceeded)
 	}
 }
@@ -119,44 +118,45 @@ func TestWorkflowToolRunnerRefusesAnUnconfiguredGitHubCredential(t *testing.T) {
 var providerSafeToolName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 type gitHubToolRig struct {
-	credentials []config.GitHubCredential
+	credentials []github.Credential
 	wiring      toolWiring
 	access      func(db *sql.DB) toolbroker.AccessPolicy
 }
 
-func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*toolsbuiltin.Executor, *sql.DB) {
+func (r *gitHubToolRig) build(t *testing.T, report capability.Report) (*runtimeadk.BrokerExecutor, *sql.DB) {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := appconfig.Default()
 	cfg.Tools.Workspace = filepath.Join(dir, "workspace")
 	cfg.Storage.Path = dir
 	cfg.Tools.GitHub.Credentials = r.credentials
-	storetest.Seed(t, filepath.Join(dir, "aura.db"))
+	sqlitetest.Seed(t, filepath.Join(dir, "aura.db"), Schemas()...)
 	db, err := sqlite.Open(t.Context(), filepath.Join(dir, "aura.db"), sqlite.Options{})
 	if err != nil {
 		t.Fatalf("open db: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 	wiring := r.wiring
 	if r.access != nil {
 		wiring.access = r.access(db)
 	}
-	executor, err := newToolExecutor(&toolExecutorInput{
+	executor, err := newTestToolExecutor(&toolExecutorInput{
 		result: &appconfig.LoadResult{Config: &cfg, CapabilityReport: report}, db: db, artifactRoot: filepath.Join(dir, "artifacts"),
 		logger: slog.New(slog.DiscardHandler), wiring: &wiring, events: turn.NewEventBus(slog.New(slog.DiscardHandler)),
 	})
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, executor, &cfg)
 	return executor, db
 }
 
-func oneCredential() []config.GitHubCredential {
-	return []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+func oneCredential() []github.Credential {
+	return []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 }
 
 func approveAll(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return true, nil }
@@ -234,7 +234,7 @@ func TestToolExecutorRegistersTheGitHubTools(t *testing.T) {
 	if githubCredentials(&noTools) != nil {
 		t.Errorf("githubCredentials without a tools section = %v, want nil", githubCredentials(&noTools))
 	}
-	_, err = newToolExecutor(&toolExecutorInput{result: loadResultWithAll(t, &noTools), db: nil, logger: slog.New(slog.DiscardHandler), wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler))})
+	_, err = newTestToolExecutor(&toolExecutorInput{result: loadResultWithAll(t, &noTools), db: nil, logger: slog.New(slog.DiscardHandler), wiring: &toolWiring{}, events: turn.NewEventBus(slog.New(slog.DiscardHandler))})
 	if err == nil || !strings.Contains(err.Error(), "tools configuration is required") {
 		t.Errorf("newToolExecutor without a tools section err = %v, want tools configuration is required", err)
 	}
@@ -299,7 +299,7 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 		{ID: "ops", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}},
 		{ID: "plain", Description: "d", Instructions: "i", Audience: auraagent.AudienceTrusted, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"read_file"}},
 		{ID: "lobby", Description: "d", Instructions: "i", Audience: auraagent.AudiencePublic, Tools: []string{"read_file", "github_comment"}, PrincipalTools: []string{"github_comment"}, PublicTools: []string{"read_file"}},
-	}, personaToolNames(&cfg), nil)
+	}, personaToolNames(&cfg), append(appconfig.BuiltinToolDefinitions(), github.Definitions()...), nil)
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -338,8 +338,8 @@ func TestSurfaceExecutorAsksApprovalForAGitHubCall(t *testing.T) {
 	}
 
 	now := time.Now().UTC()
-	grant := &store.StandingGrant{PrincipalID: "discord:111", AgentID: "ops", ToolName: github.ToolComment, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
-	if _, err := store.NewStandingGrantStore(db).Grant(t.Context(), grant); err != nil {
+	grant := &principal.StandingGrant{PrincipalID: "discord:111", AgentID: "ops", ToolName: github.ToolComment, GrantedBy: "discord:777", GrantedAt: now, ExpiresAt: now.Add(time.Hour)}
+	if _, err := principal.NewStandingGrantStore(db).Grant(t.Context(), grant); err != nil {
 		t.Fatalf("Grant: %v", err)
 	}
 	if active, err := policy.StandingGrant(t.Context(), "discord:111", "ops", github.ToolComment, ""); err != nil || !active {
@@ -399,7 +399,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	if err != nil {
 		t.Fatalf("storagePaths: %v", err)
 	}
-	storetest.Seed(t, dbPath)
+	sqlitetest.Seed(t, dbPath, Schemas()...)
 	db, err := openStorage(t.Context(), cfg)
 	if err != nil {
 		t.Fatalf("openStorage: %v", err)
@@ -411,7 +411,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	}
 	passEvals(t, db, registry, "ops", "plain", "open")
 	liveEvents := turn.NewEventBus(slog.New(slog.DiscardHandler))
-	builtin, err := newToolExecutor(&toolExecutorInput{
+	builtin, err := newTestToolExecutor(&toolExecutorInput{
 		result: loadResultWithAll(t, cfg), db: db, artifactRoot: t.TempDir(), logger: slog.New(slog.DiscardHandler),
 		wiring: &toolWiring{decider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return false, nil }},
 		events: liveEvents,
@@ -419,9 +419,10 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	if err != nil {
 		t.Fatalf("newToolExecutor: %v", err)
 	}
+	registerGitHubModule(t, builtin, cfg)
 	name := "http-chat-model"
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: llm}, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(builtin),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -430,11 +431,11 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		LiveEvents:     liveEvents,
 	})
 	if err != nil {
@@ -449,11 +450,27 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 
 func (h *httpChatHarness) mintKey(persona, class string) string {
 	h.t.Helper()
-	cmd := &cobra.Command{}
+	registry, err := buildAgentRegistry(h.cfg)
+	if err != nil {
+		h.t.Fatalf("buildAgentRegistry: %v", err)
+	}
+	opener := func(_ *cobra.Command, _ principal.CommandMode, fn func(context.Context, *principal.CommandEnv) error) error {
+		return fn(h.t.Context(), &principal.CommandEnv{
+			DB:       h.db,
+			Actions:  turnstore.NewOwnerActionRecorder(h.db),
+			Personas: registryPersonaChecker{registry: registry},
+		})
+	}
+	cmd := findSubcommand(principal.Commands(opener), "apikey")
 	var out bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(io.Discard)
-	if err := createAPIKey(h.t.Context(), cmd, h.cfg, h.db, &apiKeyCreateFlags{persona: persona, class: class, label: "test"}); err != nil {
+	args := []string{"create", "--persona", persona, "--class", class, "--label", "test"}
+	if class == string(principal.ClassOwner) {
+		args = append(args, "--confirm-owner")
+	}
+	cmd.SetArgs(args)
+	if err := cmd.ExecuteContext(h.t.Context()); err != nil {
 		h.t.Fatalf("createAPIKey: %v", err)
 	}
 	return strings.TrimSpace(out.String())

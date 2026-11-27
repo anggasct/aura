@@ -9,10 +9,11 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 type kbRetrievalRig struct {
@@ -25,14 +26,19 @@ type kbRetrievalRig struct {
 func newKBRetrievalRig(t *testing.T) *kbRetrievalRig {
 	t.Helper()
 	cfg, db, dbPath := kbTestStorage(t, writeMemoryCLIConfig(t))
-	pool, err := openKnowledgeReadPool(t.Context(), dbPath)
+	pool, err := sqlite.OpenReadOnly(t.Context(), dbPath)
 	if err != nil {
-		t.Fatalf("openKnowledgeReadPool: %v", err)
+		t.Fatalf("OpenReadOnly: %v", err)
 	}
+	pool.SetMaxOpenConns(4)
 	t.Cleanup(func() { _ = pool.Close() })
-	retriever, err := newKnowledgeRetriever(cfg, pool)
+	index, err := knowledge.NewSQLiteIndex(pool)
 	if err != nil {
-		t.Fatalf("newKnowledgeRetriever: %v", err)
+		t.Fatalf("NewSQLiteIndex: %v", err)
+	}
+	retriever, err := knowledge.NewRetriever(index, &knowledgeSecrets{cfg: cfg})
+	if err != nil {
+		t.Fatalf("NewRetriever: %v", err)
 	}
 	service, err := newKnowledgeService(cfg, db, nil)
 	if err != nil {
@@ -95,7 +101,7 @@ func TestKnowledgeSearchNeverCrossesCollectionsEvenWithTheScopeTokenInTheQuery(t
 	scopeTokens := func(collections ...string) string {
 		var tokens []string
 		for _, collection := range collections {
-			tokens = append(tokens, store.KBScope(collection))
+			tokens = append(tokens, knowledge.ScopeToken(collection))
 		}
 		return strings.Join(tokens, " ")
 	}
@@ -133,7 +139,7 @@ func TestKnowledgeSearchDropsAChunkMatchingANewlyAddedVaultValue(t *testing.T) {
 		t.Fatalf("hits before the secret exists = %d, want 2", len(hits))
 	}
 	t.Setenv("KB_TEST_LATE_SECRET", secretValue)
-	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_LATE_SECRET"}}
+	rig.cfg.Webhook.Keys = []platformwebhook.Key{{ID: "late", SecretEnv: "KB_TEST_LATE_SECRET"}}
 	hits := rig.search(t, []string{"support"}, "refund")
 	if len(hits) != 1 || hits[0].Label != "clean.md" {
 		t.Fatalf("hits after the secret exists = %+v, want only clean.md", hits)
@@ -143,9 +149,9 @@ func TestKnowledgeSearchDropsAChunkMatchingANewlyAddedVaultValue(t *testing.T) {
 func TestKnowledgeSearchFailsClosedWhenASecretReferenceIsUnresolvable(t *testing.T) {
 	rig := newKBRetrievalRig(t)
 	rig.add(t, "support", "policy.md", "Refunds are issued within thirty days.")
-	rig.cfg.Webhook.Keys = []config.WebhookKey{{ID: "late", SecretEnv: "KB_TEST_UNSET_RETRIEVAL_SECRET"}}
+	rig.cfg.Webhook.Keys = []platformwebhook.Key{{ID: "late", SecretEnv: "KB_TEST_UNSET_RETRIEVAL_SECRET"}}
 	hits, err := ownerSearch(t.Context(), rig.retriever, []string{"support"}, "refund", knowledge.SearchDepth)
-	if code, ok := knowledge.CodeOf(err); !ok || code != knowledge.ErrorCodeSecretUnavailable || len(hits) != 0 {
+	if code, ok := fault.CodeOf[knowledge.ErrorCode](err); !ok || code != knowledge.ErrorCodeSecretUnavailable || len(hits) != 0 {
 		t.Fatalf("hits = %v, error = %v", hits, err)
 	}
 }
@@ -166,7 +172,7 @@ func seedBulkKBScope(t testing.TB, db *sql.DB, collection string, chunks int, co
 	query := fmt.Sprintf(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < %d)
 		INSERT INTO kb_chunk (id, source_id, ordinal, heading, content, scope, content_sha256)
 		SELECT ? || i, ?, i, 'Section', %s, ?, ? FROM n`, chunks, contentSQL)
-	if _, err := db.ExecContext(ctx, query, "kbc_"+collection+"_", sourceID, store.KBScope(collection), strings.Repeat("0", 64)); err != nil {
+	if _, err := db.ExecContext(ctx, query, "kbc_"+collection+"_", sourceID, knowledge.ScopeToken(collection), strings.Repeat("0", 64)); err != nil {
 		t.Fatalf("seed chunks: %v", err)
 	}
 }

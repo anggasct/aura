@@ -4,7 +4,6 @@ import (
 	"context"
 	"net/url"
 
-	"github.com/anggasct/aura/internal/config"
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/secret"
 )
@@ -24,7 +23,7 @@ func parseSecretRef(ref secret.Ref) (secret.Reference, error) {
 	return ref.Reference(), nil
 }
 
-func ValidateTransportShape(cfg *config.Sync) error {
+func ValidateTransportShape(cfg *Config) error {
 	if cfg == nil {
 		return errNilArgument("cfg")
 	}
@@ -70,7 +69,7 @@ func ValidateTransportShape(cfg *config.Sync) error {
 	return nil
 }
 
-func ResolveTransport(ctx context.Context, cfg *config.Sync, resolver egress.Resolver) (Transport, error) {
+func ResolveTransport(ctx context.Context, cfg *Config, resolver egress.Resolver) (Transport, error) {
 	if ctx == nil {
 		return Transport{}, errNilArgument("ctx")
 	}

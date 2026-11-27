@@ -3,7 +3,6 @@ package app
 import (
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"log/slog"
 	"slices"
 	"strings"
@@ -11,8 +10,7 @@ import (
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
@@ -37,45 +35,49 @@ func waitingSpec(id, goal string) *workflow.Spec {
 
 func builtinRegistry(t *testing.T) *auraagent.Registry {
 	t.Helper()
-	registry, err := auraagent.Build(nil, toolsbuiltin.DefinitionNames(), nil)
+	registry, err := auraagent.Build(nil, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return registry
 }
 
-func workflowToolFixture(t *testing.T, allowlist ...string) (*workflowToolController, *workflow.Store, *sql.DB) {
+func workflowToolFixture(t *testing.T, allowlist ...string) (*workflow.Controller, *workflow.Store, *sql.DB) {
 	t.Helper()
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
-	runs := workflow.NewStore(db)
+	runs := mustWorkflowStore(t, db)
 	fake := durabletest.NewFake()
 	t.Cleanup(fake.Close)
-	interpreter := workflow.NewInterpreter(runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
+	interpreter := mustWorkflowInterpreter(t, runs, fake, &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
 	registry, err := auraagent.Build([]auraagent.Persona{{
 		ID: "lobby", Description: "front desk", Instructions: "You help visitors.", Audience: auraagent.AudiencePublic,
 		Tools: []string{"workflow_start"}, PublicTools: []string{"workflow_start"}, Workflows: allowlist,
-	}}, toolsbuiltin.DefinitionNames(), nil)
+	}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	deps := &workflow.ValidationDeps{Agents: registry, KnownTools: toolsbuiltin.DefinitionNames(), EffectfulTools: toolsbuiltin.EffectfulToolNames(), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
+	deps := &workflow.ValidationDeps{Agents: registry, KnownTools: definitionNames(), EffectfulTools: effectfulToolNames(), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}
 	for _, spec := range []*workflow.Spec{waitingSpec("book_visit", "Book a visit"), waitingSpec("refund", "Issue a refund")} {
 		if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, deps); err != nil {
 			t.Fatal(err)
 		}
 	}
-	controller, err := newWorkflowToolController(interpreter, runs, registry, nil)
+	controller, err := workflow.NewController(&workflow.ControllerDeps{
+		Interpreter: interpreter,
+		Runs:        runs,
+		Registry:    registry,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return controller, runs, db
 }
 
-func caller(class principal.Class, id string) *toolsbuiltin.WorkflowCaller {
-	return &toolsbuiltin.WorkflowCaller{SessionID: "lobby/discord:" + id + "/dm", PrincipalID: id, PrincipalClass: class, AgentID: "lobby"}
+func caller(class principal.Class, id string) *workflow.Caller {
+	return &workflow.Caller{SessionID: "lobby/discord:" + id + "/dm", PrincipalID: id, PrincipalClass: class, AgentID: "lobby"}
 }
 
-func listedIDs(t *testing.T, controller *workflowToolController, who *toolsbuiltin.WorkflowCaller) string {
+func listedIDs(t *testing.T, controller *workflow.Controller, who *workflow.Caller) string {
 	t.Helper()
 	workflows, err := controller.List(t.Context(), who)
 	if err != nil {
@@ -113,7 +115,7 @@ func TestOwnerStartsAnyLoadedWorkflowAndReadsItsSteps(t *testing.T) {
 	if err != nil || status.WorkflowID != "refund" || len(status.Steps) != 1 || status.Steps[0].ID != "hold" {
 		t.Fatalf("Status = %+v, %v", status, err)
 	}
-	if _, err := controller.Start(t.Context(), owner, "missing", ""); err == nil || errors.Is(err, toolsbuiltin.ErrWorkflowNotPermitted) {
+	if _, err := controller.Start(t.Context(), owner, "missing", ""); err == nil || fault.HasCode(err, workflow.ErrorCodeNotPermitted) {
 		t.Fatalf("owner start of an unloaded workflow = %v", err)
 	}
 }
@@ -127,7 +129,7 @@ func TestNonOwnersStartOnlyAllowlistedWorkflowsAndSeeOnlyTheirRuns(t *testing.T)
 		t.Fatalf("public list = %q", got)
 	}
 	for _, id := range []string{"refund", "missing"} {
-		if _, err := controller.Start(t.Context(), visitor, id, ""); !errors.Is(err, toolsbuiltin.ErrWorkflowNotPermitted) {
+		if _, err := controller.Start(t.Context(), visitor, id, ""); !fault.HasCode(err, workflow.ErrorCodeNotPermitted) {
 			t.Fatalf("public start of %q = %v, want workflow_not_permitted", id, err)
 		}
 	}
@@ -146,17 +148,17 @@ func TestNonOwnersStartOnlyAllowlistedWorkflowsAndSeeOnlyTheirRuns(t *testing.T)
 		t.Fatal(err)
 	}
 	for label, probe := range map[string]struct {
-		who   *toolsbuiltin.WorkflowCaller
+		who   *workflow.Caller
 		runID string
 	}{
 		"another principal's run":   {other, started.RunID},
 		"the owner's run":           {visitor, ownerRun.RunID},
 		"a run that does not exist": {visitor, "run_nope"},
 	} {
-		if _, err := controller.Status(t.Context(), probe.who, probe.runID); !errors.Is(err, toolsbuiltin.ErrWorkflowRunNotFound) {
+		if _, err := controller.Status(t.Context(), probe.who, probe.runID); !fault.HasCode(err, workflow.ErrorCodeRunNotFound) {
 			t.Fatalf("status of %s = %v, want workflow_run_not_found", label, err)
 		}
-		if _, err := controller.Cancel(t.Context(), probe.who, probe.runID); !errors.Is(err, toolsbuiltin.ErrWorkflowRunNotFound) {
+		if _, err := controller.Cancel(t.Context(), probe.who, probe.runID); !fault.HasCode(err, workflow.ErrorCodeRunNotFound) {
 			t.Fatalf("cancel of %s = %v, want workflow_run_not_found", label, err)
 		}
 	}
@@ -167,13 +169,13 @@ func TestNonOwnersStartOnlyAllowlistedWorkflowsAndSeeOnlyTheirRuns(t *testing.T)
 
 func TestAllowlistNamingAnUnloadedWorkflowFailsStartup(t *testing.T) {
 	db := openAccessDB(t, writePersonaEvalConfig(t, "x", "web_search"))
-	runs := workflow.NewStore(db)
-	interpreter := workflow.NewInterpreter(runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
-	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, toolsbuiltin.DefinitionNames(), nil)
+	runs := mustWorkflowStore(t, db)
+	interpreter := mustWorkflowInterpreter(t, runs, durabletest.NewFake(), &workflow.Options{Logger: slog.New(slog.DiscardHandler)})
+	registry, err := auraagent.Build([]auraagent.Persona{{ID: "lobby", Description: "d", Instructions: "x", Workflows: []string{"ghost"}}}, definitionNames(), appconfig.BuiltinToolDefinitions(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = newWorkflowToolController(interpreter, runs, registry, nil)
+	_, err = workflow.NewController(&workflow.ControllerDeps{Interpreter: interpreter, Runs: runs, Registry: registry})
 	if !fault.HasCode(err, auraagent.ErrorCodePersonaInvalid) || !strings.Contains(err.Error(), "ghost") {
 		t.Fatalf("startup with an unknown allowlisted workflow = %v", err)
 	}
@@ -196,7 +198,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 		"workflow_cancel", "workflow_propose", "workflow_save_routine",
 	}
 	configured := appconfig.Default()
-	configured.Tools.GitHub.Credentials = []config.GitHubCredential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
+	configured.Tools.GitHub.Credentials = []github.Credential{{Name: "ci", Ref: secrettest.Ref("env://AURA_TEST_GITHUB_TOKEN")}}
 	deps, err := workflowValidationDeps(&configured)
 	if err != nil {
 		t.Fatalf("workflowValidationDeps: %v", err)
@@ -213,7 +215,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 	}
 	for _, name := range append(forbidden, "github.comment") {
 		err := workflow.Validate(toolStepSpec(name), deps)
-		if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid || !strings.Contains(err.Error(), "references unknown tool") {
+		if !fault.HasCode(err, workflow.ErrorCodeExecutorInvalid) || !strings.Contains(err.Error(), "references unknown tool") {
 			t.Errorf("Validate with %q = %v, want executor_invalid references unknown tool", name, err)
 		}
 	}
@@ -234,7 +236,7 @@ func TestWorkflowStepsMayNotCallWorkflowOrHandoffTools(t *testing.T) {
 		}
 	}
 	err = workflow.Validate(toolStepSpec("github_comment"), bareDeps)
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid || !strings.Contains(err.Error(), "references unknown tool") {
+	if !fault.HasCode(err, workflow.ErrorCodeExecutorInvalid) || !strings.Contains(err.Error(), "references unknown tool") {
 		t.Errorf("Validate with github_comment and no credentials = %v, want references unknown tool", err)
 	}
 }

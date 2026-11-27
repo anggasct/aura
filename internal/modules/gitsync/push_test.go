@@ -8,8 +8,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type stubRunner struct {
@@ -74,12 +75,12 @@ func (s *stubRunner) Reconcile(ctx context.Context, id string, _ effect.Provider
 
 func openPushJournal(t *testing.T) *effect.Journal {
 	t.Helper()
-	db := storetest.OpenMigrated(t)
-	svc := store.NewSessionService(db)
-	if err := svc.Create(t.Context(), &store.Session{ID: "session-1", OwnerID: "owner-1"}); err != nil {
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema())
+	svc := turnstore.NewSessionService(db)
+	if err := svc.Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1"}); err != nil {
 		t.Fatalf("seed session: %v", err)
 	}
-	journal, err := effect.NewJournal(db, effect.Options{})
+	journal, err := effect.NewJournal(db, effect.Options{Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -121,8 +122,8 @@ func TestStartPushRejectsDigestChange(t *testing.T) {
 	}
 	if _, err := StartPush(t.Context(), runner, "session-1", "ssh://git@example.com/owner/repo.git", "main", "digest-2", "ref-abc123", "turn-1", "call-1", 1, nil); err == nil {
 		t.Fatal("changed digest must conflict")
-	} else if code, ok := fault.CodeOf[store.ErrorCode](err); !ok && code == "" {
-		t.Fatalf("expected a classified conflict, got %v", err)
+	} else if code, ok := fault.CodeOf[turnstore.ErrorCode](err); !ok || code != turnstore.ErrorCodeEventSequenceConflict {
+		t.Fatalf("expected %q, got %v", turnstore.ErrorCodeEventSequenceConflict, err)
 	}
 }
 

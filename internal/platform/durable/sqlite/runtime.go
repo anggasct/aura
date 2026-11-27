@@ -15,6 +15,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	dbsqlite "github.com/anggasct/aura/internal/platform/sqlite"
 )
 
 const (
@@ -258,7 +259,7 @@ func (r *Runtime) Start(ctx context.Context, req durable.StartRequest) (durable.
 		return r.startReusingEnded(ctx, &req)
 	}
 	if !r.knowsHandler(req.Handler) {
-		exists, err := runExists(ctx, r.db, req.Key)
+		exists, err := runExists(ctx, dbsqlite.Conn(ctx, r.db), req.Key)
 		if err != nil {
 			return durable.RunRef{}, fmt.Errorf("durable start: %w", err)
 		}
@@ -268,13 +269,15 @@ func (r *Runtime) Start(ctx context.Context, req durable.StartRequest) (durable.
 		return durable.RunRef{}, handlerNotRegistered(req.Handler)
 	}
 	stamp := r.stamp()
-	if _, err := r.db.ExecContext(ctx, `INSERT INTO durable_run (key, handler, payload, state, created_at, updated_at)
+	if _, err := dbsqlite.Conn(ctx, r.db).ExecContext(ctx, `INSERT INTO durable_run (key, handler, payload, state, created_at, updated_at)
 VALUES (?, ?, ?, 'running', ?, ?) ON CONFLICT (key) DO NOTHING`, req.Key, req.Handler, bytesOrEmpty(req.Payload), stamp, stamp); err != nil {
 		return durable.RunRef{}, fmt.Errorf("durable start: %w", err)
 	}
-	if h := r.currentHost(); h != nil {
-		h.nudge()
-	}
+	dbsqlite.AfterCommit(ctx, r.db, func() {
+		if h := r.currentHost(); h != nil {
+			h.nudge()
+		}
+	})
 	return ref, nil
 }
 
@@ -282,19 +285,21 @@ func (r *Runtime) startReusingEnded(ctx context.Context, req *durable.StartReque
 	if !r.knowsHandler(req.Handler) {
 		return durable.RunRef{}, handlerNotRegistered(req.Handler)
 	}
-	if err := r.inTx(ctx, "durable start", func(tx *sql.Tx) error { return r.replaceEnded(ctx, tx, req) }); err != nil {
+	if err := r.inTx(ctx, func(txCtx context.Context, q dbsqlite.Querier) error { return r.replaceEnded(txCtx, q, req) }); err != nil {
 		return durable.RunRef{}, err
 	}
-	if h := r.currentHost(); h != nil {
-		h.nudge()
-	}
+	dbsqlite.AfterCommit(ctx, r.db, func() {
+		if h := r.currentHost(); h != nil {
+			h.nudge()
+		}
+	})
 	return durable.RunRef{Key: req.Key}, nil
 }
 
-func (r *Runtime) replaceEnded(ctx context.Context, tx *sql.Tx, req *durable.StartRequest) error {
+func (r *Runtime) replaceEnded(ctx context.Context, q dbsqlite.Querier, req *durable.StartRequest) error {
 	var handler, state string
 	var claim int64
-	err := tx.QueryRowContext(ctx, `SELECT handler, state, claim FROM durable_run WHERE key = ?`, req.Key).Scan(&handler, &state, &claim)
+	err := q.QueryRowContext(ctx, `SELECT handler, state, claim FROM durable_run WHERE key = ?`, req.Key).Scan(&handler, &state, &claim)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 	case err != nil:
@@ -304,12 +309,12 @@ func (r *Runtime) replaceEnded(ctx context.Context, tx *sql.Tx, req *durable.Sta
 	case durable.RunState(state) == durable.RunRunning:
 		return nil
 	default:
-		if _, err := tx.ExecContext(ctx, `DELETE FROM durable_run WHERE key = ?`, req.Key); err != nil {
+		if _, err := q.ExecContext(ctx, `DELETE FROM durable_run WHERE key = ?`, req.Key); err != nil {
 			return fmt.Errorf("durable start: delete ended run: %w", err)
 		}
 	}
 	stamp := r.stamp()
-	if _, err := tx.ExecContext(ctx, `INSERT INTO durable_run (key, handler, payload, state, claim, created_at, updated_at)
+	if _, err := q.ExecContext(ctx, `INSERT INTO durable_run (key, handler, payload, state, claim, created_at, updated_at)
 VALUES (?, ?, ?, 'running', ?, ?, ?)`, req.Key, req.Handler, bytesOrEmpty(req.Payload), claim, stamp, stamp); err != nil {
 		return fmt.Errorf("durable start: insert run: %w", err)
 	}
@@ -320,16 +325,18 @@ func (r *Runtime) Signal(ctx context.Context, run durable.RunRef, name string, p
 	if name == "" {
 		return invalidArgument("durable signal requires a name")
 	}
-	err := r.inTx(ctx, "durable signal", func(tx *sql.Tx) error {
-		if err := requireRunning(ctx, tx, run.Key); err != nil {
+	err := r.inTx(ctx, func(txCtx context.Context, q dbsqlite.Querier) error {
+		if err := requireRunning(txCtx, q, run.Key); err != nil {
 			return err
 		}
-		return appendSignal(ctx, tx, &signalRow{runKey: run.Key, name: name, payload: payload, stamp: r.stamp()})
+		return appendSignal(txCtx, q, &signalRow{runKey: run.Key, name: name, payload: payload, stamp: r.stamp()})
 	})
 	if err != nil {
 		return err
 	}
-	r.notifySignal(run.Key)
+	dbsqlite.AfterCommit(ctx, r.db, func() {
+		r.notifySignal(run.Key)
+	})
 	return nil
 }
 
@@ -345,13 +352,16 @@ func (r *Runtime) notifySignal(key string) {
 }
 
 func (r *Runtime) Cancel(ctx context.Context, run durable.RunRef) error {
+	if dbsqlite.InTx(ctx, r.db) {
+		return invalidArgument("durable cancel must not run inside a caller's transaction")
+	}
 	var liveOwner string
 	var liveClaim int64
-	err := r.inTx(ctx, "durable cancel", func(tx *sql.Tx) error {
+	err := r.inTx(ctx, func(txCtx context.Context, q dbsqlite.Querier) error {
 		var state string
 		var owner sql.NullString
 		var claim int64
-		err := tx.QueryRowContext(ctx, `SELECT state, owner, claim FROM durable_run WHERE key = ?`, run.Key).Scan(&state, &owner, &claim)
+		err := q.QueryRowContext(txCtx, `SELECT state, owner, claim FROM durable_run WHERE key = ?`, run.Key).Scan(&state, &owner, &claim)
 		if errors.Is(err, sql.ErrNoRows) {
 			return unknownRun(run.Key)
 		}
@@ -363,17 +373,17 @@ func (r *Runtime) Cancel(ctx context.Context, run durable.RunRef) error {
 		}
 		live := false
 		if owner.Valid {
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_host WHERE owner = ? AND expires_at > `+dbNowMS+`)`, owner.String).Scan(&live); err != nil {
+			if err := q.QueryRowContext(txCtx, `SELECT EXISTS (SELECT 1 FROM durable_host WHERE owner = ? AND expires_at > `+dbNowMS+`)`, owner.String).Scan(&live); err != nil {
 				return fmt.Errorf("durable cancel: read host: %w", err)
 			}
 		}
 		if !live {
-			if _, err := tx.ExecContext(ctx, `UPDATE durable_run SET state = 'cancelled', detail = '', owner = NULL, cancel_requested = 1, updated_at = ? WHERE key = ?`, r.stamp(), run.Key); err != nil {
+			if _, err := q.ExecContext(txCtx, `UPDATE durable_run SET state = 'cancelled', detail = '', owner = NULL, cancel_requested = 1, updated_at = ? WHERE key = ?`, r.stamp(), run.Key); err != nil {
 				return fmt.Errorf("durable cancel: write run: %w", err)
 			}
 			return nil
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE durable_run SET cancel_requested = 1, updated_at = ? WHERE key = ?`, r.stamp(), run.Key); err != nil {
+		if _, err := q.ExecContext(txCtx, `UPDATE durable_run SET cancel_requested = 1, updated_at = ? WHERE key = ?`, r.stamp(), run.Key); err != nil {
 			return fmt.Errorf("durable cancel: request: %w", err)
 		}
 		liveOwner = owner.String
@@ -401,7 +411,7 @@ func (r *Runtime) Cancel(ctx context.Context, run durable.RunRef) error {
 
 func (r *Runtime) Status(ctx context.Context, run durable.RunRef) (durable.RunStatus, error) {
 	var state, detail string
-	err := r.db.QueryRowContext(ctx, `SELECT state, detail FROM durable_run WHERE key = ?`, run.Key).Scan(&state, &detail)
+	err := dbsqlite.Conn(ctx, r.db).QueryRowContext(ctx, `SELECT state, detail FROM durable_run WHERE key = ?`, run.Key).Scan(&state, &detail)
 	if errors.Is(err, sql.ErrNoRows) {
 		return durable.RunStatus{}, unknownRun(run.Key)
 	}
@@ -432,27 +442,29 @@ func (r *Runtime) ResolveApproval(ctx context.Context, req durable.ResolveApprov
 	if err != nil {
 		return invalidArgument(err.Error())
 	}
-	err = r.inTx(ctx, "durable resolve approval", func(tx *sql.Tx) error {
+	err = r.inTx(ctx, func(txCtx context.Context, q dbsqlite.Querier) error {
 		var consumed bool
-		if err := tx.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM durable_approval WHERE approval_id = ?)`, req.ApprovalID).Scan(&consumed); err != nil {
+		if err := q.QueryRowContext(txCtx, `SELECT EXISTS (SELECT 1 FROM durable_approval WHERE approval_id = ?)`, req.ApprovalID).Scan(&consumed); err != nil {
 			return fmt.Errorf("durable resolve approval: read approval: %w", err)
 		}
 		if consumed {
 			return fault.New(ErrorCodeApprovalConsumed, "durable approval was already resolved")
 		}
-		if err := requireRunning(ctx, tx, runKey); err != nil {
+		if err := requireRunning(txCtx, q, runKey); err != nil {
 			return err
 		}
 		stamp := r.stamp()
-		if _, err := tx.ExecContext(ctx, `INSERT INTO durable_approval (approval_id, run_key, consumed_at) VALUES (?, ?, ?)`, req.ApprovalID, runKey, stamp); err != nil {
+		if _, err := q.ExecContext(txCtx, `INSERT INTO durable_approval (approval_id, run_key, consumed_at) VALUES (?, ?, ?)`, req.ApprovalID, runKey, stamp); err != nil {
 			return fmt.Errorf("durable resolve approval: write approval: %w", err)
 		}
-		return appendSignal(ctx, tx, &signalRow{runKey: runKey, name: signal, payload: req.Payload, stamp: stamp})
+		return appendSignal(txCtx, q, &signalRow{runKey: runKey, name: signal, payload: req.Payload, stamp: stamp})
 	})
 	if err != nil {
 		return err
 	}
-	r.notifySignal(runKey)
+	dbsqlite.AfterCommit(ctx, r.db, func() {
+		r.notifySignal(runKey)
+	})
 	return nil
 }
 
@@ -461,7 +473,7 @@ func (r *Runtime) TurnDeadline(ctx context.Context, sessionID string) (time.Time
 		return time.Time{}, false, invalidArgument("durable turn deadline requires a session id")
 	}
 	var deadline sql.NullString
-	err := r.db.QueryRowContext(ctx, `SELECT deadline FROM durable_session_turn WHERE session_id = ? AND state = 'active'`, sessionID).Scan(&deadline)
+	err := dbsqlite.Conn(ctx, r.db).QueryRowContext(ctx, `SELECT deadline FROM durable_session_turn WHERE session_id = ? AND state = 'active'`, sessionID).Scan(&deadline)
 	if errors.Is(err, sql.ErrNoRows) {
 		return time.Time{}, false, nil
 	}

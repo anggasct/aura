@@ -10,16 +10,16 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type acceptedEvents struct {
-	store.EventStore
+	turnstore.EventStore
 	onAccepted func(turnID string)
 }
 
-func (s *acceptedEvents) Append(ctx context.Context, ev *store.RuntimeEvent) error {
+func (s *acceptedEvents) Append(ctx context.Context, ev *turn.Event) error {
 	if err := s.EventStore.Append(ctx, ev); err != nil {
 		return err
 	}
@@ -30,11 +30,11 @@ func (s *acceptedEvents) Append(ctx context.Context, ev *store.RuntimeEvent) err
 }
 
 type acceptedDedupe struct {
-	store.DedupeStore
+	turnstore.DedupeStore
 	onAccepted func(turnID string)
 }
 
-func (s *acceptedDedupe) Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *store.RuntimeEvent) (originalTurnID string, created bool, err error) {
+func (s *acceptedDedupe) Accept(ctx context.Context, source, externalID string, expiresAt time.Time, accepted *turn.Event) (originalTurnID string, created bool, err error) {
 	originalTurnID, created, err = s.DedupeStore.Accept(ctx, source, externalID, expiresAt, accepted)
 	if err == nil && created {
 		s.onAccepted(accepted.TurnID)
@@ -108,7 +108,7 @@ func TestConcurrentSubmitsStartInAcceptedOrder(t *testing.T) {
 				persisted <- turnID
 			}
 			engine.events = &acceptedEvents{EventStore: events, onAccepted: onAccepted}
-			engine.dedupe = &acceptedDedupe{DedupeStore: store.NewDedupeStore(db), onAccepted: onAccepted}
+			engine.dedupe = &acceptedDedupe{DedupeStore: turnstore.NewDedupeStore(db), onAccepted: onAccepted}
 
 			send := func(ctx context.Context, name string) (string, error) {
 				if tc.idempotent {

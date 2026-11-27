@@ -18,8 +18,9 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const deliverySession = "main/email:work/thread:abc"
@@ -47,7 +48,7 @@ func newDeliveryFixture(t *testing.T, behaviors ...smtpBehavior) *deliveryFixtur
 
 func (f *deliveryFixture) request(effectID string, reply *replyReference, texts ...string) *runtimechannelhost.DeliveryRequest {
 	f.t.Helper()
-	if err := (&storeSessions{sessions: store.NewSessionService(f.h.db)}).EnsureSession(f.t.Context(), deliverySession, "local-owner", testPersona); err != nil {
+	if err := (&storeSessions{sessions: turnstore.NewSessionService(f.h.db)}).EnsureSession(f.t.Context(), deliverySession, "local-owner", testPersona); err != nil {
 		f.t.Fatalf("EnsureSession: %v", err)
 	}
 	replyContext, err := json.Marshal(reply)
@@ -73,7 +74,7 @@ func defaultReply() *replyReference {
 }
 
 type storeSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s *storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
@@ -81,8 +82,8 @@ func (s *storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, a
 		return nil
 	}
 	now := time.Now().UTC()
-	err := s.sessions.Create(ctx, &store.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	err := s.sessions.Create(ctx, &turn.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err
@@ -270,7 +271,7 @@ func prepareLikeDeliver(t *testing.T, f *deliveryFixture, journal *effect.Journa
 
 func restartedAdapter(t *testing.T, f *deliveryFixture) (*Adapter, *effect.Journal) {
 	t.Helper()
-	journal, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger})
+	journal, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -278,7 +279,16 @@ func restartedAdapter(t *testing.T, f *deliveryFixture) (*Adapter, *effect.Journ
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
-	adapter, err := New(f.h.cfg, f.h.account, f.h.mailbox, f.mailer, f.h.cursors, executor, f.h.sessions, f.h.logger)
+	adapter, err := New(&Deps{
+		Config:    f.h.cfg,
+		Account:   f.h.account,
+		Connector: f.h.mailbox,
+		Mailer:    f.mailer,
+		Cursors:   f.h.cursors,
+		Effects:   executor,
+		Sessions:  f.h.sessions,
+		Logger:    f.h.logger,
+	})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -680,7 +690,7 @@ func TestSubmit_BacksOffBetweenAttemptsAndBoundsThem(t *testing.T) {
 		h.adapter.retryBase = time.Second
 		h.adapter.retryCap = time.Minute
 		submission := &Submission{From: testAddress, To: ownerAddress, Message: []byte("x")}
-		down := Errorf(ErrorCodeConnectionFailed, "down")
+		down := fault.New(ErrorCodeConnectionFailed, "down")
 
 		mailer.fail(down, down)
 		start := time.Now()
@@ -718,13 +728,13 @@ func TestSubmit_OutcomeClassification(t *testing.T) {
 		ambiguous bool
 		code      string
 	}{
-		"ambiguous after data":    {failure: Errorf(ErrorCodeDeliveryAmbiguous, "x"), attempts: 1, ambiguous: true},
+		"ambiguous after data":    {failure: deliveryAmbiguous("x", nil), attempts: 1, ambiguous: true},
 		"uncoded error":           {failure: errors.New("boom"), attempts: 1, ambiguous: true},
-		"deferred is retried":     {failure: Errorf(ErrorCodeSubmissionDeferred, "x"), attempts: sendMaxAttempts, code: "email_submission_deferred"},
-		"rejected is not retried": {failure: Errorf(ErrorCodeSubmissionRejected, "x"), attempts: 1, code: "email_submission_rejected"},
-		"login is not retried":    {failure: Errorf(ErrorCodeLoginRejected, "x"), attempts: 1, code: "email_login_rejected"},
-		"tls is not retried":      {failure: Errorf(ErrorCodeTLSUntrusted, "x"), attempts: 1, code: "email_tls_untrusted"},
-		"password is not retried": {failure: Errorf(ErrorCodeCredentialsUnavailable, "x"), attempts: 1, code: "email_credentials_unavailable"},
+		"deferred is retried":     {failure: fault.New(ErrorCodeSubmissionDeferred, "x"), attempts: sendMaxAttempts, code: "email_submission_deferred"},
+		"rejected is not retried": {failure: fault.New(ErrorCodeSubmissionRejected, "x"), attempts: 1, code: "email_submission_rejected"},
+		"login is not retried":    {failure: fault.New(ErrorCodeLoginRejected, "x"), attempts: 1, code: "email_login_rejected"},
+		"tls is not retried":      {failure: fault.New(ErrorCodeTLSUntrusted, "x"), attempts: 1, code: "email_tls_untrusted"},
+		"password is not retried": {failure: fault.New(ErrorCodeCredentialsUnavailable, "x"), attempts: 1, code: "email_credentials_unavailable"},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -747,7 +757,7 @@ func TestSubmit_OutcomeClassification(t *testing.T) {
 func TestSubmit_CancellationDuringBackoffFailsWithoutAmbiguity(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mailer := &fakeMailer{}
-		mailer.fail(Errorf(ErrorCodeConnectionFailed, "down"))
+		mailer.fail(fault.New(ErrorCodeConnectionFailed, "down"))
 		h := newHarness(t, harnessOptions{mailer: mailer})
 		h.adapter.retryBase = time.Hour
 		h.adapter.retryCap = time.Hour
@@ -844,7 +854,7 @@ func TestDeliver_StartupRecoveryMakesOrphanedIntentsUnknownAndReconcilable(t *te
 		t.Fatalf("Start foreign: %v", err)
 	}
 
-	restarted, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger})
+	restarted, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}

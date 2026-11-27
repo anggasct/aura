@@ -31,7 +31,7 @@ func newForgetAdapter(t *testing.T, eraser *fakeEraser) (*Adapter, *memorySink, 
 	adapter, sink, observer := newAccessAdapter(t, "lobby", []string{"discord:777"}, accessPersonas())
 	settings := observer.settings()
 	settings.Erasure = eraser
-	adapter.SetAccess(&settings)
+	adapter.access = settings
 	adapter.restBase = stub.srv.URL
 	registry, err := command.New(CommandBinding())
 	if err != nil {
@@ -41,7 +41,7 @@ func newForgetAdapter(t *testing.T, eraser *fakeEraser) (*Adapter, *memorySink, 
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	adapter.SetCommands(dispatcher)
+	adapter.commands = dispatcher
 	return adapter, sink, stub
 }
 

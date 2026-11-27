@@ -12,7 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const forgottenPrincipal = "discord:601"
@@ -28,10 +28,10 @@ func startRunAs(t *testing.T, app *App, principalID string) *workflow.RunSummary
 	return summary
 }
 
-func openCommandWorkflows(t *testing.T, gf *globalFlags) *App {
+func openCommandWorkflows(t *testing.T, gf *GlobalFlags) *App {
 	t.Helper()
 	restoreDefaultLogger(t)
-	app := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, gf.configPath), &syncBuffer{}, PartWorkflows))
+	app := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, gf.ConfigPath), &syncBuffer{}, PartWorkflows))
 	t.Cleanup(func() { _ = app.Close(context.Background()) })
 	return app
 }
@@ -62,8 +62,8 @@ func TestForgetMeCancelsThroughTheLateBoundInterpreter(t *testing.T) {
 	if !errors.Is(err, access.ErrForgetRunsStopping) {
 		t.Fatalf("Forget with no interpreter = %v, want the runs-stopping refusal", err)
 	}
-	if code, ok := fault.CodeOf[store.ErrorCode](err); !ok || code != store.ErrorCodeErasureBlocked {
-		t.Fatalf("Forget with no interpreter = %v, want %s", err, store.ErrorCodeErasureBlocked)
+	if code, ok := fault.CodeOf[principal.ErrorCode](err); !ok || code != principal.ErrorCodeErasureBlocked {
+		t.Fatalf("Forget with no interpreter = %v, want %s", err, principal.ErrorCodeErasureBlocked)
 	}
 	if n := countRows(t, app.db, `SELECT COUNT(*) FROM workflow_run WHERE id = ?`, summary.ID); n != 1 {
 		t.Fatal("a refused forget deleted the run")
@@ -89,7 +89,7 @@ func TestRetentionSweepSkipsAPrincipalWithLiveRuns(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	seedIdleSession(t, sessions, "main/discord:office/dm:21", "discord:21", now.Add(-721*time.Hour))
 	seedIdleSession(t, sessions, "main/discord:office/dm:24", "discord:24", now.Add(-721*time.Hour))
 	seedLiveRunRows(t, db, "run-live", "busy", "discord:21")

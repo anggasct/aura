@@ -19,11 +19,12 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
-	"github.com/anggasct/aura/internal/platform/tools"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -104,7 +105,7 @@ type auditHarness struct {
 	spans     *tracetest.InMemoryExporter
 	journal   *effect.Journal
 	broker    *toolbroker.Broker
-	artifacts store.ArtifactStore
+	artifacts storage.ArtifactStore
 	quota     func() int64
 	sequence  uint64
 	observed  observations
@@ -151,12 +152,12 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 			OutputBytes: observation.StdoutBytes + observation.StderrBytes, ArtifactBytes: observation.ArtifactBytes,
 		})
 	}
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), effect.Schema(), storage.Schema())
 	now := time.Now().UTC()
-	if err := store.NewSessionService(db).Create(t.Context(), &store.Session{ID: auditSessionID, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: auditSessionID, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	harness.artifacts = store.NewArtifactStore(db, artifactRoot, artifactQuota)
+	harness.artifacts = storage.NewArtifactStore(db, artifactRoot, artifactQuota)
 	harness.quota = func() int64 {
 		var total int64
 		if err := db.QueryRowContext(t.Context(), "SELECT COALESCE(SUM(size_bytes), 0) FROM blob").Scan(&total); err != nil {
@@ -165,7 +166,7 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 		return total
 	}
 	runner.artifacts = storeSink{store: harness.artifacts}
-	journal, err := effect.NewJournal(db, effect.Options{Logger: logger})
+	journal, err := effect.NewJournal(db, effect.Options{Logger: logger, Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,8 +176,6 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 	}
 	broker, err := toolbroker.New(&toolbroker.Options{
 		HostCapabilities: capabilitytest.Host(t), Effects: executor, Artifacts: harness.artifacts,
-		Adapters:       map[string]toolbroker.Adapter{auditToolKey: runner.Adapter()},
-		ArgumentChecks: map[string]toolbroker.ArgumentCheck{auditToolKey: runner.ArgumentCheck},
 		ApprovalDecider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
 			return true, nil
 		},
@@ -189,6 +188,9 @@ func newAuditHarness(t *testing.T, runner *Runner, artifactRoot string, artifact
 		},
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := broker.RegisterProvider(NewToolProvider(runner.Adapter(), runner.ArgumentCheck)); err != nil {
 		t.Fatal(err)
 	}
 	harness.journal, harness.broker = journal, broker
@@ -204,7 +206,7 @@ func (h *auditHarness) call(arguments any) (toolbroker.ToolResult, error) {
 	h.sequence++
 	return h.broker.Execute(h.t.Context(), &toolbroker.ToolRequest{
 		RequestID: fmt.Sprintf("call-%d", h.sequence), TurnID: "turn-1", SessionID: auditSessionID, PrincipalID: "owner-1",
-		ToolName: tools.CodeExecuteToolName, ToolVersion: "v1", Arguments: encoded, Capabilities: []string{"code-interpreter"},
+		ToolName: ToolName, ToolVersion: "v1", Arguments: encoded, Capabilities: []string{"code-interpreter"},
 		Trust: approval.TrustOwnerInput, IdempotencyKey: fmt.Sprintf("key-%d", h.sequence), EventSequence: h.sequence,
 		EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})

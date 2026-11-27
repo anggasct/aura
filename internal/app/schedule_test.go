@@ -19,23 +19,23 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/server"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type fakeCronEngine struct {
 	mu      sync.Mutex
 	calls   []*turn.TurnRequest
-	batches [][]store.RuntimeEvent
+	batches [][]turn.Event
 	errs    []error
 }
 
-func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, req)
-	var batch []store.RuntimeEvent
+	var batch []turn.Event
 	var err error
 	if len(f.batches) > 0 {
 		batch = f.batches[0]
@@ -45,9 +45,9 @@ func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2
 		err = f.errs[0]
 		f.errs = f.errs[1:]
 	}
-	return func(yield func(store.RuntimeEvent, error) bool) {
+	return func(yield func(turn.Event, error) bool) {
 		if err != nil {
-			yield(store.RuntimeEvent{}, err)
+			yield(turn.Event{}, err)
 			return
 		}
 		for i := range batch {
@@ -60,11 +60,11 @@ func (f *fakeCronEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2
 
 func cronTestDB(t *testing.T) *sql.DB {
 	t.Helper()
-	return storetest.OpenMigrated(t)
+	return sqlitetest.OpenMigrated(t, Schemas()...)
 }
 
-func cronCompletedBatch(turnID, text string) []store.RuntimeEvent {
-	return []store.RuntimeEvent{
+func cronCompletedBatch(turnID, text string) []turn.Event {
+	return []turn.Event{
 		{Kind: turn.EventKindTurnAccepted, TurnID: turnID},
 		{Kind: "message.completed", TurnID: turnID, Payload: json.RawMessage(`{"text":"` + text + `"}`)},
 		{Kind: turn.EventKindTurnCompleted, TurnID: turnID},
@@ -73,8 +73,8 @@ func cronCompletedBatch(turnID, text string) []store.RuntimeEvent {
 
 func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	db := cronTestDB(t)
-	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{cronCompletedBatch("turn-1", "nightly done")}}
-	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+	engine := &fakeCronEngine{batches: [][]turn.Event{cronCompletedBatch("turn-1", "nightly done")}}
+	runner := &engineTurnRunner{engine: engine, sessions: turnstore.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "cron:job-1:20260912T210000",
@@ -85,7 +85,7 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 	if !result.Succeeded || result.TurnID != "turn-1" || result.Text != "nightly done" {
 		t.Errorf("result = %+v", result)
 	}
-	if _, err := store.NewSessionService(db).Get(t.Context(), "cron:job-1"); err != nil {
+	if _, err := turnstore.NewSessionService(db).Get(t.Context(), "cron:job-1"); err != nil {
 		t.Errorf("cron session not ensured: %v", err)
 	}
 	call := engine.calls[0]
@@ -96,13 +96,13 @@ func TestEngineTurnRunnerRendersTerminalText(t *testing.T) {
 
 func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 	db := cronTestDB(t)
-	engine := &fakeCronEngine{batches: [][]store.RuntimeEvent{
+	engine := &fakeCronEngine{batches: [][]turn.Event{
 		{
 			{Kind: turn.EventKindTurnAccepted, TurnID: "turn-9"},
 			{Kind: turn.EventKindTurnFailed, TurnID: "turn-9"},
 		},
 	}}
-	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+	runner := &engineTurnRunner{engine: engine, sessions: turnstore.NewSessionService(db)}
 	result, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-9", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-9",
@@ -114,10 +114,10 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 		t.Errorf("failed result = %+v", result)
 	}
 
-	starved := &fakeCronEngine{batches: [][]store.RuntimeEvent{
+	starved := &fakeCronEngine{batches: [][]turn.Event{
 		{{Kind: turn.EventKindTurnAccepted, TurnID: "turn-8"}},
 	}}
-	starvedRunner := &engineTurnRunner{engine: starved, sessions: store.NewSessionService(db)}
+	starvedRunner := &engineTurnRunner{engine: starved, sessions: turnstore.NewSessionService(db)}
 	if _, err := starvedRunner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-8", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-8",
@@ -129,7 +129,7 @@ func TestEngineTurnRunnerFailedAndTruncated(t *testing.T) {
 func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	db := cronTestDB(t)
 	engine := &fakeCronEngine{errs: []error{fault.New(turn.ErrorCodeRuntimeOverloaded, "full")}}
-	runner := &engineTurnRunner{engine: engine, sessions: store.NewSessionService(db)}
+	runner := &engineTurnRunner{engine: engine, sessions: turnstore.NewSessionService(db)}
 	_, err := runner.RunTurn(t.Context(), &schedule.TurnRequest{
 		SessionID: "cron:job-1", PrincipalID: "cron", Origin: "schedule",
 		Prompt: "summarize", IdempotencyKey: "key-1",
@@ -137,7 +137,7 @@ func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	if err == nil {
 		t.Fatal("overload swallowed")
 	}
-	if code, ok := schedule.CodeOf(err); !ok || code != schedule.ErrorCodeRuntimeOverloaded {
+	if code, ok := fault.CodeOf[schedule.ErrorCode](err); !ok || code != schedule.ErrorCodeRuntimeOverloaded {
 		t.Errorf("overload code = %v, %v", code, ok)
 	}
 	if _, err := runner.RunTurn(t.Context(), nil); err == nil {
@@ -145,15 +145,25 @@ func TestEngineTurnRunnerMapsOverload(t *testing.T) {
 	}
 }
 
+type testChannelRegistry map[string]bool
+
+func (r testChannelRegistry) Registered(source string) bool {
+	return r[source]
+}
+
 func testCronBroadcaster(t *testing.T, db *sql.DB, started *[]string) *broadcast.Broadcaster {
 	t.Helper()
-	broadcaster, err := broadcast.New(
+	items, err := broadcast.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("broadcast.NewSQLiteStore(): %v", err)
+	}
+	broadcaster, err := broadcast.NewBroadcaster(
 		broadcast.Policy{
 			Destinations:   map[string]string{"default": "discord:owner"},
 			MaxDigestItems: 20, MaxDigestBytes: 12000,
 		},
-		&cronChannelRegistry{registered: map[string]bool{"discord": true}},
-		&broadcastItemStore{store: store.NewBroadcastStore(db)},
+		testChannelRegistry{"discord": true},
+		items,
 		func(_ context.Context, itemID string) error {
 			*started = append(*started, itemID)
 			return nil
@@ -161,7 +171,7 @@ func testCronBroadcaster(t *testing.T, db *sql.DB, started *[]string) *broadcast
 		nil,
 	)
 	if err != nil {
-		t.Fatalf("broadcast.New(): %v", err)
+		t.Fatalf("broadcast.NewBroadcaster(): %v", err)
 	}
 	return broadcaster
 }
@@ -179,7 +189,11 @@ func TestCronNotifierSubmitsBroadcast(t *testing.T) {
 	if len(started) != 1 {
 		t.Fatalf("broadcast runs started = %v", started)
 	}
-	items, err := store.NewBroadcastStore(db).ListItems(t.Context(), nil, 10)
+	store, err := broadcast.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("broadcast.NewSQLiteStore(): %v", err)
+	}
+	items, err := store.ListItems(t.Context(), nil, 10)
 	if err != nil {
 		t.Fatalf("ListItems(): %v", err)
 	}
@@ -196,20 +210,23 @@ func TestCronNotifierSubmitsBroadcast(t *testing.T) {
 
 func TestScheduleStoreAdapterRoundTrip(t *testing.T) {
 	db := cronTestDB(t)
-	adapter := &scheduleStore{store: store.NewScheduleStore(db)}
+	jobs, err := schedule.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
 	now := time.Now().UTC()
-	if err := adapter.InsertJob(t.Context(), &schedule.Job{
+	if err := jobs.InsertJob(t.Context(), &schedule.Job{
 		ID: "job-1", Name: "n", CronExpression: "* * * * *", Timezone: "UTC",
 		Prompt: "p", OriginChannel: "discord", OriginDestination: "default",
 		OverlapPolicy: "skip", State: "active", Version: 1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("InsertJob(): %v", err)
 	}
-	job, found, err := adapter.Job(t.Context(), "job-1")
+	job, found, err := jobs.Job(t.Context(), "job-1")
 	if err != nil || !found || job.Name != "n" {
 		t.Errorf("Job() = %+v, %v, %v", job.ID, found, err)
 	}
-	if _, found, err := adapter.Job(t.Context(), "missing"); err != nil || found {
+	if _, found, err := jobs.Job(t.Context(), "missing"); err != nil || found {
 		t.Errorf("missing Job() = %v, %v", found, err)
 	}
 }
@@ -217,17 +234,30 @@ func TestScheduleStoreAdapterRoundTrip(t *testing.T) {
 func TestBuildScheduleRunnerSmoke(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
-	runner, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started), starter: durabletest.NewFake()})
+	mod, err := schedule.New(&schedule.ModuleDeps{
+		Config:  schedule.Default(),
+		DB:      db,
+		Turns:   &engineTurnRunner{engine: &fakeCronEngine{}, sessions: turnstore.NewSessionService(db)},
+		Notify:  &cronNotifier{broadcaster: testCronBroadcaster(t, db, &started)},
+		Starter: durabletest.NewFake(),
+		Logger:  slog.Default(),
+	})
 	if err != nil {
-		t.Fatalf("buildScheduleRunner(): %v", err)
+		t.Fatalf("schedule.New(): %v", err)
 	}
-	if runner == nil {
+	if mod.Runner() == nil {
 		t.Fatal("nil runner")
 	}
-	if _, err := buildScheduleRunner(nil); err == nil {
+	if _, err := schedule.New(nil); err == nil {
 		t.Error("nil input accepted")
 	}
-	if _, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started)}); err == nil {
+	if _, err := schedule.New(&schedule.ModuleDeps{
+		Config: schedule.Default(),
+		DB:     db,
+		Turns:  &engineTurnRunner{engine: &fakeCronEngine{}, sessions: turnstore.NewSessionService(db)},
+		Notify: &cronNotifier{broadcaster: testCronBroadcaster(t, db, &started)},
+		Logger: slog.Default(),
+	}); err == nil {
 		t.Error("runner without a starter accepted")
 	}
 }
@@ -243,22 +273,26 @@ func (r *recordingScheduleRegistrar) RegisterHandler(name string, _ durable.Hand
 func TestRegisterScheduleHandler(t *testing.T) {
 	db := cronTestDB(t)
 	var started []string
-	runner, err := buildScheduleRunner(&scheduleRunnerInput{db: db, logger: slog.Default(), engine: &fakeCronEngine{}, broadcaster: testCronBroadcaster(t, db, &started), starter: durabletest.NewFake()})
+	mod, err := schedule.New(&schedule.ModuleDeps{
+		Config:  schedule.Default(),
+		DB:      db,
+		Turns:   &engineTurnRunner{engine: &fakeCronEngine{}, sessions: turnstore.NewSessionService(db)},
+		Notify:  &cronNotifier{broadcaster: testCronBroadcaster(t, db, &started)},
+		Starter: durabletest.NewFake(),
+		Logger:  slog.Default(),
+	})
 	if err != nil {
-		t.Fatalf("buildScheduleRunner(): %v", err)
+		t.Fatalf("schedule.New(): %v", err)
 	}
-	registrar := &recordingScheduleRegistrar{}
-	if err := registerScheduleHandler(registrar, runner); err != nil {
-		t.Fatalf("register: %v", err)
+	recorded := &recordingScheduleRegistrar{}
+	var target any = recorded
+	registrar, ok := target.(durable.HandlerRegistrar)
+	if !ok {
+		t.Fatal("registrar does not implement durable.HandlerRegistrar")
 	}
-	if len(registrar.names) != 1 || registrar.names[0] != schedule.HandlerName {
-		t.Errorf("registered = %v", registrar.names)
-	}
-	if err := registerScheduleHandler(registrar, nil); err == nil {
-		t.Error("nil runner accepted")
-	}
-	if err := registerScheduleHandler(struct{}{}, runner); err == nil {
-		t.Error("non-registrar accepted")
+	registrar.RegisterHandler(schedule.HandlerName, mod.Handle)
+	if len(recorded.names) != 1 || recorded.names[0] != schedule.HandlerName {
+		t.Errorf("registered = %v", recorded.names)
 	}
 }
 
@@ -302,24 +336,27 @@ type scheduleSeed struct {
 func seedScheduleJobs(t *testing.T, db *sql.DB, seeds []scheduleSeed) {
 	t.Helper()
 	now := time.Now().UTC()
-	jobs := store.NewScheduleStore(db)
+	jobs, err := schedule.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore(): %v", err)
+	}
 	for _, seed := range seeds {
-		if err := jobs.InsertJob(t.Context(), &store.ScheduledJob{
+		if err := jobs.InsertJob(t.Context(), &schedule.Job{
 			ID: seed.id, Name: seed.id, CronExpression: dailySchedule, Timezone: "UTC",
 			Prompt: "p", OriginChannel: "discord", OriginDestination: "default",
-			OverlapPolicy: "skip", CatchUpGraceSeconds: 900, State: store.ScheduleJobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
+			OverlapPolicy: "skip", CatchUpGraceSeconds: 900, State: schedule.JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("seed %s: %v", seed.id, err)
 		}
 		if !seed.fired.IsZero() {
-			if err := jobs.RecordFire(t.Context(), &store.ScheduledOccurrence{
+			if err := jobs.RecordFire(t.Context(), &schedule.Occurrence{
 				ID: "cron-" + seed.id, JobID: seed.id, JobVersion: 1, ScheduledForUTC: seed.fired,
-				State: store.OccurrenceFired, CreatedAt: now, UpdatedAt: now,
+				State: schedule.OccurrenceFired, CreatedAt: now, UpdatedAt: now,
 			}); err != nil {
 				t.Fatalf("seed the fired occurrence of %s: %v", seed.id, err)
 			}
 		}
-		if seed.state != store.ScheduleJobActive {
+		if seed.state != schedule.JobActive {
 			if err := jobs.SetJobState(t.Context(), seed.id, seed.state, now); err != nil {
 				t.Fatalf("set the state of %s: %v", seed.id, err)
 			}
@@ -357,23 +394,42 @@ func anyRunExists(t *testing.T, rt *durabletest.Fake, keys []string) bool {
 	return slices.ContainsFunc(keys, func(key string) bool { return runExists(t, rt, key) })
 }
 
+func testScheduleModule(t *testing.T, db *sql.DB, starter schedule.Starter, logger *slog.Logger, interval time.Duration) *schedule.Module {
+	t.Helper()
+	var started []string
+	mod, err := schedule.New(&schedule.ModuleDeps{
+		Config:       schedule.Default(),
+		DB:           db,
+		Turns:        &engineTurnRunner{engine: &fakeCronEngine{}, sessions: turnstore.NewSessionService(db)},
+		Notify:       &cronNotifier{broadcaster: testCronBroadcaster(t, db, &started)},
+		Starter:      starter,
+		PassInterval: interval,
+		Logger:       logger,
+	})
+	if err != nil {
+		t.Fatalf("schedule.New(): %v", err)
+	}
+	return mod
+}
+
 func TestResumeScheduleRuns(t *testing.T) {
 	db := cronTestDB(t)
 	yesterday := time.Now().UTC().Truncate(24 * time.Hour).Add(-3 * time.Hour)
 	manual := time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Add(7 * time.Nanosecond)
 	seedScheduleJobs(t, db, []scheduleSeed{
-		{id: "job-idle", state: store.ScheduleJobActive},
-		{id: "job-busy", state: store.ScheduleJobActive, fired: yesterday},
-		{id: "job-paused-fired", state: store.ScheduleJobPaused, fired: manual},
-		{id: "job-paused", state: store.ScheduleJobPaused},
-		{id: "job-deleted", state: store.ScheduleJobDeleted},
+		{id: "job-idle", state: schedule.JobActive},
+		{id: "job-busy", state: schedule.JobActive, fired: yesterday},
+		{id: "job-paused-fired", state: schedule.JobPaused, fired: manual},
+		{id: "job-paused", state: schedule.JobPaused},
+		{id: "job-deleted", state: schedule.JobDeleted},
 	})
 	rt := durabletest.NewFake()
 	rt.RegisterHandler(schedule.HandlerName, func(context.Context, durable.Invocation) error { return nil })
+	mod := testScheduleModule(t, db, rt, slog.New(slog.DiscardHandler), 0)
 	before := time.Now().UTC()
-	count, err := resumeScheduleRuns(t.Context(), rt, db)
+	count, err := mod.Resume(t.Context())
 	if err != nil {
-		t.Fatalf("resumeScheduleRuns(): %v", err)
+		t.Fatalf("Resume(): %v", err)
 	}
 	fires := nextDailyFires(t, before, time.Now().UTC())
 	if count != 3 {
@@ -393,7 +449,8 @@ func TestResumeScheduleRuns(t *testing.T) {
 		}
 	}
 
-	if _, err := resumeScheduleRuns(t.Context(), durabletest.NewFake(), db); err == nil {
+	failingMod := testScheduleModule(t, db, durabletest.NewFake(), slog.New(slog.DiscardHandler), 0)
+	if _, err := failingMod.Resume(t.Context()); err == nil {
 		t.Error("a failed start was not returned")
 	}
 }
@@ -427,12 +484,12 @@ func (l *passLogs) warned() bool {
 
 func TestSchedulePassPicksUpAManualOccurrence(t *testing.T) {
 	db := cronTestDB(t)
-	seedScheduleJobs(t, db, []scheduleSeed{{id: "job-1", state: store.ScheduleJobActive}})
+	seedScheduleJobs(t, db, []scheduleSeed{{id: "job-1", state: schedule.JobActive}})
 	rt := durabletest.NewFake()
 	logs := &passLogs{}
-	pass := &schedulePass{runtime: rt, db: db, logger: slog.New(logs), interval: 5 * time.Millisecond}
+	mod := testScheduleModule(t, db, rt, slog.New(logs), 5*time.Millisecond)
 	before := time.Now().UTC()
-	task := server.Background("schedule_pass", pass.run)
+	task := server.Background("schedule_pass", mod.RunPass)
 	if err := task.Start(t.Context()); err != nil {
 		t.Fatalf("start the pass: %v", err)
 	}
@@ -443,11 +500,7 @@ func TestSchedulePassPicksUpAManualOccurrence(t *testing.T) {
 		return anyRunExists(t, rt, nextFireKeys("job-1", nextDailyFires(t, before, time.Now().UTC())))
 	})
 
-	service, err := scheduleService(db)
-	if err != nil {
-		t.Fatalf("scheduleService(): %v", err)
-	}
-	occurrence, err := service.RunNow(t.Context(), "job-1", time.Now().UTC())
+	occurrence, err := mod.Service().RunNow(t.Context(), "job-1", time.Now().UTC())
 	if err != nil {
 		t.Fatalf("RunNow(): %v", err)
 	}
@@ -532,13 +585,13 @@ func runState(t *testing.T, rt durable.Runtime, key string) durable.RunState {
 func TestScheduleRunsAreRestartedAtBootOnly(t *testing.T) {
 	db := cronTestDB(t)
 	manual := time.Now().UTC().Add(-time.Hour).Truncate(time.Second).Add(7 * time.Nanosecond)
-	seedScheduleJobs(t, db, []scheduleSeed{{id: "job-1", state: store.ScheduleJobActive, fired: manual}})
+	seedScheduleJobs(t, db, []scheduleSeed{{id: "job-1", state: schedule.JobActive, fired: manual}})
 	handler := &failingScheduleHandler{}
 	rt := hostScheduleHandler(t, db, handler.handle)
 	key := scheduleRunKey("job-1", manual)
 	starts := &countedStarts{Runtime: rt}
-	pass := &schedulePass{runtime: starts, db: db, logger: slog.New(slog.DiscardHandler), interval: 10 * time.Millisecond}
-	task := server.Background("schedule_pass", pass.run)
+	mod := testScheduleModule(t, db, starts, slog.New(slog.DiscardHandler), 10*time.Millisecond)
+	task := server.Background("schedule_pass", mod.RunPass)
 	if err := task.Start(t.Context()); err != nil {
 		t.Fatalf("start the pass: %v", err)
 	}
@@ -555,8 +608,8 @@ func TestScheduleRunsAreRestartedAtBootOnly(t *testing.T) {
 		t.Errorf("run after the passes = %s, want %s", state, durable.RunFailed)
 	}
 
-	if _, err := resumeScheduleRuns(t.Context(), rt, db); err != nil {
-		t.Fatalf("resumeScheduleRuns(): %v", err)
+	if _, err := mod.Resume(t.Context()); err != nil {
+		t.Fatalf("Resume(): %v", err)
 	}
 	awaitSchedule(t, "the boot call invokes the handler again", func() bool { return handler.invocations() == 2 })
 	awaitSchedule(t, "the restarted run fails", func() bool { return runState(t, rt, key) == durable.RunFailed })

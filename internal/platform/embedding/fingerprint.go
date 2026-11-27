@@ -6,11 +6,14 @@ import (
 	"encoding/hex"
 	"strconv"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/platform/egress"
 )
 
-func Fingerprint(cfg *config.KnowledgeEmbedding) (string, error) {
-	endpoint, err := cfg.Endpoint()
+func Fingerprint(cfg *Config) (string, error) {
+	if cfg == nil {
+		return "", Errorf(ErrorCodeConfigInvalid, "embedding configuration must not be nil")
+	}
+	endpoint, err := egress.ParseServiceEndpoint(cfg.BaseURL)
 	if err != nil {
 		return "", Errorf(ErrorCodeConfigInvalid, "%v", err)
 	}

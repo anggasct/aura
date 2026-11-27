@@ -7,13 +7,16 @@ import (
 	"slices"
 	"strings"
 
-	legacyconfig "github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/discord"
+	"github.com/anggasct/aura/internal/channels/email"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
+	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 func validateReferences(cfg *Config, doc *document) error {
@@ -25,6 +28,7 @@ func validateReferences(cfg *Config, doc *document) error {
 		telegramOwnerProblem(&cfg.Channels.Telegram, cfg.Owner),
 		emailOwnerProblem(&cfg.Channels.Email, cfg.Owner),
 		errors.Join(bindingAccountProblems(cfg.Bindings, &cfg.Channels)...),
+		configkit.Under("agents", auraagent.ValidateKnowledgeTools(cfg.Agents, BuiltinToolDefinitions())),
 		screenOwnerSecrets(cfg.Owner, cfg),
 	)
 }
@@ -44,7 +48,7 @@ func modelRouteReferenceProblems(routes model.Routes, models model.Config) error
 	return errors.Join(problems...)
 }
 
-func webhookListenProblem(webhook *legacyconfig.Webhook, healthListen string) error {
+func webhookListenProblem(webhook *platformwebhook.Config, healthListen string) error {
 	if webhook == nil {
 		return configkit.Invalid("webhook", "must not be nil")
 	}
@@ -54,21 +58,21 @@ func webhookListenProblem(webhook *legacyconfig.Webhook, healthListen string) er
 	return nil
 }
 
-func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discord *legacyconfig.Discord) []error {
-	if telegram == nil {
+func telegramDiscordTokenProblems(tg *telegram.Config, discordCfg *discord.Config) []error {
+	if tg == nil {
 		return []error{configkit.Invalid("channels.telegram", "must not be nil")}
 	}
-	if discord == nil {
+	if discordCfg == nil {
 		return []error{configkit.Invalid("channels.discord", "must not be nil")}
 	}
-	discordRefs := make(map[secret.Ref]bool, len(discord.Accounts))
-	for i := range discord.Accounts {
-		discordRefs[discord.Accounts[i].BotTokenRef] = true
+	discordRefs := make(map[secret.Ref]bool, len(discordCfg.Accounts))
+	for i := range discordCfg.Accounts {
+		discordRefs[discordCfg.Accounts[i].BotTokenRef] = true
 	}
 	var problems []error
-	telegramRefs := make(map[secret.Ref]bool, len(telegram.Accounts))
-	for i := range telegram.Accounts {
-		ref := telegram.Accounts[i].BotTokenRef
+	telegramRefs := make(map[secret.Ref]bool, len(tg.Accounts))
+	for i := range tg.Accounts {
+		ref := tg.Accounts[i].BotTokenRef
 		if ref.IsZero() {
 			continue
 		}
@@ -77,40 +81,40 @@ func telegramDiscordTokenProblems(telegram *legacyconfig.Telegram, discord *lega
 		}
 		telegramRefs[ref] = true
 	}
-	for i := range telegram.Accounts {
-		account := &telegram.Accounts[i]
+	for i := range tg.Accounts {
+		account := &tg.Accounts[i]
 		ref := account.WebhookSecretRef
-		if account.Mode == legacyconfig.TelegramModeWebhook && !ref.IsZero() && discordRefs[ref] && !telegramRefs[ref] {
+		if account.Mode == telegram.ModeWebhook && !ref.IsZero() && discordRefs[ref] && !telegramRefs[ref] {
 			problems = append(problems, configkit.Invalid(fmt.Sprintf("channels.telegram.accounts[%d].webhook_secret_ref", i), "must differ from every bot token reference"))
 		}
 	}
 	return problems
 }
 
-func telegramOwnerProblem(telegram *legacyconfig.Telegram, owner *principal.Owner) error {
-	if telegram == nil {
+func telegramOwnerProblem(tg *telegram.Config, owner *principal.Owner) error {
+	if tg == nil {
 		return configkit.Invalid("channels.telegram", "must not be nil")
 	}
-	if !telegram.Enabled || hasOwnerChannel(owner, principal.ChannelTelegram) {
+	if !tg.Enabled || hasOwnerChannel(owner, principal.ChannelTelegram) {
 		return nil
 	}
-	for i := range telegram.Accounts {
-		if len(telegram.Accounts[i].AllowedUserIDs) == 0 {
+	for i := range tg.Accounts {
+		if len(tg.Accounts[i].AllowedUserIDs) == 0 {
 			return configkit.Invalid("channels.telegram.enabled", "requires a telegram:<user_id> entry in owner.identities or an allowed_user_ids entry on every account")
 		}
 	}
 	return nil
 }
 
-func emailOwnerProblem(email *legacyconfig.Email, owner *principal.Owner) error {
-	if email == nil {
+func emailOwnerProblem(cfg *email.Config, owner *principal.Owner) error {
+	if cfg == nil {
 		return configkit.Invalid("channels.email", "must not be nil")
 	}
-	if !email.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
+	if !cfg.Enabled || hasOwnerChannel(owner, principal.ChannelEmail) {
 		return nil
 	}
-	for i := range email.Accounts {
-		if len(email.Accounts[i].AllowedSenders) == 0 {
+	for i := range cfg.Accounts {
+		if len(cfg.Accounts[i].AllowedSenders) == 0 {
 			return configkit.Invalid("channels.email.enabled", "requires an email:<address> entry in owner.identities or an allowed_senders entry on every account")
 		}
 	}
@@ -129,7 +133,7 @@ func hasOwnerChannel(owner *principal.Owner, channel string) bool {
 	return false
 }
 
-func bindingAccountProblems(bindings auraagent.Bindings, channels *legacyconfig.Channels) []error {
+func bindingAccountProblems(bindings auraagent.Bindings, channels *Channels) []error {
 	if channels == nil {
 		return []error{configkit.Invalid("channels", "must not be nil")}
 	}

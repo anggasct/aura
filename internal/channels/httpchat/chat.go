@@ -18,7 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -57,7 +57,7 @@ type ChatOptions struct {
 	Handoffs           access.HandoffGate
 	Approvals          *approval.OwnerRoute
 	Denied             func(ctx context.Context, reason string)
-	AnswerTexts        func(events []store.RuntimeEvent) []string
+	AnswerTexts        func(events []turn.Event) []string
 	MaxHistoryMessages int
 	MaxHistoryBytes    int
 	KeepaliveInterval  time.Duration
@@ -73,7 +73,7 @@ type Chat struct {
 	handoffs    access.HandoffGate
 	approvals   *approval.OwnerRoute
 	denied      func(ctx context.Context, reason string)
-	answerTexts func(events []store.RuntimeEvent) []string
+	answerTexts func(events []turn.Event) []string
 	maxMessages int
 	maxBytes    int
 	keepalive   time.Duration
@@ -85,27 +85,27 @@ var _ ChatHandler = (*Chat)(nil)
 func NewChat(opts *ChatOptions) (*Chat, error) {
 	switch {
 	case opts == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "chat options must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "chat options must not be nil")
 	case opts.Runtime == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "runtime must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "runtime must not be nil")
 	case opts.Sessions == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "session store must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "session store must not be nil")
 	case opts.Personas == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "persona directory must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "persona directory must not be nil")
 	case opts.Budgets == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "budget gate must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "budget gate must not be nil")
 	case opts.Evals == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "eval gate must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "eval gate must not be nil")
 	case opts.Handoffs == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "handoff gate must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "handoff gate must not be nil")
 	case opts.AnswerTexts == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "answer extraction must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "answer extraction must not be nil")
 	case opts.MaxHistoryMessages < 0 || opts.MaxHistoryBytes < 0:
-		return nil, Errorf(ErrorCodeInvalidArgument, "history bounds must not be negative")
+		return nil, fault.New(ErrorCodeInvalidArgument, "history bounds must not be negative")
 	case opts.KeepaliveInterval <= 0:
-		return nil, Errorf(ErrorCodeInvalidArgument, "keepalive interval must be positive")
+		return nil, fault.New(ErrorCodeInvalidArgument, "keepalive interval must be positive")
 	case opts.Logger == nil:
-		return nil, Errorf(ErrorCodeInvalidArgument, "logger must not be nil")
+		return nil, fault.New(ErrorCodeInvalidArgument, "logger must not be nil")
 	}
 	return &Chat{
 		runtime:     opts.Runtime,
@@ -262,7 +262,7 @@ func ownsSessionShape(caller *Principal, raw string) bool {
 func newSessionID(caller *Principal) (string, error) {
 	raw := make([]byte, sessionTokenBytes)
 	if _, err := rand.Read(raw); err != nil {
-		return "", &Error{Code: ErrorCodeSessionGeneration, Detail: "random source failed", Cause: err}
+		return "", fault.Wrap(ErrorCodeSessionGeneration, "random source failed", err)
 	}
 	token := strings.ToLower(keyEncoding.EncodeToString(raw))
 	return runtimeingress.SessionKey(caller.PersonaID, sessionSource, caller.KeyID+"/"+token), nil
@@ -305,7 +305,7 @@ func (c *Chat) checkHandoff(ctx context.Context, caller *Principal, sessionID st
 
 type turnOutcome struct {
 	turnID   string
-	events   []store.RuntimeEvent
+	events   []turn.Event
 	terminal string
 	failure  turn.ErrorCode
 }
@@ -423,7 +423,7 @@ func (c *Chat) writeCompletion(w http.ResponseWriter, caller *Principal, outcome
 	})
 }
 
-func tokenUsage(events []store.RuntimeEvent) usage {
+func tokenUsage(events []turn.Event) usage {
 	var total usage
 	for i := range events {
 		if len(events[i].ProviderUsage) == 0 {
@@ -444,9 +444,9 @@ func tokenUsage(events []store.RuntimeEvent) usage {
 	return total
 }
 
-func finishReason(events []store.RuntimeEvent) string {
+func finishReason(events []turn.Event) string {
 	for i := len(events) - 1; i >= 0; i-- {
-		if events[i].Kind != store.EventKindADK {
+		if events[i].Kind != turnstore.EventKindADK {
 			continue
 		}
 		var decoded struct {

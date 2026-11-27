@@ -8,21 +8,23 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 type captureEngine struct {
 	got *turn.TurnRequest
 }
 
-func (c *captureEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[store.RuntimeEvent, error] {
+func (c *captureEngine) Run(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
 	c.got = req
-	return func(yield func(store.RuntimeEvent, error) bool) {}
+	return func(yield func(turn.Event, error) bool) {}
 }
 
 func TestTerminalRunnerPreservesImageParts(t *testing.T) {
 	engine := &captureEngine{}
-	runner := &terminalRunner{engine: engine}
+	runner, err := terminal.NewRuntimeRunner(engine, "")
+	if err != nil {
+		t.Fatalf("NewRuntimeRunner: %v", err)
+	}
 	envelope := json.RawMessage(`{"kind":"image_ref.v1"}`)
 	req := &terminal.Request{
 		SessionID:   "sess-1",

@@ -19,18 +19,17 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/channels/email"
-	"github.com/anggasct/aura/internal/config"
-	toolsbuiltin "github.com/anggasct/aura/internal/modules/builtin"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const (
@@ -236,8 +235,8 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	passEvals(t, db, registry, "desk")
 	model := &countingModel{turns: make(chan struct{}, 16)}
 	name := "email-model"
-	events := store.NewEventStore(db)
-	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, store.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
+	events := turnstore.NewEventStore(db)
+	executor, err := runtimeadk.NewADKExecutor("aura", name, auramodel.Set{name: model}, turnstore.NewSessionService(db), personaEvalDenyAll{}, nil, nil,
 		runtimeadk.WithBuiltinToolExecutor(catalogExecutor{}),
 		runtimeadk.WithAgentResolver(registry, nil),
 	)
@@ -254,28 +253,42 @@ func TestEmailTurnsRunThroughTheRealRuntime(t *testing.T) {
 	}
 	mail := newFakeMail()
 	submissions := newFakeSubmissions()
-	effects, err := toolsbuiltin.NewChannelEffects(db, slog.New(slog.DiscardHandler))
+	effects, err := newChannelEffects(db, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("NewChannelEffects: %v", err)
 	}
-	adapter, err := email.New(&cfg.Channels.Email, &cfg.Channels.Email.Accounts[0], mail, submissions,
-		emailCursors{cursors: store.NewEmailCursorStore(db)}, effects,
-		&emailSessions{discordSessionEnsurer{sessions: store.NewSessionService(db)}},
-		slog.New(slog.DiscardHandler))
+	sessions, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSessionEnsurer: %v", err)
+	}
+	cursors, err := email.NewSQLiteCursorStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
+	settings := channelAccessSettings(cfg, db, nil, nil)
+	adapter, err := email.New(&email.Deps{
+		Config:            &cfg.Channels.Email,
+		Account:           &cfg.Channels.Email.Accounts[0],
+		Connector:         mail,
+		Mailer:            submissions,
+		Cursors:           cursors,
+		Effects:           effects,
+		Sessions:          sessions,
+		Logger:            slog.New(slog.DiscardHandler),
+		PrincipalResolver: owners,
+		PersonaRouter:     router,
+		Access:            &email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals},
+	})
 	if err != nil {
 		t.Fatalf("email.New: %v", err)
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(router)
-	settings := discordAccessSettings(cfg, db, nil, nil)
-	adapter.SetAccess(&email.AccessSettings{Budgets: settings.Budgets, Evals: settings.Evals})
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
 		Events:         events,
-		Dedupe:         store.NewDedupeStore(db),
+		Dedupe:         turnstore.NewDedupeStore(db),
 		Executor:       executor,
 		Config:         runtimeengine.Default(),
 		DefaultAgentID: auraagent.DefaultID,
-		Personas:       registryPersonas{registry: registry},
+		Personas:       auraagent.RegistryPersonas{Registry: registry},
 		Channels:       []runtimechannelhost.ChannelPort{adapter},
 	})
 	if err != nil {
@@ -428,10 +441,10 @@ func TestBuildSecretVaultRedactsEmailPasswords(t *testing.T) {
 	t.Setenv("AURA_TEST_VAULT_IMAP", "imap-secret-probe")
 	t.Setenv("AURA_TEST_VAULT_SMTP", "smtp-secret-probe")
 	cfg := appconfig.Default()
-	cfg.Channels.Email.Accounts = []config.EmailAccount{{
+	cfg.Channels.Email.Accounts = []email.Account{{
 		Name: "work",
-		IMAP: config.EmailIMAP{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_IMAP")},
-		SMTP: config.EmailSMTP{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_SMTP")},
+		IMAP: email.IMAPConfig{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_IMAP")},
+		SMTP: email.SMTPConfig{PasswordRef: secrettest.Ref("env://AURA_TEST_VAULT_SMTP")},
 	}}
 	vault := buildSecretVault(&cfg)
 	for _, secret := range []string{"imap-secret-probe", "smtp-secret-probe"} {
@@ -472,12 +485,15 @@ func TestRecoverEmailEffects(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			db := storetest.OpenMigrated(t)
-			ensurer := discordSessionEnsurer{sessions: store.NewSessionService(db)}
+			db := sqlitetest.OpenMigrated(t, Schemas()...)
+			ensurer, err := access.NewSessionEnsurer(turnstore.NewSessionService(db))
+			if err != nil {
+				t.Fatalf("NewSessionEnsurer: %v", err)
+			}
 			if err := ensurer.EnsureSession(t.Context(), "desk/email:work/thread:recover", principal.OwnerID, "desk"); err != nil {
 				t.Fatalf("EnsureSession: %v", err)
 			}
-			journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+			journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 			if err != nil {
 				t.Fatalf("NewJournal: %v", err)
 			}
@@ -499,7 +515,7 @@ func TestRecoverEmailEffects(t *testing.T) {
 }
 
 func TestRecoverEmailEffects_FailsClosedWhenTheJournalIsUnreadable(t *testing.T) {
-	db := storetest.OpenMigrated(t)
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
 	if err := db.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}

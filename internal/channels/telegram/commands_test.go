@@ -12,7 +12,10 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
 type commandSessions struct {
@@ -59,7 +62,6 @@ type commandRig struct {
 
 func newCommandRig(t *testing.T, opts accessOpts) *commandRig {
 	t.Helper()
-	rig := newAccessRig(t, opts)
 	registry, err := command.New(CommandBinding())
 	if err != nil {
 		t.Fatalf("command.New: %v", err)
@@ -69,7 +71,8 @@ func newCommandRig(t *testing.T, opts accessOpts) *commandRig {
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	rig.adapter.SetCommands(dispatcher)
+	opts.commands = dispatcher
+	rig := newAccessRig(t, opts)
 	rig.adapter.sink = rig.sink
 	return &commandRig{accessRig: rig, sessions: sessions}
 }
@@ -203,7 +206,7 @@ func TestStartStaysThePairingEntryAndIsNotACommand(t *testing.T) {
 	t.Run("unknown sender is paired", func(t *testing.T) {
 		pairing := &fakePairing{result: access.PairingResult{Outcome: access.PairingOutcomeIssued, Code: "ABCD2345"}}
 		definition := auraagent.Definition{ID: testPersona, Audience: auraagent.AudienceTrusted, Pairing: true}
-		rig := newCommandRig(t, accessOpts{definition: definition, settings: AccessSettings{Pairing: pairing}})
+		rig := newCommandRig(t, accessOpts{definition: definition, settings: access.Settings{Pairing: pairing}})
 		rig.handle(t, privateText(10, strangerID, "/start"))
 		rig.assertQuiet(t, "pairing")
 		want := strings.ReplaceAll(personaMessage(auraagent.MessagePairingCode), auraagent.PairingCodePlaceholder, "ABCD2345")
@@ -216,7 +219,7 @@ func TestStartStaysThePairingEntryAndIsNotACommand(t *testing.T) {
 func TestForgetMeBehavesTheSameThroughTheDispatcher(t *testing.T) {
 	t.Run("confirmation erases the sender", func(t *testing.T) {
 		eraser := &fakeEraser{}
-		rig := newCommandRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Erasure: eraser}})
+		rig := newCommandRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
 		rig.handle(t, privateText(10, allowedUserID, "/forgetme confirm"))
 		rig.assertQuiet(t)
 		if erased := eraser.erased(); !slices.Equal(erased, []string{"telegram:555001"}) {
@@ -227,7 +230,7 @@ func TestForgetMeBehavesTheSameThroughTheDispatcher(t *testing.T) {
 		}
 	})
 	t.Run("the owner is not permitted", func(t *testing.T) {
-		rig := newCommandRig(t, accessOpts{settings: AccessSettings{Erasure: &fakeEraser{}}})
+		rig := newCommandRig(t, accessOpts{settings: access.Settings{Erasure: &fakeEraser{}}})
 		rig.handle(t, privateText(10, ownerUserID, "/forgetme confirm"))
 		if got := sentTo(rig.h.api, ownerUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageNotPermitted)}) {
 			t.Errorf("reply = %q", got)
@@ -343,7 +346,7 @@ func TestGroupMembersCanRunTheHelpCommand(t *testing.T) {
 
 func TestCommandsRunBeforeBudgetsAndNeverBecomeTurns(t *testing.T) {
 	budgets := &fakeBudgets{}
-	rig := newCommandRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: AccessSettings{Budgets: budgets}})
+	rig := newCommandRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Budgets: budgets}})
 	rig.handle(t, privateText(10, allowedUserID, "/help"))
 	if calls := budgets.recorded(); len(calls) != 0 {
 		t.Errorf("budget checks = %v, want none for a command", calls)
@@ -365,4 +368,48 @@ func TestCommandBindingNamesTheSharedSetOnAMessengerChannel(t *testing.T) {
 	if binding.Channel != principal.ChannelTelegram || binding.Style != command.StyleMessenger || !slices.Equal(binding.Names, command.MessengerNames()) {
 		t.Errorf("binding = %+v", binding)
 	}
+}
+
+type failingEffects struct {
+	err error
+}
+
+func (f failingEffects) Execute(context.Context, *effect.PrepareRequest, effect.Provider) (*effect.Intent, error) {
+	return nil, f.err
+}
+
+func TestCommandsSwallowChatCommandValidationErrors(t *testing.T) {
+	msg := privateText(10, ownerUserID, "/unregistered").Message
+	envelope := &runtimeingress.IngressEnvelope{
+		Source:         "telegram:pocket",
+		ExternalID:     "update:10",
+		ConversationID: "main/telegram:pocket/chat:" + strconv.Itoa(ownerUserID),
+		PrincipalID:    principal.OwnerID,
+		PrincipalClass: string(principal.ClassOwner),
+		AgentID:        testPersona,
+	}
+
+	t.Run("validation rejection is swallowed as handled", func(t *testing.T) {
+		rig := newCommandRig(t, accessOpts{})
+		handled, err := rig.adapter.runCommand(t.Context(), msg, &command.Invocation{Name: "unregistered"}, envelope)
+		if err != nil || !handled {
+			t.Fatalf("runCommand() = %v, %v; want handled with nil error", handled, err)
+		}
+		if replies := sentTo(rig.h.api, ownerUserID); len(replies) != 0 {
+			t.Errorf("replies = %q, want none", replies)
+		}
+	})
+
+	t.Run("non-validation failure propagates as intake failed", func(t *testing.T) {
+		rig := newCommandRig(t, accessOpts{})
+		cause := errors.New("journal down")
+		rig.adapter.effects = failingEffects{err: cause}
+		handled, err := rig.adapter.runCommand(t.Context(), msg, &command.Invocation{Name: "help"}, envelope)
+		if handled || err == nil {
+			t.Fatalf("runCommand() = %v, %v; want unhandled error", handled, err)
+		}
+		if !fault.HasCode(err, ErrorCodeIntakeFailed) || !errors.Is(err, cause) {
+			t.Errorf("runCommand() error = %v, want %q wrapping %v", err, ErrorCodeIntakeFailed, cause)
+		}
+	})
 }

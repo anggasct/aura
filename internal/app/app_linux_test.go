@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/configkit"
@@ -180,7 +182,7 @@ func TestCompositionServerRefusesABrokenWorkflowDefinition(t *testing.T) {
 	extra := fmt.Sprintf("workflows:\n  definitions_dir: %s\n", definitions)
 	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
 	_, err := Build(t.Context(), serverCompositionOptions(result, &syncBuffer{}))
-	if code, ok := workflow.CodeOf(err); !ok || code != workflow.ErrorCodeExecutorInvalid {
+	if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != workflow.ErrorCodeExecutorInvalid {
 		t.Fatalf("Build error = %v, want %s", err, workflow.ErrorCodeExecutorInvalid)
 	}
 }
@@ -200,5 +202,183 @@ func TestCompositionCloseWithoutRunReleasesResources(t *testing.T) {
 	requireNames(t, "lifecycle stopped", lifecycleNames(t, logs.String(), "lifecycle stopped"), []string{"telemetry", "sqlite"})
 	if started := lifecycleNames(t, logs.String(), "lifecycle started"); len(started) != 0 {
 		t.Fatalf("lifecycle started = %v, want none", started)
+	}
+}
+
+const compositionKnowledgePersonaYAML = `agents:
+  definitions:
+    - id: lobby
+      description: front desk
+      instructions: "Help visitors."
+      audience: public
+      knowledge: [faq]
+`
+
+func TestCompositionServerWithKnowledgeDiscoversModuleContracts(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	probeAddr := freeLoopbackAddress(t)
+	result := loadCompositionConfig(t, writeCompositionConfig(t, probeAddr, compositionModelsYAML, compositionKnowledgePersonaYAML))
+	logs := &syncBuffer{}
+
+	b := newBuild(serverCompositionOptions(result, logs))
+	for _, step := range b.phases(t.Context()) {
+		if err := step(); err != nil {
+			if b.group != nil {
+				_ = b.group.Stop(t.Context())
+			}
+			t.Fatalf("build phase: %v", err)
+		}
+	}
+	app := &App{
+		surface: SurfaceServer, group: b.group, builtin: b.builtin, serve: b.serve,
+		logger: b.logger, db: b.db, turns: b.turns, result: b.result,
+		runtime: b.runtime, interpreter: b.interpreter, models: b.models, knowledge: b.knowledge,
+	}
+
+	probeBuild := &build{cfg: b.cfg, group: b.group}
+	probeMod, err := knowledge.New(t.Context(), &knowledge.ModuleDeps{
+		Config: b.cfg.Knowledge, DBPath: b.cfg.Storage.Path + "/aura.db",
+	})
+	if err != nil {
+		t.Fatalf("knowledge.New probe: %v", err)
+	}
+	if err := probeBuild.registerModule("knowledge-probe", probeMod); err != nil {
+		t.Fatalf("registerModule probe: %v", err)
+	}
+	if len(probeBuild.execOpts) != 1 {
+		t.Fatalf("registerModule execOpts = %d, want 1 (ContextProvider)", len(probeBuild.execOpts))
+	}
+
+	output, err := app.builtin.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
+		RequestID: "call-kb", TurnID: "turn-1", SessionID: "sess-kb", PrincipalID: principal.OwnerID,
+		PrincipalClass: principal.ClassOwner, AgentID: "lobby", ToolName: "kb_search", ToolVersion: "v1",
+		Arguments: json.RawMessage(`{"query":"refunds"}`), Trust: "derived_untrusted",
+		Deadline: time.Now().Add(time.Minute), IdempotencyKey: "kb/owner",
+		Knowledge: []string{"faq"},
+	})
+	if err != nil {
+		t.Fatalf("kb_search via discovered ToolProvider failed: %v", err)
+	}
+	var searchOut knowledge.SearchOutput
+	if err := json.Unmarshal(output, &searchOut); err != nil {
+		t.Fatalf("decode kb_search output %s: %v", output, err)
+	}
+
+	checkIDs := map[string]bool{}
+	for i := range b.server.checks {
+		checkIDs[b.server.checks[i].ID] = true
+	}
+	if !checkIDs[knowledge.ComponentKnowledge] || !checkIDs[knowledge.ComponentKnowledgeEmbedding] {
+		t.Fatalf("discovered server health checks = %v, want %q and %q", checkIDs, knowledge.ComponentKnowledge, knowledge.ComponentKnowledgeEmbedding)
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	ran := make(chan error, 1)
+	go func() { ran <- app.Run(ctx) }()
+	waitForProbe(t, probeAddr, "/livez")
+
+	response, err := probeGet(ctx, probeAddr, "/readyz")
+	if err != nil {
+		t.Fatalf("GET /readyz: %v", err)
+	}
+	_ = response.Body.Close()
+
+	cancel()
+	select {
+	case err := <-ran:
+		if err != nil {
+			t.Fatalf("Run after cancel = %v, want nil", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestCompositionServerWithKnowledgeVectorsStopsLoaderBeforePools(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	probeAddr := freeLoopbackAddress(t)
+	extra := compositionKnowledgePersonaYAML + `knowledge:
+  embedding:
+    base_url: https://api.example.com/v1
+    model: embed-v1
+    dimensions: 4
+`
+	result := loadCompositionConfig(t, writeCompositionConfig(t, probeAddr, compositionModelsYAML, extra))
+	logs := &syncBuffer{}
+	app := buildApp(t, serverCompositionOptions(result, logs))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	ran := make(chan error, 1)
+	go func() { ran <- app.Run(ctx) }()
+	waitForProbe(t, probeAddr, "/livez")
+	cancel()
+	select {
+	case err := <-ran:
+		if err != nil {
+			t.Fatalf("Run after cancel = %v, want nil", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not return after cancel")
+	}
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	stopped := lifecycleNames(t, logs.String(), "lifecycle stopped")
+	vectorsIdx := slices.Index(stopped, "knowledge_vectors")
+	poolsIdx := slices.Index(stopped, "knowledge")
+	if vectorsIdx < 0 || poolsIdx < 0 || vectorsIdx >= poolsIdx {
+		t.Fatalf("stopped order = %v, want knowledge_vectors before knowledge", stopped)
+	}
+}
+
+func TestCompositionCloseWithoutRunClosesKnowledgePools(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, compositionKnowledgePersonaYAML))
+	logs := &syncBuffer{}
+	app := buildApp(t, serverCompositionOptions(result, logs))
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close without Run: %v", err)
+	}
+	stopped := lifecycleNames(t, logs.String(), "lifecycle stopped")
+	if !slices.Contains(stopped, "knowledge") {
+		t.Fatalf("stopped = %v, want knowledge defer to close pools even without Run", stopped)
+	}
+}
+
+func TestMCPCloseWithoutRunClosesSubprocesses(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	extra := "mcp:\n  servers:\n    - name: docs\n      transport: stdio\n      command: /usr/local/bin/docs-mcp\n"
+	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, extra))
+	logs := &syncBuffer{}
+	app := buildApp(t, serverCompositionOptions(result, logs))
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close without Run: %v", err)
+	}
+	stopped := lifecycleNames(t, logs.String(), "lifecycle stopped")
+	if !slices.Contains(stopped, "mcp") {
+		t.Fatalf("stopped = %v, want mcp defer to close subprocesses even without Run", stopped)
+	}
+}
+
+func TestCompositionChatWithToolsAndNoEnabledCapabilities(t *testing.T) {
+	restoreDefaultLogger(t)
+	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
+	extra := fmt.Sprintf("tools:\n  workspace: %s\n", t.TempDir())
+	result := loadCompositionConfig(t, writeChatCompositionConfig(t, extra))
+	app := buildApp(t, chatCompositionOptions(result, &syncBuffer{}))
+	if err := app.Run(t.Context()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := app.Close(t.Context()); err != nil {
+		t.Fatalf("Close: %v", err)
 	}
 }

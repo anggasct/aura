@@ -150,7 +150,7 @@ func TestBadCapabilityListsFailTheSessionBeforeAnyCall(t *testing.T) {
 			h := newTestHost(t, nil, starter, &bearerAuth{})
 			_, fail := invokeTool(t, h, readTool(h))
 			mustCode(t, fail, ErrRPCInvalid)
-			if fail.RequestSent {
+			if fail.requestSent {
 				t.Fatal("a failed describe cannot have sent a request")
 			}
 			if got := kinds(starter.allPayloads()); !slices.Equal(got, []string{"describe"}) {
@@ -232,8 +232,8 @@ func TestARestartedConnectorThatNoLongerDescribesTheToolFailsTheCall(t *testing.
 		time.Sleep(RestartInterval)
 		_, fail = invokeTool(t, h, effectTool(h))
 		mustCode(t, fail, ErrToolDrift)
-		if fail.RequestSent || starter.openSessions() != 0 {
-			t.Fatalf("sent = %v, open sessions = %d", fail.RequestSent, starter.openSessions())
+		if fail.requestSent || starter.openSessions() != 0 {
+			t.Fatalf("sent = %v, open sessions = %d", fail.requestSent, starter.openSessions())
 		}
 		if got := kinds(starter.session(1).payloads()); !slices.Equal(got, []string{"describe"}) {
 			t.Fatalf("exchanged %v, want no invoke on a drifted session", got)

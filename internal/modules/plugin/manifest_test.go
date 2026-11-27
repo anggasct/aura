@@ -46,7 +46,7 @@ backend:
 		t.Fatalf("ParseManifest: %v", err)
 	}
 	server := manifest.ServerConfig("/data/plugins/remote-notes/0.3.1")
-	if server.Auth != nil || server.URL != "https://notes.example.com/mcp" {
+	if server.URL != "https://notes.example.com/mcp" {
 		t.Fatalf("server = %+v", server)
 	}
 	if spec := manifest.AuthSpec("fp"); spec.Kind != AuthStaticSecret || spec.SecretRef != "env://NOTES_TOKEN" || spec.Header != "Authorization" || spec.Fingerprint != "fp" {

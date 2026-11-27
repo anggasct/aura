@@ -1,6 +1,8 @@
 package main
 
 import (
+	"bytes"
+	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -43,10 +45,7 @@ func TestLayerViolations(t *testing.T) {
 		{"cli to app", "internal/cli", "internal/app", false},
 		{"cli to platform logging", "internal/cli", "internal/platform/logging", false},
 		{"cli to platform turn", "internal/cli", "internal/platform/turn", true},
-		{"cli to legacy config", "internal/cli", "internal/config", true},
 		{"cli to module", "internal/cli", "internal/modules/memory", true},
-		{"legacy source is exempt", "internal/config", "internal/modules/memory", false},
-		{"legacy target is exempt", "internal/platform/turn", "internal/store", false},
 		{"app is exempt", "internal/app", "internal/modules/memory", false},
 		{"cmd is exempt", "cmd/aura", "internal/modules/memory", false},
 	}
@@ -60,21 +59,16 @@ func TestLayerViolations(t *testing.T) {
 	}
 }
 
-func TestCheckLayersHonoursAllowListAndReportsStaleEntries(t *testing.T) {
+func TestCheckLayersReportsViolationsDirectly(t *testing.T) {
 	t.Parallel()
 	packages := []repoPackage{
-		{path: "internal/modules/builtin", imports: []string{"internal/modules/codeexec/interpreter", "internal/modules/fetch", "internal/platform/tools"}},
+		{path: "internal/modules/builtin", imports: []string{"internal/modules/fetch", "internal/platform/tools"}},
 		{path: "internal/platform/effect", imports: []string{"internal/channels/discord", "internal/channels/discord"}},
 	}
-	allowed, problems := parseAllow("internal/modules/builtin -> internal/modules/codeexec  # S12\n\ninternal/modules/memory -> internal/modules/profile # S08\n")
-	if len(problems) != 0 {
-		t.Fatalf("parseAllow problems = %v", problems)
-	}
-	got := checkLayers(packages, allowed)
+	got := checkLayers(packages)
 	want := []string{
 		"layers: internal/modules/builtin imports internal/modules/fetch",
 		"layers: internal/platform/effect imports internal/channels/discord",
-		"layers.allow:3: stale allow entry internal/modules/memory -> internal/modules/profile",
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("checkLayers = %q, want %q", got, want)
@@ -86,25 +80,17 @@ func TestCheckLayersReportsCliImportingPlatformPackages(t *testing.T) {
 	packages := []repoPackage{
 		{path: "internal/cli", imports: []string{"internal/app", "internal/platform/turn"}},
 	}
-	got := checkLayers(packages, nil)
+	got := checkLayers(packages)
 	want := []string{"layers: internal/cli imports internal/platform/turn"}
 	if !slices.Equal(got, want) {
 		t.Fatalf("checkLayers = %q, want %q", got, want)
 	}
 }
 
-func TestParseAllowRejectsMalformedEntries(t *testing.T) {
-	t.Parallel()
-	_, problems := parseAllow("internal/modules/a internal/modules/b\n -> internal/modules/b\n")
-	if len(problems) != 2 {
-		t.Fatalf("problems = %q, want two malformed entries", problems)
-	}
-}
-
 func TestCheckLayout(t *testing.T) {
 	t.Parallel()
 	entries := map[string][]dirEntry{
-		"internal":          {{name: "platform", isDir: true}, {name: "modules", isDir: true}, {name: "store", isDir: true}, {name: "tools", isDir: true}, {name: "doc.go"}},
+		"internal":          {{name: "platform", isDir: true}, {name: "modules", isDir: true}, {name: "tools", isDir: true}, {name: "doc.go"}},
 		"internal/modules":  {{name: "memory", isDir: true}, {name: "registry.go"}},
 		"internal/platform": {{name: "turn", isDir: true}, {name: "README"}},
 	}
@@ -118,6 +104,76 @@ func TestCheckLayout(t *testing.T) {
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Fatalf("checkLayout = %q, want %q", got, want)
+	}
+}
+
+func TestCheckAppLayout(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		entries []dirEntry
+		want    []string
+	}{
+		{
+			name: "valid composition root with tests and testdata",
+			entries: []dirEntry{
+				{name: "app.go"},
+				{name: "modules.go"},
+				{name: "commands.go"},
+				{name: "migrations.go"},
+				{name: "app_test.go"},
+				{name: "durable_turn_killed_test.go"},
+				{name: "config", isDir: true},
+				{name: "testdata", isDir: true},
+			},
+		},
+		{
+			name: "extra production go file",
+			entries: []dirEntry{
+				{name: "app.go"},
+				{name: "modules.go"},
+				{name: "commands.go"},
+				{name: "migrations.go"},
+				{name: "extra.go"},
+				{name: "config", isDir: true},
+			},
+			want: []string{
+				"app-layout: internal/app/extra.go is not in the allowed composition-root file set (app.go, modules.go, commands.go, migrations.go)",
+			},
+		},
+		{
+			name: "extra subdirectory",
+			entries: []dirEntry{
+				{name: "app.go"},
+				{name: "config", isDir: true},
+				{name: "helpers", isDir: true},
+			},
+			want: []string{
+				"app-layout: internal/app/helpers is not an allowed subdirectory (config)",
+			},
+		},
+		{
+			name: "extra non-test non-go file and extra subdir",
+			entries: []dirEntry{
+				{name: "app.go"},
+				{name: "notes.txt"},
+				{name: "scratch", isDir: true},
+				{name: "app_linux_test.go"},
+			},
+			want: []string{
+				"app-layout: internal/app/notes.txt is not in the allowed composition-root file set (app.go, modules.go, commands.go, migrations.go)",
+				"app-layout: internal/app/scratch is not an allowed subdirectory (config)",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := checkAppLayout(tc.entries)
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("checkAppLayout = %q, want %q", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -144,10 +200,6 @@ func sourceFixture(t *testing.T, dir, source string) sourcePackage {
 		t.Fatalf("parse fixture %s: %v", dir, err)
 	}
 	return sourcePackage{path: dir, name: name, files: append([]*ast.File(nil), file)}
-}
-
-func fixtureViolations(file string, fields int, findings []finding) []string {
-	return baseline{file: file, fields: fields}.apply(findings, "")
 }
 
 func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
@@ -184,7 +236,7 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := fixtureViolations("fakes.allow", 2, findFakes([]sourcePackage{sourceFixture(t, tc.dir, tc.source)}))
+			got := findFakes([]sourcePackage{sourceFixture(t, tc.dir, tc.source)})
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("findFakes = %q, want %q", got, tc.want)
 			}
@@ -215,7 +267,7 @@ func TestFakesReportsFakeNamesOutsideTestKits(t *testing.T) {
 func TestFakesReportsProductionImportsOfTestKits(t *testing.T) {
 	t.Parallel()
 	repo := &repository{stdNames: map[string]string{"testing": "testing"}, importedStd: map[string]bool{}}
-	kitImport := modulePath + "/internal/store/storetest"
+	kitImport := modulePath + "/internal/platform/sqlite/sqlitetest"
 	cases := []struct {
 		name   string
 		listed listedPackage
@@ -224,7 +276,7 @@ func TestFakesReportsProductionImportsOfTestKits(t *testing.T) {
 		{
 			name:   "production import",
 			listed: listedPackage{ImportPath: modulePath + "/internal/modules/memory", Name: "memory", Imports: []string{kitImport}},
-			want:   []string{"fakes: internal/modules/memory imports the test kit internal/store/storetest from a production file"},
+			want:   []string{"fakes: internal/modules/memory imports the test kit internal/platform/sqlite/sqlitetest from a production file"},
 		},
 		{
 			name:   "test imports",
@@ -238,10 +290,10 @@ func TestFakesReportsProductionImportsOfTestKits(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			kit := sourcePackage{path: "internal/store/storetest", name: "storetest"}
+			kit := sourcePackage{path: "internal/platform/sqlite/sqlitetest", name: "sqlitetest"}
 			pkg := repo.newPackage(&tc.listed)
 			subject := sourcePackage{path: pkg.path, name: pkg.name, imports: pkg.productionImports}
-			got := fixtureViolations("fakes.allow", 2, findFakes([]sourcePackage{kit, subject}))
+			got := findFakes([]sourcePackage{kit, subject})
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("findFakes = %q, want %q", got, tc.want)
 			}
@@ -279,12 +331,12 @@ func TestSettersReportsSingleArgumentDependencySetters(t *testing.T) {
 		{name: "variadic", dir: dir, source: "type T struct{}\nfunc (t *T) SetIssuers(issuers ...string) {}\n"},
 		{name: "function without receiver", dir: dir, source: "func SetDefault(l *slog.Logger) {}\n"},
 		{name: "name without a capital letter", dir: dir, source: "type T struct{}\nfunc (t *T) Setup(dep Dep) {}\nfunc (t *T) Set(dep Dep) {}\nfunc (t *T) Settle(dep Dep) {}\n"},
-		{name: "test kit", dir: "internal/store/storetest", source: "type T struct{}\nfunc (t *T) SetX(dep Dep) {}\n"},
+		{name: "test kit", dir: "internal/platform/sqlite/sqlitetest", source: "type T struct{}\nfunc (t *T) SetX(dep Dep) {}\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := fixtureViolations("setters.allow", 2, findSetters([]sourcePackage{sourceFixture(t, tc.dir, tc.source)}))
+			got := findSetters([]sourcePackage{sourceFixture(t, tc.dir, tc.source)})
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("findSetters = %q, want %q", got, tc.want)
 			}
@@ -310,12 +362,12 @@ func TestCodedErrorsReportsCopiedErrorTypesOutsideFault(t *testing.T) {
 		{name: "fault package", dir: faultPackage, source: "type Error struct{}\nfunc CodeOf(err error) string { return \"\" }\n"},
 		{name: "method", dir: dir, source: "type Probe struct{}\nfunc (p *Probe) CodeOf() string { return \"\" }\n"},
 		{name: "error code type", dir: dir, source: "type ErrorCode string\nfunc Error() {}\nvar CodeOf = 1\n"},
-		{name: "test kit", dir: "internal/store/storetest", source: "type Error struct{}\n"},
+		{name: "test kit", dir: "internal/platform/sqlite/sqlitetest", source: "type Error struct{}\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := fixtureViolations("codederrors.allow", 1, findCodedErrors([]sourcePackage{sourceFixture(t, tc.dir, tc.source)}))
+			got := findCodedErrors([]sourcePackage{sourceFixture(t, tc.dir, tc.source)})
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("findCodedErrors = %q, want %q", got, tc.want)
 			}
@@ -323,73 +375,254 @@ func TestCodedErrorsReportsCopiedErrorTypesOutsideFault(t *testing.T) {
 	}
 }
 
-func TestBaselinesReportStaleDuplicateAndMalformedEntries(t *testing.T) {
+func TestCodedErrorsExemptsPluginWireProtocolBoundary(t *testing.T) {
 	t.Parallel()
-	setters := baseline{file: "setters.allow", fields: 2}
-	found := []finding{
-		{entry: "internal/app Real.SetReal", message: "setters: internal/app Real.SetReal injects a dependency after construction"},
-		{entry: "internal/app Other.SetOther", message: "setters: internal/app Other.SetOther injects a dependency after construction"},
-		{message: "fakes: internal/app imports the test kit internal/store/storetest from a production file"},
-	}
 	cases := []struct {
-		name    string
-		content string
-		want    []string
+		name   string
+		dir    string
+		source string
+		want   []string
 	}{
+		{name: "plugin wire contract", dir: pluginWire, source: "type Error struct{}\nfunc CodeOf(err error) string { return \"\" }\n"},
+		{name: "out-of-process plugin connector", dir: "plugins/gmail/connector", source: "type Error struct{}\n"},
 		{
-			name:    "entries cover the findings they match",
-			content: "# header\n\ninternal/app Real.SetReal  # reason\ninternal/app Other.SetOther\n",
-			want:    []string{"fakes: internal/app imports the test kit internal/store/storetest from a production file"},
-		},
-		{
-			name:    "stale entry",
-			content: "internal/app Real.SetReal  # reason\ninternal/app Other.SetOther\ninternal/app Nope.SetNope  # gone\n",
+			name:   "plugin module is still checked",
+			dir:    "internal/modules/plugin",
+			source: "type Error struct{}\nfunc CodeOf(err error) string { return \"\" }\n",
 			want: []string{
-				"fakes: internal/app imports the test kit internal/store/storetest from a production file",
-				"setters.allow:3: stale allow entry internal/app Nope.SetNope",
+				"codederrors: internal/modules/plugin declares its own CodeOf; use fault.CodeOf",
+				"codederrors: internal/modules/plugin declares its own Error type; use platform/fault",
 			},
 		},
 		{
-			name:    "duplicate entry",
-			content: "internal/app Real.SetReal\ninternal/app  Real.SetReal  # again\ninternal/app Other.SetOther\n",
+			name:   "plugin connector host is still checked",
+			dir:    "internal/modules/plugin/connector",
+			source: "type Error struct{}\n",
 			want: []string{
-				"fakes: internal/app imports the test kit internal/store/storetest from a production file",
-				"setters.allow:2: duplicate entry internal/app Real.SetReal",
-			},
-		},
-		{
-			name:    "too many fields",
-			content: "internal/app Real.SetReal extra\ninternal/app Other.SetOther\n",
-			want: []string{
-				"fakes: internal/app imports the test kit internal/store/storetest from a production file",
-				"setters.allow:1: malformed entry \"internal/app Real.SetReal extra\"",
-				"setters: internal/app Real.SetReal injects a dependency after construction",
-			},
-		},
-		{
-			name:    "missing baseline",
-			content: "",
-			want: []string{
-				"fakes: internal/app imports the test kit internal/store/storetest from a production file",
-				"setters: internal/app Other.SetOther injects a dependency after construction",
-				"setters: internal/app Real.SetReal injects a dependency after construction",
+				"codederrors: internal/modules/plugin/connector declares its own Error type; use platform/fault",
 			},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := setters.apply(found, tc.content)
+			got := findCodedErrors([]sourcePackage{sourceFixture(t, tc.dir, tc.source)})
 			if !slices.Equal(got, tc.want) {
-				t.Fatalf("apply = %q, want %q", got, tc.want)
+				t.Fatalf("findCodedErrors = %q, want %q", got, tc.want)
 			}
 		})
 	}
-	t.Run("a file that does not exist reads as an empty baseline", func(t *testing.T) {
+}
+
+func TestAllowListAntiResurrection(t *testing.T) {
+	t.Parallel()
+	for _, check := range []string{"layers", "fakes", "setters", "codederrors"} {
+		t.Run(check+" fails when allow-list file exists", func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			allowPath := filepath.Join(dir, check+".allow")
+			deps := runDeps{
+				allowDir:      dir,
+				moduleMapFile: filepath.Join(dir, "module-map.txt"),
+				readGroups:    func() (map[string][]dirEntry, error) { return map[string][]dirEntry{}, nil },
+				readApp:       func() ([]dirEntry, error) { return nil, nil },
+				loadRepo:      func(context.Context) (repository, error) { return repository{}, nil },
+			}
+			var stdout, stderr bytes.Buffer
+			if code := runWithDeps(t.Context(), []string{check}, &stdout, &stderr, deps); code != 0 {
+				t.Fatalf("without allow-list: code = %d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
+			}
+			if err := os.WriteFile(allowPath, nil, 0o600); err != nil {
+				t.Fatal(err)
+			}
+			stdout.Reset()
+			stderr.Reset()
+			code := runWithDeps(t.Context(), []string{check}, &stdout, &stderr, deps)
+			want := filepath.ToSlash(allowPath) + ": allow-list files are forbidden after close-out\n"
+			if code != 1 || stdout.String() != want {
+				t.Fatalf("with allow-list: code = %d stdout=%q stderr=%q, want 1 and %q", code, stdout.String(), stderr.String(), want)
+			}
+		})
+	}
+}
+
+func TestModuleMap(t *testing.T) {
+	t.Parallel()
+	samplePackages := []repoPackage{
+		{path: "scripts/archcheck", name: "main"},
+		{path: "plugins/gmail/connector", name: "connector"},
+		{path: "internal/channels/discord", name: "discord"},
+		{path: "internal/modules/memory", name: "memory"},
+		{path: "internal/platform/turn/engine", name: "runtimeengine"},
+		{path: "internal/platform/sqlite/sqlitetest", name: "sqlitetest"},
+		{path: "internal/platform/sqlite", name: "sqlite"},
+		{path: "internal/cli", name: "cli"},
+		{path: "internal/app/config", name: "config"},
+		{path: "internal/app", name: "app"},
+		{path: "cmd/aura-connector-gmail", name: "main"},
+		{path: "cmd/aura", name: "main"},
+	}
+	wantRendered := strings.Join([]string{
+		"cmd/",
+		"  cmd/aura",
+		"  cmd/aura-connector-gmail",
+		"",
+		"internal/app/",
+		"  internal/app",
+		"  internal/app/config",
+		"",
+		"internal/cli/",
+		"  internal/cli",
+		"",
+		"internal/platform/",
+		"  internal/platform/sqlite",
+		"  internal/platform/sqlite/sqlitetest",
+		"  internal/platform/turn/engine (package runtimeengine)",
+		"",
+		"internal/modules/",
+		"  internal/modules/memory",
+		"",
+		"internal/channels/",
+		"  internal/channels/discord",
+		"",
+		"plugins/",
+		"  plugins/gmail/connector",
+		"",
+	}, "\n")
+
+	t.Run("deterministic rendering omits package main and annotates mismatched names", func(t *testing.T) {
 		t.Parallel()
-		content, err := readOptional(filepath.Join(t.TempDir(), "missing.allow"))
-		if err != nil || content != "" {
-			t.Fatalf("readOptional = %q, %v, want an empty baseline", content, err)
+		got, err := renderModuleMap(samplePackages)
+		if err != nil {
+			t.Fatalf("renderModuleMap: %v", err)
+		}
+		if got != wantRendered {
+			t.Fatalf("renderModuleMap =\n%s\nwant:\n%s", got, wantRendered)
+		}
+		if strings.Contains(got, "(package main)") {
+			t.Fatalf("rendered map must omit (package main):\n%s", got)
+		}
+		if strings.Contains(got, "scripts/archcheck") {
+			t.Fatalf("rendered map must exclude scripts/:\n%s", got)
+		}
+	})
+
+	t.Run("unknown section under internal fails rather than dropping package", func(t *testing.T) {
+		t.Parallel()
+		_, err := renderModuleMap([]repoPackage{{path: "internal/orphan", name: "orphan"}})
+		if err == nil || !strings.Contains(err.Error(), "internal/orphan") {
+			t.Fatalf("renderModuleMap error = %v, want error naming internal/orphan", err)
+		}
+	})
+
+	t.Run("stdout mode prints rendered map and exits 0", func(t *testing.T) {
+		t.Parallel()
+		deps := runDeps{
+			allowDir:      t.TempDir(),
+			moduleMapFile: filepath.Join(t.TempDir(), "module-map.txt"),
+			loadRepo:      func(context.Context) (repository, error) { return repository{packages: samplePackages}, nil },
+		}
+		var stdout, stderr bytes.Buffer
+		code := runWithDeps(t.Context(), []string{"modulemap"}, &stdout, &stderr, deps)
+		if code != 0 || stdout.String() != wantRendered || stderr.Len() != 0 {
+			t.Fatalf("code=%d stdout=%q stderr=%q, want 0 and rendered map", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("write creates 0644 file and check detects match added or missing package", func(t *testing.T) {
+		t.Parallel()
+		target := filepath.Join(t.TempDir(), "golden", "module-map.txt")
+		load := func(pkgs []repoPackage) func(context.Context) (repository, error) {
+			return func(context.Context) (repository, error) { return repository{packages: pkgs}, nil }
+		}
+		deps := runDeps{allowDir: t.TempDir(), moduleMapFile: target, loadRepo: load(samplePackages)}
+		var stdout, stderr bytes.Buffer
+		if code := runWithDeps(t.Context(), []string{"modulemap", "-write", "-file", target}, &stdout, &stderr, deps); code != 0 {
+			t.Fatalf("-write code=%d stderr=%q, want 0", code, stderr.String())
+		}
+		info, err := os.Stat(target)
+		if err != nil {
+			t.Fatalf("stat %s: %v", target, err)
+		}
+		if mode := info.Mode().Perm(); mode != 0o644 {
+			t.Fatalf("file mode = %o, want 0644", mode)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if code := runWithDeps(t.Context(), []string{"modulemap", "-check", "-file", target}, &stdout, &stderr, deps); code != 0 {
+			t.Fatalf("-check match code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
+		}
+
+		added := append(slices.Clone(samplePackages), repoPackage{path: "internal/modules/newmod", name: "newmod"})
+		deps.loadRepo = load(added)
+		stdout.Reset()
+		stderr.Reset()
+		if code := runWithDeps(t.Context(), []string{"modulemap", "-check", "-file", target}, &stdout, &stderr, deps); code != 1 || !strings.Contains(stdout.String(), "differs at line") {
+			t.Fatalf("-check added package code=%d stdout=%q stderr=%q, want 1 with differing line", code, stdout.String(), stderr.String())
+		}
+
+		missing := slices.DeleteFunc(slices.Clone(samplePackages), func(p repoPackage) bool { return p.path == "internal/modules/memory" })
+		deps.loadRepo = load(missing)
+		stdout.Reset()
+		stderr.Reset()
+		if code := runWithDeps(t.Context(), []string{"modulemap", "-check", "-file", target}, &stdout, &stderr, deps); code != 1 || !strings.Contains(stdout.String(), "differs at line") {
+			t.Fatalf("-check missing package code=%d stdout=%q stderr=%q, want 1 with differing line", code, stdout.String(), stderr.String())
+		}
+	})
+
+	t.Run("flag validation rejects invalid modulemap invocations with exit 2", func(t *testing.T) {
+		t.Parallel()
+		deps := runDeps{
+			allowDir:      t.TempDir(),
+			moduleMapFile: filepath.Join(t.TempDir(), "module-map.txt"),
+			loadRepo:      func(context.Context) (repository, error) { return repository{packages: samplePackages}, nil },
+		}
+		cases := []struct {
+			name string
+			args []string
+		}{
+			{"check and write together", []string{"modulemap", "-check", "-write"}},
+			{"unknown flag", []string{"modulemap", "-unknown"}},
+			{"extra positional arg", []string{"modulemap", "extra"}},
+			{"flag in multi-check", []string{"layout", "-check"}},
+			{"flag after modulemap in multi-check", []string{"layout", "modulemap", "-check"}},
+			{"unknown check", []string{"nope"}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+				var stdout, stderr bytes.Buffer
+				if code := runWithDeps(t.Context(), tc.args, &stdout, &stderr, deps); code != 2 || stderr.Len() == 0 {
+					t.Fatalf("args %v: code=%d stdout=%q stderr=%q, want 2 with stderr message", tc.args, code, stdout.String(), stderr.String())
+				}
+			})
+		}
+	})
+
+	t.Run("multi-check layout modulemap runs check against default golden file", func(t *testing.T) {
+		t.Parallel()
+		target := filepath.Join(t.TempDir(), "module-map.txt")
+		if err := os.WriteFile(target, []byte(wantRendered), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		deps := runDeps{
+			allowDir:      t.TempDir(),
+			moduleMapFile: target,
+			readGroups:    func() (map[string][]dirEntry, error) { return map[string][]dirEntry{}, nil },
+			readApp:       func() ([]dirEntry, error) { return nil, nil },
+			loadRepo:      func(context.Context) (repository, error) { return repository{packages: samplePackages}, nil },
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runWithDeps(t.Context(), []string{"layout", "modulemap"}, &stdout, &stderr, deps); code != 0 {
+			t.Fatalf("layout modulemap match: code=%d stdout=%q stderr=%q, want 0", code, stdout.String(), stderr.String())
+		}
+		if err := os.WriteFile(target, []byte("cmd/\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		stdout.Reset()
+		stderr.Reset()
+		if code := runWithDeps(t.Context(), []string{"layout", "modulemap"}, &stdout, &stderr, deps); code != 1 || !strings.Contains(stdout.String(), "differs at line") {
+			t.Fatalf("layout modulemap mismatch: code=%d stdout=%q stderr=%q, want 1 with differing line", code, stdout.String(), stderr.String())
 		}
 	})
 }

@@ -15,17 +15,20 @@ import (
 	"testing"
 	"time"
 
-	"github.com/anggasct/aura/internal/config"
+	"github.com/anggasct/aura/internal/channels/kit/access"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/configkit"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/store"
-	"github.com/anggasct/aura/internal/store/storetest"
+	"github.com/anggasct/aura/internal/platform/turn/store"
+	"github.com/anggasct/aura/internal/platform/usage"
 )
 
 const (
@@ -439,7 +442,7 @@ func (fixedRouter) ServesPersona(channel, account, persona string) bool {
 }
 
 type storeSessions struct {
-	sessions store.SessionService
+	sessions turnstore.SessionService
 }
 
 func (s storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, agentID string) error {
@@ -447,8 +450,8 @@ func (s storeSessions) EnsureSession(ctx context.Context, sessionID, ownerID, ag
 		return nil
 	}
 	now := time.Now().UTC()
-	err := s.sessions.Create(ctx, &store.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
-	if code, ok := fault.CodeOf[store.ErrorCode](err); ok && code == store.ErrorCodeSessionIDConflict {
+	err := s.sessions.Create(ctx, &turn.Session{ID: sessionID, OwnerID: ownerID, AgentID: agentID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now})
+	if code, ok := fault.CodeOf[turnstore.ErrorCode](err); ok && code == turnstore.ErrorCodeSessionIDConflict {
 		return nil
 	}
 	return err
@@ -465,7 +468,7 @@ func (c *failingCursors) Advance(ctx context.Context, source string, next int64,
 	failing := c.failing
 	c.mu.Unlock()
 	if failing {
-		return store.Errorf(store.ErrorCodeInvalidArgument, "cursor write blocked")
+		return fault.New(ErrorCodeInvalidArgument, "cursor write blocked")
 	}
 	return c.CursorStore.Advance(ctx, source, next, at)
 }
@@ -501,8 +504,8 @@ type harness struct {
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	t.Setenv(testTokenEnv, testToken)
-	db := storetest.OpenMigrated(t)
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler)})
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), usage.Schema(), principal.Schema(), storage.Schema(), Schema())
+	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -510,12 +513,16 @@ func newHarness(t *testing.T) *harness {
 	if err != nil {
 		t.Fatalf("NewExecutor: %v", err)
 	}
+	cursors, err := NewSQLiteCursorStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteCursorStore: %v", err)
+	}
 	return &harness{
 		db:       db,
 		api:      newFakeBotAPI(t),
-		cursors:  store.NewTelegramCursorStore(db),
+		cursors:  cursors,
 		effects:  executor,
-		sessions: storeSessions{sessions: store.NewSessionService(db)},
+		sessions: storeSessions{sessions: turnstore.NewSessionService(db)},
 		logs:     &logCapture{},
 	}
 }
@@ -525,36 +532,54 @@ func (h *harness) adapter(t *testing.T, cursors CursorStore) *Adapter {
 	return h.adapterWith(t, cursors, nil)
 }
 
-func (h *harness) adapterWith(t *testing.T, cursors CursorStore, configure func(*config.Telegram, *config.TelegramAccount)) *Adapter {
+func (h *harness) adapterWith(t *testing.T, cursors CursorStore, configure func(*Config, *Account)) *Adapter {
+	t.Helper()
+	return h.adapterWithDeps(t, cursors, configure, nil)
+}
+
+func (h *harness) adapterWithDeps(t *testing.T, cursors CursorStore, configure func(*Config, *Account), configureDeps func(*Deps)) *Adapter {
 	t.Helper()
 	if cursors == nil {
 		cursors = h.cursors
 	}
-	cfg := &config.Telegram{
+	cfg := &Config{
 		Enabled:            true,
-		Polling:            config.TelegramPolling{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
-		MaxAttachmentBytes: config.TelegramMaxAttachmentBytes,
+		Polling:            PollingConfig{Timeout: configkit.Duration(time.Second), MaxBackoff: configkit.Duration(time.Second)},
+		MaxAttachmentBytes: MaxAttachmentBytes,
 	}
-	account := &config.TelegramAccount{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv)}
+	account := &Account{Name: "pocket", BotTokenRef: secrettest.Ref("env://" + testTokenEnv)}
 	if configure != nil {
 		configure(cfg, account)
 	}
 	logger := slog.New(slog.NewTextHandler(h.logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	adapter, err := New(cfg, account, cursors, h.effects, h.sessions, logger)
-	if err != nil {
-		t.Fatalf("New: %v", err)
-	}
 	owners, err := principal.NewResolver([]string{"telegram:424242"})
 	if err != nil {
 		t.Fatalf("NewResolver: %v", err)
 	}
-	adapter.SetPrincipalResolver(owners)
-	adapter.SetPersonaRouter(fixedRouter{})
-	adapter.SetDenialObserver(func(_ context.Context, reason string) {
-		h.mu.Lock()
-		defer h.mu.Unlock()
-		h.denials = append(h.denials, reason)
-	})
+	deps := &Deps{
+		Config:            cfg,
+		Account:           account,
+		Cursors:           cursors,
+		Effects:           h.effects,
+		Sessions:          h.sessions,
+		Logger:            logger,
+		PrincipalResolver: owners,
+		PersonaRouter:     fixedRouter{},
+		Access: &access.Settings{
+			Denied: func(_ context.Context, reason string) {
+				h.mu.Lock()
+				defer h.mu.Unlock()
+				h.denials = append(h.denials, reason)
+			},
+		},
+	}
+	if configureDeps != nil {
+		configureDeps(deps)
+	}
+	adapter, err := New(deps)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	adapter.bot.base = h.api.srv.URL
 	adapter.retryBase = 10 * time.Millisecond
 	adapter.rateCap = 50 * time.Millisecond

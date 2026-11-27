@@ -13,7 +13,6 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/store"
 )
 
 func TestDurableTurnFirstLife(t *testing.T) {
@@ -173,11 +172,11 @@ type retrievedPayload struct {
 	} `json:"counts"`
 }
 
-func retrievals(t *testing.T, events []store.RuntimeEvent) []retrievedPayload {
+func retrievals(t *testing.T, events []turn.Event) []retrievedPayload {
 	t.Helper()
 	var payloads []retrievedPayload
 	for i := range events {
-		if events[i].Kind != turn.EventKindKnowledgeRetrieved {
+		if events[i].Kind != knowledge.EventKindRetrieved {
 			continue
 		}
 		if strings.Contains(string(events[i].Payload), originalKnowledge) {

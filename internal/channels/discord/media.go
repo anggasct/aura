@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -68,16 +69,16 @@ func (a *Adapter) mediaClient() *http.Client {
 func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachmentPayload, limit int64) (*os.File, error) {
 	endpoint, err := url.Parse(attachment.URL)
 	if err != nil || endpoint.Hostname() == "" {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment url is not a valid endpoint")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment url is not a valid endpoint")
 	}
 	if endpoint.Scheme != "https" && (endpoint.Scheme != "http" || !isLoopbackHost(endpoint.Hostname())) {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment url is not a valid https endpoint")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment url is not a valid https endpoint")
 	}
 	if attachment.Size <= 0 || attachment.Size > limit {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment size is outside the allowed bound")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment size is outside the allowed bound")
 	}
 	if !media.Eligible(attachment.ContentType) {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
 	}
 	call, cancel := context.WithTimeout(ctx, mediaDownloadTimeout)
 	defer cancel()
@@ -91,18 +92,18 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment download did not succeed")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment download did not succeed")
 	}
 	actual := resp.Header.Get("Content-Type")
 	if actual != "" && !media.Eligible(actual) {
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
 	}
 	tmp, err := media.Spool(resp.Body, limit)
 	if err != nil {
-		if code, ok := media.CodeOf(err); ok && code == media.ErrorCodeSizeExceeded {
-			return nil, Errorf(ErrorCodeAttachmentRejected, "attachment size is outside the allowed bound")
+		if fault.HasCode(err, media.ErrorCodeSizeExceeded) {
+			return nil, fault.New(ErrorCodeAttachmentRejected, "attachment size is outside the allowed bound")
 		}
-		return nil, Errorf(ErrorCodeAttachmentRejected, "attachment download did not complete")
+		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment download did not complete")
 	}
 	return tmp, nil
 }
@@ -112,7 +113,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 		return nil, nil, nil
 	}
 	if len(attachments) > maxAttachmentsPerMessage {
-		return nil, nil, Errorf(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
+		return nil, nil, fault.New(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
 	}
 	stash := a.cfg.MaxAttachmentBytes
 	staged := make([]*os.File, 0, len(attachments))
@@ -161,10 +162,10 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 func (a *Adapter) putVisionImage(ctx context.Context, attachment *attachmentPayload, content *os.File, sessionID, messageID string) (media.ArtifactSummary, json.RawMessage, error) {
 	visionSvc := a.visionService()
 	if visionSvc == nil {
-		return media.ArtifactSummary{}, nil, Errorf(ErrorCodeAttachmentRejected, "image intake is not configured")
+		return media.ArtifactSummary{}, nil, fault.New(ErrorCodeAttachmentRejected, "image intake is not configured")
 	}
 	if _, err := content.Seek(0, io.SeekStart); err != nil {
-		return media.ArtifactSummary{}, nil, Errorf(ErrorCodeAttachmentRejected, "attachment download did not complete")
+		return media.ArtifactSummary{}, nil, fault.New(ErrorCodeAttachmentRejected, "attachment download did not complete")
 	}
 	source := a.source()
 	part, err := visionSvc.Ingest(ctx, &vision.IngestRequest{
@@ -196,7 +197,7 @@ func (a *Adapter) putVisionImage(ctx context.Context, attachment *attachmentPayl
 func (a *Adapter) putAttachment(ctx context.Context, attachment *attachmentPayload, content io.Reader, sessionID, messageID string) (media.Receipt, error) {
 	extra, err := json.Marshal(map[string]string{"message_id": messageID})
 	if err != nil {
-		return media.Receipt{}, Errorf(ErrorCodeProtocolInvalid, "artifact metadata is not serializable")
+		return media.Receipt{}, fault.New(ErrorCodeProtocolInvalid, "artifact metadata is not serializable")
 	}
 	return a.media.Put(ctx, content, &media.Meta{
 		SessionID: sessionID,

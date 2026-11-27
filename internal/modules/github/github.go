@@ -3,25 +3,33 @@ package github
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
-	gatewaywebhook "github.com/anggasct/aura/internal/channels/webhook"
-	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
+	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
 const Source = "github"
 
 const maxNormalizedPayloadBytes = 4096
 
+type Correlation struct {
+	Source     string
+	EventType  string
+	ExternalID string
+	RunID      string
+	SignalName string
+	DedupeKey  string
+}
+
 type CorrelationStore interface {
-	BindCorrelation(ctx context.Context, correlation *workflow.Correlation) error
-	ResolveCorrelation(ctx context.Context, source, eventType, externalID, dedupeKey string) (workflow.Correlation, error)
+	BindCorrelation(ctx context.Context, correlation *Correlation) error
+	ResolveCorrelation(ctx context.Context, source, eventType, externalID, dedupeKey string) (Correlation, error)
 	DeleteCorrelation(ctx context.Context, source, eventType, externalID, dedupeKey string) error
-	Run(ctx context.Context, runID string) (*workflow.RunSummary, error)
+	RunDurableKey(ctx context.Context, runID string) (string, error)
 }
 
 type NormalizedEvent struct {
@@ -38,10 +46,10 @@ type Adapter struct {
 
 func NewAdapter(store CorrelationStore, runtime durable.Runtime, logger *slog.Logger) (*Adapter, error) {
 	if store == nil {
-		return nil, errors.New("github adapter requires a correlation store")
+		return nil, fault.New(ErrorCodeInvalidArgument, "github adapter requires a correlation store")
 	}
 	if runtime == nil {
-		return nil, errors.New("github adapter requires a durable runtime")
+		return nil, fault.New(ErrorCodeInvalidArgument, "github adapter requires a durable runtime")
 	}
 	if logger == nil {
 		logger = slog.Default()
@@ -204,7 +212,7 @@ func (a *Adapter) Handle(ctx context.Context, event *gatewaywebhook.AcceptedEven
 	}
 	binding, err := a.store.ResolveCorrelation(ctx, Source, normalized.EventType, normalized.ExternalID, "")
 	if err != nil {
-		if code, ok := workflow.CodeOf(err); ok && code == workflow.ErrorCodeCorrelationUnmatched {
+		if fault.HasCode(err, ErrorCodeCorrelationUnmatched) {
 			a.logger.WarnContext(ctx, "github event matches no workflow",
 				"component", "github",
 				"event_type", normalized.EventType,
@@ -215,22 +223,22 @@ func (a *Adapter) Handle(ctx context.Context, event *gatewaywebhook.AcceptedEven
 		}
 		return true, gatewaywebhook.ExecutionRef{}, err
 	}
-	delivery := &workflow.Correlation{
+	delivery := &Correlation{
 		Source: binding.Source, EventType: binding.EventType, ExternalID: binding.ExternalID,
 		RunID: binding.RunID, SignalName: binding.SignalName, DedupeKey: eventDedupeKey(event),
 	}
 	if err := a.store.BindCorrelation(ctx, delivery); err != nil {
-		if code, ok := workflow.CodeOf(err); ok && code == workflow.ErrorCodeCorrelationConflict {
+		if fault.HasCode(err, ErrorCodeCorrelationConflict) {
 			return true, gatewaywebhook.ExecutionRef{ExecutionID: binding.RunID}, nil
 		}
 		return true, gatewaywebhook.ExecutionRef{}, err
 	}
-	summary, err := a.store.Run(ctx, binding.RunID)
+	durableKey, err := a.store.RunDurableKey(ctx, binding.RunID)
 	if err != nil {
 		_ = a.store.DeleteCorrelation(ctx, delivery.Source, delivery.EventType, delivery.ExternalID, delivery.DedupeKey)
 		return true, gatewaywebhook.ExecutionRef{}, err
 	}
-	if err := a.runtime.Signal(ctx, durable.RunRef{Key: summary.DurableKey}, binding.SignalName, normalized.Payload); err != nil {
+	if err := a.runtime.Signal(ctx, durable.RunRef{Key: durableKey}, binding.SignalName, normalized.Payload); err != nil {
 		_ = a.store.DeleteCorrelation(ctx, delivery.Source, delivery.EventType, delivery.ExternalID, delivery.DedupeKey)
 		return true, gatewaywebhook.ExecutionRef{}, fmt.Errorf("signal run %s: %w", binding.RunID, err)
 	}

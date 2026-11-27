@@ -1,0 +1,109 @@
+package turnstore
+
+import (
+	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
+)
+
+func TestConversationSessionPointerLifecycle(t *testing.T) {
+	db := newTestDB(t)
+	ctx := t.Context()
+	s := NewConversationSessionStore(db)
+	key := "main/discord:owner/dm:111"
+	seedPersonaSession(t, db, key, "local-owner", "main")
+	seedPersonaSession(t, db, key+"~aaaa", "local-owner", "main")
+	seedPersonaSession(t, db, key+"~bbbb", "local-owner", "main")
+
+	if id, found, err := s.Resolve(ctx, key); err != nil || found || id != "" {
+		t.Fatalf("Resolve before pointer = %q %v %v", id, found, err)
+	}
+	for _, target := range []string{key + "~aaaa", key + "~bbbb"} {
+		if err := s.Point(ctx, key, target); err != nil {
+			t.Fatalf("Point(%s): %v", target, err)
+		}
+		if id, found, err := s.Resolve(ctx, key); err != nil || !found || id != target {
+			t.Fatalf("Resolve = %q %v %v, want %s", id, found, err, target)
+		}
+	}
+	var rows int
+	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM conversation_session`).Scan(&rows); err != nil || rows != 1 {
+		t.Fatalf("pointer rows = %d %v, want one upserted row", rows, err)
+	}
+	if err := s.Clear(ctx, key); err != nil {
+		t.Fatalf("Clear: %v", err)
+	}
+	if _, found, _ := s.Resolve(ctx, key); found {
+		t.Fatal("pointer survived Clear")
+	}
+	if err := s.Clear(ctx, key); err != nil {
+		t.Fatalf("Clear without pointer: %v", err)
+	}
+}
+
+func TestConversationSessionPointerCascadesAndRejectsUnknownSessions(t *testing.T) {
+	db := newTestDB(t)
+	ctx := t.Context()
+	s := NewConversationSessionStore(db)
+	key := "main/discord:owner/thread:777"
+	seedPersonaSession(t, db, key, "local-owner", "main")
+	seedPersonaSession(t, db, key+"~cccc", "local-owner", "main")
+	if err := s.Point(ctx, key, key+"~missing"); err == nil {
+		t.Fatal("pointer to a missing session accepted")
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSessionNotFound {
+		t.Fatalf("Point(missing) error = %v, want session_not_found", err)
+	}
+	if err := s.Point(ctx, key, key+"~cccc"); err != nil {
+		t.Fatalf("Point: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `DELETE FROM session WHERE id = ?`, key+"~cccc"); err != nil {
+		t.Fatalf("delete pointed session: %v", err)
+	}
+	if id, found, err := s.Resolve(ctx, key); err != nil || found {
+		t.Fatalf("Resolve after cascade = %q %v %v, want no pointer", id, found, err)
+	}
+	for _, call := range []func() error{
+		func() error { _, _, err := s.Resolve(ctx, ""); return err },
+		func() error { return s.Point(ctx, "", key) },
+		func() error { return s.Point(ctx, key, "") },
+		func() error { return s.Clear(ctx, "") },
+	} {
+		if err := call(); err == nil {
+			t.Error("empty argument accepted")
+		}
+	}
+}
+
+func TestConversationSessionBaselineSchemaAndForeignKeys(t *testing.T) {
+	ctx := t.Context()
+	migrations, err := sqlite.Baseline(Schema())
+	if err != nil {
+		t.Fatalf("Baseline: %v", err)
+	}
+	db := sqlitetest.OpenMigrations(t, migrations)
+	seedPersonaSession(t, db, "main/discord:owner/dm:111", "local-owner", "main")
+	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
+	if err != nil || applied != 1 || latest != 1 {
+		t.Fatalf("schema = applied %d latest %d %v, want 1", applied, latest, err)
+	}
+	if _, found, err := NewConversationSessionStore(db).Resolve(ctx, "main/discord:owner/dm:111"); err != nil || found {
+		t.Fatalf("existing conversation resolved to a pointer: %v %v", found, err)
+	}
+	rows, err := db.QueryContext(ctx, `PRAGMA foreign_key_check`)
+	if err != nil {
+		t.Fatalf("foreign_key_check: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	if rows.Next() {
+		t.Error("foreign_key_check reported violations")
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("foreign_key_check rows: %v", err)
+	}
+	var index string
+	if err := db.QueryRowContext(ctx, `SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'conversation_session_session_idx'`).Scan(&index); err != nil {
+		t.Fatalf("pointer index missing: %v", err)
+	}
+}

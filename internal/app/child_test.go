@@ -15,9 +15,11 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
+	"github.com/anggasct/aura/internal/platform/fault"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
-	"github.com/anggasct/aura/internal/store"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
@@ -56,13 +58,51 @@ func newTestChildExec(t *testing.T, db *sql.DB, answer string) (exec *runtimeadk
 	name := "fake-child-model"
 	exec, err := runtimeadk.NewADKExecutor(
 		"aura-test", name, auramodel.Set{name: model},
-		store.NewSessionService(db),
+		turnstore.NewSessionService(db),
 		stubChildBroker{}, nil, slog.New(slog.DiscardHandler),
 	)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	return exec, name
+}
+
+func newTestChildStore(t *testing.T, db *sql.DB) *child.SQLiteStore {
+	t.Helper()
+	s, err := child.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	return s
+}
+
+func newTestChildRegistry(t *testing.T, db *sql.DB) *child.StoreRegistry {
+	t.Helper()
+	reg, err := child.NewStoreRegistry(newTestChildStore(t, db), turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewStoreRegistry: %v", err)
+	}
+	return reg
+}
+
+func newTestChildModule(t *testing.T, db *sql.DB, ledger child.BudgetLedger, signaler child.Signaler, exec *runtimeadk.ADKExecutor, modelName string) *child.Module {
+	t.Helper()
+	var turns child.TurnRunner
+	if exec != nil {
+		turns = exec
+	}
+	mod, err := child.New(&child.ModuleDeps{
+		DB:        db,
+		Sessions:  turnstore.NewSessionService(db),
+		Turns:     turns,
+		Ledger:    ledger,
+		Signaler:  signaler,
+		ModelName: modelName,
+	})
+	if err != nil {
+		t.Fatalf("child.New: %v", err)
+	}
+	return mod
 }
 
 func TestChildRegistrySpawnIdempotent(t *testing.T) {
@@ -77,13 +117,13 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	service, err := child.NewService(newChildRegistry(db))
+	service, err := child.NewService(newTestChildRegistry(t, db))
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -120,7 +160,7 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	rival.Task = "other work"
 	if _, _, err := service.SpawnChild(t.Context(), &rival, now); err == nil {
 		t.Fatal("altered replay must conflict")
-	} else if code, ok := child.CodeOf(err); !ok || code != child.ErrorCodeChildConflict {
+	} else if code, ok := fault.CodeOf[child.ErrorCode](err); !ok || code != child.ErrorCodeChildConflict {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	deep := *spec
@@ -130,7 +170,7 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	deep.ParentDepth = 1
 	if _, _, err := service.SpawnChild(t.Context(), &deep, now); err == nil {
 		t.Fatal("depth above one must fail")
-	} else if code, ok := child.CodeOf(err); !ok || code != child.ErrorCodeChildDepthExceeded {
+	} else if code, ok := fault.CodeOf[child.ErrorCode](err); !ok || code != child.ErrorCodeChildDepthExceeded {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 	widened := *spec
@@ -141,7 +181,7 @@ func TestChildRegistrySpawnIdempotent(t *testing.T) {
 	if _, _, err := service.SpawnChild(t.Context(), &widened, now); err == nil {
 		t.Fatal("widening grants must fail")
 	}
-	registry, err := child.NewService(newChildRegistry(db))
+	registry, err := child.NewService(newTestChildRegistry(t, db))
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -163,13 +203,13 @@ func openChildTestService(t *testing.T, sessions ...string) (*child.Service, tim
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	now := time.Now().UTC()
-	storeSessions := store.NewSessionService(db)
+	storeSessions := turnstore.NewSessionService(db)
 	for _, id := range sessions {
-		if err := storeSessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := storeSessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	service, err := child.NewService(newChildRegistry(db))
+	service, err := child.NewService(newTestChildRegistry(t, db))
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -261,7 +301,7 @@ func TestChildRegistryConcurrentAlteredSpawnConflicts(t *testing.T) {
 			succeeded++
 			continue
 		}
-		if code, ok := child.CodeOf(r.err); ok && code == child.ErrorCodeChildConflict {
+		if code, ok := fault.CodeOf[child.ErrorCode](r.err); ok && code == child.ErrorCodeChildConflict {
 			conflicted++
 			continue
 		}
@@ -304,7 +344,7 @@ func TestChildRegistryDepthEnforcedFromDurableState(t *testing.T) {
 	}
 	if _, _, err := service.SpawnChild(t.Context(), leaf, now); err == nil {
 		t.Fatal("grandchild spawn must fail")
-	} else if code, ok := child.CodeOf(err); !ok || code != child.ErrorCodeChildDepthExceeded {
+	} else if code, ok := fault.CodeOf[child.ErrorCode](err); !ok || code != child.ErrorCodeChildDepthExceeded {
 		t.Fatalf("code = %v, %v (%v)", code, ok, err)
 	}
 }
@@ -354,13 +394,14 @@ func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	service, err := child.NewService(newChildRegistry(db))
+	reg := newTestChildRegistry(t, db)
+	service, err := child.NewService(reg)
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -387,10 +428,10 @@ func TestChildRegistryReplayReturnsPersistedGrants(t *testing.T) {
 	if len(replayed.Grants) != 2 {
 		t.Fatalf("replay must return persisted grants: %+v", replayed.Grants)
 	}
-	if _, found, err := newChildRegistry(db).Get(t.Context(), "missing"); err != nil || found {
+	if _, found, err := reg.Get(t.Context(), "missing"); err != nil || found {
 		t.Fatalf("Get missing: %v, %v", found, err)
 	}
-	if _, _, err := newChildRegistry(db).Get(t.Context(), "ch-1"); err != nil {
+	if _, _, err := reg.Get(t.Context(), "ch-1"); err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 }
@@ -406,19 +447,17 @@ func TestBuildChildHandlerRegisters(t *testing.T) {
 		t.Fatalf("openStorage: %v", err)
 	}
 	defer func() { _ = db.Close() }()
-	handler, err := buildChildHandler(db, nil, nil, nil, "")
-	if err != nil {
-		t.Fatalf("buildChildHandler: %v", err)
-	}
+	mod := newTestChildModule(t, db, nil, nil, nil, "")
 	runtime := durabletest.NewFake()
-	if err := registerChildHandler(runtime, handler); err != nil {
-		t.Fatalf("registerChildHandler: %v", err)
+	if err := mod.Register(runtime); err != nil {
+		t.Fatalf("mod.Register: %v", err)
 	}
-	if err := registerChildHandler(runtime, nil); err == nil {
-		t.Error("expected nil handler rejection")
+	var nilMod *child.Module
+	if err := nilMod.Register(runtime); err == nil {
+		t.Error("expected nil module rejection")
 	}
-	if err := registerChildHandler(struct{}{}, handler); err == nil {
-		t.Error("expected non-registrar rejection")
+	if err := mod.Register(nil); err == nil {
+		t.Error("expected nil registrar rejection")
 	}
 }
 
@@ -434,14 +473,14 @@ func TestChildCancellerDrivesDurableCancel(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children := newTestChildStore(t, db)
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -471,8 +510,15 @@ func TestChildCancellerDrivesDurableCancel(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("durable run never started")
 	}
-	canceller := &childCanceller{registry: newChildRegistry(db), runs: &durableChildRuns{runtime: runtime}}
-	state, err := canceller.Cancel(t.Context(), "ch-1")
+	runs, err := child.NewDurableCanceller(runtime)
+	if err != nil {
+		t.Fatalf("NewDurableCanceller: %v", err)
+	}
+	canceller, err := child.NewCancelService(newTestChildRegistry(t, db), runs)
+	if err != nil {
+		t.Fatalf("NewCancelService: %v", err)
+	}
+	state, err := canceller.Cancel(t.Context(), "ch-1", time.Now().UTC())
 	if err != nil || state != "cancelled" {
 		t.Fatalf("Cancel: %s, %v", state, err)
 	}
@@ -501,14 +547,14 @@ func TestChildCancellerDurableFailureLeavesStateUnchanged(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children := newTestChildStore(t, db)
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -519,8 +565,11 @@ func TestChildCancellerDurableFailureLeavesStateUnchanged(t *testing.T) {
 	if err := children.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
-	canceller := &childCanceller{registry: newChildRegistry(db), runs: &failingChildRuns{err: errors.New("durable down")}}
-	if _, err := canceller.Cancel(t.Context(), "ch-1"); err == nil {
+	canceller, err := child.NewCancelService(newTestChildRegistry(t, db), &failingChildRuns{err: errors.New("durable down")})
+	if err != nil {
+		t.Fatalf("NewCancelService: %v", err)
+	}
+	if _, err := canceller.Cancel(t.Context(), "ch-1", time.Now().UTC()); err == nil {
 		t.Fatal("expected durable failure")
 	}
 	got, _, err := children.GetRun(t.Context(), "ch-1")
@@ -538,7 +587,10 @@ func (f *failingChildRuns) CancelRun(_ context.Context, _ string) error {
 }
 
 func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
-	runner := childSessionRunner{}
+	runner, err := child.NewSessionRunner(&child.SessionRunnerDeps{})
+	if err != nil {
+		t.Fatalf("NewSessionRunner: %v", err)
+	}
 	if _, err := runner.RunSession(t.Context(), child.RunRequest{Deadline: time.Now().UTC().Add(time.Minute)}); err == nil {
 		t.Fatal("empty session must fail")
 	}
@@ -546,7 +598,10 @@ func TestProductionSessionRunnerEnforcesBounds(t *testing.T) {
 		t.Fatal("empty task must fail")
 	}
 	exec, _ := newTestChildExec(t, nil, "done")
-	bare := childSessionRunner{exec: exec}
+	bare, err := child.NewSessionRunner(&child.SessionRunnerDeps{Turns: exec})
+	if err != nil {
+		t.Fatalf("NewSessionRunner: %v", err)
+	}
 	if _, err := bare.RunSession(t.Context(), child.RunRequest{SessionID: "sess-child-1", Deadline: time.Now().UTC().Add(time.Minute), Task: "work"}); err == nil {
 		t.Fatal("unresolved owner must fail")
 	}
@@ -575,14 +630,14 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children := newTestChildStore(t, db)
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -593,9 +648,25 @@ func TestProductionHandlerPersistsResultThroughStore(t *testing.T) {
 	if err := children.InsertRun(t.Context(), run); err != nil {
 		t.Fatalf("InsertRun: %v", err)
 	}
-	runs := &childHandlerRuns{store: children}
+	runs, err := child.NewStoreHandlerRuns(children)
+	if err != nil {
+		t.Fatalf("NewStoreHandlerRuns: %v", err)
+	}
 	exec, modelName := newTestChildExec(t, db, "summary of the logs")
-	handler, err := child.NewHandlerWithLedger(runs, childSessionRunner{db: db, exec: exec, modelName: modelName}, newRecordingChildLedger())
+	sessionRunner, err := child.NewSessionRunner(&child.SessionRunnerDeps{
+		Store:     children,
+		Sessions:  sessions,
+		Turns:     exec,
+		ModelName: modelName,
+	})
+	if err != nil {
+		t.Fatalf("NewSessionRunner: %v", err)
+	}
+	handler, err := child.NewHandler(&child.HandlerDeps{
+		Runs:   runs,
+		Exec:   sessionRunner,
+		Ledger: newRecordingChildLedger(),
+	})
 	if err != nil {
 		t.Fatalf("NewHandler: %v", err)
 	}
@@ -645,14 +716,14 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children := newTestChildStore(t, db)
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -664,13 +735,10 @@ func TestProductionHandlerDurablePerStep(t *testing.T) {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	exec, modelName := newTestChildExec(t, db, "per-step answer")
-	handler, err := buildChildHandler(db, newRecordingChildLedger(), nil, exec, modelName)
-	if err != nil {
-		t.Fatalf("buildChildHandler: %v", err)
-	}
+	mod := newTestChildModule(t, db, newRecordingChildLedger(), nil, exec, modelName)
 	runtime := durabletest.NewFake()
-	if err := registerChildHandler(runtime, handler); err != nil {
-		t.Fatalf("registerChildHandler: %v", err)
+	if err := mod.Register(runtime); err != nil {
+		t.Fatalf("mod.Register: %v", err)
 	}
 	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1","task":"run the steps"}`)
 	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: payload})
@@ -748,7 +816,10 @@ func TestDurableCancelRunSignalsCounterpart(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	runs := &durableChildRuns{runtime: runtime}
+	runs, err := child.NewDurableCanceller(runtime)
+	if err != nil {
+		t.Fatalf("NewDurableCanceller: %v", err)
+	}
 	if err := runs.CancelRun(t.Context(), "child/ch-cancel"); err != nil {
 		t.Fatalf("CancelRun: %v", err)
 	}
@@ -822,14 +893,14 @@ func TestProductionHandlerSignalsSettlement(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children := newTestChildStore(t, db)
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -842,13 +913,10 @@ func TestProductionHandlerSignalsSettlement(t *testing.T) {
 	}
 	signaler := &recordingChildSignaler{}
 	exec, modelName := newTestChildExec(t, db, "settlement answer")
-	handler, err := buildChildHandler(db, newRecordingChildLedger(), signaler, exec, modelName)
-	if err != nil {
-		t.Fatalf("buildChildHandler: %v", err)
-	}
+	mod := newTestChildModule(t, db, newRecordingChildLedger(), signaler, exec, modelName)
 	runtime := durabletest.NewFake()
-	if err := registerChildHandler(runtime, handler); err != nil {
-		t.Fatalf("registerChildHandler: %v", err)
+	if err := mod.Register(runtime); err != nil {
+		t.Fatalf("mod.Register: %v", err)
 	}
 	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-1","task":"summarize the logs"}`)
 	ref, err := runtime.Start(t.Context(), durable.StartRequest{Handler: "child.run", Key: "child/ch-1", Payload: payload})
@@ -888,14 +956,14 @@ func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
+	sessions := turnstore.NewSessionService(db)
 	for _, id := range []string{"sess-parent", "sess-child-1"} {
-		if err := sessions.Create(t.Context(), &store.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+		if err := sessions.Create(t.Context(), &turn.Session{ID: id, OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 			t.Fatalf("Create session %s: %v", id, err)
 		}
 	}
-	children := store.NewChildStore(db)
-	run := &store.ChildRun{
+	children := newTestChildStore(t, db)
+	run := &child.Run{
 		ID: "ch-1", IdempotencyKey: "key-1",
 		ParentSessionID: "sess-parent", ParentTurnID: "turn-1", ParentInvocation: "inv-1",
 		ChildSessionID: "sess-child-1", DurableKey: "child/ch-1",
@@ -907,12 +975,9 @@ func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 		t.Fatalf("InsertRun: %v", err)
 	}
 	exec, modelName := newTestChildExec(t, db, "charge me")
-	handler, err := buildChildHandler(db, child.NewLedger(nil, 0), nil, exec, modelName)
-	if err != nil {
-		t.Fatalf("buildChildHandler: %v", err)
-	}
+	mod := newTestChildModule(t, db, child.NewLedger(nil, 0), nil, exec, modelName)
 	payload := []byte(`{"child_id":"ch-1","session_id":"sess-child-1","durable_key":"child/ch-1","reservation_id":"res-unknown","task":"charge me"}`)
-	if err := handler.HandleInvocation(t.Context(), payload, func() time.Time { return now }); err == nil {
+	if err := mod.Handler().HandleInvocation(t.Context(), payload, func() time.Time { return now }); err == nil {
 		t.Fatal("charge against an unknown reservation must fail closed")
 	}
 	got, found, err := children.GetRun(t.Context(), "ch-1")
@@ -921,6 +986,19 @@ func TestProductionHandlerChargeFailsClosed(t *testing.T) {
 	}
 	if got.State != "failed" {
 		t.Fatalf("unreserved charge state = %q, want failed", got.State)
+	}
+}
+
+type capturingTurnRunner struct {
+	req *turn.TurnRequest
+}
+
+func (c *capturingTurnRunner) Execute(_ context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	c.req = req
+	return func(yield func(turn.Event, error) bool) {
+		yield(turn.Event{
+			Payload: []byte(`{"content":{"parts":[{"text":"inspected"}]}}`),
+		}, nil)
 	}
 }
 
@@ -936,11 +1014,11 @@ func TestChildInheritsParentPersona(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 	now := time.Now().UTC()
-	sessions := store.NewSessionService(db)
-	if err := sessions.Create(t.Context(), &store.Session{ID: "sess-parent", OwnerID: "owner-1", AgentID: "engineer", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
+	sessions := turnstore.NewSessionService(db)
+	if err := sessions.Create(t.Context(), &turn.Session{ID: "sess-parent", OwnerID: "owner-1", AgentID: "engineer", CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`)}); err != nil {
 		t.Fatalf("Create parent session: %v", err)
 	}
-	service, err := child.NewService(newChildRegistry(db))
+	service, err := child.NewService(newTestChildRegistry(t, db))
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
@@ -961,8 +1039,23 @@ func TestChildInheritsParentPersona(t *testing.T) {
 	if childSession.AgentID != "engineer" {
 		t.Fatalf("child session persona = %q, want the parent's engineer", childSession.AgentID)
 	}
-	projection := childSessionRunner{db: db}.loadProjection(t.Context(), "sess-child-persona")
-	if req := childTurnRequest("sess-child-persona", "ch-persona", "inspect the repo", time.Time{}, projection); req.AgentID != "engineer" {
-		t.Fatalf("child turn persona = %q, want engineer", req.AgentID)
+	capture := &capturingTurnRunner{}
+	runner, err := child.NewSessionRunner(&child.SessionRunnerDeps{
+		Store:    newTestChildStore(t, db),
+		Sessions: sessions,
+		Turns:    capture,
+	})
+	if err != nil {
+		t.Fatalf("NewSessionRunner: %v", err)
+	}
+	if _, err := runner.RunSession(t.Context(), child.RunRequest{
+		ChildID:   "ch-persona",
+		SessionID: "sess-child-persona",
+		Task:      "inspect the repo",
+	}); err != nil {
+		t.Fatalf("RunSession: %v", err)
+	}
+	if capture.req == nil || capture.req.AgentID != "engineer" {
+		t.Fatalf("child turn persona = %+v, want engineer", capture.req)
 	}
 }
