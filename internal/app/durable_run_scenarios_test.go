@@ -61,6 +61,7 @@ var runScenarios = map[string]runScenario{
 	"effect-returned":    effectReturnedWorkflow.scenario(approveTheGate),
 	"effect-interrupted": effectInterruptedWorkflow.scenario(approveTheGate),
 	"child":              {seed: seedChild, host: hostChild, firstLife: startTheChild},
+	"agent-step":         {seed: seedAgentStep, host: hostAgentStep, firstLife: startAgentStepRun, started: discoverTheRun},
 }
 
 type workflowStub struct {

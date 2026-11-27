@@ -5,14 +5,18 @@ package app
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"os"
 	"testing"
+
+	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/modules/child"
 	githubadapter "github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/effect"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	gatewaywebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
@@ -213,4 +217,83 @@ func TestDurableChildResumesAfterAKilledProcess(t *testing.T) {
 	suite.ledger.requireCount(t, modelCalls, 3)
 	suite.ledger.requireCount(t, executions("tool-a"), 1)
 	suite.ledger.requireCount(t, executions("tool-b"), 1)
+}
+
+func TestDurableWorkflowAgentStepResumesAfterAKilledProcess(t *testing.T) {
+	suite := startRunSuite(t, runStart{scenario: "agent-step"})
+	suite.child.waitKillPoint(t, "the agent step's tool result is about to be persisted", suite.ledger.exists(t, agentStepToolResult+".entered"))
+	prefix := "run/" + suite.plan.Run + "/step/" + agentStepID + "/attempt/0/agent/"
+	for _, action := range []string{prefix + "model-1", prefix + "call-1-0/execution"} {
+		if n := countRows(t, suite.db, `SELECT COUNT(*) FROM durable_action WHERE run_key = ? AND action_key = ?`, suite.plan.Key, action); n != 1 {
+			t.Fatalf("journal actions %q at the kill = %d, want 1", action, n)
+		}
+	}
+	if n := countRows(t, suite.db, `SELECT COUNT(*) FROM durable_action WHERE run_key = ? AND action_key = ?`, suite.plan.Key, prefix+"model-2"); n != 0 {
+		t.Fatalf("journal actions %q at the kill = %d, want 0", prefix+"model-2", n)
+	}
+	suite.ledger.requireCount(t, modelCalls, 1)
+	suite.ledger.requireCount(t, executions(agentStepReadTool), 1)
+
+	suite.child.kill(t)
+	suite.openSecondLife(t)
+	suite.requireRunSucceeded(t)
+
+	afterKill := 0
+	for _, record := range suite.ledger.records(t, modelCalls) {
+		if record.Life != 2 {
+			continue
+		}
+		afterKill++
+		var request agentModelRequest
+		if err := json.Unmarshal([]byte(record.Text), &request); err != nil {
+			t.Fatalf("decode the model request after the kill: %v", err)
+		}
+		if len(request.Results) != 1 || request.Results[0] != agentStepReadTool+` {"ok":true}` {
+			t.Errorf("the model request after the kill carries %v, want the recorded %s result", request.Results, agentStepReadTool)
+		}
+	}
+	if afterKill != 1 {
+		t.Errorf("model calls after the kill = %d, want exactly 1", afterKill)
+	}
+	suite.ledger.requireCount(t, modelCalls, 2)
+	suite.ledger.requireCount(t, executions(agentStepReadTool), 1)
+
+	disk := mustWorkflowStore(t, suite.db)
+	requireStepsSucceeded(t, disk, suite.plan.Run)
+	sessionID := workflow.StepSessionID(suite.plan.Run, agentStepID, 0)
+	events, err := turnstore.NewDedupeStore(suite.db).ListTurnEvents(t.Context(), sessionID, sessionID)
+	if err != nil {
+		t.Fatalf("list the step session events: %v", err)
+	}
+	var calls, results, answers, inputs int
+	for i := range events {
+		if want := fmt.Sprintf("%s-ev-%d", sessionID, i+1); events[i].ID != want {
+			t.Errorf("event %d id = %q, want %q", i+1, events[i].ID, want)
+		}
+		decoded, err := turnstore.RuntimeEventToADK(&events[i])
+		if err != nil {
+			t.Fatalf("decode %s: %v", events[i].ID, err)
+		}
+		for _, part := range decoded.Content.Parts {
+			switch {
+			case part.FunctionCall != nil:
+				calls++
+			case part.FunctionResponse != nil:
+				results++
+			case part.Text == agentStepFinalText:
+				answers++
+			case decoded.Content.Role == genai.RoleUser:
+				inputs++
+			}
+		}
+	}
+	if len(events) != 4 || calls != 1 || results != 1 || answers != 1 || inputs != 1 {
+		t.Errorf("step session holds %d events: %d input, %d function call, %d result, %d final answer; want 4 events with one of each", len(events), inputs, calls, results, answers)
+	}
+	if n := countRows(t, suite.db, `SELECT COUNT(*) FROM usage_reservation WHERE state = 'settled'`); n != 2 {
+		t.Errorf("settled usage reservations = %d, want one per model call (2)", n)
+	}
+	if n := countRows(t, suite.db, `SELECT COUNT(*) FROM usage_reservation`); n != 2 {
+		t.Errorf("usage reservations = %d, want 2", n)
+	}
 }
