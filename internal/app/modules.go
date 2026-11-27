@@ -2742,6 +2742,75 @@ func workflowProposalOfferers(ports []runtimechannelhost.ChannelPort) []workflow
 	return offerers
 }
 
+var agentStepToolNames = []string{filesystem.ReadFileToolName, filesystem.ListDirToolName, search.ToolName, fetch.ToolName}
+
+type readOnlyAgentStepTools struct {
+	inner runtimeadk.BuiltinToolExecutor
+}
+
+func newReadOnlyAgentStepTools(inner runtimeadk.BuiltinToolExecutor) (*readOnlyAgentStepTools, error) {
+	if inner == nil {
+		return nil, invalidOptions("the agent step tools need the surface tool executor")
+	}
+	return &readOnlyAgentStepTools{inner: inner}, nil
+}
+
+func (r *readOnlyAgentStepTools) Definitions() []runtimeadk.BuiltinToolDefinition {
+	registered := r.inner.Definitions()
+	offered := make([]runtimeadk.BuiltinToolDefinition, 0, len(agentStepToolNames))
+	for i := range registered {
+		if slices.Contains(agentStepToolNames, registered[i].Name) {
+			offered = append(offered, registered[i])
+		}
+	}
+	return offered
+}
+
+func (r *readOnlyAgentStepTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
+	if request == nil {
+		return nil, invalidOptions("builtin tool request must not be nil")
+	}
+	if !slices.Contains(agentStepToolNames, request.ToolName) {
+		return nil, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "tool %q is not available to workflow agent steps", request.ToolName)
+	}
+	forwarded := *request
+	forwarded.Unattended = true
+	return r.inner.Execute(ctx, &forwarded)
+}
+
+type agentStepExecutorInput struct {
+	models     runtimeadk.ModelSource
+	modelName  string
+	sessions   runtimeadk.SessionPort
+	builtin    runtimeadk.BuiltinToolExecutor
+	ledger     *usage.Ledger
+	registry   *auraagent.Registry
+	routeModel func(route string) (string, error)
+	logger     *slog.Logger
+}
+
+func newAgentStepExecutor(in *agentStepExecutorInput) (*runtimeadk.ADKExecutor, error) {
+	opts := []runtimeadk.ExecutorOption{
+		runtimeadk.WithBudgetLedger(in.ledger, "primary"),
+		runtimeadk.WithAgentResolver(in.registry, in.routeModel),
+	}
+	readOnly, err := newReadOnlyAgentStepTools(in.builtin)
+	if err != nil {
+		return nil, err
+	}
+	if len(readOnly.Definitions()) > 0 {
+		opts = append(opts, runtimeadk.WithBuiltinToolExecutor(readOnly))
+	}
+	return runtimeadk.NewADKExecutor("aura", in.modelName, in.models, in.sessions, terminal.DenyPolicy{}, nil, in.logger, opts...)
+}
+
+func (b *build) newAgentStepExecutor() (*runtimeadk.ADKExecutor, error) {
+	return newAgentStepExecutor(&agentStepExecutorInput{
+		models: b.models, modelName: b.primaryModel(), sessions: b.sessions, builtin: b.builtin,
+		ledger: b.ledger, registry: b.registry, routeModel: b.routeModel, logger: b.logger,
+	})
+}
+
 type workflowSessionTextAppender struct {
 	db *sql.DB
 }

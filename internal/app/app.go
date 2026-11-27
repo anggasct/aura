@@ -1632,6 +1632,13 @@ func (b *build) wireWorkflowParts() error {
 	if b.workflowMod == nil || b.interpreter == nil || b.builtin == nil || b.builtin.Broker() == nil {
 		return invalidOptions("the server's workflow parts need an interpreter and the surface tool executor")
 	}
+	stepExecutor, err := b.newAgentStepExecutor()
+	if err != nil {
+		return err
+	}
+	if err := b.workflowMod.BindAgentTurns(stepExecutor, b.events); err != nil {
+		return fault.Wrap(ErrorCodeInvalidArgument, "the server's workflow module cannot run agent steps", err)
+	}
 	if err := b.group.Add(server.Background("workflow_proposal_cards", b.workflowMod.ProposalCardsRunner())); err != nil {
 		return err
 	}
