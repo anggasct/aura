@@ -138,11 +138,11 @@ func TestResolveDefinitionPassesRequestedID(t *testing.T) {
 
 func TestToolsForNarrowsToDeclaredTools(t *testing.T) {
 	executor := &ADKExecutor{tools: []tool.Tool{namedToolStub{name: "read_file"}, namedToolStub{name: "web_fetch"}}}
-	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner, "", nil)
+	narrowed := executor.toolsFor(&auraagent.Definition{Tools: []string{"web_fetch"}}, principal.ClassOwner, "", turnContext{})
 	if len(narrowed) != 1 || narrowed[0].Name() != "web_fetch" {
 		t.Fatalf("tools = %v, want only web_fetch", narrowed)
 	}
-	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, "", nil)
+	full := executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, "", turnContext{})
 	if len(full) != 2 {
 		t.Fatalf("tools = %d, want the full set when no tools are declared", len(full))
 	}
@@ -236,7 +236,7 @@ func TestToolsForOffersOptInToolsOnlyWhenListedForNonOwners(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class, "", nil)); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, "", turnContext{})); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})
@@ -301,7 +301,7 @@ func TestToolsForOffersOwnerOptInToolsOnlyToListedOwnerServerTurns(t *testing.T)
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := toolNames(executor.toolsFor(tc.definition, tc.class, tc.origin, nil))
+			got := toolNames(executor.toolsFor(tc.definition, tc.class, tc.origin, turnContext{}))
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
@@ -331,7 +331,7 @@ func TestWithBuiltinToolExecutorOffersOwnerOptInDefinitionsToListedOwners(t *tes
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := toolNames(executor.toolsFor(listed, tc.class, tc.origin, nil))
+			got := toolNames(executor.toolsFor(listed, tc.class, tc.origin, turnContext{}))
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
@@ -372,7 +372,7 @@ func TestToolsForOffersChannelBoundToolsOnlyOnTheirChannel(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class, tc.origin, nil)); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, tc.origin, turnContext{})); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})
@@ -422,7 +422,7 @@ func TestToolsForExposesExternalToolsOnlyToListedOwnerPersonas(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := names(executor.toolsFor(tc.definition, tc.class, "", nil)); !slices.Equal(got, tc.want) {
+			if got := names(executor.toolsFor(tc.definition, tc.class, "", turnContext{})); !slices.Equal(got, tc.want) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}
 		})

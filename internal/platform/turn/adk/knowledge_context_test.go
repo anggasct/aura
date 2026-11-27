@@ -51,7 +51,7 @@ func TestToolsForOffersKnowledgeSearchOnlyWithAStampedList(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			got := names(executor.toolsFor(tc.definition, tc.class, "", tc.knowledge))
+			got := names(executor.toolsFor(tc.definition, tc.class, "", turnContext{knowledgeScope: tc.knowledge}))
 			if len(got) != len(tc.want) || (len(got) > 0 && !slices.Equal(got, tc.want)) {
 				t.Fatalf("tools = %v, want %v", got, tc.want)
 			}

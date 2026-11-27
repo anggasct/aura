@@ -53,7 +53,16 @@ func turnDescriptorFromRequest(req *turn.TurnRequest) runtimesessions.Descriptor
 		Skill:            req.Skill,
 		StreamPartial:    req.StreamPartial,
 		Knowledge:        slices.Clone(req.Knowledge),
+		InputTainted:     req.InputTainted,
+		ToolRestriction:  cloneToolRestriction(req.ToolRestriction),
 	}
+}
+
+func cloneToolRestriction(restriction *turn.ToolRestriction) *turn.ToolRestriction {
+	if restriction == nil {
+		return nil
+	}
+	return &turn.ToolRestriction{Allowed: slices.Clone(restriction.Allowed)}
 }
 
 func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *turn.TurnRequest {
@@ -80,6 +89,8 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *turn.TurnReque
 		Skill:            desc.Skill,
 		StreamPartial:    desc.StreamPartial,
 		Knowledge:        slices.Clone(desc.Knowledge),
+		InputTainted:     desc.InputTainted,
+		ToolRestriction:  cloneToolRestriction(desc.ToolRestriction),
 	}
 }
 

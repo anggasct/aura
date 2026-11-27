@@ -26,11 +26,11 @@ func QuoteUntrusted(text string) string {
 }
 
 func (r *TurnRequest) Tainted() bool {
-	return r == nil || len(r.Knowledge) > 0 || r.UntrustedContext != nil || !authoredInputOrigin(r.Origin)
+	return r == nil || len(r.Knowledge) > 0 || r.UntrustedContext != nil || r.InputTainted || !authoredInputOrigin(r.Origin)
 }
 
 func authoredInputOrigin(origin Origin) bool {
-	if origin == OriginTerminal || origin == OriginHTTP || origin == OriginSchedule {
+	if origin == OriginTerminal || origin == OriginHTTP || origin == OriginSchedule || origin == OriginWorkflow {
 		return true
 	}
 	channel, account, found := strings.Cut(string(origin), ":")

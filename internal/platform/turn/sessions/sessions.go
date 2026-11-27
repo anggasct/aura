@@ -51,6 +51,8 @@ type Descriptor struct {
 	Skill            *turn.SkillPin           `json:"skill,omitempty"`
 	StreamPartial    bool                     `json:"stream_partial,omitempty"`
 	Knowledge        []string                 `json:"knowledge,omitempty"`
+	InputTainted     bool                     `json:"input_tainted,omitempty"`
+	ToolRestriction  *turn.ToolRestriction    `json:"tool_restriction,omitempty"`
 }
 
 type QueuedTurn struct {

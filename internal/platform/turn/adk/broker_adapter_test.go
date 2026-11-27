@@ -261,3 +261,58 @@ func TestExecutorForwardsTheTaintFlagToTheBroker(t *testing.T) {
 		t.Fatalf("untainted call: %v, decisions %d, want no taint denial and no prompt", err, decisions)
 	}
 }
+
+func TestBrokerExecutorForwardsTheUnattendedFlag(t *testing.T) {
+	cases := []struct {
+		name       string
+		unattended bool
+		wantCode   toolbroker.ResultClass
+		wantAsked  int
+	}{
+		{name: "an attended request reaches the approver", wantAsked: 1},
+		{name: "an unattended request is refused without asking", unattended: true, wantCode: toolbroker.ResultApprovalRequired},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			asked := 0
+			broker, err := toolbroker.New(&toolbroker.Options{
+				HostCapabilities: []string{"workspace-read"},
+				ApprovalDecider: func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+					asked++
+					return true, nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("toolbroker.New: %v", err)
+			}
+			definition := &auratools.Definition{
+				Name: "gated_read", Version: "v1", RequiresApproval: true,
+				Schema:    json.RawMessage(`{"type":"object"}`),
+				Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil },
+			}
+			rule := toolbroker.DefaultRule(definition)
+			adapter := func(context.Context, *toolbroker.ToolRequest, approval.Constraints) (toolbroker.ToolResult, error) {
+				return toolbroker.ToolResult{Output: json.RawMessage(`{"ok":true}`)}, nil
+			}
+			if err := broker.RegisterTool(definition, adapter, &rule); err != nil {
+				t.Fatalf("RegisterTool: %v", err)
+			}
+			executor, err := NewBrokerExecutor(broker, []string{"workspace-read"})
+			if err != nil {
+				t.Fatalf("NewBrokerExecutor: %v", err)
+			}
+			_, err = executor.Execute(t.Context(), &BuiltinToolRequest{
+				RequestID: "request-1", TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
+				PrincipalClass: principal.ClassOwner, ToolName: "gated_read", ToolVersion: "v1",
+				Arguments: json.RawMessage(`{}`), Trust: string(approval.TrustOwnerInput), IdempotencyKey: "key-1",
+				Unattended: tc.unattended,
+			})
+			if code, _ := fault.CodeOf[toolbroker.ResultClass](err); code != tc.wantCode {
+				t.Fatalf("Execute error = %v, want code %q", err, tc.wantCode)
+			}
+			if asked != tc.wantAsked {
+				t.Fatalf("approver asked %d times, want %d", asked, tc.wantAsked)
+			}
+		})
+	}
+}
