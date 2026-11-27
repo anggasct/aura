@@ -1,23 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"go/ast"
-	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
-	"strings"
 )
 
-const (
-	faultPackage      = "internal/platform/fault"
-	operationPackage  = "internal/platform/operation"
-	toolsPackage      = "internal/platform/tools"
-	toolsDefinition   = "Definition"
-	operationOwnedKey = "Operation"
-	noticeOwnedKey    = "OwnerNotice"
-)
+const faultPackage = "internal/platform/fault"
 
 var (
 	fakeName   = regexp.MustCompile(`^(New)?(Fake|Stub|Mock)([A-Z_]|$)`)
@@ -40,7 +32,7 @@ var sourceChecks = []sourceCheck{
 	{name: "fakes", find: findFakes},
 	{name: "setters", find: findSetters},
 	{name: "codederrors", find: findCodedErrors},
-	{name: "operation-definitions", find: findOperationDefinitions},
+	{name: operationDefinitionsCheck, find: findOperationDefinitions},
 }
 
 func findFakes(packages []sourcePackage) []string {
@@ -180,11 +172,17 @@ func findCodedErrors(packages []sourcePackage) []string {
 	return uniqueSorted(violations)
 }
 
-func checkSources(selected []string, packages []repoPackage, allowDir string) ([]string, error) {
+func checkSources(ctx context.Context, selected []string, packages []repoPackage, deps runDeps) ([]string, error) {
 	sources, err := parseSources(packages)
 	if err != nil {
 		return nil, err
 	}
+	if slices.Contains(selected, operationDefinitionsCheck) {
+		if err := typeOperationCandidates(ctx, sources, deps.loadExports); err != nil {
+			return nil, err
+		}
+	}
+	allowDir := deps.allowDir
 	var violations []string
 	for _, check := range sourceChecks {
 		if !slices.Contains(selected, check.name) {
@@ -204,120 +202,4 @@ func hasSourceCheck(selected []string) bool {
 	return slices.ContainsFunc(sourceChecks, func(check sourceCheck) bool {
 		return slices.Contains(selected, check.name)
 	})
-}
-
-func findOperationDefinitions(packages []sourcePackage) []string {
-	var violations []string
-	for _, pkg := range packages {
-		if isTestKit(pkg.name) || within(pkg.path, operationPackage) {
-			continue
-		}
-		for _, file := range pkg.files {
-			alias, ok := toolsAlias(pkg.path, file)
-			if !ok {
-				continue
-			}
-			for _, field := range operationOwnedFields(file, alias) {
-				violations = append(violations, fmt.Sprintf("operation-definitions: %s sets Definition.%s outside %s", pkg.path, field, operationPackage))
-			}
-		}
-	}
-	return uniqueSorted(violations)
-}
-
-func toolsAlias(pkgPath string, file *ast.File) (string, bool) {
-	if pkgPath == toolsPackage {
-		return "", true
-	}
-	for _, spec := range file.Imports {
-		imported := strings.Trim(spec.Path.Value, `"`)
-		if imported != toolsPackage && !strings.HasSuffix(imported, "/"+toolsPackage) {
-			continue
-		}
-		if spec.Name != nil {
-			return spec.Name.Name, spec.Name.Name != "_" && spec.Name.Name != "."
-		}
-		return path.Base(imported), true
-	}
-	return "", false
-}
-
-func operationOwnedFields(file *ast.File, alias string) []string {
-	var fields []string
-	ast.Inspect(file, func(node ast.Node) bool {
-		switch node := node.(type) {
-		case *ast.CompositeLit:
-			fields = append(fields, definitionLiteralFields(node, alias)...)
-		case *ast.AssignStmt:
-			for _, target := range node.Lhs {
-				if selector, ok := target.(*ast.SelectorExpr); ok && isOperationOwned(selector.Sel.Name) {
-					fields = append(fields, selector.Sel.Name)
-				}
-			}
-		}
-		return true
-	})
-	return fields
-}
-
-func definitionLiteralFields(literal *ast.CompositeLit, alias string) []string {
-	var fields []string
-	elements := literal.Elts
-	switch kind := literal.Type.(type) {
-	case *ast.ArrayType:
-		if !isToolsDefinition(kind.Elt, alias) {
-			return nil
-		}
-		for _, element := range elements {
-			if inner, ok := element.(*ast.CompositeLit); ok && inner.Type == nil {
-				fields = append(fields, keyedOperationFields(inner.Elts)...)
-			}
-		}
-		return fields
-	case *ast.MapType:
-		if !isToolsDefinition(kind.Value, alias) {
-			return nil
-		}
-		for _, element := range elements {
-			if pair, ok := element.(*ast.KeyValueExpr); ok {
-				if inner, ok := pair.Value.(*ast.CompositeLit); ok && inner.Type == nil {
-					fields = append(fields, keyedOperationFields(inner.Elts)...)
-				}
-			}
-		}
-		return fields
-	}
-	if !isToolsDefinition(literal.Type, alias) {
-		return nil
-	}
-	return keyedOperationFields(elements)
-}
-
-func keyedOperationFields(elements []ast.Expr) []string {
-	var fields []string
-	for _, element := range elements {
-		pair, ok := element.(*ast.KeyValueExpr)
-		if !ok {
-			continue
-		}
-		if key, ok := pair.Key.(*ast.Ident); ok && isOperationOwned(key.Name) {
-			fields = append(fields, key.Name)
-		}
-	}
-	return fields
-}
-
-func isToolsDefinition(expr ast.Expr, alias string) bool {
-	switch kind := expr.(type) {
-	case *ast.Ident:
-		return alias == "" && kind.Name == toolsDefinition
-	case *ast.SelectorExpr:
-		pkg, ok := kind.X.(*ast.Ident)
-		return ok && alias != "" && pkg.Name == alias && kind.Sel.Name == toolsDefinition
-	}
-	return false
-}
-
-func isOperationOwned(name string) bool {
-	return name == operationOwnedKey || name == noticeOwnedKey
 }
