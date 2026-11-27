@@ -50,26 +50,47 @@ func (b *Broker) recoverIntent(ctx context.Context, call *journaledTool, invocat
 	defer cancel()
 	run := &RecoveryRun{Provider: invocation, Settle: invocation.settleFromData}
 	current := intent
-	for current.State == effect.StateStarted || current.State == effect.StateUnknown {
+	for pending(current) {
 		err := call.recovery(waitCtx, request, current, run)
 		if err == nil {
 			return b.effects.Journal().Get(ctx, current.ID)
 		}
-		if !fault.HasCode(err, effect.ErrorCodeInProgress) {
+		held := fault.HasCode(err, effect.ErrorCodeInProgress)
+		moved := fault.HasCode(err, effect.ErrorCodeTransitionInvalid)
+		if !held && !moved {
 			return nil, err
 		}
-		select {
-		case <-waitCtx.Done():
-			return nil, waitCtx.Err()
-		case <-b.clock.Timer(recoveryPoll):
+		if held {
+			if err := b.awaitRecoveryPoll(waitCtx); err != nil {
+				return nil, err
+			}
 		}
+		previous := current.State
 		var getErr error
 		current, getErr = b.effects.Journal().Get(waitCtx, current.ID)
 		if getErr != nil {
 			return nil, getErr
 		}
+		if moved && current.State == previous {
+			if err := b.awaitRecoveryPoll(waitCtx); err != nil {
+				return nil, err
+			}
+		}
 	}
 	return current, nil
+}
+
+func pending(intent *effect.Intent) bool {
+	return intent.State == effect.StateStarted || intent.State == effect.StateUnknown
+}
+
+func (b *Broker) awaitRecoveryPoll(ctx context.Context) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-b.clock.Timer(recoveryPoll):
+		return nil
+	}
 }
 
 func (i *effectInvocation) settleFromData(ctx context.Context, data json.RawMessage) (effect.Outcome, error) {
