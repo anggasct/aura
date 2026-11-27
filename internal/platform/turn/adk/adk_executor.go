@@ -472,6 +472,7 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		AgentID:         access.agentID,
 		Knowledge:       slices.Clone(access.knowledge),
 		Tainted:         access.tainted,
+		Origin:          access.origin,
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,
