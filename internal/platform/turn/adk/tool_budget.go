@@ -11,11 +11,11 @@ import (
 	"maps"
 	"slices"
 	"strconv"
-	"strings"
 	"sync"
 	"time"
 
 	"google.golang.org/adk/v2/session"
+	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/toolcall"
@@ -109,24 +109,30 @@ type turnToolBudget struct {
 	streakTool      string
 	streakCount     int
 	totalCount      int
+	refusedCallIDs  map[string]bool
 	sawRefusedBatch bool
 	logOnce         sync.Once
 }
 
 func newTurnToolBudget(ctx context.Context, cfg ToolBudget, turnID string, now func() time.Time, logger *slog.Logger) *turnToolBudget {
 	b := &turnToolBudget{
-		cfg:     cfg,
-		turnID:  turnID,
-		now:     now,
-		logger:  logger,
-		streaks: map[string]int{},
+		cfg:            cfg,
+		turnID:         turnID,
+		now:            now,
+		logger:         logger,
+		streaks:        map[string]int{},
+		refusedCallIDs: map[string]bool{},
 	}
 	if deadline, ok := ctx.Deadline(); ok {
 		deadline = deadline.UTC()
+		start, hasStart := turn.StartedAtFrom(ctx)
+		if !hasStart {
+			start = now().UTC()
+		}
 		b.hasHardDeadline = true
 		b.hardDeadline = deadline
 		b.hasSoftDeadline = true
-		b.softDeadline = computeSoftDeadline(now().UTC(), deadline, cfg.AnswerReserve)
+		b.softDeadline = computeSoftDeadline(start, deadline, cfg.AnswerReserve)
 	}
 	return b
 }
@@ -147,9 +153,20 @@ func isBudgetExempt(toolName string) bool {
 	return toolName == auratools.HandoffToolName
 }
 
-func isBudgetRefusal(response map[string]any) bool {
-	msg, ok := response["error"].(string)
-	return ok && strings.HasPrefix(msg, budgetErrorPrefix)
+func (b *turnToolBudget) isRecordedRefusal(response *genai.FunctionResponse) bool {
+	if response == nil {
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if !b.exhausted {
+		return false
+	}
+	if response.ID != "" {
+		return b.refusedCallIDs[response.ID]
+	}
+	msg, ok := response.Response["error"].(string)
+	return ok && msg == b.refusalMessageLocked()
 }
 
 func decodeBudgetDecision(raw []byte) (budgetDecisionRecord, bool) {
@@ -179,7 +196,7 @@ func decodeBudgetDecision(raw []byte) (budgetDecisionRecord, bool) {
 	}
 }
 
-func (b *turnToolBudget) check(ctx context.Context, slot *toolcall.Slot, toolName string) (budgetDecision, error) {
+func (b *turnToolBudget) check(ctx context.Context, slot *toolcall.Slot, toolName, callID string) (budgetDecision, error) {
 	scope, scoped := durable.TurnScopeFrom(ctx)
 	if scoped && slot == nil {
 		return budgetDecision{}, invalidArgument(fmt.Sprintf("tool %q has no call key", toolName))
@@ -207,7 +224,7 @@ func (b *turnToolBudget) check(ctx context.Context, slot *toolcall.Slot, toolNam
 		}
 		return budgetDecision{allowed: true, softDeadline: sd}, nil
 	}
-	msg := b.applyRefusal(ctx, record.Reason, toolName)
+	msg := b.applyRefusal(ctx, record.Reason, toolName, callID)
 	return budgetDecision{
 		allowed: false,
 		refusal: map[string]any{"error": msg},
@@ -279,7 +296,7 @@ func (b *turnToolBudget) latchLocked(reason, streakTool string, streakCount, tot
 	b.totalCount = totalCount
 }
 
-func (b *turnToolBudget) applyRefusal(ctx context.Context, reason, fallbackTool string) string {
+func (b *turnToolBudget) applyRefusal(ctx context.Context, reason, fallbackTool, callID string) string {
 	b.mu.Lock()
 	if !b.exhausted {
 		switch reason {
@@ -299,6 +316,9 @@ func (b *turnToolBudget) applyRefusal(ctx context.Context, reason, fallbackTool 
 		default:
 			b.latchLocked(budgetReasonTime, "", 0, 0)
 		}
+	}
+	if callID != "" {
+		b.refusedCallIDs[callID] = true
 	}
 	loggedReason := b.reason
 	msg := b.refusalMessageLocked()
@@ -363,7 +383,7 @@ func (b *turnToolBudget) observeEvent(ev *session.Event, origin turn.Origin) err
 			hasNonExemptCall = true
 		}
 		if part.FunctionResponse != nil {
-			if isBudgetRefusal(part.FunctionResponse.Response) {
+			if b.isRecordedRefusal(part.FunctionResponse) {
 				refusedInEvent = true
 				continue
 			}

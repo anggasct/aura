@@ -717,7 +717,7 @@ func (x *ADKExecutor) beforeTool(actx agent.Context, t tool.Tool, args map[strin
 	var callDeadline time.Time
 	if budget := turnToolBudgetFromContext(actx); budget != nil {
 		slot, _ := toolcall.From(actx)
-		decision, err := budget.check(actx, slot, t.Name())
+		decision, err := budget.check(actx, slot, t.Name(), actx.FunctionCallID())
 		if err != nil {
 			return nil, err
 		}
@@ -725,10 +725,12 @@ func (x *ADKExecutor) beforeTool(actx agent.Context, t tool.Tool, args map[strin
 			return decision.refusal, nil
 		}
 		if !decision.softDeadline.IsZero() {
-			var cancel context.CancelFunc
-			callCtx, cancel = context.WithDeadline(actx, decision.softDeadline)
-			defer cancel()
 			callDeadline = decision.softDeadline
+			if _, scoped := durable.TurnScopeFrom(actx); !scoped || x.builtins == nil {
+				var cancel context.CancelFunc
+				callCtx, cancel = context.WithDeadline(actx, decision.softDeadline)
+				defer cancel()
+			}
 		}
 	}
 	if x.builtins != nil {

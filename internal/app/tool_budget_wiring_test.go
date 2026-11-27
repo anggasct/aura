@@ -296,9 +296,9 @@ func TestAllWiringSitesPassToolBudget(t *testing.T) {
 		if err != nil {
 			t.Fatalf("resolve default persona: %v", err)
 		}
-		exec, err := newCaptureExecutor(turnstore.NewSessionService(db), evalModel, &def, toolBudgetFromRuntime(cfg.Runtime))
+		exec, err := newPersonaCapturer(&cfg).newExecutor(turnstore.NewSessionService(db), evalModel, &def)
 		if err != nil {
-			t.Fatalf("newCaptureExecutor: %v", err)
+			t.Fatalf("personaCapturer.newExecutor: %v", err)
 		}
 		if got := exec.ToolBudget(); got != want {
 			t.Fatalf("persona eval capture executor ToolBudget = %+v, want %+v", got, want)

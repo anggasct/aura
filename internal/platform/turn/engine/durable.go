@@ -624,21 +624,21 @@ func decodeTurnStart(raw []byte) (turnStartRecord, bool) {
 	return record, true
 }
 
-func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *turn.TurnRequest) (time.Time, error) {
+func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *turn.TurnRequest) (startedAt, deadline time.Time, err error) {
 	raw, err := inv.RunAction(ctx, turnStartAction, func(context.Context) ([]byte, error) {
 		return json.Marshal(turnStartRecord{StartedAt: time.Now().UTC(), Journal: turnJournalVersion})
 	})
 	if err != nil {
-		return time.Time{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the turn start", err)
+		return time.Time{}, time.Time{}, codedError(turn.ErrorCodeStorageUnavailable, "failed to journal the turn start", err)
 	}
 	record, ok := decodeTurnStart(raw)
 	if !ok {
-		return time.Time{}, codedError(turn.ErrorCodeRuntimeInternal, "turn journal was written by another build", nil)
+		return time.Time{}, time.Time{}, codedError(turn.ErrorCodeRuntimeInternal, "turn journal was written by another build", nil)
 	}
 	if !req.Deadline.IsZero() {
-		return req.Deadline, nil
+		return record.StartedAt, req.Deadline, nil
 	}
-	return record.StartedAt.Add(time.Duration(e.cfg.TurnTimeout)), nil
+	return record.StartedAt, record.StartedAt.Add(time.Duration(e.cfg.TurnTimeout)), nil
 }
 
 func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *runtimesessions.Descriptor) error {
@@ -679,10 +679,11 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	}
 	ctx = durable.WithTurnScope(ctx, scope)
 	t := &turnState{req: *req, turnID: req.TurnID, accepted: *accepted}
-	deadline, err := e.turnDeadline(ctx, inv, req)
+	startedAt, deadline, err := e.turnDeadline(ctx, inv, req)
 	if err != nil {
 		return err
 	}
+	ctx = turn.WithStartedAt(ctx, startedAt)
 	ctx, stop := context.WithDeadline(ctx, deadline)
 	defer stop()
 

@@ -422,16 +422,21 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		return ToolResult{}, err
 	}
 	slot, _ := toolcall.From(ctx)
-	if _, scoped := durable.TurnScopeFrom(ctx); scoped && slot == nil {
+	_, scoped := durable.TurnScopeFrom(ctx)
+	if scoped && slot == nil {
 		return ToolResult{}, errorf(ResultInvalidArgument, "tool %q has no call key on a durable turn", canonical.ToolName)
 	}
-	if err := contextError(ctx, canonical.Deadline); err != nil {
+	entryDeadline := canonical.Deadline
+	if scoped {
+		entryDeadline = time.Time{}
+	}
+	if err := contextError(ctx, entryDeadline); err != nil {
 		return ToolResult{}, err
 	}
 	if slot != nil {
 		defer slot.Authorized(true)
 		if err := slot.AwaitAuthorization(ctx); err != nil {
-			return ToolResult{}, contextError(ctx, canonical.Deadline)
+			return ToolResult{}, contextError(ctx, entryDeadline)
 		}
 	}
 	decision, err := b.evaluatePolicy(ctx, slot, toApprovalRequest(&canonical, b.PolicyVersion()))
@@ -471,7 +476,6 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if b.effects == nil {
 			return ToolResult{}, errorf(ResultCapabilityUnavailable, "effect journal is required for tool %q", key)
 		}
-		_, scoped := durable.TurnScopeFrom(ctx)
 		if err := validateEffectRequest(&canonical); err != nil {
 			return ToolResult{}, err
 		}
@@ -520,10 +524,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if slot != nil {
 		slot.Authorized(definition.RunsAlone())
 		if err := slot.AwaitExecution(ctx); err != nil {
-			return ToolResult{}, contextError(ctx, canonical.Deadline)
+			return ToolResult{}, contextError(ctx, entryDeadline)
 		}
 	}
-	if _, ok := durable.TurnScopeFrom(ctx); ok {
+	if scoped {
 		result, err = b.executeDurable(ctx, slot, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: definition.Effectful})
 	} else {
 		if definition.Effectful {
@@ -889,7 +893,12 @@ func (b *Broker) standingGrant(ctx context.Context, slot *toolcall.Slot, call *a
 		return false, nil
 	}
 	lookup := func(ctx context.Context) ([]byte, error) {
-		active, err := b.access.StandingGrant(ctx, request.PrincipalID, request.AgentID, request.ToolName, call.definition.Server)
+		if err := contextError(ctx, request.Deadline); err != nil {
+			return nil, err
+		}
+		callCtx, cancel := withCallDeadline(ctx, request.Deadline)
+		defer cancel()
+		active, err := b.access.StandingGrant(callCtx, request.PrincipalID, request.AgentID, request.ToolName, call.definition.Server)
 		if err != nil {
 			return nil, err
 		}
@@ -903,6 +912,9 @@ func (b *Broker) standingGrant(ctx context.Context, slot *toolcall.Slot, call *a
 		raw, err = lookup(ctx)
 	}
 	if err != nil {
+		if fault.HasCode(err, ResultDeadlineExceeded) || errors.Is(err, context.DeadlineExceeded) {
+			return false, errorf(ResultDeadlineExceeded, "tool request deadline exceeded")
+		}
 		return false, errorf(ResultPolicyDenied, "tool %q standing grant lookup failed closed", request.ToolName)
 	}
 	var active bool

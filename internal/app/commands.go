@@ -761,7 +761,7 @@ func personaEvalOpener(gf *GlobalFlags) personaeval.Opener {
 			}
 			deps := &personaeval.ServiceDeps{
 				Store:    evalStore,
-				Capturer: personaCapturer(toolBudgetFromRuntime(result.Config.Runtime)),
+				Capturer: newPersonaCapturer(result.Config).capture,
 				Catalog:  appconfig.BuiltinToolDefinitions(),
 			}
 			if req.NeedBehavior && definition.EvalBehavior != nil {

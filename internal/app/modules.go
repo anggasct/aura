@@ -499,13 +499,13 @@ func (b *build) buildPersonaEval(_ context.Context) error {
 	if !b.onServer() {
 		return nil
 	}
-	budget := toolBudgetFromRuntime(b.cfg.Runtime)
-	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models, toolBudget: budget}
+	capturer := newPersonaCapturer(b.cfg)
+	models := behaviorModels{defaultModel: b.primaryModel(), route: b.routeModel, models: b.models, toolBudget: toolBudgetFromRuntime(b.cfg.Runtime)}
 	mod, err := personaeval.New(&personaeval.ModuleDeps{
 		DB:           b.db,
 		Registry:     b.registry,
 		ConfigPath:   b.result.Path,
-		Capturer:     personaCapturer(budget),
+		Capturer:     capturer.capture,
 		Converse:     models.converse,
 		JudgeFor:     models.judge,
 		Catalog:      appconfig.BuiltinToolDefinitions(),
@@ -3074,14 +3074,27 @@ func (personaEvalDenyAll) Evaluate(context.Context, *policyapproval.ToolRequest)
 	return policyapproval.PolicyDecision{Outcome: policyapproval.OutcomeDeny}, nil
 }
 
-func personaCapturer(budget runtimeadk.ToolBudget) func(context.Context, *auraagent.Definition, principal.Class) (personaeval.Capture, error) {
-	return func(ctx context.Context, definition *auraagent.Definition, class principal.Class) (personaeval.Capture, error) {
-		return capturePersonaTurnWithBudget(ctx, definition, class, budget)
+type personaCapturer struct {
+	budget runtimeadk.ToolBudget
+}
+
+func newPersonaCapturer(cfg *appconfig.Config) personaCapturer {
+	if cfg == nil {
+		return personaCapturer{budget: toolBudgetFromRuntime(runtimeengine.Default())}
 	}
+	return personaCapturer{budget: toolBudgetFromRuntime(cfg.Runtime)}
+}
+
+func (c personaCapturer) capture(ctx context.Context, definition *auraagent.Definition, class principal.Class) (personaeval.Capture, error) {
+	return capturePersonaTurnWithBudget(ctx, definition, class, c.budget)
+}
+
+func (c personaCapturer) newExecutor(sessions runtimeadk.SessionPort, evalModel adkmodel.LLM, definition *auraagent.Definition) (*runtimeadk.ADKExecutor, error) {
+	return newCaptureExecutor(sessions, evalModel, definition, c.budget)
 }
 
 func capturePersonaTurn(ctx context.Context, definition *auraagent.Definition, class principal.Class) (personaeval.Capture, error) {
-	return capturePersonaTurnWithBudget(ctx, definition, class, toolBudgetFromRuntime(runtimeengine.Default()))
+	return newPersonaCapturer(nil).capture(ctx, definition, class)
 }
 
 func capturePersonaTurnWithBudget(ctx context.Context, definition *auraagent.Definition, class principal.Class, budget runtimeadk.ToolBudget) (personaeval.Capture, error) {

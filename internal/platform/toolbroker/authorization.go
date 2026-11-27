@@ -47,6 +47,13 @@ func (b *Broker) authorize(ctx context.Context, slot *toolcall.Slot, call *autho
 }
 
 func (b *Broker) decideAuthorization(ctx context.Context, call *authorization) (string, error) {
+	return b.decideAuthorizationWith(ctx, ctx, call)
+}
+
+func (b *Broker) decideAuthorizationWith(turnCtx, callCtx context.Context, call *authorization) (string, error) {
+	if err := contextError(turnCtx, call.canonical.Deadline); err != nil {
+		return ApprovalRejected, err
+	}
 	key := toolKey(call.canonical)
 	if call.decision.Outcome == approval.OutcomeRequireApproval && !call.standing {
 		if call.canonical.Tainted && requestClass(call.canonical) == principal.ClassPublic {
@@ -59,18 +66,18 @@ func (b *Broker) decideAuthorization(ctx context.Context, call *authorization) (
 			return ApprovalMissing, errorf(ResultApprovalRequired, "tool %q requires approval", key)
 		}
 	}
-	state, err := b.approvalAnswer(ctx, call)
+	state, err := b.approvalAnswer(callCtx, call)
 	if err != nil {
 		return state, err
 	}
-	if err := contextError(ctx, call.expiry); err != nil {
+	if err := contextError(turnCtx, call.expiry); err != nil {
 		return ApprovalRejected, err
 	}
-	grant, err := b.engine.GrantUntil(ctx, toApprovalRequest(call.canonical, b.PolicyVersion()), call.expiry)
+	grant, err := b.engine.GrantUntil(callCtx, toApprovalRequest(call.canonical, b.PolicyVersion()), call.expiry)
 	if err != nil {
 		return state, mapApprovalError(err)
 	}
-	if err := b.engine.ValidateAndConsume(ctx, toApprovalRequest(call.canonical, b.PolicyVersion()), &grant); err != nil {
+	if err := b.engine.ValidateAndConsume(callCtx, toApprovalRequest(call.canonical, b.PolicyVersion()), &grant); err != nil {
 		return state, mapApprovalError(err)
 	}
 	return state, nil
@@ -110,7 +117,9 @@ func (b *Broker) approvalAnswer(ctx context.Context, call *authorization) (strin
 }
 
 func (b *Broker) recordAuthorization(ctx context.Context, call *authorization) ([]byte, error) {
-	state, err := b.decideAuthorization(ctx, call)
+	callCtx, cancel := withCallDeadline(ctx, call.canonical.Deadline)
+	defer cancel()
+	state, err := b.decideAuthorizationWith(ctx, callCtx, call)
 	record := authorizationRecord{State: state, RequestDigest: call.canonical.RequestDigest}
 	if err != nil {
 		var refusal *fault.Error[ResultClass]
