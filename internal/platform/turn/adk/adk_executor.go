@@ -666,7 +666,7 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 			}
 		}
 	}
-	instruction = appendStatusProtocol(instruction)
+	instruction = appendTurnProtocol(instruction)
 	return llmagent.New(llmagent.Config{
 		Name:                 name,
 		Description:          definition.Description,
