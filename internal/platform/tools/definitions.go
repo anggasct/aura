@@ -89,6 +89,7 @@ type Definition struct {
 	ExternalSink         bool
 	NoStandingGrant      bool
 	Orchestration        bool
+	RepliesToRequester   bool
 	ExactDisplay         bool
 	Description          string
 	Display              []string

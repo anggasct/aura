@@ -77,6 +77,7 @@ type PersonaFingerprint struct {
 type Personas interface {
 	Fingerprint(agentID string) (PersonaFingerprint, bool)
 	Knowledge(agentID string, class principal.Class) []string
+	Message(agentID, key string) string
 }
 
 type acceptedPayload struct {

@@ -53,6 +53,8 @@ func (s stubPersonas) Fingerprint(agentID string) (turn.PersonaFingerprint, bool
 
 func (s stubPersonas) Knowledge(string, principal.Class) []string { return nil }
 
+func (s stubPersonas) Message(string, string) string { return "" }
+
 func personaFixture(agentID, soul string) turn.PersonaFingerprint {
 	return turn.PersonaFingerprint{AgentID: agentID, SoulSHA256: soul, ToolsSHA256: "tools-" + agentID, ModelRoute: "primary"}
 }

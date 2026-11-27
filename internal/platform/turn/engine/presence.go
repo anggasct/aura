@@ -25,14 +25,7 @@ func presenceDeliveryRequest(req *turn.TurnRequest) *runtimechannelhost.Delivery
 }
 
 func presenceAdapterFor(req *turn.TurnRequest, adapters []runtimechannelhost.ChannelPort) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {
-	if req == nil || req.TurnID == "" {
-		return nil, nil, false
-	}
-	switch req.Origin {
-	case turn.OriginTerminal, turn.OriginInternal, turn.OriginWebhook, turn.OriginHTTP, turn.OriginChild, turn.OriginSchedule, turn.OriginWorkflow:
-		return nil, nil, false
-	}
-	if len(req.ReplyContext) == 0 {
+	if req == nil || req.TurnID == "" || !hasChannelDestination(req) {
 		return nil, nil, false
 	}
 	if len(adapters) == 0 {
@@ -154,40 +147,38 @@ func hasToolActivity(payload json.RawMessage) bool {
 	return false
 }
 
-func isPresenceFailureEvent(ev *turn.Event) bool {
+type functionResponse struct {
+	Name     string         `json:"name"`
+	Response map[string]any `json:"response"`
+}
+
+func functionResponses(ev *turn.Event) []functionResponse {
 	if ev == nil || ev.Kind != turnstore.EventKindADK {
-		return false
+		return nil
 	}
 	var decoded struct {
 		Content *struct {
 			Parts []struct {
-				FunctionResponse *struct {
-					Name     string         `json:"name"`
-					Response map[string]any `json:"response"`
-				} `json:"functionResponse"`
+				FunctionResponse *functionResponse `json:"functionResponse"`
 			} `json:"parts"`
 		} `json:"content"`
 	}
 	if err := json.Unmarshal(ev.Payload, &decoded); err != nil || decoded.Content == nil {
-		return false
+		return nil
 	}
+	var responses []functionResponse
 	for _, part := range decoded.Content.Parts {
-		if part.FunctionResponse == nil {
-			continue
+		if part.FunctionResponse != nil {
+			responses = append(responses, *part.FunctionResponse)
 		}
-		for key, value := range part.FunctionResponse.Response {
-			if !strings.EqualFold(key, "error") {
-				continue
-			}
-			switch v := value.(type) {
-			case string:
-				if strings.TrimSpace(v) != "" {
-					return true
-				}
-			case nil:
-			default:
-				return true
-			}
+	}
+	return responses
+}
+
+func isPresenceFailureEvent(ev *turn.Event) bool {
+	for _, response := range functionResponses(ev) {
+		if turn.IsToolError(response.Response) {
+			return true
 		}
 	}
 	return false

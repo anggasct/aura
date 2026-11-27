@@ -192,7 +192,7 @@ func TestReprocessDoesNotRedeliver(t *testing.T) {
 		if got := capture.count(); got != 1 {
 			t.Fatalf("Deliver calls after reprocess = %d, want 1", got)
 		}
-		if err := engine.deliverCompletedTurn(context.Background(), req, nil); err != nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, nil)); err != nil {
 			code, ok := fault.CodeOf[turn.ErrorCode](err)
 			if !ok {
 				t.Fatalf("re-deliver returned untyped %v", err)
@@ -271,33 +271,25 @@ func TestDeliveryFailureMarksTurnFailed(t *testing.T) {
 	})
 }
 
-func TestEmptyTextSkipsDelivery(t *testing.T) {
+func TestFinalMessageWithoutPartsSkipsDelivery(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
-		executor := turntest.NewFakeExecutor([]turntest.FakeStep{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
 		capture := &capturingAdapter{}
-		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, turntest.NewFakeExecutor(nil))
 		mustCreateSession(t, db, "channel:333")
 
-		req := channelTurnRequest("channel:333", "turn-empty")
-		events, err := collect(t, engine, req)
-		if err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		if last := events[len(events)-1]; last.Kind != turn.EventKindTurnCompleted {
-			t.Fatalf("terminal kind = %q, want turn.completed", last.Kind)
-		}
-		if got := capture.count(); got != 0 {
-			t.Fatalf("Deliver calls = %d, want 0", got)
-		}
-		skipErr := engine.deliverCompletedTurn(context.Background(), &turn.TurnRequest{
+		direct := &turn.TurnRequest{
 			TurnID:       "turn-empty-direct",
 			SessionID:    "channel:333",
 			Origin:       turn.Origin("discord:test"),
 			ReplyContext: json.RawMessage(`{"channel_id":"333","message_id":"999"}`),
-		}, []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{}`)}})
+		}
+		skipErr := engine.deliverFinalMessage(context.Background(), direct, &finalMessage{Kind: finalNone, Parts: []string{}})
 		code, ok := fault.CodeOf[turn.ErrorCode](skipErr)
 		if !ok || code != turn.ErrorCodeDeliverySkipped {
 			t.Fatalf("skip code = %q (ok=%v), want delivery_skipped", code, ok)
+		}
+		if got := capture.count(); got != 0 {
+			t.Fatalf("Deliver calls = %d, want 0", got)
 		}
 	})
 }
@@ -380,14 +372,14 @@ func TestDeliveryRetryAfterFailure(t *testing.T) {
 		req := channelTurnRequest("channel:333", "turn-retry-failure")
 		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"needs reply"}`)}}
 
-		firstErr := engine.deliverCompletedTurn(context.Background(), req, events)
+		firstErr := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events))
 		if code, ok := fault.CodeOf[turn.ErrorCode](firstErr); !ok || code != turn.ErrorCodeDeliveryFailed {
 			t.Fatalf("first code = %q (ok=%v), want delivery_failed", code, ok)
 		}
 		if got := capture.count(); got != 1 {
 			t.Fatalf("first Deliver calls = %d, want 1", got)
 		}
-		secondErr := engine.deliverCompletedTurn(context.Background(), req, events)
+		secondErr := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events))
 		if code, ok := fault.CodeOf[turn.ErrorCode](secondErr); !ok || code != turn.ErrorCodeDeliveryFailed {
 			t.Fatalf("second code = %q (ok=%v), want delivery_failed retry, never nil-success without delivery", code, ok)
 		}
@@ -395,7 +387,7 @@ func TestDeliveryRetryAfterFailure(t *testing.T) {
 			t.Fatalf("second Deliver calls = %d, want 2 (retry must re-attempt)", got)
 		}
 		capture.deliverErr = nil
-		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events)); err != nil {
 			t.Fatalf("third deliver: %v", err)
 		}
 		if got := capture.count(); got != 3 {
@@ -412,14 +404,14 @@ func TestMissingAdapterFailureIsRetryable(t *testing.T) {
 
 		req := channelTurnRequest("channel:333", "turn-no-adapter-retry")
 		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
-		if err := engine.deliverCompletedTurn(context.Background(), req, events); err == nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events)); err == nil {
 			t.Fatal("missing adapter must return delivery_failed, got nil")
 		} else if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeDeliveryFailed {
 			t.Fatalf("code = %q (ok=%v), want delivery_failed", code, ok)
 		}
 		capture := &capturingAdapter{}
 		configured, _, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
-		if err := configured.deliverCompletedTurn(context.Background(), req, events); err != nil {
+		if err := configured.deliverFinalMessage(context.Background(), req, completedMessage(configured, req, events)); err != nil {
 			t.Fatalf("retry after adapter configured: %v", err)
 		}
 		if got := capture.count(); got != 1 {
@@ -437,13 +429,13 @@ func TestDeliveredEntriesExpireAfterDedupeWindow(t *testing.T) {
 
 		req := channelTurnRequest("channel:333", "turn-expire")
 		events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
-		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events)); err != nil {
 			t.Fatalf("first deliver: %v", err)
 		}
 		if got := capture.count(); got != 1 {
 			t.Fatalf("first Deliver calls = %d, want 1", got)
 		}
-		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events)); err != nil {
 			t.Fatalf("deduped redeliver: %v", err)
 		}
 		if got := capture.count(); got != 1 {
@@ -455,7 +447,7 @@ func TestDeliveredEntriesExpireAfterDedupeWindow(t *testing.T) {
 		if engine.hasDelivered(req.TurnID) {
 			t.Fatal("hasDelivered = true for expired entry, want false")
 		}
-		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events)); err != nil {
 			t.Fatalf("deliver after expiry: %v", err)
 		}
 		if got := capture.count(); got != 2 {
@@ -484,7 +476,7 @@ func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
 
 		req := channelTurnRequest("channel:333", "turn-account-kuma")
 		req.Origin = turn.Origin("discord:kuma")
-		if err := engine.deliverCompletedTurn(context.Background(), req, events); err != nil {
+		if err := engine.deliverFinalMessage(context.Background(), req, completedMessage(engine, req, events)); err != nil {
 			t.Fatalf("deliver: %v", err)
 		}
 		if home.count() != 0 || kuma.count() != 1 {
@@ -493,7 +485,7 @@ func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
 
 		gone := channelTurnRequest("channel:333", "turn-account-gone")
 		gone.Origin = turn.Origin("discord:gone")
-		err := engine.deliverCompletedTurn(context.Background(), gone, events)
+		err := engine.deliverFinalMessage(context.Background(), gone, completedMessage(engine, gone, events))
 		if code, ok := fault.CodeOf[turn.ErrorCode](err); !ok || code != turn.ErrorCodeDeliveryFailed {
 			t.Fatalf("unconfigured account code = %q (ok=%v), want delivery_failed", code, ok)
 		}
@@ -501,4 +493,9 @@ func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
 			t.Fatalf("unconfigured account leaked through another bot: home=%d kuma=%d", home.count(), kuma.count())
 		}
 	})
+}
+
+func completedMessage(engine *Engine, req *turn.TurnRequest, events []turn.Event) *finalMessage {
+	final := engine.planFinalMessage(req, events, turnEnd{})
+	return &final
 }

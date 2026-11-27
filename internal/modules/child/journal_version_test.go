@@ -9,7 +9,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
-var freshChildClock = regexp.MustCompile(`^\{"now":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z","journal":2\}$`)
+var freshChildClock = regexp.MustCompile(`^\{"now":"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+Z","journal":3\}$`)
 
 func TestChildJournalOfAnotherVersionIsRefused(t *testing.T) {
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
@@ -18,10 +18,10 @@ func TestChildJournalOfAnotherVersionIsRefused(t *testing.T) {
 		record string
 	}{
 		{name: "a bare instant", record: `"` + stamp + `"`},
-		{name: "the previous journal version", record: `{"now":"` + stamp + `","journal":1}`},
+		{name: "the previous journal version", record: `{"now":"` + stamp + `","journal":2}`},
 		{name: "another journal version", record: `{"now":"` + stamp + `","journal":0}`},
-		{name: "an unknown field", record: `{"now":"` + stamp + `","journal":2,"extra":true}`},
-		{name: "trailing data", record: `{"now":"` + stamp + `","journal":2} {}`},
+		{name: "an unknown field", record: `{"now":"` + stamp + `","journal":3,"extra":true}`},
+		{name: "trailing data", record: `{"now":"` + stamp + `","journal":3} {}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -54,7 +54,7 @@ func TestChildJournalOfAnotherVersionIsRefused(t *testing.T) {
 			t.Fatalf("HandleDurable: %v", err)
 		}
 		if raw := string(inv.journal["child-clock/sess-child"]); !freshChildClock.MatchString(raw) {
-			t.Errorf("child-clock record = %s, want {\"now\":<instant>,\"journal\":2}", raw)
+			t.Errorf("child-clock record = %s, want {\"now\":<instant>,\"journal\":3}", raw)
 		}
 	})
 }

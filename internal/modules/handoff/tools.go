@@ -34,12 +34,13 @@ type Opener interface {
 
 func ToolDefinition() tools.Definition {
 	return tools.Definition{
-		Name:          ToolName,
-		Version:       tools.Version,
-		Schema:        []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`),
-		OptIn:         true,
-		Orchestration: true,
-		Validator:     validateHandoffArguments,
+		Name:               ToolName,
+		Version:            tools.Version,
+		Schema:             []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/handoff_to_owner/v1","type":"object","properties":{"reason":{"type":"string","minLength":1,"maxLength":500}},"required":["reason"],"additionalProperties":false}`),
+		OptIn:              true,
+		Orchestration:      true,
+		RepliesToRequester: true,
+		Validator:          validateHandoffArguments,
 	}
 }
 

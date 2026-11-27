@@ -66,6 +66,9 @@ const (
 	MessageWorkflowSucceeded = "workflow_succeeded"
 	MessageWorkflowFailed    = "workflow_failed"
 	MessageWorkflowCancelled = "workflow_cancelled"
+	MessageTurnFailed        = "turn_failed"
+	MessageTurnTimeout       = "turn_timeout"
+	MessageTurnEmpty         = "turn_empty"
 )
 
 const (
@@ -97,6 +100,9 @@ var personaMessageDefaults = map[string]string{
 	MessageWorkflowSucceeded: "Done: " + WorkflowGoalPlaceholder,
 	MessageWorkflowFailed:    "Sorry, " + WorkflowGoalPlaceholder + " could not be completed.",
 	MessageWorkflowCancelled: WorkflowGoalPlaceholder + " was cancelled.",
+	MessageTurnFailed:        "Sorry, something went wrong and I could not finish this. Please try again.",
+	MessageTurnTimeout:       "Sorry, this took too long and I had to stop. Please try again, maybe with a smaller request.",
+	MessageTurnEmpty:         "Sorry, I could not put an answer together. Please try again or rephrase.",
 }
 
 type Config struct {

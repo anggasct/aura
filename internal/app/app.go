@@ -56,6 +56,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
@@ -896,6 +897,14 @@ func (b *build) onServer() bool { return b.opts.Surface == SurfaceServer }
 
 func (b *build) primaryModel() string { return b.cfg.Models.Definitions["primary"].Model }
 
+func (b *build) repliesToRequester(toolName string) bool {
+	if b.broker == nil {
+		return false
+	}
+	definition, ok := b.broker.Definition(toolName, tools.Version)
+	return ok && definition.RepliesToRequester
+}
+
 func (b *build) meters() metric.MeterProvider {
 	if b.pipeline == nil {
 		return nil
@@ -1349,19 +1358,20 @@ func (b *build) buildTurnRuntime() error {
 		channels = b.server.channels
 	}
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
-		Events:         b.events,
-		Dedupe:         turnstore.NewDedupeStore(b.db),
-		Executor:       executor,
-		Logger:         b.logger,
-		Config:         b.cfg.Runtime,
-		DefaultAgentID: auraagent.DefaultID,
-		Personas:       auraagent.RegistryPersonas{Registry: b.registry},
-		Skills:         b.modules.skillRenderer,
-		Durable:        durableConfig,
-		PostTurnHook:   composeTurnHooks(hooks),
-		CountTurn:      countTurn,
-		LiveEvents:     b.liveEvents,
-		Channels:       channels,
+		Events:             b.events,
+		Dedupe:             turnstore.NewDedupeStore(b.db),
+		Executor:           executor,
+		Logger:             b.logger,
+		Config:             b.cfg.Runtime,
+		DefaultAgentID:     auraagent.DefaultID,
+		Personas:           auraagent.RegistryPersonas{Registry: b.registry},
+		RepliesToRequester: b.repliesToRequester,
+		Skills:             b.modules.skillRenderer,
+		Durable:            durableConfig,
+		PostTurnHook:       composeTurnHooks(hooks),
+		CountTurn:          countTurn,
+		LiveEvents:         b.liveEvents,
+		Channels:           channels,
 	})
 	if err != nil {
 		return err
