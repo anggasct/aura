@@ -366,6 +366,9 @@ func (v *validation) param(id string, exposure Exposure, chat bool, p *Param) {
 			v.reject(id, "the parameter %q names an unknown surface", name)
 		}
 	}
+	if name == flagJSON || name == flagApply {
+		v.reject(id, "the parameter %q collides with a command flag", name)
+	}
 	if p.Secret && exposure != ExposureHost {
 		v.reject(id, "the parameter %q is secret and the operation is not host", name)
 	}

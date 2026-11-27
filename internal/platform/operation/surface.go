@@ -3,6 +3,8 @@ package operation
 import (
 	"slices"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func allSurfaces() []Surface {
@@ -141,7 +143,5 @@ func (d *Descriptor) OutputFieldsOn(surface Surface) []string {
 
 func ToolName(id string) string {
 	replacer := strings.NewReplacer(".", "_", "-", "_")
-	return toolPrefix + replacer.Replace(id)
+	return tools.OperationToolPrefix + replacer.Replace(id)
 }
-
-const toolPrefix = "aura_"
