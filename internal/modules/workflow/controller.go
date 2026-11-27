@@ -305,6 +305,9 @@ func (c *Controller) Cancel(ctx context.Context, caller *Caller, runID string) (
 	if caller == nil {
 		return RunState{}, codedError(ErrorCodeInvalidArgument, "caller must not be nil")
 	}
+	if caller.Tainted {
+		return RunState{}, codedError(ErrorCodeNotPermitted, "this workflow is not available on an untrusted turn")
+	}
 	run, err := c.visibleRun(ctx, caller, runID)
 	if err != nil {
 		return RunState{}, err
@@ -362,6 +365,9 @@ func (c *Controller) SaveRoutine(ctx context.Context, caller *Caller, runID, nam
 	}
 	if caller.PrincipalClass != principal.ClassOwner {
 		return RoutineSummary{}, codedError(ErrorCodeNotPermitted, "this workflow is not available here")
+	}
+	if caller.Tainted {
+		return RoutineSummary{}, codedError(ErrorCodeNotPermitted, "this workflow is not available on an untrusted turn")
 	}
 	routine, err := c.interpreter.SaveRoutine(ctx, runID, name)
 	if fault.HasCode(err, ErrorCodeRunNotFound) {
