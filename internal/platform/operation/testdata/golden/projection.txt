@@ -1,0 +1,83 @@
+== proj.notify
+schema agent:
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "aura://operations/proj.notify/v1",
+  "type": "object",
+  "properties": {
+    "message": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 500,
+      "description": "the text"
+    },
+    "priority": {
+      "type": "string",
+      "enum": [
+        "info",
+        "warning"
+      ],
+      "description": "how loud",
+      "default": "info"
+    },
+    "attempts": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 5,
+      "description": "tries",
+      "default": 3
+    },
+    "grace": {
+      "type": "string",
+      "pattern": "^\\d+(ns|us|ms|s|m|h)(\\d+(ns|us|ms|s|m|h))*$",
+      "description": "wait first"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 16
+      },
+      "maxItems": 32,
+      "description": "labels"
+    },
+    "attachment": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "a file"
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "additionalProperties": false
+}
+cli positionals:
+  1 message string required=true rest=true
+cli flags:
+  --priority enum repeated=false values=[info warning urgent] default="info"
+  --attempts integer repeated=false values=[] default=3
+  --grace duration repeated=false values=[] default=
+  --tags strings repeated=true values=[] default=
+  --payload json repeated=false values=[] default=
+  --probe boolean repeated=false values=[] default=
+  --attachment path repeated=false values=[] default=
+cli output: [id status trace]
+chat positionals:
+  1 message string required=true rest=true
+chat flags:
+  --priority enum repeated=false values=[info warning] default="info"
+  --attempts integer repeated=false values=[] default=3
+  --grace duration repeated=false values=[] default=
+  --tags strings repeated=true values=[] default=
+chat output: [id status]
+agent positionals:
+  1 message string required=true rest=true
+agent flags:
+  --priority enum repeated=false values=[info warning] default="info"
+  --attempts integer repeated=false values=[] default=3
+  --grace duration repeated=false values=[] default=
+  --tags strings repeated=true values=[] default=
+  --attachment path repeated=false values=[] default=
+agent output: [id status]
