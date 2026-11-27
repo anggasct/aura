@@ -380,8 +380,15 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	return r, nil
 }
 
+func canonicalToolArguments(args map[string]any) (json.RawMessage, error) {
+	if args == nil {
+		args = map[string]any{}
+	}
+	return json.Marshal(args)
+}
+
 func (x *ADKExecutor) toolGate(actx agent.Context, toolName string, args map[string]any) error {
-	raw, err := json.Marshal(args)
+	raw, err := canonicalToolArguments(args)
 	if err != nil {
 		return codedError(turn.ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
 	}
@@ -415,7 +422,7 @@ func (x *ADKExecutor) executeBuiltinTool(actx agent.Context, toolName string, ar
 	if definition == nil {
 		return nil, invalidArgument(fmt.Sprintf("unknown builtin tool %q", toolName))
 	}
-	raw, err := json.Marshal(args)
+	raw, err := canonicalToolArguments(args)
 	if err != nil {
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "failed to marshal tool arguments", err)
 	}
