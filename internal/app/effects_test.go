@@ -45,10 +45,11 @@ func seedUnknownEffect(t *testing.T, dataRoot string) (configPath, intentID stri
 	if err != nil {
 		t.Fatalf("prepare: %v", err)
 	}
-	if _, err := j.Start(ctx, intent.ID); err != nil {
+	started, err := j.Start(ctx, intent.ID)
+	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	if _, err := j.MarkUnknown(ctx, intent.ID); err != nil {
+	if _, err := j.MarkUnknown(ctx, started.ID, started.LeaseToken); err != nil {
 		t.Fatalf("unknown: %v", err)
 	}
 	return filepath.Join(t.TempDir(), "config.yaml"), intent.ID

@@ -9,22 +9,43 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
+var testEpoch = time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+
 func newTestJournal(t *testing.T) (*Journal, *sql.DB) {
 	t.Helper()
-	return newTestJournalWithEvents(t, nil)
+	j, db, _ := newClockedJournal(t)
+	return j, db
+}
+
+func newClockedJournal(t *testing.T) (*Journal, *sql.DB, *durabletest.ManualClock) {
+	t.Helper()
+	clock := durabletest.NewManualClock(testEpoch)
+	j, db := newJournalOnClock(t, clock, nil)
+	return j, db, clock
+}
+
+func lapseLeases(clock *durabletest.ManualClock) {
+	clock.Advance(leaseDuration + time.Second)
 }
 
 func newTestJournalWithEvents(t *testing.T, events EventPublisher) (*Journal, *sql.DB) {
 	t.Helper()
+	return newJournalOnClock(t, durabletest.NewManualClock(testEpoch), events)
+}
+
+func newJournalOnClock(t *testing.T, clock durable.Clock, events EventPublisher) (*Journal, *sql.DB) {
+	t.Helper()
 	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
 	j, err := NewJournal(db, Options{
-		Now:    func() time.Time { return time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC) },
+		Clock:  clock,
 		Logger: slog.New(slog.DiscardHandler),
 		Events: events,
 		Turns:  turnstore.NewTurnStore(db),

@@ -40,16 +40,16 @@ func (s *stubRunner) Execute(ctx context.Context, req *effect.PrepareRequest, pr
 		Request:        started.RequestJSON,
 	})
 	if err != nil {
-		unknown, markErr := s.journal.MarkUnknown(ctx, started.ID)
+		unknown, markErr := s.journal.MarkUnknown(ctx, started.ID, started.LeaseToken)
 		return unknown, errors.Join(err, markErr)
 	}
 	if outcome.Ambiguous {
-		return s.journal.MarkUnknown(ctx, started.ID)
+		return s.journal.MarkUnknown(ctx, started.ID, started.LeaseToken)
 	}
 	if outcome.Succeeded {
-		return s.journal.Succeed(ctx, started.ID, outcome.Receipt)
+		return s.journal.Succeed(ctx, started.ID, started.LeaseToken, outcome.Receipt)
 	}
-	return s.journal.Fail(ctx, started.ID, outcome.SafeErrorCode)
+	return s.journal.Fail(ctx, started.ID, started.LeaseToken, outcome.SafeErrorCode)
 }
 
 func (s *stubRunner) Reconcile(ctx context.Context, id string, _ effect.Provider, reconciler effect.Reconciler) (*effect.Intent, error) {

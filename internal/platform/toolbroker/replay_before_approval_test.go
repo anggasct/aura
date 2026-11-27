@@ -28,10 +28,11 @@ func seedIntent(t *testing.T, h *replayHarness, request *ToolRequest, settled bo
 	if !settled {
 		return
 	}
-	if _, err := journal.Start(t.Context(), intent.ID); err != nil {
+	started, err := journal.Start(t.Context(), intent.ID)
+	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	if _, err := journal.Succeed(t.Context(), intent.ID, json.RawMessage(`{}`)); err != nil {
+	if _, err := journal.Succeed(t.Context(), started.ID, started.LeaseToken, json.RawMessage(`{}`)); err != nil {
 		t.Fatalf("Succeed: %v", err)
 	}
 }

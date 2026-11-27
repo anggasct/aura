@@ -16,6 +16,7 @@ import (
 
 	mimepkg "mime"
 
+	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -33,6 +34,7 @@ type deliveryFixture struct {
 	server    *fakeSMTP
 	authority *testAuthority
 	mailer    *smtpMailer
+	clock     *durabletest.ManualClock
 }
 
 func newDeliveryFixture(t *testing.T, behaviors ...smtpBehavior) *deliveryFixture {
@@ -271,7 +273,8 @@ func prepareLikeDeliver(t *testing.T, f *deliveryFixture, journal *effect.Journa
 
 func restartedAdapter(t *testing.T, f *deliveryFixture) (*Adapter, *effect.Journal) {
 	t.Helper()
-	journal, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
+	f.clock = durabletest.NewManualClock(fixedNow)
+	journal, err := effect.NewJournal(f.h.db, effect.Options{Clock: f.clock, Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}
@@ -328,6 +331,7 @@ func TestDeliver_CrashDuringTheSendIsNeverResent(t *testing.T) {
 			}
 			wantState := effect.StateStarted
 			if recover {
+				f.clock.Advance(2 * time.Minute)
 				report, err := journal.Recover(t.Context())
 				if err != nil || report.Claimed != 1 {
 					t.Fatalf("Recover = %+v, %v; want the started intent claimed", report, err)
@@ -854,7 +858,8 @@ func TestDeliver_StartupRecoveryMakesOrphanedIntentsUnknownAndReconcilable(t *te
 		t.Fatalf("Start foreign: %v", err)
 	}
 
-	restarted, err := effect.NewJournal(f.h.db, effect.Options{Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
+	f.clock.Advance(2 * time.Minute)
+	restarted, err := effect.NewJournal(f.h.db, effect.Options{Clock: f.clock, Logger: f.h.logger, Turns: turnstore.NewTurnStore(f.h.db)})
 	if err != nil {
 		t.Fatalf("NewJournal: %v", err)
 	}

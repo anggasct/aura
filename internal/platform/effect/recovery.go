@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
@@ -12,11 +13,12 @@ func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 	if id == "" {
 		return false, codedError(ErrorCodeInvalidArgument, "effect: id must not be empty", nil)
 	}
+	now := j.clock.Now()
 	res, err := sqlite.Conn(ctx, j.db).ExecContext(ctx, `
 		UPDATE effect_intent
 		SET state = ?, updated_at = ?
-		WHERE id = ? AND state = ?`,
-		string(StateUnknown), fmtTime(j.now()), id, string(StateStarted),
+		WHERE id = ? AND state = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
+		string(StateUnknown), fmtTime(now), id, string(StateStarted), fmtLeaseTime(now),
 	)
 	if err != nil {
 		return false, fmt.Errorf("effect: claim intent %s: %w", id, err)
@@ -39,6 +41,7 @@ func (j *Journal) Claim(ctx context.Context, id string) (bool, error) {
 type RecoveryReport struct {
 	Scanned int
 	Claimed int
+	RetryAt time.Time
 }
 
 func (j *Journal) Recover(ctx context.Context) (RecoveryReport, error) {
@@ -69,6 +72,14 @@ func (j *Journal) recoverStarted(ctx context.Context, provider string) (Recovery
 		}
 		if claimed {
 			report.Claimed++
+			continue
+		}
+		expiresAt, live, err := j.liveLeaseExpiry(ctx, started[i].ID)
+		if err != nil {
+			return report, err
+		}
+		if live && expiresAt.After(report.RetryAt) {
+			report.RetryAt = expiresAt
 		}
 	}
 	return report, nil
@@ -149,6 +160,9 @@ func (j *Journal) ValidateResumeEffects(ctx context.Context, sessionID, turnID s
 			}
 			if current.State == StateUnknown {
 				return codedError(ErrorCodeUnknown, fmt.Sprintf("effect: pending tool call %s requires reconciliation before resume", intents[i].ToolCallID), nil)
+			}
+			if current.State == StateStarted {
+				return codedError(ErrorCodeInProgress, fmt.Sprintf("effect: pending tool call %s is held under a live lease", intents[i].ToolCallID), nil)
 			}
 			return codedError(ErrorCodeTransitionInvalid, fmt.Sprintf("effect: pending tool call %s changed to %s during recovery", intents[i].ToolCallID, current.State), nil)
 		case StateSucceeded, StateFailed:

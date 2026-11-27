@@ -159,16 +159,16 @@ func TestBroadcastReconcileRestartsAnEndedRun(t *testing.T) {
 func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 	cases := []struct {
 		name      string
-		finish    func(ctx context.Context, journal *effect.Journal, id string) (*effect.Intent, error)
+		finish    func(ctx context.Context, journal *effect.Journal, started *effect.Intent) (*effect.Intent, error)
 		succeeded bool
 		ambiguous bool
 	}{
 		{name: "an intent an interrupted call left started", ambiguous: true},
-		{name: "a failed intent", finish: func(ctx context.Context, journal *effect.Journal, id string) (*effect.Intent, error) {
-			return journal.Fail(ctx, id, "discord_rejected")
+		{name: "a failed intent", finish: func(ctx context.Context, journal *effect.Journal, started *effect.Intent) (*effect.Intent, error) {
+			return journal.Fail(ctx, started.ID, started.LeaseToken, "discord_rejected")
 		}},
-		{name: "a succeeded intent", succeeded: true, finish: func(ctx context.Context, journal *effect.Journal, id string) (*effect.Intent, error) {
-			return journal.Succeed(ctx, id, json.RawMessage(`{"message_id":"m1"}`))
+		{name: "a succeeded intent", succeeded: true, finish: func(ctx context.Context, journal *effect.Journal, started *effect.Intent) (*effect.Intent, error) {
+			return journal.Succeed(ctx, started.ID, started.LeaseToken, json.RawMessage(`{"message_id":"m1"}`))
 		}},
 	}
 	for _, tc := range cases {
@@ -199,11 +199,12 @@ func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Prepare: %v", err)
 			}
-			if _, err := effects.Journal().Start(t.Context(), prepared.ID); err != nil {
+			started, err := effects.Journal().Start(t.Context(), prepared.ID)
+			if err != nil {
 				t.Fatalf("Start: %v", err)
 			}
 			if tc.finish != nil {
-				if _, err := tc.finish(t.Context(), effects.Journal(), prepared.ID); err != nil {
+				if _, err := tc.finish(t.Context(), effects.Journal(), started); err != nil {
 					t.Fatalf("finish the intent: %v", err)
 				}
 			}

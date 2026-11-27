@@ -14,8 +14,8 @@ func TestApprovalTokenIsBoundAndConsumed(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	intent = mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	intent = mustMarkUnknown(t, j, intent)
 
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
@@ -52,8 +52,8 @@ func TestApprovalUsesDefaultExpiry(t *testing.T) {
 	t.Parallel()
 	j, _ := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID: intent.ID,
@@ -73,8 +73,8 @@ func TestApprovalReasonAndActionAreBound(t *testing.T) {
 	t.Parallel()
 	j, _ := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
 		Action:    ApprovalActionMarkFailed,
@@ -97,8 +97,8 @@ func TestApprovalExpiryIsEnforced(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
 		Action:    ApprovalActionMarkFailed,
@@ -119,8 +119,8 @@ func TestApprovalConsumptionIsExactlyOnce(t *testing.T) {
 	t.Parallel()
 	j, _ := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
 		Action:    ApprovalActionMarkFailed,
@@ -156,8 +156,8 @@ func TestRetryApprovalCreatesLinkedIntentAndEvent(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
 		Action:    ApprovalActionRetry,
@@ -203,8 +203,8 @@ func TestRetryRejectsUnsafeStoredRequest(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
 		Action:    ApprovalActionRetry,
@@ -228,8 +228,8 @@ func TestRetryRejectsChangedStoredRequest(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  intent.ID,
 		Action:    ApprovalActionRetry,
@@ -255,14 +255,14 @@ func TestRetentionPreservesAuditAndUnknown(t *testing.T) {
 	old := "2026-07-01T00:00:00Z"
 
 	pruned := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, pruned.ID)
-	if _, err := j.Succeed(context.Background(), pruned.ID, json.RawMessage(`{"id":"done"}`)); err != nil {
+	pruned = mustStart(t, j, pruned.ID)
+	if _, err := j.Succeed(context.Background(), pruned.ID, pruned.LeaseToken, json.RawMessage(`{"id":"done"}`)); err != nil {
 		t.Fatalf("succeed: %v", err)
 	}
 
 	audited := mustPrepare(t, j, validPrepare(2))
-	mustStart(t, j, audited.ID)
-	mustMarkUnknown(t, j, audited.ID)
+	audited = mustStart(t, j, audited.ID)
+	mustMarkUnknown(t, j, audited)
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{
 		IntentID:  audited.ID,
 		Action:    ApprovalActionMarkFailed,
@@ -277,8 +277,8 @@ func TestRetentionPreservesAuditAndUnknown(t *testing.T) {
 	}
 
 	unknown := mustPrepare(t, j, validPrepare(3))
-	mustStart(t, j, unknown.ID)
-	mustMarkUnknown(t, j, unknown.ID)
+	unknown = mustStart(t, j, unknown.ID)
+	mustMarkUnknown(t, j, unknown)
 	if _, err := db.ExecContext(context.Background(), `UPDATE effect_intent SET finished_at = ?, updated_at = ? WHERE id IN (?, ?)`, old, old, pruned.ID, audited.ID); err != nil {
 		t.Fatalf("age terminal intents: %v", err)
 	}
@@ -307,8 +307,8 @@ func TestStatusReportsStatesAndOldestUpdate(t *testing.T) {
 	started := mustPrepare(t, j, validPrepare(2))
 	mustStart(t, j, started.ID)
 	unknown := mustPrepare(t, j, validPrepare(3))
-	mustStart(t, j, unknown.ID)
-	mustMarkUnknown(t, j, unknown.ID)
+	unknown = mustStart(t, j, unknown.ID)
+	mustMarkUnknown(t, j, unknown)
 
 	status, err := j.Status(context.Background())
 	if err != nil {
@@ -323,9 +323,9 @@ func TestStatusReportsStatesAndOldestUpdate(t *testing.T) {
 	_ = prepared
 }
 
-func mustMarkUnknown(t *testing.T, j *Journal, id string) *Intent {
+func mustMarkUnknown(t *testing.T, j *Journal, started *Intent) *Intent {
 	t.Helper()
-	intent, err := j.MarkUnknown(context.Background(), id)
+	intent, err := j.MarkUnknown(context.Background(), started.ID, started.LeaseToken)
 	if err != nil {
 		t.Fatalf("mark unknown: %v", err)
 	}
@@ -336,8 +336,8 @@ func TestApprovalReasonDoesNotLeakIntoIntentPayload(t *testing.T) {
 	t.Parallel()
 	j, db := newTestJournal(t)
 	intent := mustPrepare(t, j, validPrepare(1))
-	mustStart(t, j, intent.ID)
-	mustMarkUnknown(t, j, intent.ID)
+	intent = mustStart(t, j, intent.ID)
+	mustMarkUnknown(t, j, intent)
 	reason := "owner reason with no request content"
 	approval, err := j.Approve(context.Background(), &ApprovalRequest{IntentID: intent.ID, Action: ApprovalActionMarkFailed, Reason: reason, ExpiresIn: time.Minute})
 	if err != nil {

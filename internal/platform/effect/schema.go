@@ -50,6 +50,18 @@ CREATE INDEX effect_intent_turn_idx ON effect_intent(session_id, turn_id, prepar
 CREATE INDEX effect_approval_intent_idx ON effect_approval(intent_id, issued_at);
 `
 
+const leaseStepSQL = `
+ALTER TABLE effect_intent ADD COLUMN lease_token TEXT;
+ALTER TABLE effect_intent ADD COLUMN lease_expires_at TEXT;
+CREATE INDEX effect_intent_lease_idx ON effect_intent(state, lease_expires_at) WHERE state = 'started';
+`
+
+const leaseStepVersion = 26
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "effect", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "effect",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: leaseStepVersion, SQL: leaseStepSQL}},
+	}
 }
