@@ -5,43 +5,17 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
-	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
-const (
-	ProposalCardTTL    = 24 * time.Hour
-	proposalCardHeader = "workflow proposal "
-)
+const proposalCommandQuote = "`"
 
-type ProposalDecider func(ctx context.Context, approved bool) (string, error)
-
-type ProposalCard struct {
-	ID      string
-	Plan    string
-	Tainted bool
+func proposalContent(card *approval.ProposalCard) string {
+	return approval.ProposalHeading(card) + "\n" + fenceBlock(card.Plan)
 }
 
-func (c ProposalCard) content() string {
-	heading := proposalCardHeader + tools.EscapeDisplayText(c.ID)
-	if c.Tainted {
-		heading += "\n" + policy.UntrustedInputNotice
-	}
-	return heading + "\n" + fenceBlock(c.Plan)
-}
-
-func (c ProposalCard) tooLongNotice() string {
-	id := tools.EscapeDisplayText(c.ID)
-	notice := proposalCardHeader + id + " is too long for a card. Review it with `aura workflow proposal show " + id + "` and approve it there."
-	if c.Tainted {
-		notice += "\n" + policy.UntrustedInputNotice
-	}
-	return notice
-}
-
-func (a *Adapter) OfferProposal(ctx context.Context, card ProposalCard, decide ProposalDecider) error {
+func (a *Adapter) OfferProposal(ctx context.Context, card approval.ProposalCard, decide approval.ProposalDecider) error {
 	if decide == nil {
 		return fault.New(ErrorCodeInvalidArgument, "proposal decider must not be nil")
 	}
@@ -57,12 +31,14 @@ func (a *Adapter) OfferProposal(ctx context.Context, card ProposalCard, decide P
 	if err != nil {
 		return approvalUnavailable("owner dm channel is unavailable")
 	}
-	content := card.content()
+	content := proposalContent(&card)
 	if len([]rune(content)) > discordMessageLimit {
-		a.postNotice(ctx, token, dmChannel, card.tooLongNotice())
+		if err := sendText(ctx, a.httpClient, a.restBase, token, dmChannel, approval.ProposalTooLongNotice(&card, proposalCommandQuote)); err != nil {
+			return approvalUnavailable("proposal notice delivery failed")
+		}
 		return nil
 	}
-	expiresAt := time.Now().Add(ProposalCardTTL)
+	expiresAt := time.Now().Add(approval.ProposalCardTTL)
 	binding := approvalBinding{
 		principal: principal.Namespaced(principal.ChannelDiscord, owners[0]),
 		class:     principal.ClassOwner,
@@ -82,7 +58,7 @@ func (a *Adapter) OfferProposal(ctx context.Context, card ProposalCard, decide P
 	return nil
 }
 
-func (a *Adapter) awaitProposal(ctx context.Context, token, tokenID string, pending *approval.Pending, card cardRef, proposalID string, decide ProposalDecider) {
+func (a *Adapter) awaitProposal(ctx context.Context, token, tokenID string, pending *approval.Pending, card cardRef, proposalID string, decide approval.ProposalDecider) {
 	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, card)
 	if timedOut || err != nil {
 		return

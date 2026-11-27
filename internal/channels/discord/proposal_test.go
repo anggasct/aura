@@ -3,12 +3,15 @@ package discord
 import (
 	"context"
 	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	policy "github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -49,7 +52,7 @@ func TestProposalCardIsDecidedOnlyByTheOwnerInTheDM(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	recorded := &recordedDecision{reply: "approved prop_1: run run_9"}
-	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_1", Plan: "Plan: Write the release note\n1. approve — owner approval"}, recorded.decide); err != nil {
+	if err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_1", Plan: "Plan: Write the release note\n1. approve — owner approval"}, recorded.decide); err != nil {
 		t.Fatal(err)
 	}
 	card := stub.waitPostTo(t, "555", 1)[0]
@@ -86,7 +89,7 @@ func TestProposalCardRejectionAndFailureAreReported(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	recorded := &recordedDecision{err: errors.New("workflow_proposal_digest_mismatch: changed")}
-	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_2", Plan: "Plan: x"}, recorded.decide); err != nil {
+	if err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_2", Plan: "Plan: x"}, recorded.decide); err != nil {
 		t.Fatal(err)
 	}
 	_, ids := cardButtons(t, stub.waitPostTo(t, "555", 1)[0])
@@ -103,7 +106,7 @@ func TestProposalCardRejectionAndFailureAreReported(t *testing.T) {
 func TestProposalCardNeedsAnOwnerIdentity(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, nil, principal.ClassOwner)
-	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_3", Plan: "Plan: x"}, (&recordedDecision{}).decide); err == nil {
+	if err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_3", Plan: "Plan: x"}, (&recordedDecision{}).decide); err == nil {
 		t.Fatal("a proposal card was offered without an owner identity")
 	}
 	if posts := stub.postsTo("555"); len(posts) != 0 {
@@ -116,7 +119,7 @@ func TestCardDoesNotEscapeThePlanTwice(t *testing.T) {
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	fence := strings.Repeat("`", 3)
 	plan := "Plan: ship" + fence + "[ok](https://evil)\n1. approve - owner approval\n    path: a\\\\b"
-	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_1", Plan: plan}, (&recordedDecision{}).decide); err != nil {
+	if err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_1", Plan: plan}, (&recordedDecision{}).decide); err != nil {
 		t.Fatal(err)
 	}
 	card := stub.waitPostTo(t, "555", 1)[0]
@@ -152,7 +155,7 @@ func TestLongPlanCardHasNoButtons(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := newApprovalStub(t)
 			adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
-			if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_9", Plan: tc.plan}, (&recordedDecision{}).decide); err != nil {
+			if err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_9", Plan: tc.plan}, (&recordedDecision{}).decide); err != nil {
 				t.Fatal(err)
 			}
 			post := stub.waitPostTo(t, "555", 1)[0]
@@ -184,7 +187,7 @@ func TestUntrustedLineSurvivesALongPlan(t *testing.T) {
 	stub := newApprovalStub(t)
 	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
 	plan := "Plan: " + strings.Repeat("a", 1794)
-	if err := adapter.OfferProposal(t.Context(), ProposalCard{ID: "prop_5", Plan: plan, Tainted: true}, (&recordedDecision{}).decide); err != nil {
+	if err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_5", Plan: plan, Tainted: true}, (&recordedDecision{}).decide); err != nil {
 		t.Fatal(err)
 	}
 	content, _ := stub.waitPostTo(t, "555", 1)[0].body["content"].(string)
@@ -194,5 +197,18 @@ func TestUntrustedLineSurvivesALongPlan(t *testing.T) {
 	}
 	if !strings.Contains(content, plan) {
 		t.Errorf("card does not hold the whole plan")
+	}
+}
+
+func TestTooLongNoticeFailureIsUnavailable(t *testing.T) {
+	stub := newApprovalStub(t)
+	stub.postCode = http.StatusInternalServerError
+	adapter, _ := newOwnerRoutedAdapter(t, stub, []string{"discord:777"}, principal.ClassOwner)
+	err := adapter.OfferProposal(t.Context(), approval.ProposalCard{ID: "prop_7", Plan: "Plan: " + strings.Repeat("a", 2100)}, (&recordedDecision{}).decide)
+	if !fault.HasCode(err, ErrorCodeApprovalUnavailable) {
+		t.Fatalf("OfferProposal() = %v, want approval_unavailable", err)
+	}
+	if got := adapter.approvals.Len(); got != 0 {
+		t.Errorf("pending tokens = %d, want none", got)
 	}
 }

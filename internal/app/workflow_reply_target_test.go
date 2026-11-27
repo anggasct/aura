@@ -15,7 +15,7 @@ func (h *proposalHarness) targetOwnerSession(t *testing.T, sessions map[string]a
 	t.Helper()
 	h.targets = []workflow.ReplyTargeter{&workflowReplyTargeterAdapter{target: fixedTarget{sessions: sessions}}}
 	card := &fakeOfferer{sessions: map[string]bool{h.owner.SessionID: true}}
-	h.rebuildController(t, &discordProposalOffererAdapter{offerer: card})
+	h.rebuildController(t, &workflowProposalOffererAdapter{offerer: card})
 	go h.controller.RunProposalCards(t.Context())
 	return card
 }
