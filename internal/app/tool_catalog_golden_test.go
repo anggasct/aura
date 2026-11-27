@@ -58,6 +58,7 @@ type catalogDefinition struct {
 	Version              string          `json:"version"`
 	Server               string          `json:"server"`
 	Plugin               bool            `json:"plugin"`
+	Description          string          `json:"description,omitempty"`
 	Schema               json.RawMessage `json:"schema"`
 	RequiredCapabilities []string        `json:"required_capabilities"`
 	RequiresApproval     bool            `json:"requires_approval"`
@@ -160,6 +161,7 @@ func TestToolCatalogGolden(t *testing.T) {
 			Version:              definition.Version,
 			Server:               definition.Server,
 			Plugin:               definition.Plugin != nil,
+			Description:          definition.Description,
 			Schema:               definition.Schema,
 			RequiredCapabilities: definition.RequiredCapabilities,
 			RequiresApproval:     definition.RequiresApproval,

@@ -15,6 +15,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
@@ -52,7 +53,7 @@ func proposalFixture(t *testing.T) *proposalHarness {
 	t.Helper()
 	base, runs, db := workflowToolFixture(t, "book_visit")
 	cfg := &appconfig.Config{Agents: &auraagent.Config{Definitions: []auraagent.Persona{{
-		ID: "ops", Description: "operator", Instructions: "You plan work.", Tools: []string{"read_file", "write_file", "workflow_propose"},
+		ID: "ops", Description: "operator", Instructions: "You plan work.", Tools: []string{"read_file", "write_file", "web_search", "workflow_propose"},
 	}}}}
 	registry, err := buildAgentRegistry(cfg)
 	if err != nil {
@@ -126,6 +127,56 @@ func TestProposeStoresAValidatedPlanForTheOwnerOnly(t *testing.T) {
 	}
 	if got := proposalCount(t, runs); got != 1 {
 		t.Fatalf("proposals stored = %d", got)
+	}
+}
+
+func proposeToolDefinition(t *testing.T) *tools.Definition {
+	t.Helper()
+	definitions := workflow.ToolDefinitions()
+	for i := range definitions {
+		if definitions[i].Name == workflow.ProposeToolName {
+			return &definitions[i]
+		}
+	}
+	t.Fatalf("%s is not defined", workflow.ProposeToolName)
+	return nil
+}
+
+func TestProposeExampleCompiles(t *testing.T) {
+	h := proposalFixture(t)
+	deps := h.interpreter.ValidationDeps()
+	deps.DefaultStepTimeout = time.Minute
+	deps.CheckToolCall = newStepCatalog(nil).CheckArguments
+	if err := h.interpreter.LoadAll(t.Context(), nil, deps); err != nil {
+		t.Fatal(err)
+	}
+	definition := proposeToolDefinition(t)
+	_, example, found := strings.Cut(definition.Description, "Example: ")
+	if !found {
+		t.Fatalf("description has no example: %q", definition.Description)
+	}
+	validated, err := definition.Validate(json.RawMessage(example))
+	if err != nil {
+		t.Fatalf("example is refused by the tool validator: %v", err)
+	}
+	var args struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(validated, &args); err != nil {
+		t.Fatal(err)
+	}
+	proposed, err := h.controller.Propose(t.Context(), h.owner, args.Spec)
+	if err != nil {
+		t.Fatalf("example proposal: %v", err)
+	}
+	stored, err := h.runs.Proposal(t.Context(), proposed.ProposalID, time.Now())
+	if err != nil || stored.Status != workflow.ProposalProposed || len(stored.Spec.Steps) != 2 {
+		t.Fatalf("stored = %+v, %v", stored, err)
+	}
+	for _, want := range []string{"run tool web_search", "summary"} {
+		if !strings.Contains(proposed.Plan, want) {
+			t.Fatalf("plan lacks %q:\n%s", want, proposed.Plan)
+		}
 	}
 }
 
