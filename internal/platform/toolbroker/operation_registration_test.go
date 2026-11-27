@@ -149,10 +149,10 @@ func TestOperationHelpersRefuseNilArguments(t *testing.T) {
 			return err
 		}},
 		{name: "preview without a previewer", call: func() error {
-			_, err := broker.runPreview(t.Context(), nil, &operationCall{canonical: request, definition: &definition}, nil)
+			_, err := broker.runPreview(t.Context(), nil, &operationCall{canonical: request, definition: &definition})
 			return err
 		}},
-		{name: "preview action without a call", call: func() error { _, err := broker.previewAction(t.Context(), nil, defaultPreview); return err }},
+		{name: "preview action without a call", call: func() error { _, err := broker.previewAction(t.Context(), nil); return err }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

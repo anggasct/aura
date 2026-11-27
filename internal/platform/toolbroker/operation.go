@@ -25,6 +25,7 @@ type Previewer func(ctx context.Context, request *ToolRequest) (Preview, error)
 type operationCall struct {
 	canonical  *ToolRequest
 	definition *tools.Definition
+	previewer  Previewer
 }
 
 type operationAdmission struct {
@@ -155,7 +156,8 @@ func (b *Broker) admitOperation(ctx context.Context, slot *toolcall.Slot, call *
 		}
 		return operationAdmission{}, nil
 	}
-	preview, err := b.runPreview(ctx, slot, call, previewer)
+	call.previewer = previewer
+	preview, err := b.runPreview(ctx, slot, call)
 	if err != nil {
 		return operationAdmission{}, err
 	}
@@ -175,16 +177,16 @@ func (b *Broker) admitOperation(ctx context.Context, slot *toolcall.Slot, call *
 	return operationAdmission{lines: preview.Lines}, nil
 }
 
-func (b *Broker) runPreview(ctx context.Context, slot *toolcall.Slot, call *operationCall, previewer Previewer) (Preview, error) {
-	if call == nil || call.canonical == nil || call.definition == nil || previewer == nil {
+func (b *Broker) runPreview(ctx context.Context, slot *toolcall.Slot, call *operationCall) (Preview, error) {
+	if call == nil || call.canonical == nil || call.definition == nil || call.previewer == nil {
 		return Preview{}, nilOperationArguments()
 	}
 	scope, scoped := durable.TurnScopeFrom(ctx)
 	if !scoped {
-		return b.previewAction(ctx, call, previewer)
+		return b.previewAction(ctx, call)
 	}
 	raw, err := scope.Invocation().RunAction(ctx, slot.Action("preview"), b.recordApproval(func(ctx context.Context) ([]byte, error) {
-		preview, err := b.previewAction(ctx, call, previewer)
+		preview, err := b.previewAction(ctx, call)
 		if err != nil {
 			return nil, err
 		}
@@ -204,8 +206,8 @@ func (b *Broker) runPreview(ctx context.Context, slot *toolcall.Slot, call *oper
 	return preview, nil
 }
 
-func (b *Broker) previewAction(ctx context.Context, call *operationCall, previewer Previewer) (Preview, error) {
-	if call == nil || call.canonical == nil || call.definition == nil || previewer == nil {
+func (b *Broker) previewAction(ctx context.Context, call *operationCall) (Preview, error) {
+	if call == nil || call.canonical == nil || call.definition == nil || call.previewer == nil {
 		return Preview{}, nilOperationArguments()
 	}
 	if err := contextError(ctx, call.canonical.Deadline); err != nil {
@@ -213,7 +215,7 @@ func (b *Broker) previewAction(ctx context.Context, call *operationCall, preview
 	}
 	callCtx, cancel := withCallDeadline(ctx, call.canonical.Deadline)
 	defer cancel()
-	preview, err := previewer(callCtx, call.canonical)
+	preview, err := call.previewer(callCtx, call.canonical)
 	if err != nil {
 		return Preview{}, b.classifyExecutionError(ctx, call.canonical, err)
 	}
