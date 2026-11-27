@@ -215,4 +215,6 @@ type StepRun struct {
 	OutputArtifactDigest string
 	ErrorCode            string
 	UpdatedAt            time.Time
+	Tainted              bool
+	Private              bool
 }

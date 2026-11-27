@@ -330,7 +330,7 @@ func (s *Store) Runs(ctx context.Context, status string) ([]*RunSummary, error) 
 
 func (s *Store) Steps(ctx context.Context, runID string) ([]*StepRun, error) {
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
-		`SELECT step_id, status, attempt, started_at, ended_at, COALESCE(output_json, ''), COALESCE(output_artifact_digest, ''), COALESCE(error_code, ''), updated_at FROM workflow_step_run WHERE run_id = ? ORDER BY step_id`,
+		`SELECT step_id, status, attempt, started_at, ended_at, COALESCE(output_json, ''), COALESCE(output_artifact_digest, ''), COALESCE(error_code, ''), updated_at, tainted, private FROM workflow_step_run WHERE run_id = ? ORDER BY step_id`,
 		runID,
 	)
 	if err != nil {
@@ -342,7 +342,7 @@ func (s *Store) Steps(ctx context.Context, runID string) ([]*StepRun, error) {
 		step := &StepRun{RunID: runID}
 		var startedAt, endedAt, updatedAt sql.NullString
 		var output string
-		if err := rows.Scan(&step.StepID, &step.Status, &step.Attempt, &startedAt, &endedAt, &output, &step.OutputArtifactDigest, &step.ErrorCode, &updatedAt); err != nil {
+		if err := rows.Scan(&step.StepID, &step.Status, &step.Attempt, &startedAt, &endedAt, &output, &step.OutputArtifactDigest, &step.ErrorCode, &updatedAt, &step.Tainted, &step.Private); err != nil {
 			return nil, sqlite.Classify(fmt.Errorf("scan step: %w", err))
 		}
 		step.UpdatedAt, _ = time.Parse(time.RFC3339Nano, updatedAt.String)
@@ -409,8 +409,8 @@ func (s *Store) updateStep(ctx context.Context, runID, stepID string, update *st
 		output = string(update.Output)
 	}
 	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
-		`UPDATE workflow_step_run SET status = ?, attempt = ?, started_at = ?, ended_at = ?, output_json = ?, output_artifact_digest = ?, error_code = ?, updated_at = ? WHERE run_id = ? AND step_id = ?`,
-		update.Status, update.Attempt, format(update.StartedAt), format(update.EndedAt), output, nullIfEmpty(update.ArtifactDigest), nullIfEmpty(update.ErrorCode), time.Now().UTC().Format(time.RFC3339Nano), runID, stepID,
+		`UPDATE workflow_step_run SET status = ?, attempt = ?, started_at = ?, ended_at = ?, output_json = ?, output_artifact_digest = ?, error_code = ?, updated_at = ?, tainted = ?, private = ? WHERE run_id = ? AND step_id = ?`,
+		update.Status, update.Attempt, format(update.StartedAt), format(update.EndedAt), output, nullIfEmpty(update.ArtifactDigest), nullIfEmpty(update.ErrorCode), time.Now().UTC().Format(time.RFC3339Nano), update.Tainted, update.Private, runID, stepID,
 	)
 	if err != nil {
 		return sqlite.Classify(fmt.Errorf("update step %s: %w", stepID, err))

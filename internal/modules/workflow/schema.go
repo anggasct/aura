@@ -137,6 +137,13 @@ END;
 
 const personaPinsStepVersion = 24
 
+const stepLabelsStepSQL = `
+ALTER TABLE workflow_step_run ADD COLUMN tainted INTEGER NOT NULL DEFAULT 1 CHECK (tainted IN (0,1));
+ALTER TABLE workflow_step_run ADD COLUMN private INTEGER NOT NULL DEFAULT 1 CHECK (private IN (0,1));
+`
+
+const stepLabelsStepVersion = 25
+
 func Schema() sqlite.SchemaOwner {
 	return sqlite.StaticSchema{
 		Name: "workflow",
@@ -144,6 +151,7 @@ func Schema() sqlite.SchemaOwner {
 		Steps: []sqlite.Step{
 			{Version: replyTargetStepVersion, SQL: replyTargetStepSQL},
 			{Version: personaPinsStepVersion, SQL: personaPinsStepSQL},
+			{Version: stepLabelsStepVersion, SQL: stepLabelsStepSQL},
 		},
 	}
 }
