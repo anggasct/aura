@@ -20,6 +20,7 @@ type ToolObservation struct {
 	Executor      string
 	Duration      time.Duration
 	OutputBytes   int64
+	OperationID   string
 
 	WorkflowRunID  string
 	WorkflowStepID string
@@ -69,6 +70,9 @@ func (r *ToolRecorder) Record(ctx context.Context, observation *ToolObservation)
 		attribute.String(AttrToolExecutor, observation.Executor),
 		attribute.Int64(AttrToolOutputBytes, observation.OutputBytes),
 		attribute.String(AttrSemconvVersion, SemconvVersion),
+	}
+	if observation.OperationID != "" {
+		spanAttrs = append(spanAttrs, attribute.String(AttrOperationID, observation.OperationID))
 	}
 	if observation.WorkflowRunID != "" {
 		spanAttrs = append(spanAttrs, attribute.String(AttrWorkflowRunID, observation.WorkflowRunID))
