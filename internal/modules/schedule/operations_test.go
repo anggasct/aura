@@ -115,7 +115,7 @@ func TestCronAddAgentSchemaNamesNoDestination(t *testing.T) {
 	}
 }
 
-func TestCronAddDeliversToTheOwnerDestination(t *testing.T) {
+func TestAgentCronAddDeliversToOwner(t *testing.T) {
 	rig := newScheduleRig(t, ownerRoute{alias: "me", route: "telegram:owner"})
 	request := operationtest.RequestFor("aura_cron_add", rig.addArguments(t), "add-1")
 

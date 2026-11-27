@@ -232,6 +232,9 @@ func (r *ToolStepRunner) prepare(ctx context.Context, call *StepCall, toolID str
 	if definition.Orchestration {
 		return nil, codedError(ErrorCodeExecutorInvalid, "tool "+toolID+" is an orchestration tool and cannot run as a workflow step")
 	}
+	if definition.Operation != "" {
+		return nil, codedError(ErrorCodeCapabilityExceeded, "tool "+toolID+" is an operation tool and cannot run as a workflow step")
+	}
 	if definition.Channel == principal.ChannelEmail {
 		return nil, codedError(ErrorCodeCapabilityUnavailable, "a workflow run has no email account to send from")
 	}
@@ -262,6 +265,7 @@ func (r *ToolStepRunner) prepare(ctx context.Context, call *StepCall, toolID str
 		PrincipalID:           call.Origin.PrincipalID,
 		PrincipalClass:        class,
 		AgentID:               call.Origin.AgentID,
+		Origin:                turn.OriginWorkflow,
 		Knowledge:             persona.KnowledgeFor(class),
 		Tainted:               call.Origin.Tainted || call.Approval.Tainted,
 		Deadline:              deadline,

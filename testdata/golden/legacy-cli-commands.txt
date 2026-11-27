@@ -1,0 +1,111 @@
+agents list
+agents show
+apikey create
+apikey list
+apikey revoke
+bindings explain
+broadcast reconcile
+broadcast status
+chat
+children cancel
+children list
+children show
+config check
+config schema
+doctor
+effects approve
+effects list
+effects mark
+effects prune
+effects reconcile
+effects retry
+exec
+grants list
+grants revoke
+handoff list
+handoff release
+interpreter install
+interpreter list
+interpreter remove
+kb add
+kb check
+kb embed
+kb list
+kb refresh
+kb remove
+kb show
+mcp list
+mcp trust approve
+mcp trust revoke
+memory forget
+memory inspect
+memory purge
+models circuit-reset
+models circuits
+models routes
+owner rekey
+owner whoami
+pairing approve
+pairing clear-pending
+pairing list
+pairing revoke
+persona eval
+persona eval-results
+persona list
+plugin approve
+plugin disable
+plugin install
+plugin list
+plugin login
+plugin logout
+plugin remove
+plugin review
+principal forget
+principal list
+principal show
+profile accept
+profile delete
+profile list
+profile reject
+profile review
+profile set
+profile show
+reply
+server
+skills accept
+skills create
+skills disable
+skills doctor
+skills list
+skills reject
+skills review
+skills show
+skills validate
+status
+storage backup
+storage gc
+storage reconcile
+storage restore
+storage upgrade
+storage verify
+sync doctor
+sync reconcile
+sync run
+sync status
+usage entries
+usage prices
+usage reconcile
+usage status
+version
+workflow approve
+workflow cancel
+workflow definitions
+workflow inspect
+workflow proposal approve
+workflow proposal reject
+workflow proposal show
+workflow proposals
+workflow runs
+workflow signal
+workflow start
+workflow validate

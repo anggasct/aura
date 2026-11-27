@@ -46,6 +46,7 @@ type ADKExecutor struct {
 	tools             []tool.Tool
 	optIn             map[string]bool
 	ownerOptIn        map[string]bool
+	operationTools    map[string]bool
 	channelTools      map[string]string
 	externalServers   map[string]string
 	pluginTools       map[string]string
@@ -142,6 +143,7 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 		e.tools = tools
 		e.optIn = map[string]bool{}
 		e.ownerOptIn = map[string]bool{}
+		e.operationTools = map[string]bool{}
 		e.channelTools = map[string]string{}
 		e.externalServers = map[string]string{}
 		e.pluginTools = map[string]string{}
@@ -151,6 +153,9 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 			}
 			if definitions[i].OwnerOptIn {
 				e.ownerOptIn[definitions[i].Name] = true
+			}
+			if definitions[i].Operation != "" {
+				e.operationTools[definitions[i].Name] = true
 			}
 			if definitions[i].Channel != "" {
 				e.channelTools[definitions[i].Name] = definitions[i].Channel
@@ -593,6 +598,9 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 	listed := len(allowed) > 0
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
+		if x.operationTools[t.Name()] {
+			continue
+		}
 		if extra.restriction != nil && !slices.Contains(extra.restriction.Allowed, t.Name()) {
 			continue
 		}

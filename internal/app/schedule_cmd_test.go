@@ -250,7 +250,7 @@ func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 	})
 }
 
-func TestScheduleCommandsKeepTheirOutputAndExitCodes(t *testing.T) {
+func TestOperationCommandOutput(t *testing.T) {
 	dataDir := t.TempDir()
 	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 	id := addScheduleJob(t, gf)
@@ -294,7 +294,7 @@ func TestScheduleCommandsKeepTheirOutputAndExitCodes(t *testing.T) {
 	})
 }
 
-func TestScheduleListTableMatchesTheGolden(t *testing.T) {
+func TestOperationCommandOutputCronListGolden(t *testing.T) {
 	dataDir := t.TempDir()
 	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 	db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))

@@ -171,7 +171,7 @@ func buildOverride(override *Persona, index int, knownTools []string, catalog []
 	builtin, isBuiltin := builtinByID(override.ID)
 	if isBuiltin {
 		definition.Name = builtin.Name
-		definition.Tools = append([]string(nil), builtin.Tools...)
+		definition.Tools = inheritedTools(builtin.Tools, definition.Audience)
 		definition.Instructions = builtin.Instructions
 	} else {
 		definition.Instructions = override.Instructions
@@ -185,6 +185,9 @@ func buildOverride(override *Persona, index int, knownTools []string, catalog []
 	}
 	if len(override.Tools) > 0 {
 		definition.Tools = append([]string(nil), override.Tools...)
+	}
+	if path, detail := operationToolDefect(definition.Audience, definition.Tools, definition.PrincipalTools, definition.PublicTools); path != "" {
+		return nil, codedError(ErrorCodePersonaInvalid, field+"."+path+": "+detail)
 	}
 	definition.Capabilities = append([]string(nil), override.Capabilities...)
 	definition.Name = cmp.Or(override.Name, definition.Name, definition.ID)
@@ -229,6 +232,17 @@ func buildOverride(override *Persona, index int, knownTools []string, catalog []
 		return nil, codedError(ErrorCodeDefinitionInvalid, field+".limits.turn_timeout must not be negative")
 	}
 	return &definition, nil
+}
+
+func inheritedTools(builtin []string, audience string) []string {
+	inherited := make([]string, 0, len(builtin))
+	for _, name := range builtin {
+		if audience != AudienceOwner && tools.IsOperationEntry(name) {
+			continue
+		}
+		inherited = append(inherited, name)
+	}
+	return inherited
 }
 
 func validateToolCeilings(definition *Definition, field string, knownTools []string, catalog []tools.Definition, mcpServers []string) error {

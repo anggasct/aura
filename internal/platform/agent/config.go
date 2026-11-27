@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"maps"
@@ -187,6 +188,9 @@ func (c Config) validateAccess() error {
 				return configkit.Field(field+"."+list.name, fault.New(ErrorCodePersonaInvalid, "must not list a tool twice"))
 			}
 		}
+		if path, detail := operationToolDefect(cmp.Or(definition.Audience, AudienceOwner), definition.Tools, definition.PrincipalTools, definition.PublicTools); path != "" {
+			return configkit.Field(field+"."+path, fault.New(ErrorCodePersonaInvalid, detail))
+		}
 		for _, id := range definition.Workflows {
 			if strings.TrimSpace(id) == "" || id != strings.TrimSpace(id) {
 				return configkit.Field(field+".workflows", fault.New(ErrorCodePersonaInvalid, "entries must be non-empty workflow ids"))
@@ -209,6 +213,18 @@ func (c Config) validateAccess() error {
 		}
 	}
 	return nil
+}
+
+func operationToolDefect(audience string, listed, principal, public []string) (path, detail string) {
+	switch {
+	case slices.ContainsFunc(principal, tools.IsOperationEntry):
+		return "principal_tools", "operation tools are never available to principals other than the owner"
+	case slices.ContainsFunc(public, tools.IsOperationEntry):
+		return "public_tools", "operation tools are never available to principals other than the owner"
+	case audience != AudienceOwner && slices.ContainsFunc(listed, tools.IsOperationEntry):
+		return "tools", "operation tools need audience \"owner\""
+	}
+	return "", ""
 }
 
 func validateMessages(field string, messages map[string]string) error {
