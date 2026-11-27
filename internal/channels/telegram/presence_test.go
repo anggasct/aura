@@ -3,16 +3,36 @@ package telegram
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
+	"runtime"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
-	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) {
+	return fn(r)
+}
+
+func useInMemoryBotAPI(adapter *Adapter, api *fakeBotAPI) {
+	adapter.bot.base = "https://telegram.test"
+	adapter.bot.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+		rec := httptest.NewRecorder()
+		api.serve(rec, r)
+		resp := rec.Result()
+		resp.Request = r
+		return resp, nil
+	})
+}
 
 func presenceRequest(t *testing.T, h *harness, turnID string) *runtimechannelhost.DeliveryRequest {
 	t.Helper()
@@ -37,10 +57,18 @@ func endPresence(t *testing.T, adapter *Adapter, turnID string) {
 	}
 }
 
-func presenceUpdate(t *testing.T, adapter *Adapter, req *runtimechannelhost.DeliveryRequest, text, args string, failed bool) {
+func presenceUpdate(t *testing.T, adapter *Adapter, req *runtimechannelhost.DeliveryRequest, update runtimechannelhost.PresenceUpdate) {
 	t.Helper()
-	if err := adapter.PresenceUpdated(t.Context(), req, text, args, failed); err != nil {
-		t.Fatalf("PresenceUpdated(%q): %v", text, err)
+	if err := adapter.PresenceUpdated(t.Context(), req, update); err != nil {
+		t.Fatalf("PresenceUpdated(%+v): %v", update, err)
+	}
+}
+
+func stepUpdate(callID, activity string, outcome runtimechannelhost.StepOutcome) runtimechannelhost.PresenceUpdate {
+	return runtimechannelhost.PresenceUpdate{
+		CallIDs:  []string{callID},
+		Activity: activity,
+		Outcome:  outcome,
 	}
 }
 
@@ -65,35 +93,172 @@ func operationStates(t *testing.T, h *harness, operation string) map[effect.Stat
 	return states
 }
 
-func TestPresenceTypingRefreshesUntilTheStatusIsPosted(t *testing.T) {
-	h := newHarness(t)
-	adapter := presenceAdapter(t, h, 120*time.Millisecond, 15*time.Millisecond, 0)
-	req := presenceRequest(t, h, "turn-typing")
-	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
-		t.Fatalf("PresenceStarted: %v", err)
-	}
-	typing := h.api.bodies("sendChatAction")
-	if len(typing) != 1 || typing[0]["action"] != chatActionTyping || typing[0]["chat_id"] != float64(ownerUserID) {
-		t.Fatalf("typing calls = %v, want one immediate typing action for the chat", typing)
-	}
-	eventually(t, "typing refresh", func() bool { return h.api.count("sendChatAction") >= 3 })
-	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	endPresence(t, adapter, "turn-typing")
-	posted := h.api.callsOf("sendMessage")[0]
-	for _, call := range h.api.callsOf("sendChatAction") {
-		if call.at.After(posted.at) {
-			t.Fatal("typing continued after the status message was posted")
-		}
-	}
-	if posted.body["text"] != status.Fallback(0) {
-		t.Errorf("status text = %v, want the first fallback", posted.body["text"])
-	}
-	if _, formatted := posted.body["parse_mode"]; formatted {
-		t.Error("status message was sent with a parse mode")
-	}
-	if _, replies := posted.body["reply_parameters"]; replies {
-		t.Error("status message replies to the trigger")
-	}
+func TestTypingContinuesAfterTheStatusIsPosted(t *testing.T) {
+	t.Run("stops on Deliver", func(t *testing.T) {
+		h := newHarness(t)
+		adapter := h.adapter(t, nil)
+		useInMemoryBotAPI(adapter, h.api)
+		req := presenceRequest(t, h, "turn-typing-deliver")
+		deliverReq := deliveryRequest(t, h, "turn-typing-deliver", "final answer")
+
+		synctest.Test(t, func(t *testing.T) {
+			if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+				t.Fatalf("PresenceStarted: %v", err)
+			}
+			synctest.Wait()
+			if got := h.api.count("sendChatAction"); got != 1 {
+				t.Fatalf("initial typing calls = %d, want 1", got)
+			}
+
+			time.Sleep(statusPostAfter)
+			synctest.Wait()
+			if got := h.api.count("sendMessage"); got != 1 {
+				t.Fatalf("sendMessage calls at %v = %d, want 1", statusPostAfter, got)
+			}
+			posted := h.api.callsOf("sendMessage")[0]
+			if posted.body["text"] != "Working…\n⏱ 0:10" {
+				t.Errorf("initial status text = %q, want Working… and 0:10", posted.body["text"])
+			}
+			if _, formatted := posted.body["parse_mode"]; formatted {
+				t.Error("status message was sent with a parse mode")
+			}
+			if _, replies := posted.body["reply_parameters"]; replies {
+				t.Error("status message replies to the trigger")
+			}
+
+			time.Sleep(12 * time.Second)
+			synctest.Wait()
+			afterPost := 0
+			for _, call := range h.api.callsOf("sendChatAction") {
+				if call.at.After(posted.at) {
+					afterPost++
+				}
+			}
+			if afterPost < 3 {
+				t.Fatalf("typing calls after status post = %d, want at least 3", afterPost)
+			}
+
+			if _, err := adapter.Deliver(t.Context(), deliverReq); err != nil {
+				t.Fatalf("Deliver: %v", err)
+			}
+			typingAtDeliver := h.api.count("sendChatAction")
+			time.Sleep(20 * time.Second)
+			synctest.Wait()
+			if got := h.api.count("sendChatAction"); got != typingAtDeliver {
+				t.Fatalf("typing calls after Deliver = %d, want still %d", got, typingAtDeliver)
+			}
+			endPresence(t, adapter, "turn-typing-deliver")
+		})
+	})
+
+	t.Run("stops on PresenceEnded", func(t *testing.T) {
+		h := newHarness(t)
+		adapter := h.adapter(t, nil)
+		useInMemoryBotAPI(adapter, h.api)
+		req := presenceRequest(t, h, "turn-typing-end")
+
+		synctest.Test(t, func(t *testing.T) {
+			if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+				t.Fatalf("PresenceStarted: %v", err)
+			}
+			time.Sleep(statusPostAfter + 12*time.Second)
+			synctest.Wait()
+			posted := h.api.callsOf("sendMessage")[0]
+			afterPost := 0
+			for _, call := range h.api.callsOf("sendChatAction") {
+				if call.at.After(posted.at) {
+					afterPost++
+				}
+			}
+			if afterPost < 3 {
+				t.Fatalf("typing calls after status post = %d, want at least 3", afterPost)
+			}
+			endPresence(t, adapter, "turn-typing-end")
+			typingAtEnd := h.api.count("sendChatAction")
+			time.Sleep(20 * time.Second)
+			synctest.Wait()
+			if got := h.api.count("sendChatAction"); got != typingAtEnd {
+				t.Fatalf("typing calls after PresenceEnded = %d, want still %d", got, typingAtEnd)
+			}
+		})
+	})
+}
+
+func TestElapsedTimeTicksWithoutActivity(t *testing.T) {
+	t.Run("stops on Deliver", func(t *testing.T) {
+		h := newHarness(t)
+		adapter := h.adapter(t, nil)
+		adapter.cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+		useInMemoryBotAPI(adapter, h.api)
+		req := presenceRequest(t, h, "turn-tick-deliver")
+		deliverReq := deliveryRequest(t, h, "turn-tick-deliver", "final answer")
+
+		synctest.Test(t, func(t *testing.T) {
+			if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+				t.Fatalf("PresenceStarted: %v", err)
+			}
+			time.Sleep(statusPostAfter)
+			synctest.Wait()
+			if got := h.api.count("sendMessage"); got != 1 {
+				t.Fatalf("status posts = %d, want 1", got)
+			}
+			if got := h.api.sends()[0]["text"]; got != "Working…\n⏱ 0:10" {
+				t.Fatalf("initial status = %q, want Working… at 0:10", got)
+			}
+
+			time.Sleep(90 * time.Second)
+			synctest.Wait()
+			edits := h.api.bodies("editMessageText")
+			wantEdits := []string{
+				"Working…\n⏱ 0:40",
+				"Still working…\n⏱ 1:10",
+				"Still working…\n⏱ 1:40",
+			}
+			if len(edits) != len(wantEdits) {
+				t.Fatalf("idle edits = %d (%v), want %d", len(edits), edits, len(wantEdits))
+			}
+			for i, want := range wantEdits {
+				if edits[i]["text"] != want {
+					t.Errorf("edit[%d] = %q, want %q", i, edits[i]["text"], want)
+				}
+			}
+
+			if _, err := adapter.Deliver(t.Context(), deliverReq); err != nil {
+				t.Fatalf("Deliver: %v", err)
+			}
+			time.Sleep(90 * time.Second)
+			synctest.Wait()
+			if got := h.api.count("editMessageText"); got != len(wantEdits) {
+				t.Fatalf("edits after Deliver = %d, want still %d", got, len(wantEdits))
+			}
+			endPresence(t, adapter, "turn-tick-deliver")
+		})
+	})
+
+	t.Run("stops on PresenceEnded", func(t *testing.T) {
+		h := newHarness(t)
+		adapter := h.adapter(t, nil)
+		adapter.cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+		useInMemoryBotAPI(adapter, h.api)
+		req := presenceRequest(t, h, "turn-tick-end")
+
+		synctest.Test(t, func(t *testing.T) {
+			if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+				t.Fatalf("PresenceStarted: %v", err)
+			}
+			time.Sleep(statusPostAfter + 60*time.Second)
+			synctest.Wait()
+			if got := h.api.count("editMessageText"); got != 2 {
+				t.Fatalf("idle edits = %d, want 2", got)
+			}
+			endPresence(t, adapter, "turn-tick-end")
+			time.Sleep(90 * time.Second)
+			synctest.Wait()
+			if got := h.api.count("editMessageText"); got != 2 {
+				t.Fatalf("edits after PresenceEnded = %d, want still 2", got)
+			}
+		})
+	})
 }
 
 func TestPresenceFastTurnPostsNoStatusAndJournalsNothing(t *testing.T) {
@@ -103,7 +268,7 @@ func TestPresenceFastTurnPostsNoStatusAndJournalsNothing(t *testing.T) {
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted: %v", err)
 	}
-	presenceUpdate(t, adapter, req, "Looking through notes", "", false)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Looking through notes", runtimechannelhost.StepRunning))
 	endPresence(t, adapter, "turn-fast")
 	if got := h.api.count("sendMessage"); got != 0 {
 		t.Fatalf("sendMessage calls = %d, want none for a fast turn", got)
@@ -123,29 +288,32 @@ func TestPresencePostsOnceThenEditsInPlace(t *testing.T) {
 	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
 		t.Fatalf("PresenceStarted: %v", err)
 	}
-	presenceUpdate(t, adapter, req, "Looking through notes", `{"path":"notes.md"}`, false)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Looking through notes", runtimechannelhost.StepRunning))
 	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	presenceUpdate(t, adapter, req, "Checking open tasks", "", false)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Looking through notes", runtimechannelhost.StepDone))
+	presenceUpdate(t, adapter, req, stepUpdate("c2", "Checking open tasks", runtimechannelhost.StepRunning))
 	endPresence(t, adapter, "turn-edit")
 	posts := h.api.sends()
-	if len(posts) != 1 || posts[0]["text"] != "Looking through notes notes.md" {
-		t.Fatalf("status posts = %v, want one post with the rendered activity", posts)
+	firstPostText, _ := posts[0]["text"].(string)
+	if len(posts) != 1 || !strings.HasPrefix(firstPostText, "⏳ Looking through notes\n⏱ ") {
+		t.Fatalf("status posts = %v, want one post with the running step and elapsed time", posts)
 	}
 	edits := h.api.bodies("editMessageText")
-	if len(edits) != 1 {
-		t.Fatalf("edits = %d, want 1", len(edits))
+	if len(edits) != 2 {
+		t.Fatalf("edits = %d, want 2", len(edits))
 	}
-	if edits[0]["text"] != "Checking open tasks" || edits[0]["message_id"] != float64(701) || edits[0]["chat_id"] != float64(ownerUserID) {
-		t.Errorf("edit = %v, want the status message edited in place", edits[0])
+	lastText, _ := edits[1]["text"].(string)
+	if !strings.HasPrefix(lastText, "✓ Looking through notes\n⏳ Checking open tasks\n⏱ ") || edits[1]["message_id"] != float64(701) || edits[1]["chat_id"] != float64(ownerUserID) {
+		t.Errorf("edit = %v, want the status message edited in place with both steps", edits[1])
 	}
-	if _, formatted := edits[0]["parse_mode"]; formatted {
+	if _, formatted := edits[1]["parse_mode"]; formatted {
 		t.Error("status edit was sent with a parse mode")
 	}
 	if states := operationStates(t, h, OpSendMessage); states[effect.StateSucceeded] != 1 {
 		t.Errorf("send intents = %v, want one journaled status post", states)
 	}
-	if states := operationStates(t, h, opEditMessage); states[effect.StateSucceeded] != 1 {
-		t.Errorf("edit intents = %v, want one journaled edit", states)
+	if states := operationStates(t, h, opEditMessage); states[effect.StateSucceeded] != 2 {
+		t.Errorf("edit intents = %v, want two journaled edits", states)
 	}
 }
 
@@ -158,16 +326,17 @@ func TestPresenceCoalescesEditsUnderMinEditInterval(t *testing.T) {
 		t.Fatalf("PresenceStarted: %v", err)
 	}
 	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	presenceUpdate(t, adapter, req, "Second activity here", "", false)
-	presenceUpdate(t, adapter, req, "Third activity here", "", false)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Second activity here", runtimechannelhost.StepRunning))
+	presenceUpdate(t, adapter, req, stepUpdate("c2", "Third activity here", runtimechannelhost.StepRunning))
 	if got := h.api.count("editMessageText"); got != 0 {
 		t.Fatalf("edits = %d inside the interval, want 0", got)
 	}
 	eventually(t, "trailing edit", func() bool { return h.api.count("editMessageText") == 1 })
 	endPresence(t, adapter, "turn-coalesce")
 	edits := h.api.callsOf("editMessageText")
-	if len(edits) != 1 || edits[0].body["text"] != "Third activity here" {
-		t.Fatalf("edits = %v, want one edit carrying the latest activity", edits)
+	text, _ := edits[0].body["text"].(string)
+	if len(edits) != 1 || !strings.Contains(text, "⏳ Second activity here") || !strings.Contains(text, "⏳ Third activity here") {
+		t.Fatalf("edits = %v, want one edit carrying both coalesced steps", edits)
 	}
 	posted := h.api.callsOf("sendMessage")[0]
 	if gap := edits[0].at.Sub(posted.at); gap < interval {
@@ -178,41 +347,56 @@ func TestPresenceCoalescesEditsUnderMinEditInterval(t *testing.T) {
 func TestPresenceUnchangedStatusIsNotReEdited(t *testing.T) {
 	h := newHarness(t)
 	adapter := presenceAdapter(t, h, time.Nanosecond, time.Hour, 0)
+	useInMemoryBotAPI(adapter, h.api)
 	req := presenceRequest(t, h, "turn-unchanged")
-	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
-		t.Fatalf("PresenceStarted: %v", err)
-	}
-	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	presenceUpdate(t, adapter, req, "Checking open tasks", "", false)
-	presenceUpdate(t, adapter, req, "Checking open tasks", "", false)
-	endPresence(t, adapter, "turn-unchanged")
-	if got := h.api.count("editMessageText"); got != 1 {
-		t.Fatalf("edits = %d, want 1 (an unchanged status is not re-sent)", got)
-	}
-	if states := operationStates(t, h, opEditMessage); states[effect.StateSucceeded] != 1 || len(states) != 1 {
-		t.Fatalf("edit intents = %v, want the single edit recorded as success", states)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted: %v", err)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if got := h.api.count("sendMessage"); got != 1 {
+			t.Fatalf("status posts = %d, want 1", got)
+		}
+		presenceUpdate(t, adapter, req, stepUpdate("c1", "Checking open tasks", runtimechannelhost.StepRunning))
+		presenceUpdate(t, adapter, req, stepUpdate("c1", "Checking open tasks", runtimechannelhost.StepRunning))
+		endPresence(t, adapter, "turn-unchanged")
+		if got := h.api.count("editMessageText"); got != 1 {
+			t.Fatalf("edits = %d, want 1 (an unchanged status is not re-sent)", got)
+		}
+		if states := operationStates(t, h, opEditMessage); states[effect.StateSucceeded] != 1 || len(states) != 1 {
+			t.Fatalf("edit intents = %v, want the single edit recorded as success", states)
+		}
+	})
 }
 
-func TestPresenceFailureLineIsShownOnce(t *testing.T) {
+func TestPresenceStepFailureMarksOnlyThatStep(t *testing.T) {
 	h := newHarness(t)
 	adapter := presenceAdapter(t, h, time.Nanosecond, time.Hour, 0)
-	req := presenceRequest(t, h, "turn-failure")
-	if err := adapter.PresenceStarted(t.Context(), req); err != nil {
-		t.Fatalf("PresenceStarted: %v", err)
-	}
-	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	presenceUpdate(t, adapter, req, "Checking open tasks", "", false)
-	presenceUpdate(t, adapter, req, "", "", true)
-	presenceUpdate(t, adapter, req, "", "", true)
-	endPresence(t, adapter, "turn-failure")
-	edits := h.api.bodies("editMessageText")
-	if len(edits) != 2 {
-		t.Fatalf("edits = %d, want the activity and one failure line", len(edits))
-	}
-	if want := status.FailureLine("Checking open tasks"); edits[1]["text"] != want {
-		t.Errorf("failure edit = %v, want %q", edits[1]["text"], want)
-	}
+	useInMemoryBotAPI(adapter, h.api)
+	req := presenceRequest(t, h, "turn-step-fail")
+	synctest.Test(t, func(t *testing.T) {
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted: %v", err)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		presenceUpdate(t, adapter, req, stepUpdate("c1", "Checking open tasks", runtimechannelhost.StepRunning))
+		presenceUpdate(t, adapter, req, stepUpdate("c1", "Checking open tasks", runtimechannelhost.StepFailed))
+		presenceUpdate(t, adapter, req, stepUpdate("c2", "Trying another source", runtimechannelhost.StepRunning))
+		endPresence(t, adapter, "turn-step-fail")
+		edits := h.api.bodies("editMessageText")
+		if len(edits) != 3 {
+			t.Fatalf("edits = %d, want 3", len(edits))
+		}
+		last, _ := edits[2]["text"].(string)
+		if !strings.HasPrefix(last, "✗ Checking open tasks\n⏳ Trying another source\n⏱ ") {
+			t.Errorf("last edit = %q, want failed first step and running second step", last)
+		}
+		if strings.Contains(last, "⚠️") {
+			t.Errorf("last edit contains legacy global warning marker: %q", last)
+		}
+	})
 }
 
 func TestPresenceRedactsSecretsFromStatusMessages(t *testing.T) {
@@ -230,9 +414,9 @@ func TestPresenceRedactsSecretsFromStatusMessages(t *testing.T) {
 		t.Fatalf("PresenceStarted: %v", err)
 	}
 	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	presenceUpdate(t, adapter, req, "Using sk-live-hunter2 for search", `{"q":"sk-live-hunter2"}`, false)
-	presenceUpdate(t, adapter, req, "Reading the password file", "", false)
-	presenceUpdate(t, adapter, req, "Calling sk-live-hunter2", "", true)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Using sk-live-hunter2 for search", runtimechannelhost.StepRunning))
+	presenceUpdate(t, adapter, req, stepUpdate("c2", "Reading the password file", runtimechannelhost.StepRunning))
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Using sk-live-hunter2 for search", runtimechannelhost.StepFailed))
 	endPresence(t, adapter, "turn-secret")
 	for _, method := range []string{"sendMessage", "editMessageText"} {
 		for _, body := range h.api.bodies(method) {
@@ -258,18 +442,19 @@ func TestPresenceRateLimitDefersTheEditUntilRetryAfter(t *testing.T) {
 	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
 	h.api.failNextOn("editMessageText", apiFailure(http.StatusTooManyRequests, 1))
 	started := time.Now()
-	presenceUpdate(t, adapter, req, "Second activity here", "", false)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "Second activity here", runtimechannelhost.StepRunning))
 	if elapsed := time.Since(started); elapsed >= adapter.rateCap {
 		t.Fatalf("a rate-limited status edit blocked the turn for %v", elapsed)
 	}
-	presenceUpdate(t, adapter, req, "Third activity here", "", false)
+	presenceUpdate(t, adapter, req, stepUpdate("c2", "Third activity here", runtimechannelhost.StepRunning))
 	if got := h.api.count("editMessageText"); got != 1 {
 		t.Fatalf("edits = %d while rate limited, want only the rejected one", got)
 	}
 	eventually(t, "edit after retry_after", func() bool { return h.api.count("editMessageText") == 2 })
 	endPresence(t, adapter, "turn-limited")
 	edits := h.api.callsOf("editMessageText")
-	if edits[1].body["text"] != "Third activity here" {
+	text, _ := edits[1].body["text"].(string)
+	if !strings.Contains(text, "⏳ Third activity here") {
 		t.Errorf("deferred edit = %v, want the latest activity", edits[1].body["text"])
 	}
 	if gap := edits[1].at.Sub(edits[0].at); gap < adapter.rateCap {
@@ -385,7 +570,7 @@ func TestPresenceStatusFailuresNeverAffectTheFinalReply(t *testing.T) {
 				t.Fatalf("PresenceStarted: %v", err)
 			}
 			eventually(t, "status post attempt", func() bool { return h.api.count("sendMessage") == 1 })
-			presenceUpdate(t, adapter, req, "Checking open tasks", "", false)
+			presenceUpdate(t, adapter, req, stepUpdate("c1", "Checking open tasks", runtimechannelhost.StepRunning))
 			if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-resilient", "final answer")); err != nil {
 				t.Fatalf("Deliver after a presence failure: %v", err)
 			}
@@ -416,10 +601,124 @@ func TestPresenceRejectsRequestsWithoutAChat(t *testing.T) {
 		t.Fatal("nil presence request accepted")
 	}
 	req = presenceRequest(t, h, "")
-	if err := adapter.PresenceUpdated(t.Context(), req, "x", "", false); err == nil {
+	if err := adapter.PresenceUpdated(t.Context(), req, stepUpdate("c1", "x", runtimechannelhost.StepRunning)); err == nil {
 		t.Fatal("presence without a turn id accepted")
 	}
 	if got := h.api.count("sendChatAction"); got != 0 {
 		t.Fatalf("typing calls = %d, want 0", got)
 	}
+}
+
+func TestPresenceUpdateDuringInFlightPostFlushesAfterMinEditInterval(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	adapter.cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+	req := presenceRequest(t, h, "turn-inflight-flush")
+
+	synctest.Test(t, func(t *testing.T) {
+		postStarted := make(chan struct{})
+		releasePost := make(chan struct{})
+		var sendCalls atomic.Int32
+		adapter.bot.base = "https://telegram.test"
+		adapter.bot.http.Transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
+			if strings.HasSuffix(r.URL.Path, "/sendMessage") && sendCalls.Add(1) == 1 {
+				close(postStarted)
+				<-releasePost
+			}
+			rec := httptest.NewRecorder()
+			h.api.serve(rec, r)
+			resp := rec.Result()
+			resp.Request = r
+			return resp, nil
+		})
+
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted: %v", err)
+		}
+		adapter.presenceMu.Lock()
+		session := adapter.presence["turn-inflight-flush"]
+		adapter.presenceMu.Unlock()
+
+		time.Sleep(statusPostAfter)
+		<-postStarted
+
+		updateDone := make(chan error, 1)
+		go func() {
+			updateDone <- adapter.PresenceUpdated(t.Context(), req, stepUpdate("c1", "Inspecting logs", runtimechannelhost.StepRunning))
+		}()
+		for {
+			adapter.presenceMu.Lock()
+			updated := session.version > 0
+			adapter.presenceMu.Unlock()
+			if updated {
+				break
+			}
+			runtime.Gosched()
+		}
+
+		close(releasePost)
+		if err := <-updateDone; err != nil {
+			t.Fatalf("PresenceUpdated: %v", err)
+		}
+		synctest.Wait()
+		if got := h.api.count("editMessageText"); got != 0 {
+			t.Fatalf("edits immediately after post = %d, want 0 within min_edit_interval", got)
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		edits := h.api.bodies("editMessageText")
+		if len(edits) != 1 {
+			t.Fatalf("edits after min_edit_interval = %d, want 1", len(edits))
+		}
+		text, _ := edits[0]["text"].(string)
+		if !strings.HasPrefix(text, "⏳ Inspecting logs\n⏱ ") {
+			t.Errorf("flushed edit = %q, want step queued during in-flight post", text)
+		}
+		endPresence(t, adapter, "turn-inflight-flush")
+	})
+}
+
+func TestInitialStatusDefersDuringTypingRateHold(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapter(t, nil)
+	adapter.rateCap = rateLimitCap
+	adapter.cfg.MinEditInterval = configkit.Duration(2 * time.Second)
+	useInMemoryBotAPI(adapter, h.api)
+	req := presenceRequest(t, h, "turn-typing-hold")
+
+	synctest.Test(t, func(t *testing.T) {
+		if err := adapter.PresenceStarted(t.Context(), req); err != nil {
+			t.Fatalf("PresenceStarted: %v", err)
+		}
+		time.Sleep(typingRefreshInterval)
+		synctest.Wait()
+		h.api.failNextOn("sendChatAction", apiFailure(http.StatusTooManyRequests, 5))
+		time.Sleep(typingRefreshInterval)
+		synctest.Wait()
+
+		time.Sleep(statusPostAfter - 2*typingRefreshInterval)
+		synctest.Wait()
+		if got := h.api.count("sendMessage"); got != 0 {
+			t.Fatalf("sendMessage during active typing rate hold = %d, want 0", got)
+		}
+
+		time.Sleep(2 * time.Second)
+		synctest.Wait()
+		if got := h.api.count("sendMessage"); got != 0 {
+			t.Fatalf("sendMessage before rate hold expiry = %d, want 0", got)
+		}
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		sends := h.api.sends()
+		if len(sends) != 1 {
+			t.Fatalf("sendMessage after rate hold expiry = %d, want 1", len(sends))
+		}
+		text, _ := sends[0]["text"].(string)
+		if text != "Working…\n⏱ 0:13" {
+			t.Errorf("deferred initial status = %q, want Working… at 0:13", text)
+		}
+		endPresence(t, adapter, "turn-typing-hold")
+	})
 }

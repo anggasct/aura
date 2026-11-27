@@ -3,6 +3,7 @@ package runtimeengine
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -71,56 +72,6 @@ func (e *Engine) currentPresence(req *turn.TurnRequest) (runtimechannelhost.Pres
 	return presenceAdapterFor(req, e.adapters)
 }
 
-func extractPresenceActivity(ev *turn.Event) (text, args string, ok bool) {
-	if ev == nil {
-		return "", "", false
-	}
-	if ev.Kind != turnstore.EventKindADK {
-		return "", "", false
-	}
-	if !hasToolActivity(ev.Payload) {
-		return "", "", false
-	}
-	text = adkModelText(ev.Payload, false)
-	if strings.TrimSpace(text) == "" {
-		return "", "", false
-	}
-	return text, adkToolArgs(ev.Payload), true
-}
-
-func adkToolArgs(payload json.RawMessage) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var decoded struct {
-		Content *struct {
-			Parts []struct {
-				FunctionCall *struct {
-					Args json.RawMessage `json:"args"`
-				} `json:"functionCall"`
-			} `json:"parts"`
-		} `json:"content"`
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil || decoded.Content == nil {
-		return ""
-	}
-	var parts []string
-	for _, part := range decoded.Content.Parts {
-		if part.FunctionCall == nil {
-			continue
-		}
-		raw := strings.TrimSpace(string(part.FunctionCall.Args))
-		if raw == "" || raw == "null" {
-			continue
-		}
-		parts = append(parts, raw)
-	}
-	if len(parts) != 1 {
-		return ""
-	}
-	return parts[0]
-}
-
 func hasToolActivity(payload json.RawMessage) bool {
 	if len(payload) == 0 {
 		return false
@@ -147,7 +98,12 @@ func hasToolActivity(payload json.RawMessage) bool {
 	return false
 }
 
+type functionCall struct {
+	ID string `json:"id"`
+}
+
 type functionResponse struct {
+	ID       string         `json:"id"`
 	Name     string         `json:"name"`
 	Response map[string]any `json:"response"`
 }
@@ -175,13 +131,107 @@ func functionResponses(ev *turn.Event) []functionResponse {
 	return responses
 }
 
-func isPresenceFailureEvent(ev *turn.Event) bool {
-	for _, response := range functionResponses(ev) {
-		if turn.IsToolError(response.Response) {
-			return true
+type presenceStep struct {
+	callIDs  []string
+	activity string
+	pending  map[string]struct{}
+	settled  bool
+}
+
+type presenceTracker struct {
+	byCallID map[string]*presenceStep
+}
+
+func (t *presenceTracker) observe(ev *turn.Event) []runtimechannelhost.PresenceUpdate {
+	if ev == nil || ev.Kind != turnstore.EventKindADK || len(ev.Payload) == 0 {
+		return nil
+	}
+	var decoded struct {
+		Content *struct {
+			Parts []struct {
+				FunctionCall     *functionCall     `json:"functionCall"`
+				FunctionResponse *functionResponse `json:"functionResponse"`
+			} `json:"parts"`
+		} `json:"content"`
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(ev.Payload, &decoded); err != nil || decoded.Partial || decoded.Content == nil {
+		return nil
+	}
+	hasCalls := false
+	var callIDs []string
+	var pending map[string]struct{}
+	var responses []functionResponse
+	for _, part := range decoded.Content.Parts {
+		if part.FunctionCall != nil {
+			hasCalls = true
+			if id := strings.TrimSpace(part.FunctionCall.ID); id != "" {
+				if pending == nil {
+					pending = map[string]struct{}{}
+				}
+				if _, seen := pending[id]; !seen {
+					pending[id] = struct{}{}
+					callIDs = append(callIDs, id)
+				}
+			}
+		}
+		if part.FunctionResponse != nil {
+			responses = append(responses, *part.FunctionResponse)
 		}
 	}
-	return false
+	var updates []runtimechannelhost.PresenceUpdate
+	if hasCalls {
+		step := &presenceStep{
+			callIDs:  callIDs,
+			activity: adkModelText(ev.Payload, false),
+			pending:  pending,
+		}
+		if len(callIDs) > 0 {
+			if t.byCallID == nil {
+				t.byCallID = map[string]*presenceStep{}
+			}
+			for _, id := range callIDs {
+				t.byCallID[id] = step
+			}
+		}
+		updates = append(updates, runtimechannelhost.PresenceUpdate{
+			CallIDs:  slices.Clone(step.callIDs),
+			Activity: step.activity,
+			Outcome:  runtimechannelhost.StepRunning,
+		})
+	}
+	for _, response := range responses {
+		id := strings.TrimSpace(response.ID)
+		if id == "" {
+			continue
+		}
+		step := t.byCallID[id]
+		if step == nil || step.settled {
+			continue
+		}
+		if _, ok := step.pending[id]; !ok {
+			continue
+		}
+		delete(step.pending, id)
+		if turn.IsToolError(response.Response) {
+			step.settled = true
+			updates = append(updates, runtimechannelhost.PresenceUpdate{
+				CallIDs:  slices.Clone(step.callIDs),
+				Activity: step.activity,
+				Outcome:  runtimechannelhost.StepFailed,
+			})
+			continue
+		}
+		if len(step.pending) == 0 {
+			step.settled = true
+			updates = append(updates, runtimechannelhost.PresenceUpdate{
+				CallIDs:  slices.Clone(step.callIDs),
+				Activity: step.activity,
+				Outcome:  runtimechannelhost.StepDone,
+			})
+		}
+	}
+	return updates
 }
 
 func (e *Engine) notifyPresenceStarted(ctx context.Context, req *turn.TurnRequest) {
@@ -194,23 +244,19 @@ func (e *Engine) notifyPresenceStarted(ctx context.Context, req *turn.TurnReques
 	}
 }
 
-func (e *Engine) notifyPresenceText(ctx context.Context, req *turn.TurnRequest, text, args string) {
+func (e *Engine) notifyPresenceEvent(ctx context.Context, req *turn.TurnRequest, tracker *presenceTracker, ev *turn.Event) {
+	updates := tracker.observe(ev)
+	if len(updates) == 0 {
+		return
+	}
 	presence, delivery, ok := e.currentPresence(req)
 	if !ok {
 		return
 	}
-	if err := presence.PresenceUpdated(ctx, delivery, text, args, false); err != nil {
-		e.logger.DebugContext(ctx, "presence update failed", "error", err, "turn_id", req.TurnID)
-	}
-}
-
-func (e *Engine) notifyPresenceFailed(ctx context.Context, req *turn.TurnRequest) {
-	presence, delivery, ok := e.currentPresence(req)
-	if !ok {
-		return
-	}
-	if err := presence.PresenceUpdated(ctx, delivery, "", "", true); err != nil {
-		e.logger.DebugContext(ctx, "presence failure update failed", "error", err, "turn_id", req.TurnID)
+	for _, update := range updates {
+		if err := presence.PresenceUpdated(ctx, delivery, update); err != nil {
+			e.logger.DebugContext(ctx, "presence update failed", "error", err, "turn_id", req.TurnID)
+		}
 	}
 }
 

@@ -641,13 +641,6 @@ func (e *Engine) turnDeadline(ctx context.Context, inv durable.Invocation, req *
 	return record.StartedAt.Add(time.Duration(e.cfg.TurnTimeout)), nil
 }
 
-func (e *Engine) closeCancelledPresence(ctx context.Context, req *turn.TurnRequest) {
-	if !durable.Preempted(ctx) {
-		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
-	}
-	e.notifyPresenceEnded(ctx, req)
-}
-
 func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *runtimesessions.Descriptor) error {
 	if inv == nil {
 		return invalidArgument("durable turn drive requires an invocation")
@@ -722,6 +715,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	}
 
 	var executed []turn.Event
+	var presence presenceTracker
 	e.notifyPresenceStarted(ctx, req)
 	execErr := e.persistSkillActivation(ctx, req, journaledSkillActivation(scope, e.renderSkillActivation), persist)
 	if execErr == nil {
@@ -748,13 +742,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 				break
 			}
 			executed = append(executed, ev)
-			if isPresenceFailureEvent(&ev) {
-				e.notifyPresenceFailed(ctx, req)
-				continue
-			}
-			if text, args, ok := extractPresenceActivity(&ev); ok {
-				e.notifyPresenceText(ctx, req, text, args)
-			}
+			e.notifyPresenceEvent(ctx, req, &presence, &ev)
 		}
 	}
 	ended := &endedTurn{req: req, events: executed}
@@ -765,7 +753,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 				e.logger.ErrorContext(ctx, "post-turn record failed", "error", err, "turn_id", req.TurnID)
 			}
 		}
-		e.closeCancelledPresence(ctx, req)
+		e.notifyPresenceEnded(ctx, req)
 		return ctx.Err()
 	}
 	final, err := e.journalFinalMessage(context.WithoutCancel(ctx), scope, ended, end)
@@ -779,9 +767,6 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	terminalKind, terminalPayload := final.terminal(e.agentID(req), record)
 	if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, ended); err != nil {
 		return err
-	}
-	if terminalKind != turn.EventKindTurnCompleted {
-		e.notifyPresenceFailed(context.WithoutCancel(ctx), req)
 	}
 	e.notifyPresenceEnded(ctx, req)
 	terminal := &turn.Event{ID: req.TurnID + "-terminal", Kind: terminalKind, Payload: terminalPayload}
