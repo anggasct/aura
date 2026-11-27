@@ -63,6 +63,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
@@ -222,6 +223,9 @@ func (b *build) registerModule(name string, mod any) error {
 			}
 			b.addHealthCheck(&check)
 		}
+	}
+	if provider, ok := mod.(operation.Provider); ok {
+		b.bindings = append(b.bindings, provider.Bindings()...)
 	}
 	switch m := mod.(type) {
 	case server.Lifecycle:
@@ -913,12 +917,19 @@ func sweepRetention(ctx context.Context, cfg *appconfig.Config, db *sql.DB, arti
 	if err != nil {
 		return nil, err
 	}
-	return principal.SweepRetention(
+	swept, err := principal.SweepRetention(
 		ctx, cfg.Access, db,
 		allowlistedPrincipals(cfg, owners),
 		turnStoreActivityReader{turns: turnstore.NewTurnStore(db)},
 		participants, artifactRoot, collectErasedBlobs, now,
 	)
+	if err != nil {
+		return swept, err
+	}
+	if _, err := operation.PruneReceipts(ctx, db, now.Add(-operation.ReceiptRetention)); err != nil {
+		return swept, err
+	}
+	return swept, nil
 }
 
 func runRetentionSweeps(ctx context.Context, cfg *appconfig.Config, db *sql.DB, artifactRoot string, logger *slog.Logger) {
@@ -2530,7 +2541,7 @@ func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.
 		return err
 	}
 	if _, err := runs.LatestDefinition(ctx, id); err != nil {
-		return clikit.NewUsageError(fmt.Errorf("workflow %q is neither a definition nor a saved routine", id))
+		return operation.NewError(operation.ErrorCodeInputInvalid, fmt.Sprintf("workflow %q is neither a definition nor a saved routine", id))
 	}
 	return nil
 }

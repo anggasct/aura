@@ -48,6 +48,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret"
@@ -549,6 +550,7 @@ type toolExecutorInput struct {
 	logger       *slog.Logger
 	wiring       *toolWiring
 	events       *turn.EventBus
+	clock        durable.Clock
 }
 
 func newToolBroker(in *toolExecutorInput) (*toolbroker.Broker, *runtimeadk.BrokerExecutor, storage.ArtifactStore, error) {
@@ -592,6 +594,7 @@ func newToolBroker(in *toolExecutorInput) (*toolbroker.Broker, *runtimeadk.Broke
 		Access:               wiring.access,
 		HostCapabilities:     host,
 		ApprovalReachable:    wiring.reachable,
+		Clock:                in.clock,
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -673,6 +676,9 @@ type build struct {
 	wiring     toolWiring
 	liveEvents *turn.EventBus
 	broker     *toolbroker.Broker
+	clock      durable.Clock
+	bindings   []operation.Binding
+	operations *operation.Registry
 	artifacts  storage.ArtifactStore
 	builtin    *runtimeadk.BrokerExecutor
 	routeModel func(route string) (string, error)
@@ -882,7 +888,7 @@ func (b *build) durableRuntime() (durable.Runtime, error) {
 }
 
 func newBuild(opts *Options) *build {
-	b := &build{opts: opts, result: opts.Config, cfg: opts.Config.Config}
+	b := &build{opts: opts, result: opts.Config, cfg: opts.Config.Config, clock: durable.RealClock()}
 	switch opts.Surface {
 	case SurfaceServer:
 		b.server = &serverBuild{erasureRuns: &erasureRuns{}}
@@ -1112,7 +1118,7 @@ func (b *build) buildKernel(ctx context.Context) error {
 	if b.onServer() || b.cfg.Tools != nil {
 		broker, builtin, artifacts, err := newToolBroker(&toolExecutorInput{
 			result: b.result, db: b.db, artifactRoot: b.artifactRoot, logger: b.logger, wiring: &b.wiring,
-			events: b.liveEvents,
+			events: b.liveEvents, clock: b.clock,
 		})
 		if err != nil {
 			return err
@@ -1153,6 +1159,7 @@ func toolObserver(recorder *telemetry.ToolRecorder) toolbroker.Observer {
 			Executor:      observation.Executor,
 			Duration:      observation.Duration,
 			OutputBytes:   observation.OutputBytes,
+			OperationID:   observation.OperationID,
 		}
 		if call, ok := workflow.StepCallFrom(ctx); ok {
 			observed.WorkflowRunID, observed.WorkflowStepID = call.RunID, call.StepID
@@ -1401,6 +1408,7 @@ func (b *build) buildServerSurface(ctx context.Context) error {
 		b.buildChannelHost,
 		b.buildBroadcast,
 		b.buildSchedule,
+		b.buildOperations,
 		func() error { return b.buildWorkflowHost(ctx) },
 		b.buildDurableHost,
 		b.buildProbe,
@@ -1483,8 +1491,16 @@ func (b *build) buildSchedule() error {
 		Starter:  s.broadcastRuntime,
 		Logger:   logger,
 		Observer: scheduleRecorderObserver(scheduleRecorder),
+
+		WorkflowChecker: func(ctx context.Context, id string) error {
+			return checkScheduledWorkflow(ctx, cfg, db, id)
+		},
+		Owner: &cfg.Broadcast,
 	})
 	if err != nil {
+		return err
+	}
+	if err := b.registerModule("schedule", s.scheduleMod); err != nil {
 		return err
 	}
 	registrar, ok := s.broadcastRuntime.(durable.HandlerRegistrar)
@@ -1536,6 +1552,29 @@ func (b *build) buildSchedule() error {
 		return err
 	}
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
+}
+
+func (b *build) buildOperations() error {
+	recorder, err := telemetry.NewOperationRecorder(b.meters())
+	if err != nil {
+		return err
+	}
+	registry, err := operation.NewRegistry(operationCatalogs(), b.bindings, &operation.Deps{
+		DB:        b.db,
+		Effects:   b.broker.Effects(),
+		Tools:     b.broker,
+		Clock:     b.clock,
+		Logger:    b.logger,
+		Telemetry: recorder,
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.broker.RegisterProvider(registry); err != nil {
+		return err
+	}
+	b.operations = registry
+	return nil
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {

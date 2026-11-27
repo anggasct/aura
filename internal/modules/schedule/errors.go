@@ -18,6 +18,8 @@ const (
 	ErrorCodeRuntimeOverloaded  ErrorCode = "cron_runtime_overloaded"
 	ErrorCodeDeliveryPending    ErrorCode = "cron_delivery_pending"
 	ErrorCodeUnavailable        ErrorCode = "unavailable"
+
+	ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {

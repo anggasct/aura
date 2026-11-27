@@ -1,0 +1,3 @@
+ID	NAME	SCHEDULE	TIMEZONE	STATE	NEXT_FIRE
+job_0000000000000002	weekly report	30 8 * * 1	Asia/Jakarta	paused	-
+job_0000000000000001	nightly	0 21 * * *	UTC	paused	-

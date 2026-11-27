@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/modules/schedule"
 )
@@ -22,14 +25,24 @@ func writeScheduleCLIConfig(t *testing.T, dataDir string) string {
 	return path
 }
 
+func cronCommand(gf *GlobalFlags) *cobra.Command {
+	root := &cobra.Command{Use: "aura", SilenceUsage: true, SilenceErrors: true}
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return NewUsageError(err) })
+	mountOperationCommands(root, gf)
+	cmd, _, _ := root.Find([]string{"cron"})
+	root.RemoveCommand(cmd)
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return NewUsageError(err) })
+	return cmd
+}
+
 func runScheduleCommand(t *testing.T, gf *GlobalFlags, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmd := schedule.Commands(scheduleOpener(gf))[0]
+	cmd := cronCommand(gf)
 	out := &bytes.Buffer{}
-	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
-	cmd.SetErr(errBuf)
+	cmd.SetErr(&bytes.Buffer{})
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
@@ -235,4 +248,75 @@ func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 			t.Fatalf("schedule runs for the manual fire = %d, want 1", n)
 		}
 	})
+}
+
+func TestScheduleCommandsKeepTheirOutputAndExitCodes(t *testing.T) {
+	dataDir := t.TempDir()
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
+	id := addScheduleJob(t, gf)
+
+	t.Run("a record is key value lines", func(t *testing.T) {
+		out, err := runScheduleCommand(t, gf, "pause", id)
+		if err != nil || out != "id: "+id+"\nstate: paused\n" {
+			t.Fatalf("pause output = %q, err = %v", out, err)
+		}
+	})
+	t.Run("json prints the data object", func(t *testing.T) {
+		out, err := runScheduleCommand(t, gf, "delete", id, "--json")
+		want := "{\n  \"id\": \"" + id + "\",\n  \"state\": \"deleted\"\n}\n"
+		if err != nil || out != want {
+			t.Fatalf("delete --json output = %q, err = %v, want %q", out, err, want)
+		}
+	})
+	t.Run("a missing required flag exits 2", func(t *testing.T) {
+		_, err := runScheduleCommand(t, gf, "add", "--name", "x")
+		if code := ExitCode(nil, nil, err); code != 2 {
+			t.Fatalf("exit code = %d (%v), want 2", code, err)
+		}
+	})
+	t.Run("a missing job id exits 2", func(t *testing.T) {
+		_, err := runScheduleCommand(t, gf, "pause")
+		if code := ExitCode(nil, nil, err); code != 2 {
+			t.Fatalf("exit code = %d (%v), want 2", code, err)
+		}
+	})
+	t.Run("a runs limit out of range exits 2", func(t *testing.T) {
+		_, err := runScheduleCommand(t, gf, "runs", id, "--limit", "0")
+		if code := ExitCode(nil, nil, err); code != 2 {
+			t.Fatalf("exit code = %d (%v), want 2", code, err)
+		}
+	})
+	t.Run("an unknown job exits 1", func(t *testing.T) {
+		_, err := runScheduleCommand(t, gf, "pause", "missing")
+		if code := ExitCode(nil, nil, err); code != 1 {
+			t.Fatalf("exit code = %d (%v), want 1", code, err)
+		}
+	})
+}
+
+func TestScheduleListTableMatchesTheGolden(t *testing.T) {
+	dataDir := t.TempDir()
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
+	db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))
+	jobs, err := schedule.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	created := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	for _, job := range []*schedule.Job{
+		{ID: "job_0000000000000001", Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "summarize"},
+		{ID: "job_0000000000000002", Name: "weekly report", CronExpression: "30 8 * * 1", Timezone: "Asia/Jakarta", Prompt: "report"},
+	} {
+		job.OriginChannel, job.OriginDestination = "discord", "default"
+		job.OverlapPolicy, job.State, job.Version = schedule.OverlapSkip, schedule.JobPaused, 1
+		job.CreatedAt, job.UpdatedAt = created, created
+		if err := jobs.InsertJob(t.Context(), job); err != nil {
+			t.Fatalf("InsertJob: %v", err)
+		}
+	}
+	out, err := runScheduleCommand(t, gf, "list")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	compareAppGolden(t, "cron-list.txt", out)
 }

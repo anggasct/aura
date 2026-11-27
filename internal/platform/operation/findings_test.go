@@ -362,3 +362,29 @@ func TestACancelledHandlerIsNeverReportedAsNotPerformed(t *testing.T) {
 		t.Errorf("failed intents = %+v, want none for a cancellation", failed)
 	}
 }
+
+func TestWriteGuardCatchesAHandlerThatWritesBeforeCommit(t *testing.T) {
+	cases := []struct {
+		name  string
+		write bool
+		want  bool
+	}{
+		{name: "a handler that writes only inside Commit", write: false, want: false},
+		{name: "a handler that writes before Commit", write: true, want: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := operationtest.NewRig(t, nil)
+			if tc.write {
+				rig.Stubs.BeforeCommit(operationtest.Change, func(ctx context.Context, _ *operation.Call) error {
+					_, err := rig.DB.ExecContext(ctx, `INSERT INTO operation_stub_ledger (operation, subject) VALUES ('early', 'x')`)
+					return err
+				})
+			}
+			problem := operationtest.WritesOutsideCommit(t, rig.Registry, rig.DB, operationtest.Change, json.RawMessage(`{"subject":"a"}`))
+			if (problem != "") != tc.want {
+				t.Fatalf("problem = %q, want a problem: %v", problem, tc.want)
+			}
+		})
+	}
+}
