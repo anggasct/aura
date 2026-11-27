@@ -44,6 +44,7 @@ type ADKExecutor struct {
 	broker            turn.ToolBroker
 	tools             []tool.Tool
 	optIn             map[string]bool
+	ownerOptIn        map[string]bool
 	channelTools      map[string]string
 	externalServers   map[string]string
 	pluginTools       map[string]string
@@ -137,12 +138,16 @@ func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 		e.builtins = executor
 		e.tools = tools
 		e.optIn = map[string]bool{}
+		e.ownerOptIn = map[string]bool{}
 		e.channelTools = map[string]string{}
 		e.externalServers = map[string]string{}
 		e.pluginTools = map[string]string{}
 		for i := range definitions {
 			if definitions[i].OptIn {
 				e.optIn[definitions[i].Name] = true
+			}
+			if definitions[i].OwnerOptIn {
+				e.ownerOptIn[definitions[i].Name] = true
 			}
 			if definitions[i].Channel != "" {
 				e.channelTools[definitions[i].Name] = definitions[i].Channel
@@ -561,7 +566,7 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 		if channel != "" && !originOnChannel(origin, channel) {
 			continue
 		}
-		if x.optIn[t.Name()] && (!listed || class == "" || (class == principal.ClassOwner && channel == "")) {
+		if x.optIn[t.Name()] && (!listed || class == "" || (class == principal.ClassOwner && channel == "" && !x.ownerListed(t.Name(), origin))) {
 			continue
 		}
 		if !listed || slices.Contains(allowed, t.Name()) {
@@ -569,6 +574,10 @@ func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal
 		}
 	}
 	return filtered
+}
+
+func (x *ADKExecutor) ownerListed(name string, origin turn.Origin) bool {
+	return x.ownerOptIn[name] && origin != turn.OriginChild
 }
 
 func exposesKnowledgeSearch(class principal.Class, allowed, knowledge []string) bool {

@@ -28,6 +28,7 @@ type BuiltinToolDefinition struct {
 	Schema               json.RawMessage
 	RequiredCapabilities []string
 	OptIn                bool
+	OwnerOptIn           bool
 }
 
 type BuiltinToolRequest struct {

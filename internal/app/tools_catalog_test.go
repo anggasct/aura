@@ -7,7 +7,9 @@ import (
 	"testing"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/modules/github"
 	"github.com/anggasct/aura/internal/modules/handoff"
+	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -45,6 +47,53 @@ func TestStaticCatalogIgnoresTheCapabilitySet(t *testing.T) {
 	}
 	if got, want := len(catalogDefinitions()), 16; got != want {
 		t.Fatalf("catalogDefinitions() = %d entries, want %d", got, want)
+	}
+}
+
+func TestOnlyTheSixWorkflowDefinitionsAreOwnerOptIn(t *testing.T) {
+	workflowNames := []string{}
+	for _, definition := range workflow.ToolDefinitions() {
+		workflowNames = append(workflowNames, definition.Name)
+		if !definition.OwnerOptIn {
+			t.Errorf("%s OwnerOptIn = false, want true", definition.Name)
+		}
+	}
+	if len(workflowNames) != 6 {
+		t.Fatalf("workflow definitions = %v, want 6", workflowNames)
+	}
+	for _, definition := range github.Definitions() {
+		if definition.OwnerOptIn {
+			t.Errorf("%s OwnerOptIn = true, want false", definition.Name)
+		}
+	}
+	if definition := handoff.ToolDefinition(); definition.OwnerOptIn {
+		t.Errorf("%s OwnerOptIn = true, want false", definition.Name)
+	}
+	builtins := appconfig.BuiltinToolDefinitions()
+	for i := range builtins {
+		if want := slices.Contains(workflowNames, builtins[i].Name); builtins[i].OwnerOptIn != want {
+			t.Errorf("%s OwnerOptIn = %t, want %t", builtins[i].Name, builtins[i].OwnerOptIn, want)
+		}
+	}
+}
+
+func TestCatalogDefinitionsCarryTheOwnerOptInFlag(t *testing.T) {
+	builtins := appconfig.BuiltinToolDefinitions()
+	catalog := catalogDefinitions()
+	if len(catalog) != len(builtins) {
+		t.Fatalf("catalogDefinitions() = %d entries, want %d", len(catalog), len(builtins))
+	}
+	ownerOptIn := 0
+	for i := range catalog {
+		if catalog[i].OwnerOptIn != builtins[i].OwnerOptIn {
+			t.Errorf("%s OwnerOptIn = %t, want %t", catalog[i].Name, catalog[i].OwnerOptIn, builtins[i].OwnerOptIn)
+		}
+		if catalog[i].OwnerOptIn {
+			ownerOptIn++
+		}
+	}
+	if ownerOptIn != 6 {
+		t.Fatalf("owner opt-in catalog definitions = %d, want 6", ownerOptIn)
 	}
 }
 

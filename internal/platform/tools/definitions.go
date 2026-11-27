@@ -85,6 +85,7 @@ type Definition struct {
 	RequiresApproval     bool
 	Effectful            bool
 	OptIn                bool
+	OwnerOptIn           bool
 	ExternalSink         bool
 	NoStandingGrant      bool
 	Orchestration        bool
