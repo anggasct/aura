@@ -9,9 +9,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
@@ -27,24 +29,28 @@ const (
 var _ runtimechannelhost.PresencePort = (*Adapter)(nil)
 
 type presenceSession struct {
-	chatID     int64
-	threadID   int64
-	request    *runtimechannelhost.DeliveryRequest
-	started    time.Time
-	lastTyping time.Time
-	statusID   int64
-	steps      []status.TrackedStep
-	shownText  string
-	lastEdit   time.Time
-	lastTick   time.Time
-	attempts   int
-	version    uint64
-	dirty      bool
-	statusMu   sync.Mutex
-	wake       chan struct{}
-	stop       chan struct{}
-	done       chan struct{}
-	stopped    bool
+	chatID       int64
+	threadID     int64
+	fromID       int64
+	request      *runtimechannelhost.DeliveryRequest
+	started      time.Time
+	lastTyping   time.Time
+	statusID     int64
+	stopTokenID  string
+	stopPending  *approval.Pending
+	stopCallback string
+	steps        []status.TrackedStep
+	shownText    string
+	lastEdit     time.Time
+	lastTick     time.Time
+	attempts     int
+	version      uint64
+	dirty        bool
+	statusMu     sync.Mutex
+	wake         chan struct{}
+	stop         chan struct{}
+	done         chan struct{}
+	stopped      bool
 }
 
 type presenceSnapshot struct {
@@ -105,6 +111,7 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 	session := &presenceSession{
 		chatID:   target.ChatID,
 		threadID: target.ThreadID,
+		fromID:   target.FromID,
 		request:  &cloned,
 		started:  time.Now(),
 		wake:     make(chan struct{}, 1),
@@ -367,16 +374,28 @@ func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSess
 	a.presenceMu.Lock()
 	statusID := session.statusID
 	shownText := session.shownText
+	stopCallback := session.stopCallback
 	attempt := session.attempts
 	if statusID == 0 || display != shownText {
 		session.attempts++
 	}
 	a.presenceMu.Unlock()
 	if statusID == 0 {
-		id, err := a.postStatusMessage(ctx, session, attempt, display)
+		tokenID, pending, callbackData, minted := a.mintStopToken(session)
+		id, err := a.postStatusMessage(ctx, session, attempt, display, stopKeyboard(callbackData))
 		if err != nil {
+			if minted {
+				a.stops.Drop(tokenID, pending)
+			}
 			a.logger.WarnContext(ctx, "status post failed", "component", "telegram", "error", err)
 			return err
+		}
+		if minted {
+			a.presenceMu.Lock()
+			session.stopTokenID = tokenID
+			session.stopPending = pending
+			session.stopCallback = callbackData
+			a.presenceMu.Unlock()
 		}
 		a.recordShown(session, id, display, renderedVersion)
 		return nil
@@ -385,12 +404,46 @@ func (a *Adapter) publishStatusLocked(ctx context.Context, session *presenceSess
 		a.clearDirtyIfCurrent(session, renderedVersion)
 		return nil
 	}
-	if err := a.editStatusMessage(ctx, session, statusID, attempt, display); err != nil {
+	if err := a.editStatusMessage(ctx, session, statusID, attempt, display, stopKeyboard(stopCallback)); err != nil {
 		a.logger.WarnContext(ctx, "status edit failed", "component", "telegram", "error", err)
 		return err
 	}
 	a.recordShown(session, statusID, display, renderedVersion)
 	return nil
+}
+
+func (a *Adapter) mintStopToken(session *presenceSession) (tokenID string, pending *approval.Pending, callbackData string, ok bool) {
+	if a.stops == nil || session == nil || session.request == nil {
+		return "", nil, "", false
+	}
+	if principal.ParseClass(session.request.PrincipalClass) != principal.ClassOwner {
+		return "", nil, "", false
+	}
+	if session.fromID <= 0 || session.request.Deadline.IsZero() {
+		return "", nil, "", false
+	}
+	binding := &approval.Binding{
+		Class:     principal.ClassOwner,
+		Actor:     strconv.FormatInt(session.fromID, 10),
+		Scope:     scopeOf(session.destination()),
+		SessionID: session.request.ConversationID,
+		TurnID:    session.request.EffectID,
+	}
+	tokenID, pending, err := a.stops.Issue(binding, session.request.Deadline)
+	if err != nil {
+		return "", nil, "", false
+	}
+	return tokenID, pending, a.stops.Callback(tokenID, approval.ActionStop, binding, session.request.Deadline), true
+}
+
+func stopKeyboard(callbackData string) *inlineKeyboard {
+	if callbackData == "" {
+		return nil
+	}
+	return &inlineKeyboard{Rows: [][]inlineButton{{{
+		Text:         status.DefaultTexts().StopButton,
+		CallbackData: callbackData,
+	}}}}
 }
 
 func (a *Adapter) recordShown(session *presenceSession, statusID int64, display string, renderedVersion uint64) {
@@ -405,8 +458,8 @@ func (a *Adapter) recordShown(session *presenceSession, statusID int64, display 
 	wakeClock(session)
 }
 
-func (a *Adapter) postStatusMessage(ctx context.Context, session *presenceSession, attempt int, text string) (int64, error) {
-	request, err := json.Marshal(sendOperation{ChatID: session.chatID, ThreadID: session.threadID, Text: text, Status: true})
+func (a *Adapter) postStatusMessage(ctx context.Context, session *presenceSession, attempt int, text string, markup *inlineKeyboard) (int64, error) {
+	request, err := json.Marshal(sendOperation{ChatID: session.chatID, ThreadID: session.threadID, Text: text, ReplyMarkup: markup, Status: true})
 	if err != nil {
 		return 0, fault.New(ErrorCodeProtocolInvalid, "status request is not serializable")
 	}
@@ -425,8 +478,8 @@ func (a *Adapter) postStatusMessage(ctx context.Context, session *presenceSessio
 	return receiptMessageID(intent)
 }
 
-func (a *Adapter) editStatusMessage(ctx context.Context, session *presenceSession, messageID int64, attempt int, text string) error {
-	request, err := json.Marshal(editOperation{ChatID: session.chatID, MessageID: messageID, Text: text})
+func (a *Adapter) editStatusMessage(ctx context.Context, session *presenceSession, messageID int64, attempt int, text string, markup *inlineKeyboard) error {
+	request, err := json.Marshal(editOperation{ChatID: session.chatID, MessageID: messageID, Text: text, ReplyMarkup: markup})
 	if err != nil {
 		return fault.New(ErrorCodeProtocolInvalid, "status edit request is not serializable")
 	}
@@ -513,14 +566,94 @@ func (a *Adapter) stopPresence(turnID string) {
 	}
 }
 
-func (a *Adapter) PresenceEnded(_ context.Context, turnID string) error {
+func (a *Adapter) clearPresenceStop(ctx context.Context, turnID string) {
+	a.presenceMu.Lock()
+	session := a.presence[turnID]
+	a.presenceMu.Unlock()
+	if session == nil {
+		return
+	}
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	statusID := session.statusID
+	chatID := session.chatID
+	tokenID := session.stopTokenID
+	pending := session.stopPending
+	hadButton := session.stopCallback != ""
+	session.stopTokenID = ""
+	session.stopPending = nil
+	session.stopCallback = ""
+	a.presenceMu.Unlock()
+	if tokenID != "" && a.stops != nil {
+		a.stops.Drop(tokenID, pending)
+	}
+	if statusID != 0 && hadButton {
+		a.clearStatusKeyboard(ctx, chatID, statusID)
+	}
+}
+
+func (a *Adapter) clearStatusKeyboard(ctx context.Context, chatID, messageID int64) {
+	token, ok := a.botToken()
+	if !ok {
+		return
+	}
+	call, cancel := context.WithTimeout(context.WithoutCancel(ctx), noticeTimeout)
+	defer cancel()
+	if err := a.bot.clearKeyboard(call, token, chatID, messageID); err != nil {
+		a.logger.WarnContext(ctx, "status keyboard removal failed", "component", "telegram", "account", a.account.Name)
+	}
+}
+
+func (a *Adapter) PresenceEnded(ctx context.Context, turnID string, end runtimechannelhost.PresenceEnd) error {
 	if turnID == "" {
 		return fault.New(ErrorCodeInvalidArgument, "presence turn id must not be empty")
 	}
 	a.stopPresence(turnID)
 	a.presenceMu.Lock()
+	session := a.presence[turnID]
 	delete(a.presence, turnID)
 	a.presenceMu.Unlock()
+	if session == nil {
+		return nil
+	}
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	statusID := session.statusID
+	chatID := session.chatID
+	tokenID := session.stopTokenID
+	pending := session.stopPending
+	hadButton := session.stopCallback != ""
+	attempt := session.attempts
+	if end.Stopped && statusID != 0 {
+		session.attempts++
+	}
+	session.stopTokenID = ""
+	session.stopPending = nil
+	session.stopCallback = ""
+	a.presenceMu.Unlock()
+	if tokenID != "" && a.stops != nil {
+		a.stops.Drop(tokenID, pending)
+	}
+	if statusID == 0 {
+		return nil
+	}
+	if !end.Stopped {
+		if hadButton {
+			a.clearStatusKeyboard(ctx, chatID, statusID)
+		}
+		return nil
+	}
+	if time.Until(a.chatHeldUntil(chatID)) > 0 {
+		return nil
+	}
+	if err := a.editStatusMessage(context.WithoutCancel(ctx), session, statusID, attempt, status.DefaultTexts().Stopped, nil); err != nil {
+		a.logger.WarnContext(ctx, "status stopped edit failed", "component", "telegram", "error", err)
+		if hadButton {
+			a.clearStatusKeyboard(ctx, chatID, statusID)
+		}
+	}
 	return nil
 }
 

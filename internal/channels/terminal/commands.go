@@ -138,6 +138,10 @@ func (idleTurns) CancelActive(context.Context, string) (turnID string, cancelled
 	return "", false, nil
 }
 
+func (idleTurns) CancelTurn(context.Context, string, string) (bool, error) {
+	return false, nil
+}
+
 func (idleTurns) Activity(string) (activeTurnID string, queued int) {
 	return "", 0
 }

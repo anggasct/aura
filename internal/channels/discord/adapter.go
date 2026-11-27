@@ -159,6 +159,7 @@ type Adapter struct {
 	holdMu         sync.Mutex
 	holds          map[string]time.Time
 	approvals      *approval.Registry
+	stops          *approval.Registry
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
 	access         AccessSettings
@@ -240,6 +241,10 @@ func New(deps *Deps) (*Adapter, error) {
 	if err != nil {
 		return nil, fault.Wrap(ErrorCodeConnectionFailed, "approval token key is unavailable", err)
 	}
+	stops, err := approval.NewRegistry()
+	if err != nil {
+		return nil, fault.Wrap(ErrorCodeConnectionFailed, "stop token key is unavailable", err)
+	}
 	adapter := &Adapter{
 		cfg:            deps.Config,
 		account:        deps.Account,
@@ -264,6 +269,7 @@ func New(deps *Deps) (*Adapter, error) {
 		posted:         map[string][]string{},
 		holds:          map[string]time.Time{},
 		approvals:      approvals,
+		stops:          stops,
 		targets:        map[string]approvalBinding{},
 		ownerDMs:       map[string]string{},
 		triggerThreads: map[string]string{},

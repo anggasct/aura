@@ -1641,6 +1641,7 @@ func broadcastRecorderObserver(recorder *telemetry.BroadcastRecorder) broadcast.
 
 type sessionActivity interface {
 	CancelActive(ctx context.Context, sessionID string) (turnID string, cancelled bool, err error)
+	CancelTurn(ctx context.Context, sessionID, turnID string) (bool, error)
 	SessionActivity(sessionID string) (activeTurnID string, queued int)
 }
 
@@ -1663,6 +1664,17 @@ func (t *deferredCommandTurns) CancelActive(ctx context.Context, sessionID strin
 		return "", false, command.Errorf(command.ErrorCodeUnavailable, "turn engine is not ready")
 	}
 	return (*engine).CancelActive(ctx, sessionID)
+}
+
+func (t *deferredCommandTurns) CancelTurn(ctx context.Context, sessionID, turnID string) (bool, error) {
+	var engine *sessionActivity
+	if t != nil {
+		engine = t.engine.Load()
+	}
+	if engine == nil {
+		return false, command.Errorf(command.ErrorCodeUnavailable, "turn engine is not ready")
+	}
+	return (*engine).CancelTurn(ctx, sessionID, turnID)
 }
 
 func (t *deferredCommandTurns) Activity(sessionID string) (activeTurnID string, queued int) {

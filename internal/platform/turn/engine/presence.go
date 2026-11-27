@@ -5,34 +5,39 @@ import (
 	"encoding/json"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 )
 
-func presenceDeliveryRequest(req *turn.TurnRequest) *runtimechannelhost.DeliveryRequest {
+func presenceDeliveryRequest(req *turn.TurnRequest, deadline time.Time) *runtimechannelhost.DeliveryRequest {
 	if req == nil {
 		return nil
+	}
+	if deadline.IsZero() {
+		deadline = req.Deadline
 	}
 	return &runtimechannelhost.DeliveryRequest{
 		EffectID:       req.TurnID,
 		Channel:        string(req.Origin),
 		ConversationID: req.SessionID,
+		PrincipalClass: string(req.PrincipalClass),
 		ReplyContext:   req.ReplyContext,
 		IdempotencyKey: req.TurnID,
-		Deadline:       req.Deadline,
+		Deadline:       deadline,
 	}
 }
 
-func presenceAdapterFor(req *turn.TurnRequest, adapters []runtimechannelhost.ChannelPort) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {
+func presenceAdapterFor(req *turn.TurnRequest, deadline time.Time, adapters []runtimechannelhost.ChannelPort) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {
 	if req == nil || req.TurnID == "" || !hasChannelDestination(req) {
 		return nil, nil, false
 	}
 	if len(adapters) == 0 {
 		return nil, nil, false
 	}
-	delivery := presenceDeliveryRequest(req)
+	delivery := presenceDeliveryRequest(req, deadline)
 	if delivery == nil {
 		return nil, nil, false
 	}
@@ -68,8 +73,8 @@ func adapterForOrigin(origin turn.Origin, adapters []runtimechannelhost.ChannelP
 	return fallback, fallback != nil
 }
 
-func (e *Engine) currentPresence(req *turn.TurnRequest) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {
-	return presenceAdapterFor(req, e.adapters)
+func (e *Engine) currentPresence(req *turn.TurnRequest, deadline time.Time) (runtimechannelhost.PresencePort, *runtimechannelhost.DeliveryRequest, bool) {
+	return presenceAdapterFor(req, deadline, e.adapters)
 }
 
 func hasToolActivity(payload json.RawMessage) bool {
@@ -234,8 +239,8 @@ func (t *presenceTracker) observe(ev *turn.Event) []runtimechannelhost.PresenceU
 	return updates
 }
 
-func (e *Engine) notifyPresenceStarted(ctx context.Context, req *turn.TurnRequest) {
-	presence, delivery, ok := e.currentPresence(req)
+func (e *Engine) notifyPresenceStarted(ctx context.Context, req *turn.TurnRequest, deadline time.Time) {
+	presence, delivery, ok := e.currentPresence(req, deadline)
 	if !ok {
 		return
 	}
@@ -244,12 +249,12 @@ func (e *Engine) notifyPresenceStarted(ctx context.Context, req *turn.TurnReques
 	}
 }
 
-func (e *Engine) notifyPresenceEvent(ctx context.Context, req *turn.TurnRequest, tracker *presenceTracker, ev *turn.Event) {
+func (e *Engine) notifyPresenceEvent(ctx context.Context, req *turn.TurnRequest, deadline time.Time, tracker *presenceTracker, ev *turn.Event) {
 	updates := tracker.observe(ev)
 	if len(updates) == 0 {
 		return
 	}
-	presence, delivery, ok := e.currentPresence(req)
+	presence, delivery, ok := e.currentPresence(req, deadline)
 	if !ok {
 		return
 	}
@@ -260,12 +265,12 @@ func (e *Engine) notifyPresenceEvent(ctx context.Context, req *turn.TurnRequest,
 	}
 }
 
-func (e *Engine) notifyPresenceEnded(ctx context.Context, req *turn.TurnRequest) {
-	presence, _, ok := e.currentPresence(req)
+func (e *Engine) notifyPresenceEnded(ctx context.Context, req *turn.TurnRequest, end runtimechannelhost.PresenceEnd) {
+	presence, _, ok := e.currentPresence(req, time.Time{})
 	if !ok {
 		return
 	}
-	if err := presence.PresenceEnded(context.WithoutCancel(ctx), req.TurnID); err != nil {
+	if err := presence.PresenceEnded(context.WithoutCancel(ctx), req.TurnID, end); err != nil {
 		e.logger.DebugContext(ctx, "presence end failed", "error", err, "turn_id", req.TurnID)
 	}
 }

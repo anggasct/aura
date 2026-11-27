@@ -38,17 +38,19 @@ type EffectRunner interface {
 }
 
 type SendOperation struct {
-	ChannelID string `json:"channel_id"`
-	Text      string `json:"text"`
-	ReplyTo   string `json:"reply_to_message_id,omitempty"`
-	FileName  string `json:"file_name,omitempty"`
-	FileBody  []byte `json:"file_body,omitempty"`
+	ChannelID  string             `json:"channel_id"`
+	Text       string             `json:"text"`
+	ReplyTo    string             `json:"reply_to_message_id,omitempty"`
+	FileName   string             `json:"file_name,omitempty"`
+	FileBody   []byte             `json:"file_body,omitempty"`
+	Components []componentPayload `json:"components,omitempty"`
 }
 
 type editOperation struct {
-	ChannelID string `json:"channel_id"`
-	MessageID string `json:"message_id"`
-	Text      string `json:"text"`
+	ChannelID       string `json:"channel_id"`
+	MessageID       string `json:"message_id"`
+	Text            string `json:"text"`
+	ClearComponents bool   `json:"clear_components,omitempty"`
 }
 
 type messageReceipt struct {
@@ -237,6 +239,9 @@ func (a *Adapter) patchMessage(ctx context.Context, token string, operation *edi
 		"content":          operation.Text,
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	}
+	if operation.ClearComponents {
+		edit["components"] = []componentPayload{}
+	}
 	suppressEmbedsUnlessOptedIn(edit, a.account.LinkPreviews)
 	payload, err := json.Marshal(edit)
 	if err != nil {
@@ -304,6 +309,9 @@ func sendBody(operation *SendOperation, linkPreviews bool) (body []byte, content
 	suppressEmbedsUnlessOptedIn(message, linkPreviews)
 	if operation.ReplyTo != "" {
 		message["message_reference"] = map[string]any{"message_id": operation.ReplyTo}
+	}
+	if len(operation.Components) > 0 {
+		message["components"] = operation.Components
 	}
 	if len(operation.FileBody) == 0 {
 		raw, err := json.Marshal(message)

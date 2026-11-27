@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
 )
@@ -717,7 +718,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 
 	var executed []turn.Event
 	var presence presenceTracker
-	e.notifyPresenceStarted(ctx, req)
+	e.notifyPresenceStarted(ctx, req, deadline)
 	execErr := e.persistSkillActivation(ctx, req, journaledSkillActivation(scope, e.renderSkillActivation), persist)
 	if execErr == nil {
 		var nextDelta uint64
@@ -743,18 +744,19 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 				break
 			}
 			executed = append(executed, ev)
-			e.notifyPresenceEvent(ctx, req, &presence, &ev)
+			e.notifyPresenceEvent(ctx, req, deadline, &presence, &ev)
 		}
 	}
 	ended := &endedTurn{req: req, events: executed}
 	end := e.endOf(ctx.Err(), execErr)
 	if end.cancelled {
-		if !durable.Preempted(ctx) {
+		stopped := !durable.Preempted(ctx)
+		if stopped {
 			if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, ended); err != nil {
 				e.logger.ErrorContext(ctx, "post-turn record failed", "error", err, "turn_id", req.TurnID)
 			}
 		}
-		e.notifyPresenceEnded(ctx, req)
+		e.notifyPresenceEnded(ctx, req, runtimechannelhost.PresenceEnd{Stopped: stopped})
 		return ctx.Err()
 	}
 	final, err := e.journalFinalMessage(context.WithoutCancel(ctx), scope, ended, end)
@@ -769,7 +771,7 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 	if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, ended); err != nil {
 		return err
 	}
-	e.notifyPresenceEnded(ctx, req)
+	e.notifyPresenceEnded(ctx, req, runtimechannelhost.PresenceEnd{})
 	terminal := &turn.Event{ID: req.TurnID + "-terminal", Kind: terminalKind, Payload: terminalPayload}
 	if err := persist(context.WithoutCancel(ctx), terminal); err != nil {
 		return err

@@ -53,6 +53,11 @@ func (s *spyPorts) CancelActive(context.Context, string) (turnID string, cancell
 	return s.cancelID, s.cancelled, nil
 }
 
+func (s *spyPorts) CancelTurn(_ context.Context, _, turnID string) (bool, error) {
+	s.calls = append(s.calls, "CancelTurn")
+	return s.cancelled && s.cancelID == turnID, nil
+}
+
 func (s *spyPorts) Activity(string) (activeTurnID string, queued int) {
 	s.calls = append(s.calls, "Activity")
 	return s.active, s.queued

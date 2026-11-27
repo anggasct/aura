@@ -224,6 +224,7 @@ func (e *Engine) planDelivery(req *turn.TurnRequest, final *finalMessage) (plann
 		EffectID:       req.TurnID,
 		Channel:        string(req.Origin),
 		ConversationID: req.SessionID,
+		PrincipalClass: string(req.PrincipalClass),
 		ReplyContext:   req.ReplyContext,
 		Parts:          parts,
 		IdempotencyKey: req.TurnID,

@@ -259,7 +259,7 @@ func (a *Adapter) clearKeyboard(ctx context.Context, token string, card *openedC
 }
 
 func (a *Adapter) handleCallback(ctx context.Context, query *callbackQuery) {
-	resolved := a.resolveCallback(query)
+	resolved := a.resolveCallback(ctx, query)
 	a.answerCallback(ctx, query)
 	if !resolved {
 		a.drop(ctx, callbackScope(query), dropCallbackRejected, true)
@@ -273,17 +273,42 @@ func callbackScope(query *callbackQuery) string {
 	return dropScopeChat
 }
 
-func (a *Adapter) resolveCallback(query *callbackQuery) bool {
-	if query.ID == "" || query.From == nil || query.From.ID <= 0 || query.From.IsBot || query.Message == nil || query.Message.Chat.ID == 0 {
+func (a *Adapter) resolveCallback(ctx context.Context, query *callbackQuery) bool {
+	if query == nil || query.ID == "" || query.From == nil || query.From.ID <= 0 || query.From.IsBot || query.Message == nil || query.Message.Chat.ID == 0 {
 		return false
+	}
+	_, action, _, ok := approval.ParseCallbackData(query.Data)
+	if !ok {
+		return false
+	}
+	presser := &approval.Presser{
+		Actor: strconv.FormatInt(query.From.ID, 10),
+		Scope: scopeOf(query.Message.destination()),
+	}
+	if action == approval.ActionStop {
+		if a.stops == nil || !a.stops.NoteSeen(query.ID) {
+			return false
+		}
+		resolvedAction, binding, resolved := a.stops.ResolveAction(query.Data, presser)
+		if !resolved || resolvedAction != approval.ActionStop {
+			return false
+		}
+		a.cancelStoppedTurn(ctx, binding.SessionID, binding.TurnID)
+		return true
 	}
 	if !a.approvals.NoteSeen(query.ID) {
 		return false
 	}
-	return a.approvals.Resolve(query.Data, &approval.Presser{
-		Actor: strconv.FormatInt(query.From.ID, 10),
-		Scope: scopeOf(query.Message.destination()),
-	})
+	return a.approvals.Resolve(query.Data, presser)
+}
+
+func (a *Adapter) cancelStoppedTurn(ctx context.Context, sessionID, turnID string) {
+	if a.commands == nil || sessionID == "" || turnID == "" {
+		return
+	}
+	if _, err := a.commands.CancelTurn(ctx, sessionID, turnID); err != nil {
+		a.logger.WarnContext(ctx, "stop turn cancel failed", "component", "telegram", "account", a.account.Name, "error", err)
+	}
 }
 
 func (a *Adapter) answerCallback(ctx context.Context, query *callbackQuery) {

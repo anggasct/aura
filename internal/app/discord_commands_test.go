@@ -38,6 +38,10 @@ func (parityPorts) CancelActive(context.Context, string) (turnID string, cancell
 	return "turn-7", true, nil
 }
 
+func (parityPorts) CancelTurn(_ context.Context, _, turnID string) (bool, error) {
+	return turnID == "turn-7", nil
+}
+
 func (parityPorts) Activity(string) (activeTurnID string, queued int) { return "turn-7", 1 }
 
 func (parityPorts) Activate(_ context.Context, name string) (command.SkillPin, error) {
@@ -113,12 +117,18 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 }
 
 type stubActivity struct {
-	cancelled []string
+	cancelled      []string
+	cancelledTurns []string
 }
 
 func (s *stubActivity) CancelActive(_ context.Context, sessionID string) (turnID string, cancelled bool, err error) {
 	s.cancelled = append(s.cancelled, sessionID)
 	return "turn-1", true, nil
+}
+
+func (s *stubActivity) CancelTurn(_ context.Context, sessionID, turnID string) (bool, error) {
+	s.cancelledTurns = append(s.cancelledTurns, sessionID+":"+turnID)
+	return turnID == "turn-1", nil
 }
 
 func (s *stubActivity) SessionActivity(string) (activeTurnID string, queued int) { return "turn-1", 3 }
@@ -253,6 +263,9 @@ func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	if id, cancelled, err := turns.CancelActive(t.Context(), "s"); cancelled || id != "" || !fault.HasCode(err, command.ErrorCodeUnavailable) {
 		t.Errorf("unbound CancelActive = %q %v %v, want command_unavailable", id, cancelled, err)
 	}
+	if cancelled, err := turns.CancelTurn(t.Context(), "s", "turn-1"); cancelled || !fault.HasCode(err, command.ErrorCodeUnavailable) {
+		t.Errorf("unbound CancelTurn = %v %v, want command_unavailable", cancelled, err)
+	}
 	if active, queued := turns.Activity("s"); active != "" || queued != 0 {
 		t.Errorf("unbound Activity = %q %d, want zero", active, queued)
 	}
@@ -260,6 +273,9 @@ func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	turns.bind(activity)
 	if id, cancelled, err := turns.CancelActive(t.Context(), "s"); err != nil || !cancelled || id != "turn-1" || !slices.Equal(activity.cancelled, []string{"s"}) {
 		t.Errorf("CancelActive = %q %v %v", id, cancelled, err)
+	}
+	if cancelled, err := dispatcher.CancelTurn(t.Context(), "s", "turn-1"); err != nil || !cancelled || !slices.Equal(activity.cancelledTurns, []string{"s:turn-1"}) {
+		t.Errorf("CancelTurn = %v %v %v", cancelled, err, activity.cancelledTurns)
 	}
 	if active, queued := turns.Activity("s"); active != "turn-1" || queued != 3 {
 		t.Errorf("Activity = %q %d", active, queued)

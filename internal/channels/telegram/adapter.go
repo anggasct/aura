@@ -168,6 +168,7 @@ type Adapter struct {
 	identityRefresh chan struct{}
 
 	approvals   *approval.Registry
+	stops       *approval.Registry
 	proposalTTL time.Duration
 	targetsMu   sync.Mutex
 	targets     map[string]approvalTarget
@@ -218,6 +219,10 @@ func New(deps *Deps) (*Adapter, error) {
 	if err != nil {
 		return nil, fault.Wrap(ErrorCodeConnectionFailed, "approval token key is unavailable", err)
 	}
+	stops, err := approval.NewRegistry()
+	if err != nil {
+		return nil, fault.Wrap(ErrorCodeConnectionFailed, "stop token key is unavailable", err)
+	}
 	var settings access.Settings
 	if deps.Access != nil {
 		settings = *deps.Access
@@ -252,6 +257,7 @@ func New(deps *Deps) (*Adapter, error) {
 		presence:    map[string]*presenceSession{},
 		holds:       map[int64]time.Time{},
 		approvals:   approvals,
+		stops:       stops,
 		proposalTTL: approval.ProposalCardTTL,
 		targets:     map[string]approvalTarget{},
 		commands:    deps.Commands,

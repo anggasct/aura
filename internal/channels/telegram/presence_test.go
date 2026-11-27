@@ -52,7 +52,7 @@ func presenceAdapter(t *testing.T, h *harness, statusAfter, typingRefresh, minEd
 
 func endPresence(t *testing.T, adapter *Adapter, turnID string) {
 	t.Helper()
-	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded: %v", err)
 	}
 }
@@ -487,10 +487,10 @@ func TestPresenceEndedStopsTheClockDeterministically(t *testing.T) {
 	if remaining != 0 {
 		t.Fatalf("presence sessions = %d after end, want 0", remaining)
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-ended"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-ended", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("second PresenceEnded: %v", err)
 	}
-	if err := adapter.PresenceEnded(t.Context(), ""); err == nil {
+	if err := adapter.PresenceEnded(t.Context(), "", runtimechannelhost.PresenceEnd{}); err == nil {
 		t.Fatal("PresenceEnded accepted an empty turn id")
 	}
 }

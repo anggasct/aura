@@ -35,13 +35,14 @@ func TestParseCallbackData(t *testing.T) {
 		{"empty", "", false},
 		{"wrong prefix", "bogus:0123456789abcdef:a:0123456789abcdef", false},
 		{"short token", "aura:abc:a:0123456789abcdef", false},
-		{"bad action", "aura:0123456789abcdef:x:0123456789abcdef", false},
+		{"bad action", "aura:0123456789abcdef:z:0123456789abcdef", false},
 		{"non-hex mac", "aura:0123456789abcdef:a:zzzzzzzzzzzzzzzz", false},
 		{"uppercase hex", "aura:0123456789ABCDEF:a:0123456789abcdef", false},
 		{"extra part", "aura:0123456789abcdef:a:0123456789abcdef:x", false},
 		{"approve", "aura:0123456789abcdef:a:0123456789abcdef", true},
 		{"reject", "aura:0123456789abcdef:r:fedcba9876543210", true},
 		{"standing", "aura:0123456789abcdef:s:fedcba9876543210", true},
+		{"stop", "aura:0123456789abcdef:x:fedcba9876543210", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -445,4 +446,46 @@ func TestRenderCardEscapesEveryField(t *testing.T) {
 	if !strings.Contains(card, "arguments: "+`a\\b`) {
 		t.Errorf("card changed the arguments: %q", card)
 	}
+}
+
+func TestResolveActionHandlesStopTokensAndKeepsResolveScopedToApprovals(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		registry := newTestRegistry(t)
+		expiresAt := time.Now().Add(time.Minute)
+		binding := &Binding{
+			Class:     principal.ClassOwner,
+			Actor:     "42",
+			Scope:     [2]string{"guild-1", "thread-9"},
+			SessionID: "main/discord:bot/thread:thread-9",
+			TurnID:    "turn-77",
+		}
+		tokenID, _, err := registry.Issue(binding, expiresAt)
+		if err != nil {
+			t.Fatalf("Issue(): %v", err)
+		}
+		data := registry.Callback(tokenID, ActionStop, binding, expiresAt)
+		if _, action, _, ok := ParseCallbackData(data); !ok || action != ActionStop {
+			t.Fatalf("ParseCallbackData(%q) = %q, %v", data, action, ok)
+		}
+		presser := &Presser{Actor: "42", Scope: [2]string{"guild-1", "thread-9"}}
+		if registry.Resolve(data, presser) {
+			t.Fatal("Resolve accepted a stop token")
+		}
+		if _, _, ok := registry.ResolveAction(data, &Presser{Actor: "99", Scope: presser.Scope}); ok {
+			t.Fatal("ResolveAction accepted another actor")
+		}
+		if _, _, ok := registry.ResolveAction(data, &Presser{Actor: "42", Scope: [2]string{"", "thread-9"}}); ok {
+			t.Fatal("ResolveAction accepted another guild scope")
+		}
+		action, got, ok := registry.ResolveAction(data, presser)
+		if !ok || action != ActionStop || got.SessionID != binding.SessionID || got.TurnID != binding.TurnID {
+			t.Fatalf("ResolveAction() = %q, %+v, %v", action, got, ok)
+		}
+		if registry.Len() != 0 {
+			t.Fatalf("pending stop tokens = %d after resolve, want 0", registry.Len())
+		}
+		if _, _, ok := registry.ResolveAction(data, presser); ok {
+			t.Fatal("ResolveAction resolved a stop token twice")
+		}
+	})
 }

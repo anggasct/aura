@@ -105,6 +105,17 @@ func (p *fakeCommandPorts) CancelActive(_ context.Context, sessionID string) (tu
 	return p.active, true, nil
 }
 
+func (p *fakeCommandPorts) CancelTurn(_ context.Context, sessionID, turnID string) (bool, error) {
+	p.record("CancelTurn")
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.active == "" || p.active != turnID {
+		return false, nil
+	}
+	p.cancelled = append(p.cancelled, sessionID+":"+turnID)
+	return true, nil
+}
+
 func (p *fakeCommandPorts) Activate(_ context.Context, name string) (command.SkillPin, error) {
 	p.record("Activate")
 	p.mu.Lock()

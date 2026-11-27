@@ -16,6 +16,7 @@ type replyReference struct {
 	MessageID string                  `json:"message_id"`
 	GuildID   string                  `json:"guild_id,omitempty"`
 	ThreadID  string                  `json:"thread_id,omitempty"`
+	AuthorID  string                  `json:"author_id,omitempty"`
 	Artifacts []media.ArtifactSummary `json:"artifacts,omitempty"`
 }
 
@@ -53,6 +54,7 @@ func normalizeMessage(account *Account, owners *principal.Resolver, selfID strin
 		ChannelID: msg.ChannelID,
 		MessageID: msg.ID,
 		GuildID:   msg.GuildID,
+		AuthorID:  msg.Author.ID,
 	})
 	if err != nil {
 		return nil, "", fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")

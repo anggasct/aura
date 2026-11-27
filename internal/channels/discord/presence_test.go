@@ -236,7 +236,7 @@ func TestTypingContinuesAfterTheStatusIsPosted(t *testing.T) {
 			if got := len(api.typingCalls()); got != typingAtDeliver {
 				t.Fatalf("typing calls after Deliver = %d, want still %d", got, typingAtDeliver)
 			}
-			if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+			if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 				t.Fatalf("PresenceEnded(): %v", err)
 			}
 		})
@@ -268,7 +268,7 @@ func TestTypingContinuesAfterTheStatusIsPosted(t *testing.T) {
 			if afterPost < 3 {
 				t.Fatalf("typing calls after status post = %d, want at least 3", afterPost)
 			}
-			if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+			if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 				t.Fatalf("PresenceEnded(): %v", err)
 			}
 			typingAtEnd := len(api.typingCalls())
@@ -341,7 +341,7 @@ func TestElapsedTimeTicksWithoutActivity(t *testing.T) {
 			if got := len(api.patchContents(t)); got != patchesAfterDeliver {
 				t.Fatalf("edits after Deliver = %d, want still %d", got, patchesAfterDeliver)
 			}
-			if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+			if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 				t.Fatalf("PresenceEnded(): %v", err)
 			}
 		})
@@ -363,7 +363,7 @@ func TestElapsedTimeTicksWithoutActivity(t *testing.T) {
 			if got := len(api.patchContents(t)); got != 2 {
 				t.Fatalf("idle edits = %d, want 2", got)
 			}
-			if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+			if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 				t.Fatalf("PresenceEnded(): %v", err)
 			}
 			time.Sleep(90 * time.Second)
@@ -417,7 +417,7 @@ func TestPresenceFastTurnPostsNothing(t *testing.T) {
 	if messagePostCount(stub) != 0 {
 		t.Fatalf("posts = %d, want 0 for fast turn before status gate", messagePostCount(stub))
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-fast-1"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-fast-1", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -461,7 +461,7 @@ func TestPresencePostOnceEditInPlace(t *testing.T) {
 	if !strings.Contains(content, "⏳ Looking through notes") || !strings.Contains(content, "⏳ Checking open tasks") {
 		t.Errorf("edited content = %q, want both steps", content)
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-slow-1"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-slow-1", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -490,7 +490,7 @@ func TestPresenceSilentFallback(t *testing.T) {
 	if !strings.Contains(body, status.DefaultTexts().Working) || !strings.Contains(body, status.MarkerElapsed) {
 		t.Errorf("fallback body = %q, want working text and elapsed time", body)
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-silent-1"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-silent-1", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -521,7 +521,7 @@ func TestPresenceRedactsSecrets(t *testing.T) {
 			t.Fatal("secret value leaked into outbound body")
 		}
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-secret-1"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-secret-1", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -558,7 +558,7 @@ func TestPresenceStepFailureMarksOnlyThatStep(t *testing.T) {
 		if strings.Contains(last, "⚠️") {
 			t.Errorf("last status contains legacy warning marker: %q", last)
 		}
-		if err := adapter.PresenceEnded(t.Context(), "turn-fail-step"); err != nil {
+		if err := adapter.PresenceEnded(t.Context(), "turn-fail-step", runtimechannelhost.PresenceEnd{}); err != nil {
 			t.Fatalf("PresenceEnded(): %v", err)
 		}
 	})
@@ -586,7 +586,7 @@ func TestPresenceThrottleCoalesces(t *testing.T) {
 	if patches := stub.patchBodies(); len(patches) != 0 {
 		t.Fatalf("patches = %d, want 0 while throttled", len(patches))
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-throttle-1"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-throttle-1", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -640,7 +640,7 @@ func TestPresenceThrottleCoalescesInFlightPost(t *testing.T) {
 	if patches := stub.patchBodies(); len(patches) != 0 {
 		t.Fatalf("patches = %d, want 0 while throttled", len(patches))
 	}
-	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -713,7 +713,7 @@ func TestPresenceDeliveryStopsClockBeforeAnswer(t *testing.T) {
 	if content, _ := payload["content"].(string); !strings.Contains(content, "final answer") {
 		t.Fatalf("final edit = %q, want answer replacing status", content)
 	}
-	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -764,7 +764,7 @@ func TestPresenceStatusReplacedByFinalDelivery(t *testing.T) {
 	if !strings.Contains(content, "final answer") {
 		t.Errorf("final content = %q, want answer replacing status", content)
 	}
-	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -802,7 +802,7 @@ func TestPresenceScreensSecretStatus(t *testing.T) {
 	if !strings.Contains(joined, "Looking through notes") {
 		t.Errorf("outbound bodies = %q, want the clean activity text", joined)
 	}
-	if err := adapter.PresenceEnded(t.Context(), "turn-secret-screened"); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), "turn-secret-screened", runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -863,7 +863,7 @@ func TestPresenceSingleSlowToolStaysAlive(t *testing.T) {
 	if content, _ := payload["content"].(string); !strings.Contains(content, "final answer") {
 		t.Fatalf("final edit = %q, want answer replacing status", content)
 	}
-	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -916,7 +916,7 @@ func TestPresenceFailedStatusPostDoesNotBreakDelivery(t *testing.T) {
 	if !strings.Contains(joined, "final answer") {
 		t.Fatalf("outbound bodies = %q, want the delivered answer", joined)
 	}
-	if err := adapter.PresenceEnded(t.Context(), turnID); err != nil {
+	if err := adapter.PresenceEnded(t.Context(), turnID, runtimechannelhost.PresenceEnd{}); err != nil {
 		t.Fatalf("PresenceEnded(): %v", err)
 	}
 }
@@ -1031,7 +1031,7 @@ func TestPresenceUpdateDuringInFlightPostFlushesAfterMinEditInterval(t *testing.
 		if !strings.HasPrefix(edits[0], "⏳ Inspecting logs\n⏱ ") {
 			t.Errorf("flushed edit = %q, want step queued during in-flight post", edits[0])
 		}
-		if err := adapter.PresenceEnded(t.Context(), "turn-inflight-flush"); err != nil {
+		if err := adapter.PresenceEnded(t.Context(), "turn-inflight-flush", runtimechannelhost.PresenceEnd{}); err != nil {
 			t.Fatalf("PresenceEnded(): %v", err)
 		}
 	})
@@ -1088,7 +1088,7 @@ func TestInitialStatusDefersDuringTypingRateHold(t *testing.T) {
 		if payload["content"] != "Working…\n⏱ 0:13" {
 			t.Errorf("deferred initial status = %q, want Working… at 0:13", payload["content"])
 		}
-		if err := adapter.PresenceEnded(t.Context(), "turn-typing-hold"); err != nil {
+		if err := adapter.PresenceEnded(t.Context(), "turn-typing-hold", runtimechannelhost.PresenceEnd{}); err != nil {
 			t.Fatalf("PresenceEnded(): %v", err)
 		}
 	})
