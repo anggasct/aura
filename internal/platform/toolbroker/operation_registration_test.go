@@ -16,7 +16,7 @@ func unusedAdapter(context.Context, *ToolRequest, approval.Constraints) (ToolRes
 
 func TestBrokerRejectsInconsistentOperationDefinitions(t *testing.T) {
 	registration := func(stub operationStub, mutate func(registration *ToolRegistration)) ToolRegistration {
-		definition := stub.definition()
+		definition := stub.definition(t)
 		built := ToolRegistration{Definition: definition, Adapter: unusedAdapter, Rule: DefaultRule(&definition)}
 		if needsPreview(&definition) {
 			built.Preview = defaultPreview
@@ -83,8 +83,8 @@ func TestBrokerRejectsInconsistentOperationDefinitions(t *testing.T) {
 
 func TestRejectedOperationRegistrationRegistersNothing(t *testing.T) {
 	broker := newProbeBroker(t)
-	good := changeStub.definition()
-	bad := readStub.definition()
+	good := changeStub.definition(t)
+	bad := readStub.definition(t)
 	bad.FreshApproval = true
 	err := broker.RegisterProvider(stubOperations{
 		{Definition: good, Adapter: unusedAdapter, Rule: DefaultRule(&good)},
@@ -100,7 +100,7 @@ func TestRejectedOperationRegistrationRegistersNothing(t *testing.T) {
 
 func TestOperationToolWithoutAPreviewerOnATrustGrantCannotBeRegisteredOneByOne(t *testing.T) {
 	broker := newProbeBroker(t)
-	definition := trustGrantStub.definition()
+	definition := trustGrantStub.definition(t)
 	rule := DefaultRule(&definition)
 	if err := broker.RegisterTool(&definition, unusedAdapter, &rule); !fault.HasCode(err, ResultInvalidArgument) {
 		t.Fatalf("RegisterTool = %v, want %s", err, ResultInvalidArgument)
@@ -109,7 +109,7 @@ func TestOperationToolWithoutAPreviewerOnATrustGrantCannotBeRegisteredOneByOne(t
 
 func TestReplacingAnOperationToolDropsItsPreviewer(t *testing.T) {
 	rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: true}, operationStub{name: "aura_stub_swap", risk: tools.RiskChange, previewed: true})
-	definition := operationStub{name: "aura_stub_swap", risk: tools.RiskChange}.definition()
+	definition := operationStub{name: "aura_stub_swap", risk: tools.RiskChange}.definition(t)
 	rule := DefaultRule(&definition)
 	if err := rig.broker.RegisterTool(&definition, rig.handle, &rule); err != nil {
 		t.Fatalf("RegisterTool: %v", err)
@@ -124,7 +124,7 @@ func TestReplacingAnOperationToolDropsItsPreviewer(t *testing.T) {
 
 func TestOperationHelpersRefuseNilArguments(t *testing.T) {
 	broker := newProbeBroker(t)
-	definition := changeStub.definition()
+	definition := changeStub.definition(t)
 	request := operationRequest(changeStub.name, "x")
 	decision := approval.PolicyDecision{Outcome: approval.OutcomeAllow}
 	rule := DefaultRule(&definition)

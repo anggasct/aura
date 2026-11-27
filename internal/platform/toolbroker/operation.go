@@ -3,6 +3,7 @@ package toolbroker
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -104,7 +105,14 @@ func operationRefusal(request *ToolRequest, definition *tools.Definition) error 
 		}
 		return errorf(ResultToolTierDenied, "tool %q does not accept an attached approval", key)
 	}
+	if changeNeedsCard(request, definition) && unattendedRequest(request, definition) {
+		return operationNoApprover(request, definition)
+	}
 	return nil
+}
+
+func changeNeedsCard(request *ToolRequest, definition *tools.Definition) bool {
+	return definition.Risk == tools.RiskChange && !definition.OwnerNotice && (!request.ContentTaintTracked || request.Tainted)
 }
 
 func unattendedRequest(request *ToolRequest, definition *tools.Definition) bool {
@@ -118,16 +126,25 @@ func operationApproval(decision *approval.PolicyDecision, request *ToolRequest, 
 	if decision == nil || request == nil || definition == nil {
 		return nilOperationArguments()
 	}
-	if decision.Outcome != approval.OutcomeAllow {
+	if decision.Outcome == approval.OutcomeDeny {
+		return errorf(ResultPolicyDenied, "tool %q is denied by policy", toolKey(request))
+	}
+	if definition.Privileged() {
+		if decision.Outcome != approval.OutcomeRequireApproval {
+			decision.Outcome = approval.OutcomeRequireApproval
+			decision.ReasonCode = string(approval.ErrorCodeApprovalRequired)
+		}
 		return nil
 	}
-	switch {
-	case definition.Privileged():
-		decision.Outcome = approval.OutcomeRequireApproval
-		decision.ReasonCode = string(approval.ErrorCodeApprovalRequired)
-	case definition.Risk == tools.RiskChange && !definition.OwnerNotice && (!request.ContentTaintTracked || request.Tainted):
-		decision.Outcome = approval.OutcomeRequireApproval
-		decision.ReasonCode = approval.ReasonContentUnverified
+	switch decision.Outcome {
+	case approval.OutcomeRequireApproval:
+	case approval.OutcomeAllow:
+		if changeNeedsCard(request, definition) {
+			decision.Outcome = approval.OutcomeRequireApproval
+			decision.ReasonCode = approval.ReasonContentUnverified
+		}
+	default:
+		return errorf(ResultPolicyDenied, "tool %q has a policy outcome the broker does not know", toolKey(request))
 	}
 	return nil
 }
@@ -215,7 +232,7 @@ func (b *Broker) previewAction(ctx context.Context, call *operationCall) (Previe
 	}
 	callCtx, cancel := withCallDeadline(ctx, call.canonical.Deadline)
 	defer cancel()
-	preview, err := call.previewer(callCtx, call.canonical)
+	preview, err := call.previewer(callCtx, previewRequest(call.canonical))
 	if err != nil {
 		return Preview{}, b.classifyExecutionError(ctx, call.canonical, err)
 	}
@@ -226,6 +243,15 @@ func (b *Broker) previewAction(ctx context.Context, call *operationCall) (Previe
 		return Preview{}, err
 	}
 	return preview, nil
+}
+
+func previewRequest(canonical *ToolRequest) *ToolRequest {
+	copied := *canonical
+	copied.Arguments = slices.Clone(canonical.Arguments)
+	copied.Capabilities = slices.Clone(canonical.Capabilities)
+	copied.Knowledge = slices.Clone(canonical.Knowledge)
+	copied.Approval = nil
+	return &copied
 }
 
 func (p *Preview) wellFormed() bool {

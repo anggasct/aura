@@ -35,7 +35,8 @@ type operationStub struct {
 	capabilities []string
 }
 
-func (s operationStub) definition() tools.Definition {
+func (s operationStub) definition(tb testing.TB) tools.Definition {
+	tb.Helper()
 	definition := tools.Definition{
 		Name: s.name, Version: tools.Version, Risk: s.risk, Operation: "stub." + s.name,
 		FreshApproval: s.fresh, OwnerNotice: s.notice, ExternalSink: s.sink,
@@ -53,7 +54,9 @@ func (s operationStub) definition() tools.Definition {
 			return json.Marshal(value)
 		},
 	}
-	_ = definition.ApplyOperationFlags()
+	if err := definition.ApplyOperationFlags(); err != nil {
+		tb.Fatalf("apply the operation flags of %s: %v", s.name, err)
+	}
 	definition.RequiredCapabilities = slices.Clone(s.capabilities)
 	return definition
 }
@@ -151,7 +154,7 @@ func newOperationRig(t *testing.T, db *sql.DB, options *operationOptions, stubs 
 	rig.broker = broker
 	registrations := make(stubOperations, 0, len(stubs))
 	for _, stub := range stubs {
-		registrations = append(registrations, rig.registration(stub))
+		registrations = append(registrations, rig.registration(t, stub))
 	}
 	if err := broker.RegisterProvider(registrations); err != nil {
 		t.Fatalf("register the stub operations: %v", err)
@@ -159,8 +162,8 @@ func newOperationRig(t *testing.T, db *sql.DB, options *operationOptions, stubs 
 	return rig
 }
 
-func (r *operationRig) registration(stub operationStub) ToolRegistration {
-	definition := stub.definition()
+func (r *operationRig) registration(tb testing.TB, stub operationStub) ToolRegistration {
+	definition := stub.definition(tb)
 	registration := ToolRegistration{Definition: definition, Adapter: r.handle, Rule: DefaultRule(&definition)}
 	if stub.previewed || needsPreview(&definition) {
 		registration.Preview = r.previewer

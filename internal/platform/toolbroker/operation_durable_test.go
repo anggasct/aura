@@ -117,13 +117,15 @@ func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
 		{name: "an unattended trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an unattended deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "a scheduled deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginSchedule }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
+		{name: "a scheduled previewed change", stub: previewedStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginSchedule }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
+		{name: "an unattended previewed change", stub: previewedStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an http trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginHTTP }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an unattended fresh approval change", stub: freshStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an attached grant on a deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Approval = &approval.ApprovalGrant{GrantID: "g"} }, class: ResultToolTierDenied, journal: "call-1-0/policy"},
 		{name: "an attached grant on a fresh approval change", stub: freshStub, mutate: func(r *ToolRequest) { r.Approval = &approval.ApprovalGrant{GrantID: "g"} }, class: ResultFreshApprovalRequired, journal: "call-1-0/policy"},
 	}
 	hosted := startHostedRuntime(t)
-	rig := newDurableOperationRig(t, hosted, &operationOptions{reachable: true}, destructiveStub, trustGrantStub, freshStub)
+	rig := newDurableOperationRig(t, hosted, &operationOptions{reachable: true}, destructiveStub, trustGrantStub, freshStub, previewedStub)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			request := operationRequest(tc.stub.name, "x")
@@ -297,5 +299,35 @@ func TestOperationToolsStayOutOfTheLegacyEffectProvider(t *testing.T) {
 	definition.Operation = "group.verb"
 	if providerFor(&definition) != operationProvider {
 		t.Errorf("a definition with an operation uses %s, want %s", providerFor(&definition), operationProvider)
+	}
+}
+
+func TestEmptyPreviewReplaysAsOkOnADurableTurn(t *testing.T) {
+	empty := func(context.Context, *ToolRequest) (Preview, error) {
+		return Preview{Lines: []string{"nothing matches"}, Empty: true}, nil
+	}
+	hosted := startHostedRuntime(t)
+	rig := newDurableOperationRig(t, hosted, &operationOptions{reachable: true, preview: empty}, destructiveStub)
+	first, replay, key := rig.callTwiceOnADurableTurn(t, hosted, operationRequest(destructiveStub.name, "x"), nil)
+	if first.class != ResultOK || !strings.Contains(first.output, `"empty":true`) {
+		t.Fatalf("first = %+v, want ok carrying the empty preview", first)
+	}
+	if replay != first {
+		t.Errorf("replay = %+v, want the first result %+v", replay, first)
+	}
+	if previews := rig.previewed.Load(); previews != 1 {
+		t.Errorf("previewer runs = %d, want 1 across the call and its replay", previews)
+	}
+	if prompts := rig.decider.asked(); len(prompts) != 0 {
+		t.Errorf("approval prompts = %d, want none", len(prompts))
+	}
+	if handled := rig.handled.Load(); handled != 0 {
+		t.Errorf("handler runs = %d, want none", handled)
+	}
+	if providers := rig.intentProviders(t); len(providers) != 0 {
+		t.Errorf("effect intents = %v, want none", providers)
+	}
+	if got, want := joinedKeys(hosted.actionRows(t, key)), "call-1-0/policy,call-1-0/preview"; got != want {
+		t.Errorf("action keys = %s, want %s", got, want)
 	}
 }

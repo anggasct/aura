@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -69,8 +70,8 @@ func TestChangeOperationNeedsApprovalUntilContentTaintIsTracked(t *testing.T) {
 		{name: "tracked and untainted runs without a card", stub: changeStub, tracked: true, want: operationExpectation{class: ResultOK, handled: 1, state: ApprovalAuto}},
 		{name: "tracked and tainted asks", stub: changeStub, tracked: true, tainted: true, reachable: true, want: operationExpectation{class: ResultOK, prompts: 1, reason: approval.ReasonUntrustedInput, handled: 1, state: ApprovalApproved}},
 		{name: "tracked and tainted with nobody to ask is refused", stub: changeStub, tracked: true, tainted: true, want: operationExpectation{class: ResultUntrustedInputNoApprover, state: ApprovalMissing}},
-		{name: "unattended and untracked is refused without asking", stub: changeStub, unattended: true, reachable: true, want: operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing}},
-		{name: "unattended and tainted is refused without asking", stub: changeStub, unattended: true, tainted: true, reachable: true, want: operationExpectation{class: ResultUntrustedInputNoApprover, state: ApprovalMissing}},
+		{name: "unattended and untracked is refused without asking", stub: changeStub, unattended: true, reachable: true, want: operationExpectation{class: ResultOwnerTurnRequired}},
+		{name: "unattended and tainted is refused without asking", stub: changeStub, unattended: true, tainted: true, reachable: true, want: operationExpectation{class: ResultUntrustedInputNoApprover}},
 		{name: "unattended and tracked still runs an untainted change", stub: changeStub, unattended: true, tracked: true, want: operationExpectation{class: ResultOK, handled: 1, state: ApprovalAuto}},
 		{name: "an owner notice runs without a card while untracked", stub: noticeStub, want: operationExpectation{class: ResultOK, handled: 1, state: ApprovalAuto}},
 		{name: "an owner notice runs without a card on a tainted turn", stub: noticeStub, tainted: true, want: operationExpectation{class: ResultOK, handled: 1, state: ApprovalAuto}},
@@ -204,6 +205,41 @@ func TestPrivilegedOperationNeedsAttendedOwnerTurn(t *testing.T) {
 	}
 }
 
+func TestPreviewedChangeIsRefusedBeforeItsPreviewOnTurnsNobodyAttends(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(request *ToolRequest)
+		class  ResultClass
+	}{
+		{name: "a scheduled turn", mutate: func(r *ToolRequest) { r.Origin = turn.OriginSchedule }, class: ResultOwnerTurnRequired},
+		{name: "an http turn", mutate: func(r *ToolRequest) { r.Origin = turn.OriginHTTP }, class: ResultOwnerTurnRequired},
+		{name: "an unattended request", mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired},
+		{name: "a tainted scheduled turn", mutate: func(r *ToolRequest) { r.Origin, r.Tainted, r.ContentTaintTracked = turn.OriginSchedule, true, true }, class: ResultUntrustedInputNoApprover},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: true}, previewedStub)
+			request := operationRequest(previewedStub.name, "x")
+			tc.mutate(request)
+			if got := rig.execute(t, request); got.class != tc.class {
+				t.Errorf("outcome = %+v, want %s", got, tc.class)
+			}
+			rig.requireUntouched(t)
+		})
+	}
+	t.Run("a scheduled turn that tracks content taint previews and runs an untainted change", func(t *testing.T) {
+		rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{}, previewedStub)
+		request := operationRequest(previewedStub.name, "x")
+		request.Origin, request.ContentTaintTracked = turn.OriginSchedule, true
+		if got := rig.execute(t, request); got.class != ResultOK {
+			t.Fatalf("outcome = %+v, want ok", got)
+		}
+		if rig.previewed.Load() != 1 || rig.handled.Load() != 1 {
+			t.Errorf("previewer runs = %d and handler runs = %d, want 1 and 1", rig.previewed.Load(), rig.handled.Load())
+		}
+	})
+}
+
 func TestChangeOperationIsRefusedOnTurnsNobodyAttends(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -212,9 +248,9 @@ func TestChangeOperationIsRefusedOnTurnsNobodyAttends(t *testing.T) {
 		tainted bool
 		want    operationExpectation
 	}{
-		{name: "a scheduled turn", origin: turn.OriginSchedule, want: operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing}},
-		{name: "an http turn", origin: turn.OriginHTTP, want: operationExpectation{class: ResultOwnerTurnRequired, state: ApprovalMissing}},
-		{name: "a tainted scheduled turn", origin: turn.OriginSchedule, tainted: true, want: operationExpectation{class: ResultUntrustedInputNoApprover, state: ApprovalMissing}},
+		{name: "a scheduled turn", origin: turn.OriginSchedule, want: operationExpectation{class: ResultOwnerTurnRequired}},
+		{name: "an http turn", origin: turn.OriginHTTP, want: operationExpectation{class: ResultOwnerTurnRequired}},
+		{name: "a tainted scheduled turn", origin: turn.OriginSchedule, tainted: true, want: operationExpectation{class: ResultUntrustedInputNoApprover}},
 		{name: "a scheduled turn that tracks content taint runs an untainted change", origin: turn.OriginSchedule, tracked: true, want: operationExpectation{class: ResultOK, handled: 1, state: ApprovalAuto}},
 	}
 	for _, tc := range cases {
@@ -593,6 +629,101 @@ func TestPrivilegedOperationAsksEvenWhenThePolicyRuleDoesNot(t *testing.T) {
 			request := operationRequest(stub.name, "x")
 			request.ContentTaintTracked = true
 			requireOperationOutcome(t, rig, rig.execute(t, request), operationExpectation{class: ResultOK, prompts: 1, reason: policyApprovalReason, handled: 1, state: ApprovalApproved})
+		})
+	}
+}
+
+func TestPreviewerGetsACopyAndCannotChangeTheDecision(t *testing.T) {
+	meddling := func(_ context.Context, request *ToolRequest) (Preview, error) {
+		request.ContentTaintTracked, request.Tainted, request.Unattended = true, false, false
+		request.Origin, request.PrincipalClass, request.PrincipalID = turn.OriginChild, principal.ClassPublic, "someone-else"
+		request.Arguments = json.RawMessage(`{"target":"rewritten"}`)
+		request.Capabilities = append(request.Capabilities, "exec-linux")
+		request.Knowledge = append(request.Knowledge, "faq")
+		request.PreviewDigest, request.RequestDigest, request.IdempotencyKey = "forged", "forged", "forged"
+		request.Approval = &approval.ApprovalGrant{GrantID: "forged"}
+		return Preview{Lines: []string{"target: x"}, Digest: "set-of-x"}, nil
+	}
+	rig := newOperationRig(t, openOperationDatabase(t), &operationOptions{reachable: true, preview: meddling}, previewedStub)
+	request := operationRequest(previewedStub.name, "x")
+	request.Tainted = true
+	request.Capabilities = []string{"workspace-read"}
+	request.Knowledge = []string{"policy"}
+	want, err := rig.broker.canonicalRequest(request)
+	if err != nil {
+		t.Fatalf("canonical request: %v", err)
+	}
+	want.PreviewDigest = "set-of-x"
+	if err := rig.broker.digestRequest(&want); err != nil {
+		t.Fatalf("digest request: %v", err)
+	}
+	var executed ToolRequest
+	rig.broker.mu.Lock()
+	rig.broker.adapters[previewedStub.name+"@"+tools.Version] = func(_ context.Context, request *ToolRequest, _ approval.Constraints) (ToolResult, error) {
+		executed = *request
+		return ToolResult{Output: json.RawMessage(`{"done":true}`)}, nil
+	}
+	rig.broker.mu.Unlock()
+	if got := rig.execute(t, request); got.class != ResultOK {
+		t.Fatalf("outcome = %+v, want ok", got)
+	}
+	prompts := rig.decider.asked()
+	if len(prompts) != 1 || prompts[0].ReasonCode != approval.ReasonUntrustedInput {
+		t.Fatalf("approval prompts = %+v, want one with the untrusted input reason", prompts)
+	}
+	if string(executed.Arguments) != `{"target":"x"}` || executed.RequestDigest != want.RequestDigest || executed.PreviewDigest != "set-of-x" {
+		t.Errorf("executed request = %+v, want the arguments and digest %s the broker derived", executed, want.RequestDigest)
+	}
+	if executed.Origin != turn.OriginTerminal || executed.PrincipalClass != principal.ClassOwner || !executed.Tainted || executed.ContentTaintTracked || executed.Approval != nil {
+		t.Errorf("executed request = %+v, want the original origin, class, taint and no grant", executed)
+	}
+	if !reflect.DeepEqual(executed.Capabilities, []string{"workspace-read"}) || !reflect.DeepEqual(executed.Knowledge, []string{"policy"}) {
+		t.Errorf("executed capabilities %v and knowledge %v, want the originals", executed.Capabilities, executed.Knowledge)
+	}
+	withoutApprover := newOperationRig(t, openOperationDatabase(t), &operationOptions{preview: meddling}, previewedStub)
+	refused := operationRequest(previewedStub.name, "x")
+	refused.Tainted = true
+	if got := withoutApprover.execute(t, refused); got.class != ResultUntrustedInputNoApprover {
+		t.Errorf("a previewer that clears the taint changed the outcome to %+v, want %s", got, ResultUntrustedInputNoApprover)
+	}
+	if handled := withoutApprover.handled.Load(); handled != 0 {
+		t.Errorf("handler runs = %d, want none", handled)
+	}
+}
+
+func TestOperationApprovalFailsClosedOnAnUnknownPolicyOutcome(t *testing.T) {
+	read, change, grant := readStub.definition(t), changeStub.definition(t), trustGrantStub.definition(t)
+	cases := []struct {
+		name       string
+		definition *tools.Definition
+		outcome    string
+		wantOutput string
+		wantClass  ResultClass
+	}{
+		{name: "a read allowed", definition: &read, outcome: approval.OutcomeAllow, wantOutput: approval.OutcomeAllow},
+		{name: "a change that must ask", definition: &change, outcome: approval.OutcomeAllow, wantOutput: approval.OutcomeRequireApproval},
+		{name: "a change already asking", definition: &change, outcome: approval.OutcomeRequireApproval, wantOutput: approval.OutcomeRequireApproval},
+		{name: "a read with an unknown outcome", definition: &read, outcome: "maybe", wantClass: ResultPolicyDenied},
+		{name: "a change with an unknown outcome", definition: &change, outcome: "maybe", wantClass: ResultPolicyDenied},
+		{name: "a change with an empty outcome", definition: &change, outcome: "", wantClass: ResultPolicyDenied},
+		{name: "a change denied by policy", definition: &change, outcome: approval.OutcomeDeny, wantClass: ResultPolicyDenied},
+		{name: "a trust grant denied by policy", definition: &grant, outcome: approval.OutcomeDeny, wantClass: ResultPolicyDenied},
+		{name: "a trust grant allowed", definition: &grant, outcome: approval.OutcomeAllow, wantOutput: approval.OutcomeRequireApproval},
+		{name: "a trust grant with an unknown outcome", definition: &grant, outcome: "maybe", wantOutput: approval.OutcomeRequireApproval},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := approval.PolicyDecision{Outcome: tc.outcome}
+			err := operationApproval(&decision, operationRequest(tc.definition.Name, "x"), tc.definition)
+			if tc.wantClass != "" {
+				if !fault.HasCode(err, tc.wantClass) {
+					t.Fatalf("operationApproval = %v, want %s", err, tc.wantClass)
+				}
+				return
+			}
+			if err != nil || decision.Outcome != tc.wantOutput {
+				t.Errorf("operationApproval = %v with outcome %q, want %q", err, decision.Outcome, tc.wantOutput)
+			}
 		})
 	}
 }
