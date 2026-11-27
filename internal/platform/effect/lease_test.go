@@ -469,6 +469,14 @@ type logSignal struct {
 
 func (h *logSignal) Enabled(context.Context, slog.Level) bool { return true }
 
+func (h *logSignal) WithAttrs(attrs []slog.Attr) slog.Handler {
+	return &logSignal{Handler: h.Handler.WithAttrs(attrs), message: h.message, seen: h.seen}
+}
+
+func (h *logSignal) WithGroup(name string) slog.Handler {
+	return &logSignal{Handler: h.Handler.WithGroup(name), message: h.message, seen: h.seen}
+}
+
 func (h *logSignal) Handle(ctx context.Context, record slog.Record) error {
 	if record.Message == h.message {
 		record.Attrs(func(attr slog.Attr) bool {
