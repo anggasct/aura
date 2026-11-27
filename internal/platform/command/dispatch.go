@@ -48,6 +48,13 @@ func NewDispatcher(registry *Registry, ports Ports, recorder Recorder) (*Dispatc
 
 func (d *Dispatcher) Registry() *Registry { return d.registry }
 
+func (d *Dispatcher) CancelTurn(ctx context.Context, sessionID, turnID string) (bool, error) {
+	if d == nil || d.ports.Turns == nil {
+		return false, nil
+	}
+	return d.ports.Turns.CancelTurn(ctx, sessionID, turnID)
+}
+
 func (d *Dispatcher) Execute(ctx context.Context, caller *Caller, inv *Invocation) Result {
 	if caller == nil {
 		return failure(ErrorCodeInvalidArgument, "aura: caller must not be nil")

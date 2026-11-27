@@ -131,6 +131,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	tracked := req.EffectID != ""
 	if tracked {
 		a.stopPresence(req.EffectID)
+		a.clearPresenceStop(ctx, req.EffectID)
 	}
 	posted, ok := a.postedMessages(key)
 	if tracked && ok {

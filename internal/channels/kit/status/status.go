@@ -21,9 +21,12 @@ const (
 	MarkerDone    = "✓"
 	MarkerFailed  = "✗"
 	MarkerElapsed = "⏱"
+	MarkerStopped = "⏹"
 
 	defaultWorkingText      = "Working…"
 	defaultStillWorkingText = "Still working…"
+	defaultStoppedText      = "⏹ Stopped"
+	defaultStopButtonText   = "Stop"
 )
 
 var secretKeywords = []string{"password", "secret", "token", "api_key", "apikey", "bearer", "authorization", "private_key", "client_secret"}
@@ -33,12 +36,16 @@ var markdownMarkerReplacer = strings.NewReplacer("`", "", "*", "", "_", "", "~",
 type Texts struct {
 	Working      string
 	StillWorking string
+	Stopped      string
+	StopButton   string
 }
 
 func DefaultTexts() Texts {
 	return Texts{
 		Working:      defaultWorkingText,
 		StillWorking: defaultStillWorkingText,
+		Stopped:      defaultStoppedText,
+		StopButton:   defaultStopButtonText,
 	}
 }
 

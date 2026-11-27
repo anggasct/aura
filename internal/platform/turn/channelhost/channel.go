@@ -19,6 +19,7 @@ type DeliveryRequest struct {
 	EffectID       string
 	Channel        string
 	ConversationID string
+	PrincipalClass string
 	ReplyContext   json.RawMessage
 	Parts          []OutputPart
 	IdempotencyKey string
@@ -64,10 +65,14 @@ type PresenceUpdate struct {
 	Outcome  StepOutcome
 }
 
+type PresenceEnd struct {
+	Stopped bool
+}
+
 type PresencePort interface {
 	PresenceStarted(ctx context.Context, req *DeliveryRequest) error
 	PresenceUpdated(ctx context.Context, req *DeliveryRequest, update PresenceUpdate) error
-	PresenceEnded(ctx context.Context, turnID string) error
+	PresenceEnded(ctx context.Context, turnID string, end PresenceEnd) error
 }
 
 type ChannelIdentity interface {

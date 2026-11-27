@@ -181,6 +181,7 @@ func buildThreadEnvelope(account, principalID string, class principal.Class, msg
 		MessageID: msg.ID,
 		GuildID:   msg.GuildID,
 		ThreadID:  threadID,
+		AuthorID:  msg.Author.ID,
 	})
 	if err != nil {
 		return nil, fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
@@ -294,6 +295,7 @@ func rewriteEnvelopeForThread(envelope *runtimeingress.IngressEnvelope, msg *mes
 		MessageID: msg.ID,
 		GuildID:   msg.GuildID,
 		ThreadID:  threadID,
+		AuthorID:  msg.Author.ID,
 	})
 	if err != nil {
 		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")

@@ -28,6 +28,7 @@ const (
 	ActionApprove  = "a"
 	ActionReject   = "r"
 	ActionStanding = "s"
+	ActionStop     = "x"
 )
 
 const (
@@ -74,6 +75,8 @@ type Binding struct {
 	Actor     string
 	Scope     [2]string
 	Standing  bool
+	SessionID string
+	TurnID    string
 }
 
 type Presser struct {
@@ -180,14 +183,17 @@ func (r *Registry) mac(tokenID, action string, binding *Binding, expiryUnix int6
 	return hex.EncodeToString(mac.Sum(nil)[:macBytes])
 }
 
+func (r *Registry) Callback(tokenID, action string, binding *Binding, expiresAt time.Time) string {
+	return CallbackData(tokenID, action, r.mac(tokenID, action, binding, expiresAt.Unix()))
+}
+
 func (r *Registry) Callbacks(tokenID string, binding *Binding, expiresAt time.Time) Callbacks {
-	expiry := expiresAt.Unix()
 	callbacks := Callbacks{
-		Approve: CallbackData(tokenID, ActionApprove, r.mac(tokenID, ActionApprove, binding, expiry)),
-		Reject:  CallbackData(tokenID, ActionReject, r.mac(tokenID, ActionReject, binding, expiry)),
+		Approve: r.Callback(tokenID, ActionApprove, binding, expiresAt),
+		Reject:  r.Callback(tokenID, ActionReject, binding, expiresAt),
 	}
 	if binding.Standing {
-		callbacks.Standing = CallbackData(tokenID, ActionStanding, r.mac(tokenID, ActionStanding, binding, expiry))
+		callbacks.Standing = r.Callback(tokenID, ActionStanding, binding, expiresAt)
 	}
 	return callbacks
 }
@@ -205,7 +211,7 @@ func ParseCallbackData(raw string) (tokenID, action, mac string, ok bool) {
 	if len(tokenID) != tokenBytes*2 || len(mac) != macBytes*2 {
 		return "", "", "", false
 	}
-	if action != ActionApprove && action != ActionReject && action != ActionStanding {
+	if action != ActionApprove && action != ActionReject && action != ActionStanding && action != ActionStop {
 		return "", "", "", false
 	}
 	if !isHex(tokenID) || !isHex(mac) {
@@ -225,56 +231,65 @@ func isHex(value string) bool {
 }
 
 func (r *Registry) Resolve(data string, presser *Presser) bool {
+	_, _, ok := r.resolve(data, presser, false)
+	return ok
+}
+
+func (r *Registry) ResolveAction(data string, presser *Presser) (action string, binding Binding, ok bool) {
+	return r.resolve(data, presser, true)
+}
+
+func (r *Registry) resolve(data string, presser *Presser, allowStop bool) (action string, binding Binding, ok bool) {
 	if r == nil || presser == nil {
-		return false
+		return "", Binding{}, false
 	}
-	tokenID, action, mac, ok := ParseCallbackData(data)
-	if !ok {
-		return false
+	tokenID, parsedAction, mac, valid := ParseCallbackData(data)
+	if !valid || (!allowStop && parsedAction == ActionStop) {
+		return "", Binding{}, false
 	}
 	r.mu.Lock()
 	pending, found := r.pending[tokenID]
 	if !found {
 		r.mu.Unlock()
-		return false
+		return "", Binding{}, false
 	}
 	if pending.decided || !time.Now().Before(pending.expiresAt) {
 		if !pending.decided {
 			delete(r.pending, tokenID)
 		}
 		r.mu.Unlock()
-		return false
+		return "", Binding{}, false
 	}
-	binding := pending.binding
-	expected := r.mac(tokenID, action, &binding, pending.expiresAt.Unix())
+	binding = pending.binding
+	expected := r.mac(tokenID, parsedAction, &binding, pending.expiresAt.Unix())
 	r.mu.Unlock()
 	if subtle.ConstantTimeCompare([]byte(mac), []byte(expected)) != 1 {
-		return false
+		return "", Binding{}, false
 	}
 	if presser.Actor != binding.Actor || !scopeMatches(&binding, presser) {
-		return false
+		return "", Binding{}, false
 	}
-	if action == ActionStanding && !binding.Standing {
-		return false
+	if parsedAction == ActionStanding && !binding.Standing {
+		return "", Binding{}, false
 	}
 	r.mu.Lock()
 	if pending.decided {
 		r.mu.Unlock()
-		return false
+		return "", Binding{}, false
 	}
 	pending.decided = true
+	if parsedAction == ActionStop {
+		delete(r.pending, tokenID)
+	}
 	r.mu.Unlock()
-	pending.result <- Outcome{Accepted: action == ActionApprove || action == ActionStanding, Standing: action == ActionStanding}
-	return true
+	if parsedAction != ActionStop {
+		pending.result <- Outcome{Accepted: parsedAction == ActionApprove || parsedAction == ActionStanding, Standing: parsedAction == ActionStanding}
+	}
+	return parsedAction, binding, true
 }
 
 func scopeMatches(binding *Binding, presser *Presser) bool {
-	for i := range binding.Scope {
-		if binding.Scope[i] != "" && binding.Scope[i] != presser.Scope[i] {
-			return false
-		}
-	}
-	return true
+	return binding.Scope == presser.Scope
 }
 
 func (r *Registry) Await(ctx context.Context, tokenID string, pending *Pending) (outcome Outcome, timedOut bool, err error) {

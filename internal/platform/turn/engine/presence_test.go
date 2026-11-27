@@ -18,11 +18,14 @@ import (
 )
 
 type presenceCapture struct {
-	mu       sync.Mutex
-	started  int
-	updates  []runtimechannelhost.PresenceUpdate
-	ended    []string
-	delivers int
+	mu          sync.Mutex
+	started     int
+	startedReqs []*runtimechannelhost.DeliveryRequest
+	updates     []runtimechannelhost.PresenceUpdate
+	ended       []string
+	endOutcomes []runtimechannelhost.PresenceEnd
+	delivers    int
+	onDeliver   func()
 }
 
 func (a *presenceCapture) Start(_ context.Context, _ runtimeingress.IngressSink) error {
@@ -31,8 +34,12 @@ func (a *presenceCapture) Start(_ context.Context, _ runtimeingress.IngressSink)
 
 func (a *presenceCapture) Deliver(_ context.Context, _ *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	a.delivers++
+	hook := a.onDeliver
+	a.mu.Unlock()
+	if hook != nil {
+		hook()
+	}
 	return runtimechannelhost.ProviderReceipt{ProviderID: "fake", ExternalID: "ext-1"}, nil
 }
 
@@ -40,10 +47,14 @@ func (a *presenceCapture) Health(_ context.Context) runtimechannelhost.ChannelHe
 	return runtimechannelhost.ChannelHealth{Status: runtimechannelhost.ChannelHealthy}
 }
 
-func (a *presenceCapture) PresenceStarted(_ context.Context, _ *runtimechannelhost.DeliveryRequest) error {
+func (a *presenceCapture) PresenceStarted(_ context.Context, req *runtimechannelhost.DeliveryRequest) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.started++
+	if req != nil {
+		copied := *req
+		a.startedReqs = append(a.startedReqs, &copied)
+	}
 	return nil
 }
 
@@ -58,10 +69,11 @@ func (a *presenceCapture) PresenceUpdated(_ context.Context, _ *runtimechannelho
 	return nil
 }
 
-func (a *presenceCapture) PresenceEnded(_ context.Context, turnID string) error {
+func (a *presenceCapture) PresenceEnded(_ context.Context, turnID string, end runtimechannelhost.PresenceEnd) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	a.ended = append(a.ended, turnID)
+	a.endOutcomes = append(a.endOutcomes, end)
 	return nil
 }
 

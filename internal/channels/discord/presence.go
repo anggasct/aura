@@ -8,9 +8,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/anggasct/aura/internal/channels/kit/approval"
 	"github.com/anggasct/aura/internal/channels/kit/status"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/secret"
 	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
@@ -23,6 +25,8 @@ const (
 
 type presenceSession struct {
 	channelID    string
+	guildID      string
+	authorID     string
 	conversation string
 	replyContext []byte
 	channelKey   string
@@ -30,6 +34,9 @@ type presenceSession struct {
 	started      time.Time
 	lastTyping   time.Time
 	statusID     string
+	stopTokenID  string
+	stopPending  *approval.Pending
+	stopCallback string
 	steps        []status.TrackedStep
 	shownText    string
 	lastEdit     time.Time
@@ -172,12 +179,16 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 		return nil, "", fault.New(ErrorCodeInvalidArgument, "presence request carries no turn id")
 	}
 	channelID := req.Channel
+	var guildID string
+	var authorID string
 	if len(req.ReplyContext) > 0 {
 		var reference replyReference
 		if err := json.Unmarshal(req.ReplyContext, &reference); err != nil {
 			return nil, "", fault.New(ErrorCodeProtocolInvalid, "reply context is not decodable")
 		}
 		channelID, _, _ = deliveryTarget(&reference)
+		guildID = reference.GuildID
+		authorID = reference.AuthorID
 	}
 	a.presenceMu.Lock()
 	defer a.presenceMu.Unlock()
@@ -194,6 +205,8 @@ func (a *Adapter) ensurePresence(req *runtimechannelhost.DeliveryRequest) (*pres
 		}
 		session = &presenceSession{
 			channelID:    channelID,
+			guildID:      guildID,
+			authorID:     authorID,
 			conversation: req.ConversationID,
 			channelKey:   presenceKey(req.Channel, req.EffectID),
 			request:      &cloned,
@@ -497,14 +510,23 @@ func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presence
 		return fault.New(ErrorCodeInvalidArgument, "presence request must not be nil")
 	}
 	if statusID == "" {
-		id, postErr := a.postPresenceMessage(ctx, request, channelID, display)
+		tokenID, pending, callbackData, minted := a.mintStopToken(session)
+		id, postErr := a.postPresenceMessage(ctx, request, channelID, display, stopComponents(callbackData))
 		if postErr != nil || id == "" {
+			if minted {
+				a.stops.Drop(tokenID, pending)
+			}
 			a.logger.WarnContext(ctx, "status post failed", "component", "discord")
 			return postErr
 		}
 		now := time.Now()
 		a.presenceMu.Lock()
 		session.statusID = id
+		if minted {
+			session.stopTokenID = tokenID
+			session.stopPending = pending
+			session.stopCallback = callbackData
+		}
 		session.shownText = display
 		session.lastEdit = now
 		session.lastTick = now
@@ -518,7 +540,7 @@ func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presence
 		a.clearDirtyIfCurrent(session, renderedVersion)
 		return nil
 	}
-	if patchErr := a.patchPresenceMessage(ctx, request, channelID, statusID, display); patchErr != nil {
+	if patchErr := a.patchPresenceMessage(ctx, request, channelID, statusID, display, false); patchErr != nil {
 		a.logger.WarnContext(ctx, "status edit failed", "component", "discord")
 		return patchErr
 	}
@@ -531,6 +553,80 @@ func (a *Adapter) postOrPatchStatusLocked(ctx context.Context, session *presence
 	a.presenceMu.Unlock()
 	wakeClock(session)
 	return nil
+}
+
+func (a *Adapter) mintStopToken(session *presenceSession) (tokenID string, pending *approval.Pending, callbackData string, ok bool) {
+	if a.stops == nil || session == nil || session.request == nil {
+		return "", nil, "", false
+	}
+	if principal.ParseClass(session.request.PrincipalClass) != principal.ClassOwner {
+		return "", nil, "", false
+	}
+	if session.authorID == "" || session.request.Deadline.IsZero() {
+		return "", nil, "", false
+	}
+	binding := &approval.Binding{
+		Class:     principal.ClassOwner,
+		Actor:     session.authorID,
+		Scope:     [2]string{session.guildID, session.channelID},
+		SessionID: session.request.ConversationID,
+		TurnID:    session.request.EffectID,
+	}
+	tokenID, pending, err := a.stops.Issue(binding, session.request.Deadline)
+	if err != nil {
+		return "", nil, "", false
+	}
+	return tokenID, pending, a.stops.Callback(tokenID, approval.ActionStop, binding, session.request.Deadline), true
+}
+
+func stopComponents(customID string) []componentPayload {
+	if customID == "" {
+		return nil
+	}
+	return []componentPayload{{
+		Type: componentActionRow,
+		Components: []buttonPayload{{
+			Type:     componentButton,
+			Style:    buttonStyleSecondary,
+			Label:    status.DefaultTexts().StopButton,
+			CustomID: customID,
+		}},
+	}}
+}
+
+func (a *Adapter) clearPresenceStop(ctx context.Context, turnID string) {
+	a.presenceMu.Lock()
+	session := a.presence[turnID]
+	a.presenceMu.Unlock()
+	if session == nil {
+		return
+	}
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	statusID := session.statusID
+	channelID := session.channelID
+	tokenID := session.stopTokenID
+	pending := session.stopPending
+	hadButton := session.stopCallback != ""
+	session.stopTokenID = ""
+	session.stopPending = nil
+	session.stopCallback = ""
+	a.presenceMu.Unlock()
+	if tokenID != "" && a.stops != nil {
+		a.stops.Drop(tokenID, pending)
+	}
+	if statusID != "" && hadButton {
+		a.clearStatusComponents(ctx, channelID, statusID)
+	}
+}
+
+func (a *Adapter) clearStatusComponents(ctx context.Context, channelID, messageID string) {
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		return
+	}
+	a.disableApprovalCard(context.WithoutCancel(ctx), token, channelID, messageID)
 }
 
 func (a *Adapter) stopPresence(turnID string) {
@@ -550,14 +646,52 @@ func (a *Adapter) stopPresence(turnID string) {
 	}
 }
 
-func (a *Adapter) PresenceEnded(ctx context.Context, turnID string) error {
+func (a *Adapter) PresenceEnded(ctx context.Context, turnID string, end runtimechannelhost.PresenceEnd) error {
 	if turnID == "" {
 		return fault.New(ErrorCodeInvalidArgument, "presence turn id must not be empty")
 	}
 	a.stopPresence(turnID)
 	a.presenceMu.Lock()
+	session := a.presence[turnID]
 	delete(a.presence, turnID)
 	a.presenceMu.Unlock()
+	if session == nil {
+		return nil
+	}
+	session.statusMu.Lock()
+	defer session.statusMu.Unlock()
+	a.presenceMu.Lock()
+	statusID := session.statusID
+	channelID := session.channelID
+	request := session.request
+	tokenID := session.stopTokenID
+	pending := session.stopPending
+	hadButton := session.stopCallback != ""
+	session.stopTokenID = ""
+	session.stopPending = nil
+	session.stopCallback = ""
+	a.presenceMu.Unlock()
+	if tokenID != "" && a.stops != nil {
+		a.stops.Drop(tokenID, pending)
+	}
+	if statusID == "" {
+		return nil
+	}
+	if !end.Stopped {
+		if hadButton {
+			a.clearStatusComponents(ctx, channelID, statusID)
+		}
+		return nil
+	}
+	if time.Until(a.channelHeldUntil(channelID)) > 0 {
+		return nil
+	}
+	if err := a.patchPresenceMessage(context.WithoutCancel(ctx), request, channelID, statusID, status.DefaultTexts().Stopped, true); err != nil {
+		a.logger.WarnContext(ctx, "status stopped edit failed", "component", "discord")
+		if hadButton {
+			a.clearStatusComponents(ctx, channelID, statusID)
+		}
+	}
 	return nil
 }
 
@@ -582,8 +716,8 @@ func (a *Adapter) elapsedInterval() time.Duration {
 	return elapsedTickInterval
 }
 
-func (a *Adapter) postPresenceMessage(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID, text string) (string, error) {
-	operation := SendOperation{ChannelID: channelID, Text: text}
+func (a *Adapter) postPresenceMessage(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID, text string, components []componentPayload) (string, error) {
+	operation := SendOperation{ChannelID: channelID, Text: text, Components: components}
 	request, err := marshalOperation(operation)
 	if err != nil {
 		return "", err
@@ -603,8 +737,8 @@ func (a *Adapter) postPresenceMessage(ctx context.Context, req *runtimechannelho
 	return receiptMessageID(intent)
 }
 
-func (a *Adapter) patchPresenceMessage(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID, messageID, text string) error {
-	request, err := marshalOperation(editOperation{ChannelID: channelID, MessageID: messageID, Text: text})
+func (a *Adapter) patchPresenceMessage(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID, messageID, text string, clearComponents bool) error {
+	request, err := marshalOperation(editOperation{ChannelID: channelID, MessageID: messageID, Text: text, ClearComponents: clearComponents})
 	if err != nil {
 		return err
 	}

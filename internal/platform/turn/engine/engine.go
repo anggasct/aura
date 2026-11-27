@@ -657,7 +657,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	}
 
 	e.broadcast(t, &t.accepted)
-	e.notifyPresenceStarted(ctx, &t.req)
+	e.notifyPresenceStarted(ctx, &t.req, deadline)
 
 	var terminalKind string
 	var terminalPayload []byte
@@ -686,11 +686,12 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 				break
 			}
 			executed = append(executed, ev)
-			e.notifyPresenceEvent(ctx, &t.req, &presence, &ev)
+			e.notifyPresenceEvent(ctx, &t.req, deadline, &presence, &ev)
 		}
 	}
 
-	if end := e.endOf(ctx.Err(), execErr); end.cancelled {
+	end := e.endOf(ctx.Err(), execErr)
+	if end.cancelled {
 		terminalKind, terminalPayload = turn.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(&t.req))
 	} else {
 		final := e.planFinalMessage(&t.req, executed, end)
@@ -707,7 +708,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	if e.deps.CountTurn != nil {
 		e.deps.CountTurn(context.WithoutCancel(ctx), &t.req)
 	}
-	e.notifyPresenceEnded(ctx, &t.req)
+	e.notifyPresenceEnded(ctx, &t.req, runtimechannelhost.PresenceEnd{Stopped: end.cancelled})
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {
 		e.logger.ErrorContext(ctx, "runtime failed to persist terminal event", "error", err, "turn_id", t.turnID)
 	}
@@ -769,8 +770,28 @@ func (e *Engine) CancelActive(ctx context.Context, sessionID string) (turnID str
 		return "", false, nil
 	}
 	e.logger.DebugContext(ctx, "cancelling active turn", "session_id", sessionID, "turn_id", t.turnID)
-	t.cancel()
+	if !e.cancelTurn(t.turnID) {
+		return "", false, nil
+	}
 	return t.turnID, true, nil
+}
+
+func (e *Engine) CancelTurn(ctx context.Context, sessionID, turnID string) (bool, error) {
+	if sessionID == "" {
+		return false, invalidArgument("session id must not be empty")
+	}
+	if turnID == "" {
+		return false, invalidArgument("turn id must not be empty")
+	}
+	e.mu.Lock()
+	t := e.runningTurnLocked(sessionID)
+	matches := t != nil && t.turnID == turnID && t.cancel != nil
+	e.mu.Unlock()
+	if !matches {
+		return false, nil
+	}
+	e.logger.DebugContext(ctx, "cancelling active turn", "session_id", sessionID, "turn_id", turnID)
+	return e.cancelTurn(turnID), nil
 }
 
 func (e *Engine) SessionActivity(sessionID string) (activeTurnID string, queued int) {
@@ -798,14 +819,15 @@ func (e *Engine) runningTurnLocked(sessionID string) *turnState {
 	return nil
 }
 
-func (e *Engine) cancelTurn(turnID string) {
+func (e *Engine) cancelTurn(turnID string) bool {
 	e.mu.Lock()
 	t, ok := e.turns[turnID]
 	e.mu.Unlock()
 	if !ok || t.cancel == nil {
-		return
+		return false
 	}
 	t.cancel()
+	return true
 }
 
 type turnRef struct {

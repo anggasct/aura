@@ -128,9 +128,9 @@ type crashAtPresenceEnd struct {
 	crash *crashAfterDelivery
 }
 
-func (a *crashAtPresenceEnd) PresenceEnded(ctx context.Context, turnID string) error {
+func (a *crashAtPresenceEnd) PresenceEnded(ctx context.Context, turnID string, end runtimechannelhost.PresenceEnd) error {
 	a.crash.handOff(ctx, turnID)
-	return a.presenceCapture.PresenceEnded(ctx, turnID)
+	return a.presenceCapture.PresenceEnded(ctx, turnID, end)
 }
 
 type twoLives struct {

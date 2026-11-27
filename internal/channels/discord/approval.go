@@ -373,11 +373,39 @@ func (a *Adapter) resolveComponentClick(ctx context.Context, interaction *intera
 		return
 	}
 	defer a.ackInteraction(ctx, interaction)
+	presser := &approval.Presser{
+		Actor: interaction.actorID(),
+		Scope: [2]string{interaction.GuildID, interaction.ChannelID},
+	}
+	if isStopCustomID(interaction.Data.CustomID) {
+		if a.stops == nil || !a.stops.NoteSeen(interaction.ID) {
+			a.logger.DebugContext(ctx, "stop press rejected", "component", "discord")
+			return
+		}
+		resolvedAction, binding, resolved := a.stops.ResolveAction(interaction.Data.CustomID, presser)
+		if !resolved || resolvedAction != approval.ActionStop {
+			a.logger.DebugContext(ctx, "stop press rejected", "component", "discord")
+			return
+		}
+		a.cancelStoppedTurn(ctx, binding.SessionID, binding.TurnID)
+		return
+	}
 	if !a.approvals.NoteSeen(interaction.ID) {
 		return
 	}
-	a.approvals.Resolve(interaction.Data.CustomID, &approval.Presser{
-		Actor: interaction.actorID(),
-		Scope: [2]string{interaction.GuildID, interaction.ChannelID},
-	})
+	a.approvals.Resolve(interaction.Data.CustomID, presser)
+}
+
+func isStopCustomID(raw string) bool {
+	parts := strings.Split(raw, ":")
+	return len(parts) == 4 && parts[0] == approval.CallbackPrefix && parts[2] == approval.ActionStop
+}
+
+func (a *Adapter) cancelStoppedTurn(ctx context.Context, sessionID, turnID string) {
+	if a.commands == nil || sessionID == "" || turnID == "" {
+		return
+	}
+	if _, err := a.commands.CancelTurn(ctx, sessionID, turnID); err != nil {
+		a.logger.WarnContext(ctx, "stop turn cancel failed", "component", "discord", "error", err)
+	}
 }

@@ -112,8 +112,9 @@ const (
 )
 
 const (
-	buttonStylePrimary = 1
-	buttonStyleDanger  = 4
+	buttonStylePrimary   = 1
+	buttonStyleSecondary = 2
+	buttonStyleDanger    = 4
 )
 
 const (

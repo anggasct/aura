@@ -146,6 +146,7 @@ type Sessions interface {
 
 type Turns interface {
 	CancelActive(ctx context.Context, sessionID string) (turnID string, cancelled bool, err error)
+	CancelTurn(ctx context.Context, sessionID, turnID string) (cancelled bool, err error)
 	Activity(sessionID string) (activeTurnID string, queued int)
 }
 
