@@ -22,6 +22,8 @@ type journaledAttempt struct {
 	ErrorCode      string          `json:"error_code,omitempty"`
 	Detail         string          `json:"detail,omitempty"`
 	Tokens         int64           `json:"tokens,omitempty"`
+	Tainted        bool            `json:"tainted,omitempty"`
+	Private        bool            `json:"private,omitempty"`
 }
 
 func journaledFromUpdate(update *stepUpdate) journaledAttempt {
@@ -35,6 +37,8 @@ func journaledFromUpdate(update *stepUpdate) journaledAttempt {
 		ErrorCode:      update.ErrorCode,
 		Detail:         update.Detail,
 		Tokens:         update.Tokens,
+		Tainted:        update.Tainted,
+		Private:        update.Private,
 	}
 }
 
@@ -49,6 +53,8 @@ func updateFromJournaled(record *journaledAttempt) *stepUpdate {
 		ErrorCode:      record.ErrorCode,
 		Detail:         record.Detail,
 		Tokens:         record.Tokens,
+		Tainted:        record.Tainted,
+		Private:        record.Private,
 	}
 }
 
@@ -107,6 +113,7 @@ func (i *Interpreter) driveSerial(ctx context.Context, inv durable.Invocation, r
 		input:            input,
 		outputs:          map[string]json.RawMessage{},
 		statuses:         map[string]string{},
+		labels:           newLabelLedger(),
 		awaiting:         map[string]bool{},
 		budget:           i.budgetFor(compiled.spec, inherited),
 	}
@@ -140,26 +147,8 @@ func (e *stepExecution) driveStep(ctx context.Context, step *StepSpec) {
 	if e.isFailed() {
 		return
 	}
-	for _, dependency := range step.DependsOn {
-		if e.statusFor(dependency) == StepSkipped {
-			if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
-				e.failRun(ctx, step.ID, err)
-			}
-			return
-		}
-	}
-	if step.Condition != nil {
-		parsed, err := parseCondition(*step.Condition)
-		if err != nil {
-			e.failRun(ctx, step.ID, err)
-			return
-		}
-		if !e.evaluate(parsed) {
-			if err := e.terminal(ctx, step.ID, &stepUpdate{Status: StepSkipped}); err != nil {
-				e.failRun(ctx, step.ID, err)
-			}
-			return
-		}
+	if !e.gate(ctx, step) {
+		return
 	}
 
 	attempt := 0
@@ -188,7 +177,7 @@ func (e *stepExecution) driveStep(ctx context.Context, step *StepSpec) {
 				e.failRun(ctx, step.ID, err)
 				return
 			}
-			e.recordSuccess(step.ID, update.Output)
+			e.recordSuccess(step.ID, update)
 			return
 		}
 		if attempt >= step.Retry.Attempts || finalFailure(update.ErrorCode) {

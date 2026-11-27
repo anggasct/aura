@@ -301,7 +301,8 @@ func (r *ToolStepRunner) Invoke(ctx context.Context, toolID string, args json.Ra
 	if err != nil {
 		return ToolStepResult{}, workflowToolError(toolID, err)
 	}
-	return ToolStepResult{Output: result.Output}, nil
+	definition, found := r.broker.Definition(toolID, tools.Version)
+	return ToolStepResult{Output: result.Output, Tainted: !found || definition.IsExternalSink()}, nil
 }
 
 func (r *ToolStepRunner) execute(ctx context.Context, request *toolbroker.ToolRequest) (toolbroker.ToolResult, error) {

@@ -373,6 +373,8 @@ type stepUpdate struct {
 	ErrorCode      string
 	Detail         string
 	Tokens         int64
+	Tainted        bool
+	Private        bool
 }
 
 func (s *Store) updateStep(ctx context.Context, runID, stepID string, update *stepUpdate) error {

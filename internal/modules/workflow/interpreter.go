@@ -432,6 +432,7 @@ type stepExecution struct {
 	input            *RunInput
 	outputs          map[string]json.RawMessage
 	statuses         map[string]string
+	labels           *labelLedger
 	failedStep       string
 	budget           *runBudget
 	mu               sync.Mutex
