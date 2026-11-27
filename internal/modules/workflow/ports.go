@@ -3,8 +3,11 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"iter"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type AgentStepCall struct {
@@ -17,7 +20,15 @@ type AgentStepCall struct {
 	DefinitionDigest  string
 	Executor          ExecutorSpec
 	Input             RunInput
+	Inputs            []AgentStepInput
+	RunTokensLeft     int64
 	Invocation        durable.Invocation
+}
+
+type AgentStepInput struct {
+	StepID  string
+	Output  json.RawMessage
+	Private bool
 }
 
 type AgentStepResult struct {
@@ -29,6 +40,18 @@ type AgentStepResult struct {
 
 type AgentStepRunner interface {
 	RunStep(ctx context.Context, call *AgentStepCall) (AgentStepResult, error)
+}
+
+type StepTurns interface {
+	Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error]
+}
+
+type StepEvents interface {
+	UpsertEvent(ctx context.Context, event *turn.Event) (sequence uint64, existed bool, err error)
+}
+
+type StepToolCatalog interface {
+	Definition(name, version string) (tools.Definition, bool)
 }
 
 type ToolStepResult struct {

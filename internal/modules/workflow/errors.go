@@ -36,6 +36,8 @@ const (
 	ErrorCodePersonaMissing        ErrorCode = "workflow_persona_missing"
 	ErrorCodeSessionInvalid        ErrorCode = "workflow_session_invalid"
 	ErrorCodeApprovalSpent         ErrorCode = "workflow_approval_spent"
+	ErrorCodeAgentOutputInvalid    ErrorCode = "workflow_agent_output_invalid"
+	ErrorCodeToolUnavailable       ErrorCode = "workflow_tool_unavailable"
 	ErrorCodeInvalidArgument       ErrorCode = "invalid_argument"
 	ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"
 )

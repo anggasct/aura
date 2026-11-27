@@ -63,3 +63,9 @@ func (l *labelLedger) record(stepID string, tainted, private bool) {
 	l.tainted[stepID] = tainted
 	l.private[stepID] = private
 }
+
+func (l *labelLedger) privateOutput(stepID string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.private[stepID]
+}
