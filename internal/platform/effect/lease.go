@@ -13,9 +13,9 @@ import (
 )
 
 const (
-	leaseDuration   = 60 * time.Second
-	leaseRenewEvery = 20 * time.Second
-	leaseTimeLayout = "2006-01-02T15:04:05.000000000Z"
+	leaseDuration        = 60 * time.Second
+	leaseRenewEvery      = 20 * time.Second
+	fixedWidthTimeLayout = "2006-01-02T15:04:05.000000000Z"
 )
 
 type TakeoverProvider interface {
@@ -42,7 +42,7 @@ func (j *Journal) renewLease(ctx context.Context, held *Intent) (time.Time, erro
 		UPDATE effect_intent
 		SET lease_expires_at = ?
 		WHERE id = ? AND state = ? AND lease_token IS ?`,
-		FormatLeaseTime(expiresAt), held.ID, string(StateStarted), nullableString(held.LeaseToken),
+		FormatFixedWidthTime(expiresAt), held.ID, string(StateStarted), nullableString(held.LeaseToken),
 	)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("effect: renew lease of intent %s: %w", held.ID, err)
@@ -84,7 +84,7 @@ func (j *Journal) takeOver(ctx context.Context, id string) (*Intent, error) {
 		UPDATE effect_intent
 		SET lease_token = ?, lease_expires_at = ?, updated_at = ?
 		WHERE id = ? AND state = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)`,
-		token, FormatLeaseTime(expiresAt), fmtTime(now), id, string(StateStarted), FormatLeaseTime(now),
+		token, FormatFixedWidthTime(expiresAt), fmtTime(now), id, string(StateStarted), FormatFixedWidthTime(now),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("effect: take over intent %s: %w", id, err)
@@ -124,7 +124,7 @@ func (j *Journal) liveLeaseExpiry(ctx context.Context, id string) (time.Time, bo
 	if state != StateStarted || !raw.Valid {
 		return time.Time{}, false, nil
 	}
-	expiresAt, err := ParseLeaseTime(raw.String)
+	expiresAt, err := ParseFixedWidthTime(raw.String)
 	if err != nil {
 		return time.Time{}, false, err
 	}

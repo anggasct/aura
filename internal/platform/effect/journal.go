@@ -645,7 +645,7 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		}
 		var leaseExpiresArg any
 		if !spec.leaseExpiresAt.IsZero() {
-			leaseExpiresArg = FormatLeaseTime(spec.leaseExpiresAt)
+			leaseExpiresArg = FormatFixedWidthTime(spec.leaseExpiresAt)
 		}
 		res, err := q.ExecContext(ctx, `
 		UPDATE effect_intent
@@ -837,12 +837,12 @@ func fmtTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func FormatLeaseTime(t time.Time) string {
-	return t.UTC().Format(leaseTimeLayout)
+func FormatFixedWidthTime(t time.Time) string {
+	return t.UTC().Format(fixedWidthTimeLayout)
 }
 
-func ParseLeaseTime(raw string) (time.Time, error) {
-	t, err := time.Parse(leaseTimeLayout, raw)
+func ParseFixedWidthTime(raw string) (time.Time, error) {
+	t, err := time.Parse(fixedWidthTimeLayout, raw)
 	if err != nil {
 		return time.Time{}, fmt.Errorf("effect: parse fixed-width time: %w", err)
 	}

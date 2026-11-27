@@ -138,7 +138,7 @@ func TestStartSetsATokenAndASixtySecondLease(t *testing.T) {
 	if token != started.LeaseToken {
 		t.Fatalf("stored token = %q, want the one Start returned", token)
 	}
-	if want := FormatLeaseTime(clock.Now().Add(60 * time.Second)); expiresAt != want {
+	if want := FormatFixedWidthTime(clock.Now().Add(60 * time.Second)); expiresAt != want {
 		t.Fatalf("lease_expires_at = %q, want %q", expiresAt, want)
 	}
 	read, err := j.Get(t.Context(), started.ID)
@@ -171,7 +171,7 @@ func TestLeaseIsRenewedWhileProviderRuns(t *testing.T) {
 		probe.Advance(20 * time.Second)
 		probe.AwaitArmed(t, 1)
 		state, _, expiresAt := leaseColumns(t, db, id)
-		if want := FormatLeaseTime(probe.Now().Add(60 * time.Second)); state != StateStarted || expiresAt != want {
+		if want := FormatFixedWidthTime(probe.Now().Add(60 * time.Second)); state != StateStarted || expiresAt != want {
 			t.Fatalf("after renewal: state %s lease %q, want started and %q", state, expiresAt, want)
 		}
 	}
@@ -286,7 +286,7 @@ func TestLeaseLossCancelsProvider(t *testing.T) {
 	if err := db.QueryRowContext(t.Context(), `SELECT id FROM effect_intent`).Scan(&id); err != nil {
 		t.Fatalf("read intent id: %v", err)
 	}
-	setLease(t, db, id, "replaced-holder", FormatLeaseTime(testEpoch.Add(-time.Hour)))
+	setLease(t, db, id, "replaced-holder", FormatFixedWidthTime(testEpoch.Add(-time.Hour)))
 
 	probe.Advance(20 * time.Second)
 	result := <-done
@@ -442,7 +442,7 @@ func TestLeaseStaysLiveWhileTheSettlerReadsEvidence(t *testing.T) {
 		clock.Advance(20 * time.Second)
 		clock.AwaitArmed(t, 1)
 		_, token, expiresAt := leaseColumns(t, db, started.ID)
-		if want := FormatLeaseTime(clock.Now().Add(leaseDuration)); token != taken.LeaseToken || expiresAt != want {
+		if want := FormatFixedWidthTime(clock.Now().Add(leaseDuration)); token != taken.LeaseToken || expiresAt != want {
 			t.Fatalf("while the settler runs: token %q lease %q, want the resumer's token and %q", token, expiresAt, want)
 		}
 	}
@@ -506,7 +506,7 @@ func TestRenewalStopsWithoutCancellingWhenTheRowLeftStarted(t *testing.T) {
 		t.Fatalf("read intent id: %v", err)
 	}
 	_, token, _ := leaseColumns(t, db, id)
-	setLease(t, db, id, token, FormatLeaseTime(testEpoch.Add(-time.Hour)))
+	setLease(t, db, id, token, FormatFixedWidthTime(testEpoch.Add(-time.Hour)))
 	if claimed, err := journal.Claim(t.Context(), id); err != nil || !claimed {
 		t.Fatalf("Claim = %v, %v", claimed, err)
 	}
@@ -915,13 +915,13 @@ func TestLeaseExpiryOrdersAcrossFractions(t *testing.T) {
 	t.Run("the stored text is fixed width and sorts as time", func(t *testing.T) {
 		_, db, _ := newClockedJournal(t)
 		for i, earlier := range offsets {
-			if got := len(FormatLeaseTime(base.Add(earlier))); got != len(leaseTimeLayout) {
-				t.Fatalf("FormatLeaseTime(%v) is %d bytes, want %d", earlier, got, len(leaseTimeLayout))
+			if got := len(FormatFixedWidthTime(base.Add(earlier))); got != len(fixedWidthTimeLayout) {
+				t.Fatalf("FormatFixedWidthTime(%v) is %d bytes, want %d", earlier, got, len(fixedWidthTimeLayout))
 			}
 			for _, later := range offsets[i+1:] {
 				var ordered bool
-				if err := db.QueryRowContext(t.Context(), `SELECT ? < ?`, FormatLeaseTime(base.Add(earlier)), FormatLeaseTime(base.Add(later))).Scan(&ordered); err != nil || !ordered {
-					t.Fatalf("%q < %q = %v (%v), want true", FormatLeaseTime(base.Add(earlier)), FormatLeaseTime(base.Add(later)), ordered, err)
+				if err := db.QueryRowContext(t.Context(), `SELECT ? < ?`, FormatFixedWidthTime(base.Add(earlier)), FormatFixedWidthTime(base.Add(later))).Scan(&ordered); err != nil || !ordered {
+					t.Fatalf("%q < %q = %v (%v), want true", FormatFixedWidthTime(base.Add(earlier)), FormatFixedWidthTime(base.Add(later)), ordered, err)
 				}
 			}
 		}
@@ -931,8 +931,8 @@ func TestLeaseExpiryOrdersAcrossFractions(t *testing.T) {
 		j, db, clock := newClockedJournal(t)
 		whole := mustStart(t, j, mustPrepare(t, j, validPrepare(1)).ID)
 		half := mustStart(t, j, mustPrepare(t, j, validPrepare(2)).ID)
-		setLease(t, db, whole.ID, whole.LeaseToken, FormatLeaseTime(base))
-		setLease(t, db, half.ID, half.LeaseToken, FormatLeaseTime(base.Add(500*time.Millisecond)))
+		setLease(t, db, whole.ID, whole.LeaseToken, FormatFixedWidthTime(base))
+		setLease(t, db, half.ID, half.LeaseToken, FormatFixedWidthTime(base.Add(500*time.Millisecond)))
 		clock.Advance(base.Add(250 * time.Millisecond).Sub(clock.Now()))
 
 		for id, want := range map[string]bool{whole.ID: true, half.ID: false} {
@@ -1160,7 +1160,7 @@ func TestOptionsClockDrivesTheJournal(t *testing.T) {
 		t.Fatalf("StartedAt = %v, want the journal clock's %v", started.StartedAt, clock.Now())
 	}
 	_, _, expiresAt := leaseColumns(t, db, started.ID)
-	if want := FormatLeaseTime(clock.Now().Add(leaseDuration)); expiresAt != want {
+	if want := FormatFixedWidthTime(clock.Now().Add(leaseDuration)); expiresAt != want {
 		t.Fatalf("lease_expires_at = %q, want %q", expiresAt, want)
 	}
 }
@@ -1204,7 +1204,7 @@ func TestSettleFunctionReceivesTheProviderContext(t *testing.T) {
 	<-reading
 	clock.AwaitArmed(t, 1)
 
-	setLease(t, db, started.ID, "another-holder", FormatLeaseTime(clock.Now().Add(time.Hour)))
+	setLease(t, db, started.ID, "another-holder", FormatFixedWidthTime(clock.Now().Add(time.Hour)))
 	clock.Advance(leaseRenewEvery)
 
 	result := <-done
@@ -1255,7 +1255,7 @@ func TestLapseDoesNotSettleWhenTheTokenWasReplaced(t *testing.T) {
 			blockRenewals(t, db)
 			provider := &finishedAtLapseProvider{heldProvider: newHeldProvider(Outcome{}), outcome: tc.outcome}
 			provider.beforeReply = func() {
-				setLease(t, db, firstIntentID(t, db), "another-holder", FormatLeaseTime(probe.Now().Add(time.Hour)))
+				setLease(t, db, firstIntentID(t, db), "another-holder", FormatFixedWidthTime(probe.Now().Add(time.Hour)))
 			}
 			done := executeInBackground(t.Context(), executor, validPrepare(1), provider)
 			<-provider.entered

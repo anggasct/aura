@@ -48,7 +48,7 @@ func (s *receiptStore) lookup(ctx context.Context, key string) (receipt, bool, e
 	if err != nil {
 		return receipt{}, false, fmt.Errorf("operation: read receipt: %w", err)
 	}
-	created, err := effect.ParseLeaseTime(createdAt)
+	created, err := effect.ParseFixedWidthTime(createdAt)
 	if err != nil {
 		return receipt{}, false, wrapError(ErrorCodeFailed, "a receipt has an unreadable time", err)
 	}
@@ -74,7 +74,7 @@ func (s *receiptStore) insert(ctx context.Context, row *receipt) error {
 	res, err := sqlite.Conn(ctx, s.db).ExecContext(ctx, `
 		INSERT INTO operation_receipt (idempotency_key, operation_id, request_digest, surface, result_json, created_at)
 		VALUES (?, ?, ?, ?, ?, ?)`,
-		row.key, row.operation, row.digest, string(row.surface), string(row.result), effect.FormatLeaseTime(row.createdAt),
+		row.key, row.operation, row.digest, string(row.surface), string(row.result), effect.FormatFixedWidthTime(row.createdAt),
 	)
 	if err != nil {
 		if fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintUnique) || fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintPrimaryKey) {
@@ -100,7 +100,7 @@ func PruneReceipts(ctx context.Context, db *sql.DB, before time.Time) (int, erro
 		return 0, NewError(ErrorCodeInvalidArgument, "operation: the retention cutoff must not be zero")
 	}
 	res, err := sqlite.Conn(ctx, db).ExecContext(ctx,
-		`DELETE FROM operation_receipt WHERE created_at < ?`, effect.FormatLeaseTime(before))
+		`DELETE FROM operation_receipt WHERE created_at < ?`, effect.FormatFixedWidthTime(before))
 	if err != nil {
 		return 0, fmt.Errorf("operation: prune receipts: %w", err)
 	}
