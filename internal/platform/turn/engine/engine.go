@@ -662,6 +662,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	var terminalKind string
 	var terminalPayload []byte
 	var executed []turn.Event
+	var presence presenceTracker
 	execErr := e.persistSkillActivation(ctx, &t.req, e.renderSkillActivation, persistEvent)
 	if execErr == nil {
 		var nextDelta uint64
@@ -685,13 +686,7 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 				break
 			}
 			executed = append(executed, ev)
-			if isPresenceFailureEvent(&ev) {
-				e.notifyPresenceFailed(ctx, &t.req)
-				continue
-			}
-			if text, args, ok := extractPresenceActivity(&ev); ok {
-				e.notifyPresenceText(ctx, &t.req, text, args)
-			}
+			e.notifyPresenceEvent(ctx, &t.req, &presence, &ev)
 		}
 	}
 
@@ -711,9 +706,6 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	}
 	if e.deps.CountTurn != nil {
 		e.deps.CountTurn(context.WithoutCancel(ctx), &t.req)
-	}
-	if terminalKind != turn.EventKindTurnCompleted {
-		e.notifyPresenceFailed(context.WithoutCancel(ctx), &t.req)
 	}
 	e.notifyPresenceEnded(ctx, &t.req)
 	if err := emit(context.WithoutCancel(ctx), terminalKind, terminalPayload); err != nil {

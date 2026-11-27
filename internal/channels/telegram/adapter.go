@@ -178,6 +178,7 @@ type Adapter struct {
 	presence      map[string]*presenceSession
 	typingRefresh time.Duration
 	statusAfter   time.Duration
+	elapsedTick   time.Duration
 	holdMu        sync.Mutex
 	holds         map[int64]time.Time
 }

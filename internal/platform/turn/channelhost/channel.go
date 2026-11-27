@@ -50,9 +50,23 @@ type ChannelPort interface {
 	Health(ctx context.Context) ChannelHealth
 }
 
+type StepOutcome string
+
+const (
+	StepRunning StepOutcome = "running"
+	StepDone    StepOutcome = "done"
+	StepFailed  StepOutcome = "failed"
+)
+
+type PresenceUpdate struct {
+	CallIDs  []string
+	Activity string
+	Outcome  StepOutcome
+}
+
 type PresencePort interface {
 	PresenceStarted(ctx context.Context, req *DeliveryRequest) error
-	PresenceUpdated(ctx context.Context, req *DeliveryRequest, text, args string, failed bool) error
+	PresenceUpdated(ctx context.Context, req *DeliveryRequest, update PresenceUpdate) error
 	PresenceEnded(ctx context.Context, turnID string) error
 }
 

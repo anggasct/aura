@@ -529,7 +529,7 @@ func TestPresenceStaysInsideTheTopic(t *testing.T) {
 		t.Fatalf("PresenceStarted: %v", err)
 	}
 	eventually(t, "status post", func() bool { return h.api.count("sendMessage") == 1 })
-	presenceUpdate(t, adapter, req, "searching", "", false)
+	presenceUpdate(t, adapter, req, stepUpdate("c1", "searching", runtimechannelhost.StepRunning))
 	eventually(t, "status edit", func() bool { return h.api.count("editMessageText") >= 1 })
 	endPresence(t, adapter, "turn-presence-topic")
 	for _, body := range h.api.bodies("sendChatAction") {

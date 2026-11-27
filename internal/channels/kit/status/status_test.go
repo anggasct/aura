@@ -3,26 +3,177 @@ package status
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/secret"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
 )
 
-func TestTruncateWordsKeepsAtMostNWords(t *testing.T) {
+func TestRenderListsTheLastThreeStepsWithOutcomes(t *testing.T) {
 	cases := map[string]struct {
-		in   string
-		want string
+		steps   []Step
+		elapsed time.Duration
+		texts   Texts
+		want    string
 	}{
-		"longer":       {in: "one two three four five six seven", want: "one two three four five six"},
-		"exact":        {in: "one two three four five six", want: "one two three four five six"},
-		"collapses ws": {in: "  one\t two\n", want: "one two"},
-		"empty":        {in: "", want: ""},
+		"zero steps before sixty seconds": {
+			elapsed: 7 * time.Second,
+			want:    "Working…\n⏱ 0:07",
+		},
+		"zero steps at sixty seconds": {
+			elapsed: 60 * time.Second,
+			want:    "Still working…\n⏱ 1:00",
+		},
+		"zero steps after sixty seconds": {
+			elapsed: 12*time.Minute + 30*time.Second,
+			want:    "Still working…\n⏱ 12:30",
+		},
+		"one hour elapsed format": {
+			elapsed: time.Hour + 2*time.Minute + 3*time.Second,
+			steps: []Step{
+				{Activity: "Checking repository", Outcome: runtimechannelhost.StepRunning},
+			},
+			want: "⏳ Checking repository\n⏱ 1:02:03",
+		},
+		"marks and oldest-first order": {
+			elapsed: 7 * time.Second,
+			steps: []Step{
+				{Activity: "Reading notes", Outcome: runtimechannelhost.StepDone},
+				{Activity: "Checking calendar", Outcome: runtimechannelhost.StepFailed},
+				{Activity: "Drafting summary", Outcome: runtimechannelhost.StepRunning},
+			},
+			want: strings.Join([]string{
+				"✓ Reading notes",
+				"✗ Checking calendar",
+				"⏳ Drafting summary",
+				"⏱ 0:07",
+			}, "\n"),
+		},
+		"fourth step drops the oldest": {
+			elapsed: 12*time.Minute + 30*time.Second,
+			steps: []Step{
+				{Activity: "First step", Outcome: runtimechannelhost.StepDone},
+				{Activity: "Second step", Outcome: runtimechannelhost.StepDone},
+				{Activity: "Third step", Outcome: runtimechannelhost.StepFailed},
+				{Activity: "Fourth step", Outcome: runtimechannelhost.StepRunning},
+			},
+			want: strings.Join([]string{
+				"✓ Second step",
+				"✗ Third step",
+				"⏳ Fourth step",
+				"⏱ 12:30",
+			}, "\n"),
+		},
+		"caller supplied texts": {
+			elapsed: 75 * time.Second,
+			texts: Texts{
+				Working:      "Sedang bekerja…",
+				StillWorking: "Masih bekerja…",
+			},
+			want: "Masih bekerja…\n⏱ 1:15",
+		},
+		"negative elapsed clamps to zero": {
+			elapsed: -5 * time.Second,
+			want:    "Working…\n⏱ 0:00",
+		},
 	}
+
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if got := TruncateWords(tc.in, MaxWords); got != tc.want {
-				t.Fatalf("TruncateWords(%q) = %q, want %q", tc.in, got, tc.want)
+			got := Render(tc.steps, tc.elapsed, tc.texts, nil)
+			if got != tc.want {
+				t.Fatalf("Render() =\n%q\nwant:\n%q", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRenderCutsOnWordsWithEllipsisAndStripsMarkdown(t *testing.T) {
+	vault := secret.New()
+	vault.Set("api", "sk-live-hunter2")
+	vault.Set("gh", "ghp_under_score_999")
+
+	t.Run("ninety rune sentence ends at a word with ellipsis", func(t *testing.T) {
+		sentence := "Looking through the recent workspace documents and checking every pending task before replying"
+		if len([]rune(sentence)) < 90 {
+			t.Fatalf("fixture length = %d, want at least 90 runes", len([]rune(sentence)))
+		}
+		got := Render([]Step{{Activity: sentence, Outcome: runtimechannelhost.StepRunning}}, 5*time.Second, DefaultTexts(), vault)
+		firstLine, _, _ := strings.Cut(got, "\n")
+		activity := strings.TrimPrefix(firstLine, MarkerRunning+" ")
+		if !strings.HasSuffix(activity, "…") {
+			t.Fatalf("activity = %q, want trailing ellipsis", activity)
+		}
+		if n := len([]rune(activity)); n > MaxActivityRunes {
+			t.Fatalf("activity length = %d runes (%q), want at most %d", n, activity, MaxActivityRunes)
+		}
+		withoutEllipsis := strings.TrimSuffix(activity, "…")
+		if !strings.HasPrefix(sentence, withoutEllipsis+" ") {
+			t.Fatalf("activity = %q cut inside a word of %q", activity, sentence)
+		}
+	})
+
+	t.Run("strips inline markdown markers and keeps first line only", func(t *testing.T) {
+		got := Render([]Step{{
+			Activity: "Running `cmd` with **bold**, _italic_, and ~~old~~\nsecond line ignored",
+			Outcome:  runtimechannelhost.StepRunning,
+		}}, 3*time.Second, DefaultTexts(), vault)
+		want := "⏳ Running cmd with bold, italic, and old\n⏱ 0:03"
+		if got != want {
+			t.Fatalf("Render() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("secret value or keyword falls back to working text", func(t *testing.T) {
+		cases := map[string]string{
+			"vault value":               "Checking sk-live-hunter2 now",
+			"vault value with scores":   "Checking ghp_under_score_999 now",
+			"keyword password":          "Reading the password file",
+			"keyword token":             "Looking at secret-token abc123",
+			"keyword api_key":           "Inspecting api_key value",
+			"markdown only becomes nil": "```***___~~~",
+		}
+		for name, raw := range cases {
+			t.Run(name, func(t *testing.T) {
+				got := Render([]Step{{Activity: raw, Outcome: runtimechannelhost.StepRunning}}, 4*time.Second, DefaultTexts(), vault)
+				want := "⏳ Working…\n⏱ 0:04"
+				if got != want {
+					t.Fatalf("Render(%q) = %q, want %q", raw, got, want)
+				}
+				for _, leaked := range []string{"hunter2", "ghp_under_score_999", "password", "abc123"} {
+					if strings.Contains(strings.ToLower(got), leaked) {
+						t.Fatalf("Render(%q) leaked %q: %q", raw, leaked, got)
+					}
+				}
+			})
+		}
+	})
+
+	t.Run("live example renders without goal text", func(t *testing.T) {
+		modelLine := "The error says the executor field is missing, checking the latest Go release notes now."
+		goalText := "Cari berita terbaru soal Go 1.27 di web, ringkas hasilnya, lalu laporkan ringkas"
+		got := Render([]Step{{Activity: modelLine, Outcome: runtimechannelhost.StepRunning}}, 12*time.Second, DefaultTexts(), vault)
+		if strings.Contains(got, goalText) || strings.Contains(got, "Cari berita") {
+			t.Fatalf("Render() included tool goal text: %q", got)
+		}
+		firstLine, _, _ := strings.Cut(got, "\n")
+		activity := strings.TrimPrefix(firstLine, MarkerRunning+" ")
+		if !strings.HasSuffix(activity, "…") || len([]rune(activity)) > MaxActivityRunes {
+			t.Fatalf("activity = %q, want word-cut with ellipsis within %d runes", activity, MaxActivityRunes)
+		}
+	})
+}
+
+func TestSilentCallStartsAStepWithTheWorkingText(t *testing.T) {
+	got := Render([]Step{{Activity: "", Outcome: runtimechannelhost.StepRunning}}, 9*time.Second, DefaultTexts(), nil)
+	want := "⏳ Working…\n⏱ 0:09"
+	if got != want {
+		t.Fatalf("Render(silent step) = %q, want %q", got, want)
+	}
+	custom := Render([]Step{{Activity: "   ", Outcome: runtimechannelhost.StepDone}}, 9*time.Second, Texts{Working: "Memproses…"}, nil)
+	wantCustom := "✓ Memproses…\n⏱ 0:09"
+	if custom != wantCustom {
+		t.Fatalf("Render(silent step custom) = %q, want %q", custom, wantCustom)
 	}
 }
 
@@ -32,41 +183,6 @@ func TestTruncateRunesCutsOnRuneBoundaries(t *testing.T) {
 	}
 	if got := TruncateRunes("short", 10); got != "short" {
 		t.Fatalf("TruncateRunes = %q", got)
-	}
-}
-
-func TestFallbackCyclesAndClampsNegativeCounts(t *testing.T) {
-	all := Fallbacks()
-	if len(all) != 3 {
-		t.Fatalf("fallbacks = %v", all)
-	}
-	for i := range 6 {
-		if got := Fallback(i); got != all[i%3] {
-			t.Fatalf("Fallback(%d) = %q", i, got)
-		}
-	}
-	if Fallback(-4) != all[0] {
-		t.Fatal("negative count is not clamped")
-	}
-	all[0] = "mutated"
-	if Fallback(0) == "mutated" {
-		t.Fatal("Fallbacks exposes the shared array")
-	}
-}
-
-func TestFailureLineMarksTheActivity(t *testing.T) {
-	cases := map[string]string{
-		"":                FailureMarker,
-		"  ":              FailureMarker,
-		"Reading notes.":  FailureMarker + " Reading notes",
-		" Reading notes ": FailureMarker + " Reading notes",
-	}
-	for in, want := range cases {
-		t.Run(in, func(t *testing.T) {
-			if got := FailureLine(in); got != want {
-				t.Fatalf("FailureLine(%q) = %q, want %q", in, got, want)
-			}
-		})
 	}
 }
 
@@ -81,85 +197,27 @@ func TestContainsSecretKeywordIsCaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestHumanizeArgsFlattensJSONValues(t *testing.T) {
-	human := HumanizeArgs(`{"path":"src/main.go","query":"hello"}`)
-	if strings.Contains(human, "{") || strings.Contains(human, `"`) {
-		t.Errorf("humanized args leak JSON: %q", human)
+func TestApplyUpdateMatchesByCallID(t *testing.T) {
+	var steps []TrackedStep
+	steps = ApplyUpdate(steps, runtimechannelhost.PresenceUpdate{
+		CallIDs:  []string{"c1", "c2"},
+		Activity: "First step",
+		Outcome:  runtimechannelhost.StepRunning,
+	})
+	steps = ApplyUpdate(steps, runtimechannelhost.PresenceUpdate{
+		CallIDs:  []string{"c3"},
+		Activity: "Second step",
+		Outcome:  runtimechannelhost.StepRunning,
+	})
+	steps = ApplyUpdate(steps, runtimechannelhost.PresenceUpdate{
+		CallIDs:  []string{"c1", "c2"},
+		Activity: "First step",
+		Outcome:  runtimechannelhost.StepFailed,
+	})
+	if len(steps) != 2 {
+		t.Fatalf("steps = %+v, want 2 steps updated in place", steps)
 	}
-	if !strings.Contains(human, "src/main.go") || !strings.Contains(human, "hello") {
-		t.Errorf("humanized args = %q, want values preserved", human)
-	}
-	if got := HumanizeArgs(`{"a":["x",{"b":"y"}],"n":3}`); !strings.Contains(got, "x") || !strings.Contains(got, "y") {
-		t.Errorf("nested args = %q", got)
-	}
-	for _, in := range []string{"", "  ", "not json", `{"n":1}`, `{"a":"x"} {"b":"y"}`} {
-		if got := HumanizeArgs(in); got != "" {
-			t.Errorf("HumanizeArgs(%q) = %q, want empty", in, got)
-		}
-	}
-	if got := HumanizeArgs(`{"q":"` + strings.Repeat("z", 200) + `"}`); len([]rune(got)) != maxArgRunes {
-		t.Errorf("long args = %d runes, want %d", len([]rune(got)), maxArgRunes)
-	}
-}
-
-func TestRenderScreensSecretsAndFallsBack(t *testing.T) {
-	vault := secret.New()
-	vault.Set("api", "sk-live-hunter2")
-	cases := map[string]struct {
-		raw     string
-		args    string
-		count   int
-		want    string
-		without []string
-	}{
-		"blank uses fallback":           {raw: "  ", count: 1, want: Fallback(1)},
-		"truncates to six words":        {raw: "one two three four five six seven", want: "one two three four five six"},
-		"appends humanized args":        {raw: "Reading", args: `{"path":"notes.md"}`, want: "Reading notes.md"},
-		"keyword activity falls back":   {raw: "Looking at secret-token abc123", count: 2, want: Fallback(2)},
-		"keyword args omitted":          {raw: "Looking through notes", args: `{"path":"secret-token abc123"}`, want: "Looking through notes"},
-		"vault args omitted":            {raw: "Searching", args: `{"q":"sk-live-hunter2"}`, want: "Searching", without: []string{"hunter2"}},
-		"vault value redacted in text":  {raw: "Using sk-live-hunter2 now", without: []string{"sk-live-hunter2"}},
-		"unparseable parallel args off": {raw: "Mencari catatan", args: `{"pwd":"hunter2"} {"path":"notes.md"}`, want: "Mencari catatan"},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			got := Render(tc.raw, tc.args, tc.count, vault)
-			if tc.want != "" && got != tc.want {
-				t.Fatalf("Render = %q, want %q", got, tc.want)
-			}
-			for _, leaked := range tc.without {
-				if strings.Contains(got, leaked) {
-					t.Fatalf("Render = %q leaked %q", got, leaked)
-				}
-			}
-		})
-	}
-	if got := Render("Reading", `{"path":"notes.md"}`, 0, nil); got != "Reading notes.md" {
-		t.Fatalf("Render without vault = %q", got)
-	}
-}
-
-func TestRenderFailureScreensTheActivity(t *testing.T) {
-	vault := secret.New()
-	vault.Set("api", "sk-live-hunter2")
-	cases := map[string]struct {
-		in   string
-		want string
-	}{
-		"plain":        {in: "Reading the notes file now please quickly", want: FailureMarker + " Reading the notes file now please"},
-		"keyword":      {in: "Reading the password file", want: FailureMarker},
-		"blank":        {in: "", want: FailureMarker},
-		"vault secret": {in: "Calling sk-live-hunter2", want: FailureMarker + " Calling [redacted]"},
-	}
-	for name, tc := range cases {
-		t.Run(name, func(t *testing.T) {
-			got := RenderFailure(tc.in, vault)
-			if strings.Contains(got, "hunter2") {
-				t.Fatalf("RenderFailure leaked the secret: %q", got)
-			}
-			if got != tc.want {
-				t.Fatalf("RenderFailure(%q) = %q, want %q", tc.in, got, tc.want)
-			}
-		})
+	if steps[0].Step.Outcome != runtimechannelhost.StepFailed || steps[1].Step.Outcome != runtimechannelhost.StepRunning {
+		t.Fatalf("outcomes = [%s, %s], want [failed, running]", steps[0].Step.Outcome, steps[1].Step.Outcome)
 	}
 }

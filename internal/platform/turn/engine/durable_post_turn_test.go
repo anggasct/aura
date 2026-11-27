@@ -257,8 +257,8 @@ func TestCancelledDurableTurnDoesItsPostTurnWork(t *testing.T) {
 			t.Errorf("events passed to the hook = %v, want the one stored before the cancel", hook.counts)
 		}
 		requirePostTurnRecord(t, rig.db, "turn-1")
-		if _, failed, ended := presence.counts(); failed != 1 || len(ended) != 1 {
-			t.Errorf("failed presence updates = %d, presence ends = %v; want 1 and one", failed, ended)
+		if _, failed, ended := presence.counts(); failed != 0 || len(ended) != 1 {
+			t.Errorf("failed presence updates = %d, presence ends = %v; want 0 and one", failed, ended)
 		}
 	})
 	t.Run("a cancelled turn whose record is fenced", func(t *testing.T) {

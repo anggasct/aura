@@ -155,6 +155,9 @@ type Adapter struct {
 	secretVault    *secret.Vault
 	typingRefresh  time.Duration
 	statusAfter    time.Duration
+	elapsedTick    time.Duration
+	holdMu         sync.Mutex
+	holds          map[string]time.Time
 	approvals      *approval.Registry
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
@@ -259,6 +262,7 @@ func New(deps *Deps) (*Adapter, error) {
 		httpClient:     &http.Client{Timeout: mediaTimeout},
 		gate:           newEditGate(time.Duration(deps.Config.MinEditInterval)),
 		posted:         map[string][]string{},
+		holds:          map[string]time.Time{},
 		approvals:      approvals,
 		targets:        map[string]approvalBinding{},
 		ownerDMs:       map[string]string{},

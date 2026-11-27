@@ -3,30 +3,26 @@ package runtimeengine
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
 	"testing/synctest"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/channelhost"
-	"github.com/anggasct/aura/internal/platform/turn/ingress"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	runtimechannelhost "github.com/anggasct/aura/internal/platform/turn/channelhost"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/turntest"
 )
 
 type presenceCapture struct {
 	mu       sync.Mutex
 	started  int
-	updates  []presenceUpdate
+	updates  []runtimechannelhost.PresenceUpdate
 	ended    []string
 	delivers int
-}
-
-type presenceUpdate struct {
-	text   string
-	args   string
-	failed bool
 }
 
 func (a *presenceCapture) Start(_ context.Context, _ runtimeingress.IngressSink) error {
@@ -51,10 +47,14 @@ func (a *presenceCapture) PresenceStarted(_ context.Context, _ *runtimechannelho
 	return nil
 }
 
-func (a *presenceCapture) PresenceUpdated(_ context.Context, _ *runtimechannelhost.DeliveryRequest, text, args string, failed bool) error {
+func (a *presenceCapture) PresenceUpdated(_ context.Context, _ *runtimechannelhost.DeliveryRequest, update runtimechannelhost.PresenceUpdate) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.updates = append(a.updates, presenceUpdate{text: text, args: args, failed: failed})
+	a.updates = append(a.updates, runtimechannelhost.PresenceUpdate{
+		CallIDs:  slices.Clone(update.CallIDs),
+		Activity: update.Activity,
+		Outcome:  update.Outcome,
+	})
 	return nil
 }
 
@@ -65,17 +65,225 @@ func (a *presenceCapture) PresenceEnded(_ context.Context, turnID string) error 
 	return nil
 }
 
-func adkTextStep(text string) turntest.FakeStep {
+func (a *presenceCapture) snapshotUpdates() []runtimechannelhost.PresenceUpdate {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return slices.Clone(a.updates)
+}
+
+func (a *presenceCapture) counts() (started, failed int, ended []string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	for _, update := range a.updates {
+		if update.Outcome == runtimechannelhost.StepFailed {
+			failed++
+		}
+	}
+	return a.started, failed, append([]string(nil), a.ended...)
+}
+
+type callSpec struct {
+	id   string
+	name string
+	args map[string]any
+}
+
+type responseSpec struct {
+	id       string
+	name     string
+	response map[string]any
+}
+
+func adkCallStep(text string, calls ...callSpec) turntest.FakeStep {
+	parts := make([]any, 0, len(calls)+1)
+	if text != "" {
+		parts = append(parts, map[string]any{"text": text})
+	}
+	for _, call := range calls {
+		args := call.args
+		if args == nil {
+			args = map[string]any{}
+		}
+		parts = append(parts, map[string]any{
+			"functionCall": map[string]any{
+				"id":   call.id,
+				"name": call.name,
+				"args": args,
+			},
+		})
+	}
 	raw, err := json.Marshal(map[string]any{
 		"content": map[string]any{
 			"role":  "model",
-			"parts": []any{map[string]any{"text": text}, map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{}}}},
+			"parts": parts,
 		},
 	})
 	if err != nil {
-		panic("test payload is not serializable")
+		panic("test call payload is not serializable")
 	}
 	return turntest.FakeStep{Kind: "adk_event", Payload: raw}
+}
+
+func adkResponseStep(responses ...responseSpec) turntest.FakeStep {
+	parts := make([]any, 0, len(responses))
+	for _, resp := range responses {
+		parts = append(parts, map[string]any{
+			"functionResponse": map[string]any{
+				"id":       resp.id,
+				"name":     resp.name,
+				"response": resp.response,
+			},
+		})
+	}
+	raw, err := json.Marshal(map[string]any{
+		"content": map[string]any{
+			"role":  "user",
+			"parts": parts,
+		},
+	})
+	if err != nil {
+		panic("test response payload is not serializable")
+	}
+	return turntest.FakeStep{Kind: "adk_event", Payload: raw}
+}
+
+func adkTextStep(text string) turntest.FakeStep {
+	return adkCallStep(text, callSpec{id: "call-1", name: "read_file"})
+}
+
+type failingPresenceExecutor struct {
+	err error
+}
+
+func (f failingPresenceExecutor) Execute(_ context.Context, _ *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
+		yield(turn.Event{}, f.err)
+	}
+}
+
+func runPresenceTurn(t *testing.T, durableMode bool, turnID string, executor TurnExecutor, wantTerminal string) *presenceCapture {
+	t.Helper()
+	capture := &presenceCapture{}
+	if durableMode {
+		rig := newDurableHostRig(t, Deps{Config: testLimits(4, 16), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+		mustCreateSession(t, rig.db, "channel:333")
+		rig.startHost()
+		outcome := callTurn(context.WithoutCancel(t.Context()), rig.engine, channelTurnRequest("channel:333", turnID))
+		awaitTerminal(t, outcome, wantTerminal)
+		return capture
+	}
+	engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+	mustCreateSession(t, db, "channel:333")
+	req := channelTurnRequest("channel:333", turnID)
+	if _, err := collect(t, engine, req); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	return capture
+}
+
+func TestEngineReportsStepOutcomesByCallID(t *testing.T) {
+	modes := []struct {
+		name    string
+		durable bool
+	}{
+		{name: "in-memory", durable: false},
+		{name: "durable", durable: true},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Run("parallel outcomes, out-of-order pairing, orphan response, and no args", func(t *testing.T) {
+				secretGoal := "Cari berita terbaru soal Go 1.27 di web, ringkas hasilnya"
+				steps := []turntest.FakeStep{
+					adkCallStep("Checking both files",
+						callSpec{id: "c1", name: "read_file", args: map[string]any{"goal": secretGoal}},
+						callSpec{id: "c2", name: "read_file", args: map[string]any{"path": "notes.md"}},
+					),
+					adkResponseStep(responseSpec{id: "c1", name: "read_file", response: map[string]any{"error": "permission denied"}}),
+					adkResponseStep(responseSpec{id: "c2", name: "read_file", response: map[string]any{"result": "ok"}}),
+					adkCallStep("Reading workspace",
+						callSpec{id: "c3", name: "read_file", args: map[string]any{"goal": secretGoal}},
+						callSpec{id: "c4", name: "read_file", args: map[string]any{"path": "todo.md"}},
+					),
+					adkResponseStep(responseSpec{id: "c3", name: "read_file", response: map[string]any{"result": "ok"}}),
+					adkResponseStep(responseSpec{id: "c-orphan", name: "read_file", response: map[string]any{"error": "unmatched"}}),
+					adkResponseStep(responseSpec{id: "c4", name: "read_file", response: map[string]any{"result": "ok"}}),
+					adkCallStep("Step alpha", callSpec{id: "ca", name: "lookup"}),
+					adkCallStep("Step beta", callSpec{id: "cb", name: "lookup"}),
+					adkResponseStep(responseSpec{id: "cb", name: "lookup", response: map[string]any{"error": "boom"}}),
+					adkResponseStep(responseSpec{id: "ca", name: "lookup", response: map[string]any{"result": "ok"}}),
+					textStep("final answer"),
+				}
+
+				capture := runPresenceTurn(t, mode.durable, "turn-outcomes-"+mode.name, turntest.NewFakeExecutor(steps), turn.EventKindTurnCompleted)
+				got := capture.snapshotUpdates()
+
+				want := []runtimechannelhost.PresenceUpdate{
+					{CallIDs: []string{"c1", "c2"}, Activity: "Checking both files", Outcome: runtimechannelhost.StepRunning},
+					{CallIDs: []string{"c1", "c2"}, Activity: "Checking both files", Outcome: runtimechannelhost.StepFailed},
+					{CallIDs: []string{"c3", "c4"}, Activity: "Reading workspace", Outcome: runtimechannelhost.StepRunning},
+					{CallIDs: []string{"c3", "c4"}, Activity: "Reading workspace", Outcome: runtimechannelhost.StepDone},
+					{CallIDs: []string{"ca"}, Activity: "Step alpha", Outcome: runtimechannelhost.StepRunning},
+					{CallIDs: []string{"cb"}, Activity: "Step beta", Outcome: runtimechannelhost.StepRunning},
+					{CallIDs: []string{"cb"}, Activity: "Step beta", Outcome: runtimechannelhost.StepFailed},
+					{CallIDs: []string{"ca"}, Activity: "Step alpha", Outcome: runtimechannelhost.StepDone},
+				}
+
+				if len(got) != len(want) {
+					t.Fatalf("updates = %+v (len %d), want %+v (len %d)", got, len(got), want, len(want))
+				}
+				for i := range want {
+					if !slices.Equal(got[i].CallIDs, want[i].CallIDs) || got[i].Activity != want[i].Activity || got[i].Outcome != want[i].Outcome {
+						t.Errorf("update[%d] = %+v, want %+v", i, got[i], want[i])
+					}
+					if strings.Contains(got[i].Activity, secretGoal) || strings.Contains(got[i].Activity, "notes.md") {
+						t.Errorf("update[%d] leaked tool arguments: %+v", i, got[i])
+					}
+				}
+			})
+
+			t.Run("failed turn emits no global failure update", func(t *testing.T) {
+				capture := runPresenceTurn(t, mode.durable, "turn-failed-noglobal-"+mode.name, failingPresenceExecutor{err: errors.New("model exploded")}, turn.EventKindTurnFailed)
+				if got := capture.snapshotUpdates(); len(got) != 0 {
+					t.Fatalf("updates on failed turn without steps = %+v, want none", got)
+				}
+			})
+		})
+	}
+}
+
+func TestSilentCallStartsAStepWithTheWorkingText(t *testing.T) {
+	modes := []struct {
+		name    string
+		durable bool
+	}{
+		{name: "in-memory", durable: false},
+		{name: "durable", durable: true},
+	}
+
+	for _, mode := range modes {
+		t.Run(mode.name, func(t *testing.T) {
+			steps := []turntest.FakeStep{
+				adkCallStep("", callSpec{id: "call-silent", name: "read_file", args: map[string]any{"path": "secret.txt"}}),
+				adkResponseStep(responseSpec{id: "call-silent", name: "read_file", response: map[string]any{"result": "ok"}}),
+				textStep("done"),
+			}
+			capture := runPresenceTurn(t, mode.durable, "turn-silent-"+mode.name, turntest.NewFakeExecutor(steps), turn.EventKindTurnCompleted)
+			got := capture.snapshotUpdates()
+			want := []runtimechannelhost.PresenceUpdate{
+				{CallIDs: []string{"call-silent"}, Activity: "", Outcome: runtimechannelhost.StepRunning},
+				{CallIDs: []string{"call-silent"}, Activity: "", Outcome: runtimechannelhost.StepDone},
+			}
+			if len(got) != len(want) {
+				t.Fatalf("updates = %+v, want %+v", got, want)
+			}
+			for i := range want {
+				if !slices.Equal(got[i].CallIDs, want[i].CallIDs) || got[i].Activity != want[i].Activity || got[i].Outcome != want[i].Outcome {
+					t.Errorf("update[%d] = %+v, want %+v", i, got[i], want[i])
+				}
+			}
+		})
+	}
 }
 
 func TestEngineDrivesPresenceForSlowTurn(t *testing.T) {
@@ -101,139 +309,12 @@ func TestEngineDrivesPresenceForSlowTurn(t *testing.T) {
 		}
 		found := false
 		for _, update := range capture.updates {
-			if !update.failed && update.text == "Looking through notes" {
+			if update.Outcome == runtimechannelhost.StepRunning && update.Activity == "Looking through notes" {
 				found = true
 			}
 		}
 		if !found {
 			t.Fatalf("updates = %+v, want model snippet", capture.updates)
-		}
-	})
-}
-
-func TestEnginePresenceFailure(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		raw, err := json.Marshal(map[string]any{
-			"content": map[string]any{
-				"role": "model",
-				"parts": []any{
-					map[string]any{
-						"functionResponse": map[string]any{
-							"name":     "read_file",
-							"response": map[string]any{"error": "boom"},
-						},
-					},
-				},
-			},
-		})
-		if err != nil {
-			t.Fatalf("marshal failure fixture: %v", err)
-		}
-		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
-			{Kind: "adk_event", Payload: raw},
-			textStep("recovered answer"),
-		})
-		capture := &presenceCapture{}
-		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
-		mustCreateSession(t, db, "channel:333")
-		req := channelTurnRequest("channel:333", "turn-presence-fail")
-		if _, err := collect(t, engine, req); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		capture.mu.Lock()
-		defer capture.mu.Unlock()
-		failed := false
-		for _, update := range capture.updates {
-			if update.failed {
-				failed = true
-			}
-		}
-		if !failed {
-			t.Fatalf("updates = %+v, want a failed presence update", capture.updates)
-		}
-	})
-}
-
-func TestExtractPresenceHelpers(t *testing.T) {
-	raw, err := json.Marshal(map[string]any{
-		"content": map[string]any{"role": "model", "parts": []any{
-			map[string]any{"text": "Checking tasks"},
-			map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{"path": "notes.md"}}},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("marshal event: %v", err)
-	}
-	ev := &turn.Event{Kind: turnstore.EventKindADK, Payload: raw}
-	text, args, ok := extractPresenceActivity(ev)
-	if !ok || text != "Checking tasks" || !strings.Contains(args, "notes.md") {
-		t.Fatalf("extract = %q,%q,%v", text, args, ok)
-	}
-	if isPresenceFailureEvent(ev) {
-		t.Fatal("plain text misclassified as failure")
-	}
-}
-
-func TestExtractPresenceActivityOmitsParallelToolArgs(t *testing.T) {
-	raw, err := json.Marshal(map[string]any{
-		"content": map[string]any{"role": "model", "parts": []any{
-			map[string]any{"text": "Mencari catatan"},
-			map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{"pwd": "hunter2"}}},
-			map[string]any{"functionCall": map[string]any{"name": "read_file", "args": map[string]any{"path": "notes.md"}}},
-		}},
-	})
-	if err != nil {
-		t.Fatalf("marshal event: %v", err)
-	}
-	ev := &turn.Event{Kind: turnstore.EventKindADK, Payload: raw}
-	text, args, ok := extractPresenceActivity(ev)
-	if !ok || text != "Mencari catatan" {
-		t.Fatalf("extract = %q,%q,%v", text, args, ok)
-	}
-	if args != "" {
-		t.Fatalf("args = %q, want omitted for parallel tool calls", args)
-	}
-}
-
-func adkStepWithArgs(text string, args map[string]any) turntest.FakeStep {
-	raw, err := json.Marshal(map[string]any{
-		"content": map[string]any{
-			"role":  "model",
-			"parts": []any{map[string]any{"text": text}, map[string]any{"functionCall": map[string]any{"name": "read_file", "args": args}}},
-		},
-	})
-	if err != nil {
-		panic("test payload is not serializable")
-	}
-	return turntest.FakeStep{Kind: "adk_event", Payload: raw}
-}
-
-func TestEngineForwardsToolArgsToPresence(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		executor := turntest.NewFakeExecutor([]turntest.FakeStep{
-			adkStepWithArgs("Looking at secret-token abc123", map[string]any{"path": "notes.md", "query": "secret hunter2"}),
-			textStep("final answer"),
-		})
-		capture := &presenceCapture{}
-		engine, db, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
-		mustCreateSession(t, db, "channel:333")
-		req := channelTurnRequest("channel:333", "turn-presence-args")
-		if _, err := collect(t, engine, req); err != nil {
-			t.Fatalf("Run: %v", err)
-		}
-		capture.mu.Lock()
-		defer capture.mu.Unlock()
-		found := false
-		for _, update := range capture.updates {
-			if update.failed {
-				continue
-			}
-			if strings.Contains(update.args, "secret hunter2") && strings.Contains(update.args, "notes.md") {
-				found = true
-			}
-		}
-		if !found {
-			t.Fatalf("updates = %+v, want tool args forwarded", capture.updates)
 		}
 	})
 }
@@ -296,17 +377,6 @@ func TestEngineRoutesPresenceToOwningAdapter(t *testing.T) {
 	})
 }
 
-func (a *presenceCapture) counts() (started, failed int, ended []string) {
-	a.mu.Lock()
-	defer a.mu.Unlock()
-	for _, update := range a.updates {
-		if update.failed {
-			failed++
-		}
-	}
-	return a.started, failed, append([]string(nil), a.ended...)
-}
-
 func TestCancelledDurableTurnClosesItsPresence(t *testing.T) {
 	gate := make(chan struct{})
 	t.Cleanup(func() { close(gate) })
@@ -322,8 +392,8 @@ func TestCancelledDurableTurnClosesItsPresence(t *testing.T) {
 	}
 	awaitTerminal(t, outcome, turn.EventKindTurnCancelled)
 	started, failed, ended := capture.counts()
-	if started != 1 || failed != 1 {
-		t.Errorf("presence starts = %d, failed updates = %d; want 1 and 1", started, failed)
+	if started != 1 || failed != 0 {
+		t.Errorf("presence starts = %d, failed updates = %d; want 1 and 0", started, failed)
 	}
 	if len(ended) != 1 || ended[0] != "turn-cancelled" {
 		t.Errorf("presence ends = %v, want one for the turn", ended)
