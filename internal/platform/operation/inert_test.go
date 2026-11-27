@@ -45,14 +45,16 @@ func runLegacyCall(t *testing.T, options *operationtest.Options) legacyRun {
 		return nil
 	})
 	hosted.AwaitEnded(t, key, 1)
-	for _, definition := range rig.Broker.Definitions() {
-		run.toolNames = append(run.toolNames, definition.Name)
+	definitions := rig.Broker.Definitions()
+	for i := range definitions {
+		run.toolNames = append(run.toolNames, definitions[i].Name)
 	}
 	slices.Sort(run.toolNames)
 	run.actions = actionKeys(hosted.Actions(t, key))
 	for _, state := range []effect.State{effect.StateSucceeded, effect.StateFailed, effect.StateUnknown, effect.StateStarted} {
-		for _, intent := range intentsIn(t, rig, state) {
-			run.providers = append(run.providers, intent.Provider+"/"+intent.Operation+"/"+string(state))
+		intents := intentsIn(t, rig, state)
+		for i := range intents {
+			run.providers = append(run.providers, intents[i].Provider+"/"+intents[i].Operation+"/"+string(state))
 		}
 	}
 	return run
