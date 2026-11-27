@@ -409,7 +409,7 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 	}
 	gotIndexes := listSchemaObjectsByType(t, gotDB, "index")
 	wantIndexes := listSchemaObjectsByType(t, wantDB, "index")
-	if len(gotIndexes) != 30 || !slices.Equal(gotIndexes, wantIndexes) {
+	if len(gotIndexes) != 31 || !slices.Equal(gotIndexes, wantIndexes) {
 		t.Fatalf("indexes (%d vs %d): got=%v want=%v", len(gotIndexes), len(wantIndexes), gotIndexes, wantIndexes)
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
