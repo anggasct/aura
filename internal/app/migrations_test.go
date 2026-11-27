@@ -487,11 +487,11 @@ func assertTableFKParentsExist(t *testing.T, db *sql.DB, version int, owner, tab
 	}
 }
 
-func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
+func TestSchemaOwnersRegisteredAndForeignKeysValid(t *testing.T) {
 	owners := Schemas()
 	wantOwners := []string{
 		"turn", "durable", "effect", "usage", "principal", "model", "storage", "webhook", "knowledge", "memory", "profile",
-		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email",
+		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email", "operation",
 	}
 	gotOwners := make([]string, 0, len(owners))
 	for _, owner := range owners {
@@ -501,7 +501,13 @@ func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
 		t.Fatalf("Schemas() owners = %v, want %v", gotOwners, wantOwners)
 	}
 	migrations := Migrations()
-	if want := len(wantOwners) + len(incrementalSteps(t)); len(migrations) != want {
+	baselines := 0
+	for _, owner := range owners {
+		if strings.TrimSpace(owner.SchemaSQL()) != "" {
+			baselines++
+		}
+	}
+	if want := baselines + len(incrementalSteps(t)); len(migrations) != want {
 		t.Fatalf("len(Migrations()) = %d, want %d", len(migrations), want)
 	}
 
