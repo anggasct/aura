@@ -145,6 +145,34 @@ func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
 	}
 	rig.requireUntouched(t)
 
+	for _, outcome := range []string{approval.OutcomeDeny, "maybe", ""} {
+		for _, stub := range []operationStub{destructiveStub, previewedStub} {
+			t.Run("a recorded policy outcome of "+outcome+" for "+stub.name, func(t *testing.T) {
+				var got callOutcome
+				key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+					planted, err := json.Marshal(approval.PolicyDecision{Outcome: outcome, PolicyVersion: rig.broker.PolicyVersion()})
+					if err != nil {
+						return err
+					}
+					if _, err := inv.RunAction(ctx, "call-1-0/policy", func(context.Context) ([]byte, error) {
+						return encodeOutcomeResult(planted)
+					}); err != nil {
+						return err
+					}
+					got = outcomeOf(rig.broker.Execute(inTurn(ctx, inv), operationRequest(stub.name, "x")))
+					return nil
+				})
+				if got.class != ResultPolicyDenied {
+					t.Errorf("outcome = %+v, want %s", got, ResultPolicyDenied)
+				}
+				if keys := joinedKeys(hosted.actionRows(t, key)); keys != "call-1-0/policy" {
+					t.Errorf("action keys = %q, want only the policy action", keys)
+				}
+			})
+		}
+	}
+	rig.requireUntouched(t)
+
 	t.Run("an admitted request runs the previewer between policy and authorization", func(t *testing.T) {
 		var outcome callOutcome
 		key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {

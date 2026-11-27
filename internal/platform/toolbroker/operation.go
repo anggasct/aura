@@ -122,29 +122,30 @@ func unattendedRequest(request *ToolRequest, definition *tools.Definition) bool 
 	return definition.Operation != "" && (request.Origin == turn.OriginSchedule || request.Origin == turn.OriginHTTP)
 }
 
-func operationApproval(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {
+func operationPolicyOutcome(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {
 	if decision == nil || request == nil || definition == nil {
 		return nilOperationArguments()
 	}
-	if decision.Outcome == approval.OutcomeDeny {
-		return errorf(ResultPolicyDenied, "tool %q is denied by policy", toolKey(request))
-	}
-	if definition.Privileged() {
-		if decision.Outcome != approval.OutcomeRequireApproval {
-			decision.Outcome = approval.OutcomeRequireApproval
-			decision.ReasonCode = string(approval.ErrorCodeApprovalRequired)
-		}
-		return nil
-	}
 	switch decision.Outcome {
-	case approval.OutcomeRequireApproval:
-	case approval.OutcomeAllow:
-		if changeNeedsCard(request, definition) {
-			decision.Outcome = approval.OutcomeRequireApproval
-			decision.ReasonCode = approval.ReasonContentUnverified
-		}
+	case approval.OutcomeAllow, approval.OutcomeRequireApproval:
+		return nil
+	case approval.OutcomeDeny:
+		return errorf(ResultPolicyDenied, "tool %q is denied by policy", toolKey(request))
 	default:
 		return errorf(ResultPolicyDenied, "tool %q has a policy outcome the broker does not know", toolKey(request))
+	}
+}
+
+func operationApproval(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {
+	if err := operationPolicyOutcome(decision, request, definition); err != nil {
+		return err
+	}
+	if decision.Outcome == approval.OutcomeAllow && (definition.Privileged() || changeNeedsCard(request, definition)) {
+		decision.Outcome = approval.OutcomeRequireApproval
+		decision.ReasonCode = string(approval.ErrorCodeApprovalRequired)
+		if !definition.Privileged() {
+			decision.ReasonCode = approval.ReasonContentUnverified
+		}
 	}
 	return nil
 }

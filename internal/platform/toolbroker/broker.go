@@ -472,6 +472,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	class := requestClass(&canonical)
 	var previewLines []string
 	if definition.Operation != "" {
+		if err := operationPolicyOutcome(&decision, &canonical, definition); err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
 		if err := operationOwnerOnly(&canonical, class, definition); err != nil {
 			policyOutcome = PolicyOutcomeDeny
 			return ToolResult{}, err

@@ -709,7 +709,7 @@ func TestOperationApprovalFailsClosedOnAnUnknownPolicyOutcome(t *testing.T) {
 		{name: "a change denied by policy", definition: &change, outcome: approval.OutcomeDeny, wantClass: ResultPolicyDenied},
 		{name: "a trust grant denied by policy", definition: &grant, outcome: approval.OutcomeDeny, wantClass: ResultPolicyDenied},
 		{name: "a trust grant allowed", definition: &grant, outcome: approval.OutcomeAllow, wantOutput: approval.OutcomeRequireApproval},
-		{name: "a trust grant with an unknown outcome", definition: &grant, outcome: "maybe", wantOutput: approval.OutcomeRequireApproval},
+		{name: "a trust grant with an unknown outcome", definition: &grant, outcome: "maybe", wantClass: ResultPolicyDenied},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
