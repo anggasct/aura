@@ -361,3 +361,16 @@ func TestParseApprovalAddr(t *testing.T) {
 		}
 	}
 }
+
+func TestManualClockReportsArmedTimers(t *testing.T) {
+	clock := NewManualClock(time.Date(2026, 9, 3, 12, 0, 0, 0, time.UTC))
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		<-clock.Timer(time.Minute)
+	}()
+
+	clock.AwaitArmed(t, 1)
+	clock.Advance(time.Minute)
+	<-done
+}
