@@ -88,7 +88,7 @@ func (e *Executor) run(ctx context.Context, held *Intent, p Provider, settle Set
 	outcome, err := p.Invoke(providerCtx, invocation)
 	stopLease()
 	if errors.Is(context.Cause(providerCtx), errLeaseRevoked) {
-		if err == nil && !outcome.Ambiguous {
+		if err == nil && outcome.Succeeded {
 			if settled, settleErr := e.settleOutcome(ctx, held, &outcome); settleErr == nil {
 				return settled, nil
 			}

@@ -645,7 +645,7 @@ func (j *Journal) transition(ctx context.Context, id string, spec *transitionSpe
 		}
 		var leaseExpiresArg any
 		if !spec.leaseExpiresAt.IsZero() {
-			leaseExpiresArg = fmtLeaseTime(spec.leaseExpiresAt)
+			leaseExpiresArg = FormatLeaseTime(spec.leaseExpiresAt)
 		}
 		res, err := q.ExecContext(ctx, `
 		UPDATE effect_intent
@@ -837,14 +837,14 @@ func fmtTime(t time.Time) string {
 	return t.UTC().Format(time.RFC3339Nano)
 }
 
-func fmtLeaseTime(t time.Time) string {
+func FormatLeaseTime(t time.Time) string {
 	return t.UTC().Format(leaseTimeLayout)
 }
 
-func parseLeaseTime(raw string) (time.Time, error) {
+func ParseLeaseTime(raw string) (time.Time, error) {
 	t, err := time.Parse(leaseTimeLayout, raw)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("effect: parse lease_expires_at: %w", err)
+		return time.Time{}, fmt.Errorf("effect: parse fixed-width time: %w", err)
 	}
 	return t, nil
 }
