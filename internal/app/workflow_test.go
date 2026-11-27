@@ -131,6 +131,39 @@ func TestWorkflowValidateRejectsInvalidFile(t *testing.T) {
 	}
 }
 
+func TestValidateCommandRejectsAForbiddenAgentTool(t *testing.T) {
+	agentFile := func(tools string) string {
+		return "id: research\nversion: 1\ngoal: Research\nsteps:\n  - id: think\n    timeout: 1m\n    executor:\n      kind: agent\n      agent_id: researcher\n      prompt: Find it.\n      tools: " + tools + "\n"
+	}
+	cases := []struct {
+		name     string
+		tools    string
+		wantCode workflow.ErrorCode
+	}{
+		{name: "write_file", tools: "[write_file]", wantCode: workflow.ErrorCodeExecutorInvalid},
+		{name: "both families", tools: "[read_file, web_fetch]", wantCode: workflow.ErrorCodeExecutorInvalid},
+		{name: "one family", tools: "[web_search, web_fetch]"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file := filepath.Join(t.TempDir(), "research.yaml")
+			if err := os.WriteFile(file, []byte(agentFile(tc.tools)), 0o600); err != nil {
+				t.Fatalf("write: %v", err)
+			}
+			out, err := runWorkflowCommand(t, writeWorkflowFixtures(t, ""), "validate", file)
+			if tc.wantCode == "" {
+				if err != nil || !strings.Contains(out, "valid: research") {
+					t.Fatalf("validate = %q, %v, want the valid marker", out, err)
+				}
+				return
+			}
+			if code, ok := fault.CodeOf[workflow.ErrorCode](err); !ok || code != tc.wantCode {
+				t.Fatalf("validate = %v, want %s", err, tc.wantCode)
+			}
+		})
+	}
+}
+
 func TestWorkflowStartUnknownDefinitionFails(t *testing.T) {
 	gf := writeWorkflowFixtures(t, validWorkflowYAML)
 	_, err := runWorkflowCommand(t, gf, "start", "ghost")

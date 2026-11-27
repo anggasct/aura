@@ -128,7 +128,7 @@ func (m meteredAgents) RunMetered(context.Context, *auraagent.Definition, *Execu
 func agentSteps(id string) *Spec {
 	spec := &Spec{ID: id, Goal: "Think twice", Version: 1, Source: SourceGenerated}
 	for index, stepID := range []string{"first", "second", "third"} {
-		step := StepSpec{ID: stepID, Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("engineer")}, Timeout: 5 * time.Second}
+		step := StepSpec{ID: stepID, Executor: agentExecutor("engineer"), Timeout: 5 * time.Second}
 		if index > 0 {
 			step.DependsOn = []string{spec.Steps[index-1].ID}
 		}

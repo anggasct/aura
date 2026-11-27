@@ -273,7 +273,7 @@ func proofSpec(credential string) *workflow.Spec {
 	agent := func(id, agentID string, depends ...string) workflow.StepSpec {
 		return workflow.StepSpec{
 			ID: id, DependsOn: depends,
-			Executor: workflow.ExecutorSpec{Kind: workflow.KindAgent, AgentID: &agentID},
+			Executor: workflow.ExecutorSpec{Kind: workflow.KindAgent, AgentID: &agentID, Prompt: "Do the work."},
 			Timeout:  2 * time.Minute,
 		}
 	}

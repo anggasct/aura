@@ -54,15 +54,44 @@ type StepSpec struct {
 }
 
 type ExecutorSpec struct {
-	Kind                 Kind            `json:"kind"`
-	AgentID              *string         `json:"agent_id,omitempty"`
-	RequiredCapabilities []string        `json:"requires,omitempty"`
-	ToolID               *string         `json:"tool,omitempty"`
-	ToolArgs             json.RawMessage `json:"args,omitempty"`
-	Event                *string         `json:"event,omitempty"`
-	Source               *string         `json:"source,omitempty"`
-	ExternalRef          *string         `json:"external_ref,omitempty"`
-	WorkflowID           *string         `json:"workflow,omitempty"`
+	Kind        Kind            `json:"kind"`
+	AgentID     *string         `json:"agent_id,omitempty"`
+	Prompt      string          `json:"prompt,omitempty"`
+	Tools       []string        `json:"tools,omitempty"`
+	Output      string          `json:"output,omitempty"`
+	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	ToolID      *string         `json:"tool,omitempty"`
+	ToolArgs    json.RawMessage `json:"args,omitempty"`
+	Event       *string         `json:"event,omitempty"`
+	Source      *string         `json:"source,omitempty"`
+	ExternalRef *string         `json:"external_ref,omitempty"`
+	WorkflowID  *string         `json:"workflow,omitempty"`
+}
+
+const (
+	OutputText = "text"
+	OutputJSON = "json"
+
+	DefaultAgentMaxTokens = 50_000
+	MaxAgentMaxTokens     = 200_000
+)
+
+func (e *ExecutorSpec) TokenBudget() int {
+	if e.MaxTokens == nil {
+		return DefaultAgentMaxTokens
+	}
+	return *e.MaxTokens
+}
+
+func (e *ExecutorSpec) OutputMode() string {
+	if e.Output == "" {
+		return OutputText
+	}
+	return e.Output
+}
+
+func (e *ExecutorSpec) hasAgentFields() bool {
+	return e.AgentID != nil || e.Prompt != "" || len(e.Tools) > 0 || e.Output != "" || e.MaxTokens != nil
 }
 
 type RetryPolicy struct {

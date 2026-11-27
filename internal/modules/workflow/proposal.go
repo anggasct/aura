@@ -69,19 +69,46 @@ func Digest(spec *Spec) (string, error) {
 func CheckCeiling(spec *Spec, agentID string, class principal.Class, deps *ValidationDeps) error {
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
-		if step.Executor.Kind != KindTool || step.Executor.ToolID == nil {
-			continue
+		if step.Executor.Kind == KindTool && step.Executor.ToolID != nil {
+			if err := checkStepTool(step, agentID, class, *step.Executor.ToolID, deps); err != nil {
+				return err
+			}
 		}
-		if deps.StepAllowed == nil {
-			return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q cannot be checked: no tool ceiling is configured", step.ID))
+		if step.Executor.Kind == KindAgent {
+			if err := checkAgentStepCeiling(step, agentID, class, deps); err != nil {
+				return err
+			}
 		}
-		allowed, known := deps.StepAllowed(agentID, class, *step.Executor.ToolID)
-		if !known {
-			return codedError(ErrorCodePersonaMissing, fmt.Sprintf("persona %q is not configured", agentID))
+	}
+	return nil
+}
+
+func checkAgentStepCeiling(step *StepSpec, runAgentID string, class principal.Class, deps *ValidationDeps) error {
+	stepAgentID := deref(step.Executor.AgentID)
+	if err := checkPersona(deps, stepAgentID, class); err != nil {
+		return err
+	}
+	for _, toolID := range step.Executor.Tools {
+		if err := checkStepTool(step, runAgentID, class, toolID, deps); err != nil {
+			return err
 		}
-		if !allowed {
-			return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q uses tool %q, which persona %q does not allow for %s runs", step.ID, *step.Executor.ToolID, agentID, class))
+		if err := checkStepTool(step, stepAgentID, class, toolID, deps); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func checkStepTool(step *StepSpec, agentID string, class principal.Class, toolID string, deps *ValidationDeps) error {
+	if deps.StepAllowed == nil {
+		return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q cannot be checked: no tool ceiling is configured", step.ID))
+	}
+	allowed, known := deps.StepAllowed(agentID, class, toolID)
+	if !known {
+		return codedError(ErrorCodePersonaMissing, fmt.Sprintf("persona %q is not configured", agentID))
+	}
+	if !allowed {
+		return codedError(ErrorCodeCapabilityExceeded, fmt.Sprintf("step %q uses tool %q, which persona %q does not allow for %s runs", step.ID, toolID, agentID, class))
 	}
 	return nil
 }
@@ -95,6 +122,7 @@ func RenderPlan(spec *Spec, graph *Graph, show ToolCallText) (string, error) {
 		step := graph.ByStep[stepID]
 		line := fmt.Sprintf("%d. %s — ", index+1, tools.EscapeDisplayText(step.ID))
 		var call string
+		var detail []string
 		switch step.Executor.Kind {
 		case KindTool:
 			line += "run tool " + tools.EscapeDisplayText(deref(step.Executor.ToolID))
@@ -104,7 +132,8 @@ func RenderPlan(spec *Spec, graph *Graph, show ToolCallText) (string, error) {
 			}
 			call = text
 		case KindAgent:
-			line += "ask agent " + tools.EscapeDisplayText(cmpOr(deref(step.Executor.AgentID), strings.Join(step.Executor.RequiredCapabilities, "+")))
+			line += "ask agent " + tools.EscapeDisplayText(deref(step.Executor.AgentID))
+			detail = agentPlanLines(step)
 		case KindWait:
 			line += "wait for " + tools.EscapeDisplayText(deref(step.Executor.Event))
 		case KindApproval:
@@ -126,8 +155,31 @@ func RenderPlan(spec *Spec, graph *Graph, show ToolCallText) (string, error) {
 				lines = append(lines, "    "+callLine)
 			}
 		}
+		lines = append(lines, detail...)
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+func agentPlanLines(step *StepSpec) []string {
+	toolList, reads := "none", "none"
+	if len(step.Executor.Tools) > 0 {
+		toolList = strings.Join(step.Executor.Tools, ", ")
+	}
+	if len(step.DependsOn) > 0 {
+		reads = strings.Join(step.DependsOn, ", ")
+	}
+	promptLines := strings.Split(step.Executor.Prompt, "\n")
+	lines := make([]string, 0, 5+len(promptLines))
+	lines = append(lines,
+		"    tools: "+tools.EscapeDisplayText(toolList),
+		"    reads: "+tools.EscapeDisplayText(reads),
+		"    output: "+tools.EscapeDisplayText(step.Executor.OutputMode()),
+		fmt.Sprintf("    budget: %d tokens", step.Executor.TokenBudget()),
+		"    prompt:")
+	for _, promptLine := range promptLines {
+		lines = append(lines, "        "+tools.EscapeDisplayText(promptLine))
+	}
+	return lines
 }
 
 func showToolCall(step *StepSpec, show ToolCallText) (string, error) {
@@ -146,15 +198,6 @@ func deref(value *string) string {
 		return ""
 	}
 	return *value
-}
-
-func cmpOr(values ...string) string {
-	for _, value := range values {
-		if value != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 func (s *Store) CreateProposal(ctx context.Context, proposal *Proposal) error {

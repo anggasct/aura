@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 )
 
@@ -35,8 +34,8 @@ func runScriptedWorkflow(t *testing.T, script []struct {
 	spec := &Spec{
 		ID: "replay", Goal: "Replay", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "implement", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("engineer")}, Timeout: 5 * time.Second},
-			{ID: "verify", DependsOn: []string{"implement"}, Executor: ExecutorSpec{Kind: KindAgent, RequiredCapabilities: []string{auraagent.CapabilityRepositoryRead}}, Timeout: 5 * time.Second},
+			{ID: "implement", Executor: agentExecutor("engineer"), Timeout: 5 * time.Second},
+			{ID: "verify", DependsOn: []string{"implement"}, Executor: agentExecutor("reviewer"), Timeout: 5 * time.Second},
 			{ID: "record", DependsOn: []string{"verify"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: &tool}, Timeout: 5 * time.Second},
 			{ID: "approve", DependsOn: []string{"record"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 		},

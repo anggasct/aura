@@ -6,9 +6,11 @@ import (
 	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 type AgentResolver interface {
@@ -84,11 +86,12 @@ func Validate(spec *Spec, deps *ValidationDeps) error {
 	}
 
 	for index := range spec.Steps {
-		if err := validateExecutor(&spec.Steps[index], deps, ids); err != nil {
+		if err := validateExecutor(&spec.Steps[index], deps, stepsByID); err != nil {
 			return err
 		}
 	}
 
+	conditions := make(map[string]*condition, len(spec.Steps))
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
 		if step.Condition == nil {
@@ -106,6 +109,10 @@ func Validate(spec *Spec, deps *ValidationDeps) error {
 				return codedError(ErrorCodeConditionInvalid, fmt.Sprintf("steps[%d].condition references unknown step %q", index, referenced))
 			}
 		}
+		conditions[step.ID] = parsed
+	}
+	if err := checkWebStepInputs(spec, conditions); err != nil {
+		return err
 	}
 
 	for index := range spec.Steps {
@@ -140,36 +147,15 @@ func Validate(spec *Spec, deps *ValidationDeps) error {
 	return nil
 }
 
-func validateExecutor(step *StepSpec, deps *ValidationDeps, ids map[string]bool) error {
+func validateExecutor(step *StepSpec, deps *ValidationDeps, stepsByID map[string]*StepSpec) error {
 	field := fmt.Sprintf("step %q executor", step.ID)
 	switch step.Executor.Kind {
 	case KindAgent:
-		hasAgent := step.Executor.AgentID != nil && *step.Executor.AgentID != ""
-		if !hasAgent && len(step.Executor.RequiredCapabilities) == 0 {
-			return codedError(ErrorCodeExecutorInvalid, field+" needs agent_id or a non-empty requires list")
-		}
-		if hasAgent {
-			if err := checkDisplaySafe(field+" agent_id", *step.Executor.AgentID); err != nil {
-				return err
-			}
-		}
-		for _, capability := range step.Executor.RequiredCapabilities {
-			if err := checkDisplaySafe(field+" requires entry", capability); err != nil {
-				return err
-			}
-		}
-		if hasAgent && deps.Agents != nil {
-			agentID := *step.Executor.AgentID
-			if _, err := deps.Agents.Resolve(nil, &agentID); err != nil {
-				return codedError(ErrorCodeExecutorInvalid, field+" references unknown agent "+fmt.Sprintf("%q", agentID))
-			}
-		}
-		if deps.Agents != nil && len(step.Executor.RequiredCapabilities) > 0 {
-			if _, err := deps.Agents.Resolve(step.Executor.RequiredCapabilities, nil); err != nil {
-				return codedError(ErrorCodeExecutorInvalid, field+" requirements are not resolvable: "+err.Error())
-			}
-		}
+		return validateAgentExecutor(step, deps, field)
 	case KindTool:
+		if step.Executor.hasAgentFields() {
+			return codedError(ErrorCodeExecutorInvalid, field+" takes no agent fields")
+		}
 		if step.Executor.ToolID == nil || *step.Executor.ToolID == "" {
 			return codedError(ErrorCodeExecutorInvalid, field+" needs tool_id")
 		}
@@ -189,6 +175,9 @@ func validateExecutor(step *StepSpec, deps *ValidationDeps, ids map[string]bool)
 			return codedError(ErrorCodeSpecInvalid, field+" arguments are invalid: "+err.Error())
 		}
 	case KindWait:
+		if step.Executor.hasAgentFields() {
+			return codedError(ErrorCodeExecutorInvalid, field+" takes no agent fields")
+		}
 		if step.Executor.Event == nil || *step.Executor.Event == "" {
 			return codedError(ErrorCodeExecutorInvalid, field+" needs event")
 		}
@@ -205,15 +194,19 @@ func validateExecutor(step *StepSpec, deps *ValidationDeps, ids map[string]bool)
 			if err := checkID(field+" external_ref", *step.Executor.ExternalRef); err != nil {
 				return err
 			}
-			if !ids[*step.Executor.ExternalRef] {
+			referenced, known := stepsByID[*step.Executor.ExternalRef]
+			if !known {
 				return codedError(ErrorCodeExecutorInvalid, field+" external_ref references unknown step "+fmt.Sprintf("%q", *step.Executor.ExternalRef))
 			}
 			if !slices.Contains(step.DependsOn, *step.Executor.ExternalRef) {
 				return codedError(ErrorCodeExecutorInvalid, field+" external_ref must reference a dependency")
 			}
+			if referenced.Executor.Kind == KindAgent {
+				return codedError(ErrorCodeExecutorInvalid, field+" external_ref must not name an agent step")
+			}
 		}
 	case KindApproval:
-		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil || step.Executor.WorkflowID != nil {
+		if step.Executor.hasAgentFields() || step.Executor.ToolID != nil || step.Executor.Event != nil || step.Executor.WorkflowID != nil {
 			return codedError(ErrorCodeExecutorInvalid, field+" takes no executor extras")
 		}
 	case KindWorkflow:
@@ -223,11 +216,188 @@ func validateExecutor(step *StepSpec, deps *ValidationDeps, ids map[string]bool)
 		if err := checkID(field+" workflow", *step.Executor.WorkflowID); err != nil {
 			return err
 		}
-		if step.Executor.AgentID != nil || len(step.Executor.RequiredCapabilities) > 0 || step.Executor.ToolID != nil || step.Executor.Event != nil {
+		if step.Executor.hasAgentFields() || step.Executor.ToolID != nil || step.Executor.Event != nil {
 			return codedError(ErrorCodeExecutorInvalid, field+" takes only workflow")
 		}
 	default:
 		return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("%s kind %q is not agent, tool, wait, approval, or workflow", field, step.Executor.Kind))
+	}
+	return nil
+}
+
+const (
+	toolReadFile  = "read_file"
+	toolListDir   = "list_dir"
+	toolWebSearch = "web_search"
+	toolWebFetch  = "web_fetch"
+
+	maxAgentPromptRunes = 2000
+)
+
+func isWorkspaceTool(toolID string) bool {
+	return toolID == toolReadFile || toolID == toolListDir
+}
+
+func isWebTool(toolID string) bool {
+	return toolID == toolWebSearch || toolID == toolWebFetch
+}
+
+func hasWebTool(step *StepSpec) bool {
+	return step.Executor.Kind == KindAgent && slices.ContainsFunc(step.Executor.Tools, isWebTool)
+}
+
+func hasWorkspaceTool(step *StepSpec) bool {
+	return step.Executor.Kind == KindAgent && slices.ContainsFunc(step.Executor.Tools, isWorkspaceTool)
+}
+
+func validateAgentExecutor(step *StepSpec, deps *ValidationDeps, field string) error {
+	executor := &step.Executor
+	if executor.ToolID != nil || len(executor.ToolArgs) != 0 || executor.Event != nil || executor.Source != nil || executor.ExternalRef != nil || executor.WorkflowID != nil {
+		return codedError(ErrorCodeExecutorInvalid, field+" takes no tool, args, event, source, external_ref or workflow")
+	}
+	if executor.AgentID == nil || *executor.AgentID == "" {
+		return codedError(ErrorCodeSpecInvalid, field+" needs agent_id")
+	}
+	agentID := *executor.AgentID
+	if err := checkDisplaySafe(field+" agent_id", agentID); err != nil {
+		return err
+	}
+	if deps.Agents != nil {
+		if _, err := deps.Agents.Resolve(nil, &agentID); err != nil {
+			return codedError(ErrorCodeExecutorInvalid, field+" references unknown agent "+fmt.Sprintf("%q", agentID))
+		}
+	}
+	if err := checkAgentPrompt(field+" prompt", executor.Prompt); err != nil {
+		return err
+	}
+	switch executor.Output {
+	case "":
+		executor.Output = OutputText
+	case OutputText, OutputJSON:
+	default:
+		return codedError(ErrorCodeExecutorInvalid, field+" output must be text or json")
+	}
+	if executor.MaxTokens == nil {
+		budget := DefaultAgentMaxTokens
+		executor.MaxTokens = &budget
+	}
+	if *executor.MaxTokens < 1 || *executor.MaxTokens > MaxAgentMaxTokens {
+		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("%s max_tokens %d must be in [1, %d]", field, *executor.MaxTokens, MaxAgentMaxTokens))
+	}
+	return checkAgentTools(field, executor.Tools)
+}
+
+func checkAgentPrompt(field, prompt string) error {
+	if strings.TrimSpace(prompt) == "" {
+		return codedError(ErrorCodeSpecInvalid, field+" must not be empty")
+	}
+	if utf8.RuneCountInString(prompt) > maxAgentPromptRunes {
+		return codedError(ErrorCodeSpecInvalid, fmt.Sprintf("%s is longer than %d characters", field, maxAgentPromptRunes))
+	}
+	return checkDisplaySafe(field, strings.ReplaceAll(prompt, "\n", ""))
+}
+
+func checkAgentTools(field string, declared []string) error {
+	for _, toolID := range declared {
+		if !isWorkspaceTool(toolID) && !isWebTool(toolID) {
+			return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("%s tools entry %q is not read_file, list_dir, web_search or web_fetch", field, tools.EscapeDisplayText(toolID)))
+		}
+	}
+	if slices.ContainsFunc(declared, isWorkspaceTool) && slices.ContainsFunc(declared, isWebTool) {
+		return codedError(ErrorCodeExecutorInvalid, field+" tools may name workspace tools or web tools, never both")
+	}
+	return nil
+}
+
+type stepLabels struct {
+	private    map[string]bool
+	influenced map[string]bool
+}
+
+func computeStepLabels(spec *Spec, conditions map[string]*condition) *stepLabels {
+	labels := &stepLabels{private: make(map[string]bool, len(spec.Steps)), influenced: make(map[string]bool, len(spec.Steps))}
+	for changed := true; changed; {
+		changed = false
+		for index := range spec.Steps {
+			step := &spec.Steps[index]
+			if !labels.private[step.ID] && labels.isPrivate(step) {
+				labels.private[step.ID] = true
+				changed = true
+			}
+			if !labels.influenced[step.ID] && labels.isInfluenced(step, conditions[step.ID]) {
+				labels.influenced[step.ID] = true
+				changed = true
+			}
+		}
+	}
+	return labels
+}
+
+func (l *stepLabels) isPrivate(step *StepSpec) bool {
+	switch step.Executor.Kind {
+	case KindTool:
+		return !isWebTool(deref(step.Executor.ToolID))
+	case KindAgent:
+		return hasWorkspaceTool(step) || slices.ContainsFunc(step.DependsOn, func(dependency string) bool { return l.private[dependency] })
+	default:
+		return false
+	}
+}
+
+func (l *stepLabels) isInfluenced(step *StepSpec, parsed *condition) bool {
+	if slices.ContainsFunc(step.DependsOn, func(dependency string) bool { return l.influenced[dependency] }) {
+		return true
+	}
+	if parsed == nil {
+		return false
+	}
+	return slices.ContainsFunc(parsed.references(), func(ref *refOperand) bool {
+		return l.influenced[ref.stepID] || (ref.field == "output" && l.private[ref.stepID])
+	})
+}
+
+func (c *condition) references() []*refOperand {
+	var refs []*refOperand
+	for index := range c.comparisons {
+		for _, side := range []*operand{&c.comparisons[index].left, &c.comparisons[index].right} {
+			if side.ref != nil {
+				refs = append(refs, side.ref)
+			}
+		}
+	}
+	return refs
+}
+
+func checkWebStepInputs(spec *Spec, conditions map[string]*condition) error {
+	hasWeb := false
+	for index := range spec.Steps {
+		hasWeb = hasWeb || hasWebTool(&spec.Steps[index])
+	}
+	if !hasWeb {
+		return nil
+	}
+	labels := computeStepLabels(spec, conditions)
+	for index := range spec.Steps {
+		step := &spec.Steps[index]
+		if !hasWebTool(step) {
+			continue
+		}
+		field := fmt.Sprintf("step %q executor", step.ID)
+		for _, dependency := range step.DependsOn {
+			if labels.private[dependency] {
+				return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("%s uses web tools and cannot depend on private step %q", field, dependency))
+			}
+		}
+		if conditions[step.ID] != nil {
+			for _, ref := range conditions[step.ID].references() {
+				if labels.private[ref.stepID] {
+					return codedError(ErrorCodeExecutorInvalid, fmt.Sprintf("%s uses web tools and its condition cannot read private step %q", field, ref.stepID))
+				}
+			}
+		}
+		if labels.influenced[step.ID] {
+			return codedError(ErrorCodeExecutorInvalid, field+" uses web tools and cannot be influenced by a private step through its dependencies or condition")
+		}
 	}
 	return nil
 }

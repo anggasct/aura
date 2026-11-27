@@ -97,7 +97,7 @@ func TestDriveSerialRunsMixedWorkflow(t *testing.T) {
 	spec := &Spec{
 		ID: "serial-mixed", Goal: "Serial mixed", Version: 1, Source: SourceDefined,
 		Steps: []StepSpec{
-			{ID: "implement", Executor: ExecutorSpec{Kind: KindAgent, AgentID: ptr("engineer")}, Timeout: 5 * time.Second},
+			{ID: "implement", Executor: agentExecutor("engineer"), Timeout: 5 * time.Second},
 			{ID: "record", DependsOn: []string{"implement"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: &tool}, Timeout: 5 * time.Second},
 			{ID: "approve", DependsOn: []string{"record"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
 			{

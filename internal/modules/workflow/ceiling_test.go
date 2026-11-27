@@ -362,3 +362,214 @@ func TestTheCeilingChecksFailClosedWithoutTheirDependencies(t *testing.T) {
 		}
 	})
 }
+
+func agentCeilingRegistry(t *testing.T) *auraagent.Registry {
+	t.Helper()
+	listing := []string{"read_file", "web_fetch"}
+	overrides := []auraagent.Persona{
+		{ID: "gate", Description: "lists both", Instructions: "work", Audience: auraagent.AudiencePublic, Tools: listing, PrincipalTools: listing, PublicTools: listing},
+		{ID: "reader", Description: "lists one", Instructions: "work", Audience: auraagent.AudiencePublic, Tools: []string{"read_file"}, PrincipalTools: []string{"read_file"}, PublicTools: []string{"read_file"}},
+		{ID: "inner", Description: "owner only", Instructions: "work", Audience: auraagent.AudienceOwner, Tools: listing},
+	}
+	known := []string{"read_file", "write_file", "exec", "list_dir", "web_fetch", "web_search", "github_comment"}
+	registry, err := auraagent.Build(overrides, known, ceilingTestCatalog(), []string{"primary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return registry
+}
+
+func agentCeilingSpec(stepPersona string, toolIDs ...string) *Spec {
+	return &Spec{ID: "gen_agent_ceiling", Goal: "Check the ceiling", Version: 1, Source: SourceGenerated, Steps: []StepSpec{
+		{ID: "think", Executor: ExecutorSpec{Kind: KindAgent, AgentID: &stepPersona, Prompt: "Think.", Tools: toolIDs}, Timeout: time.Minute},
+	}}
+}
+
+func TestCheckCeilingAgentSteps(t *testing.T) {
+	registry := agentCeilingRegistry(t)
+	deps := &ValidationDeps{Agents: registry, StepAllowed: registryStepAllowed(registry)}
+	cases := []struct {
+		name        string
+		runPersona  string
+		stepPersona string
+		tools       []string
+		classes     []principal.Class
+		wantCode    ErrorCode
+	}{
+		{name: "both personas allow the tool", runPersona: "gate", stepPersona: "gate", tools: []string{"web_fetch"}, classes: allClasses()},
+		{name: "a tool-free step needs only the persona", runPersona: "reader", stepPersona: "gate", classes: allClasses()},
+		{name: "the run persona does not allow the tool", runPersona: "reader", stepPersona: "gate", tools: []string{"web_fetch"}, classes: allClasses(), wantCode: ErrorCodeCapabilityExceeded},
+		{name: "the step persona does not allow the tool", runPersona: "gate", stepPersona: "reader", tools: []string{"web_fetch"}, classes: allClasses(), wantCode: ErrorCodeCapabilityExceeded},
+		{name: "the step persona does not admit the class", runPersona: "gate", stepPersona: "inner", tools: []string{"web_fetch"}, classes: []principal.Class{principal.ClassTrusted, principal.ClassPublic}, wantCode: ErrorCodeNotPermitted},
+		{name: "a tool-free step still needs a persona that admits the class", runPersona: "gate", stepPersona: "inner", classes: []principal.Class{principal.ClassTrusted, principal.ClassPublic}, wantCode: ErrorCodeNotPermitted},
+		{name: "an owner-only step persona serves the owner", runPersona: "gate", stepPersona: "inner", tools: []string{"web_fetch"}, classes: []principal.Class{principal.ClassOwner}},
+		{name: "an unknown step persona", runPersona: "gate", stepPersona: "ghost", tools: []string{"web_fetch"}, classes: allClasses(), wantCode: ErrorCodePersonaMissing},
+		{name: "an unknown run persona", runPersona: "ghost", stepPersona: "gate", tools: []string{"web_fetch"}, classes: allClasses(), wantCode: ErrorCodePersonaMissing},
+	}
+	for _, tc := range cases {
+		for _, class := range tc.classes {
+			t.Run(tc.name+" for "+string(class), func(t *testing.T) {
+				err := CheckCeiling(agentCeilingSpec(tc.stepPersona, tc.tools...), tc.runPersona, class, deps)
+				if tc.wantCode == "" {
+					if err != nil {
+						t.Fatalf("CheckCeiling = %v, want nil", err)
+					}
+					return
+				}
+				if !hasCode(err, tc.wantCode) {
+					t.Fatalf("CheckCeiling = %v, want %s", err, tc.wantCode)
+				}
+			})
+		}
+	}
+	t.Run("a step with tools and no ceiling predicate is refused", func(t *testing.T) {
+		err := CheckCeiling(agentCeilingSpec("gate", "web_fetch"), "gate", principal.ClassOwner, &ValidationDeps{Agents: registry})
+		if !hasCode(err, ErrorCodeCapabilityExceeded) {
+			t.Fatalf("CheckCeiling = %v, want %s", err, ErrorCodeCapabilityExceeded)
+		}
+	})
+	t.Run("a step without a persona registry is refused", func(t *testing.T) {
+		err := CheckCeiling(agentCeilingSpec("gate"), "gate", principal.ClassOwner, &ValidationDeps{StepAllowed: registryStepAllowed(registry)})
+		if !hasCode(err, ErrorCodePersonaMissing) {
+			t.Fatalf("CheckCeiling = %v, want %s", err, ErrorCodePersonaMissing)
+		}
+	})
+}
+
+func allClasses() []principal.Class {
+	return []principal.Class{principal.ClassOwner, principal.ClassTrusted, principal.ClassPublic}
+}
+
+func agentLeafSpec(id, persona string, toolIDs ...string) *Spec {
+	spec := agentCeilingSpec(persona, toolIDs...)
+	spec.ID = id
+	spec.Source = SourceDefined
+	return spec
+}
+
+func TestAdmitRunChecksComposedAgentSteps(t *testing.T) {
+	runner := &fakeToolRunner{}
+	interpreter, _, disk := driverTestSetup(t, runner, DriverConcurrent)
+	deps := testValidationDeps()
+	deps.StepAllowed = personaTools(map[string][]string{"main": {"web_fetch"}, "engineer": {"read_file"}})
+	if err := interpreter.Install(t.Context(), []*Spec{agentLeafSpec("leaf", "engineer", "web_fetch"), composingSpec("top", "leaf")}, deps); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	for _, id := range []string{"leaf", "top"} {
+		_, err := interpreter.Start(t.Context(), id, nil, ownerOrigin())
+		if !hasCode(err, ErrorCodeCapabilityExceeded) || !strings.Contains(err.Error(), `"think"`) {
+			t.Fatalf("Start(%s) = %v, want %s naming the agent step", id, err, ErrorCodeCapabilityExceeded)
+		}
+	}
+	if got := countRuns(t, disk); got != 0 {
+		t.Fatalf("%d run rows written, want none", got)
+	}
+	if got := countRunSessions(t, disk); got != 0 {
+		t.Fatalf("%d run sessions written, want none", got)
+	}
+}
+
+func TestCompileProposalChecksAgentSteps(t *testing.T) {
+	registry := agentCeilingRegistry(t)
+	cases := []struct {
+		name        string
+		persona     string
+		stepPersona string
+		tools       []string
+		wantCode    ErrorCode
+	}{
+		{name: "both personas allow the tool", persona: "gate", stepPersona: "gate", tools: []string{"web_fetch"}},
+		{name: "the proposing persona does not allow the tool", persona: "reader", stepPersona: "gate", tools: []string{"web_fetch"}, wantCode: ErrorCodeCapabilityExceeded},
+		{name: "the step persona does not allow the tool", persona: "gate", stepPersona: "reader", tools: []string{"web_fetch"}, wantCode: ErrorCodeCapabilityExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := testValidationDeps()
+			deps.Agents = registry
+			deps.StepAllowed = registryStepAllowed(registry)
+			interpreter := freshInterpreter(t)
+			if err := interpreter.LoadAll(t.Context(), nil, deps); err != nil {
+				t.Fatalf("LoadAll: %v", err)
+			}
+			spec := NormalizeProposal(agentCeilingSpec(tc.stepPersona, tc.tools...), "prop_agent")
+			_, err := interpreter.CompileProposal(spec, tc.persona)
+			if tc.wantCode == "" {
+				if err != nil {
+					t.Fatalf("CompileProposal = %v, want nil", err)
+				}
+				return
+			}
+			if !hasCode(err, tc.wantCode) {
+				t.Fatalf("CompileProposal = %v, want %s", err, tc.wantCode)
+			}
+		})
+	}
+}
+
+func TestRunAsLoadChecksAgentSteps(t *testing.T) {
+	registry := agentCeilingRegistry(t)
+	cases := []struct {
+		name        string
+		runAs       string
+		stepPersona string
+		wantCode    ErrorCode
+	}{
+		{name: "both personas allow the tool", runAs: "gate", stepPersona: "gate"},
+		{name: "the run_as persona does not allow the tool", runAs: "reader", stepPersona: "gate", wantCode: ErrorCodeCapabilityExceeded},
+		{name: "the step persona does not allow the tool", runAs: "gate", stepPersona: "reader", wantCode: ErrorCodeCapabilityExceeded},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			deps := testValidationDeps()
+			deps.Agents = registry
+			deps.StepAllowed = registryStepAllowed(registry)
+			spec := agentLeafSpec("declared", tc.stepPersona, "web_fetch")
+			spec.RunAs = tc.runAs
+			_, err := Compile(spec, deps)
+			installErr := freshInterpreter(t).Install(t.Context(), []*Spec{agentLeafSpec("declared", tc.stepPersona, "web_fetch")}, deps)
+			runAsInstall := agentLeafSpec("declared", tc.stepPersona, "web_fetch")
+			runAsInstall.RunAs = tc.runAs
+			loadErr := freshInterpreter(t).Install(t.Context(), []*Spec{runAsInstall}, deps)
+			if tc.wantCode == "" {
+				if err != nil || installErr != nil || loadErr != nil {
+					t.Fatalf("Compile = %v, Install = %v, Install with run_as = %v, want nil", err, installErr, loadErr)
+				}
+				return
+			}
+			if !hasCode(err, tc.wantCode) || !hasCode(loadErr, tc.wantCode) {
+				t.Fatalf("Compile = %v, Install with run_as = %v, want %s", err, loadErr, tc.wantCode)
+			}
+			if installErr != nil {
+				t.Fatalf("Install without run_as = %v, want it unchecked until a start", installErr)
+			}
+		})
+	}
+}
+
+func TestTrustedOriginRunRunsAgentStepWithinBothCeilings(t *testing.T) {
+	interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
+	deps := testValidationDeps()
+	deps.StepAllowed = personaTools(map[string][]string{"lobby": {"read_file"}, "engineer": {"read_file"}})
+	spec := agentLeafSpec("lookup", "lobby", "read_file")
+	if err := interpreter.Install(t.Context(), []*Spec{spec}, deps); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	origin := &RunOrigin{PrincipalID: "discord:111", PrincipalClass: "trusted", AgentID: "lobby"}
+	summary, err := interpreter.Start(t.Context(), "lookup", nil, origin)
+	if err != nil {
+		t.Fatalf("Start = %v, want a trusted run within both ceilings to start", err)
+	}
+	waitForRunStatus(t, disk, summary.ID, RunSucceeded, 5*time.Second)
+	if err := interpreter.Install(t.Context(), []*Spec{agentLeafSpec("wide", "lobby", "web_fetch")}, deps); err != nil {
+		t.Fatalf("Install wide: %v", err)
+	}
+	if _, err := interpreter.Start(t.Context(), "wide", nil, origin); !hasCode(err, ErrorCodeCapabilityExceeded) {
+		t.Fatalf("Start with a tool outside both ceilings = %v, want %s", err, ErrorCodeCapabilityExceeded)
+	}
+	if err := interpreter.Install(t.Context(), []*Spec{agentLeafSpec("owner_only", "engineer", "read_file")}, deps); err != nil {
+		t.Fatalf("Install owner_only: %v", err)
+	}
+	if _, err := interpreter.Start(t.Context(), "owner_only", nil, origin); !hasCode(err, ErrorCodeNotPermitted) {
+		t.Fatalf("Start with a step persona that does not serve the class = %v, want %s", err, ErrorCodeNotPermitted)
+	}
+}
