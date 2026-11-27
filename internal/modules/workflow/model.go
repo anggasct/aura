@@ -121,9 +121,32 @@ type RunOrigin struct {
 	PrincipalClass string
 	AgentID        string
 	SessionID      string
-	ReplyAccount   string
-	ReplyChannelID string
+	Reply          ReplyTarget
 	Tainted        bool
+}
+
+type ReplyTarget struct {
+	Channel   string
+	Account   string
+	ChannelID string
+	ThreadID  string
+}
+
+func (t *ReplyTarget) IsZero() bool {
+	return t.Channel == "" && t.Account == "" && t.ChannelID == "" && t.ThreadID == ""
+}
+
+func (t *ReplyTarget) Validate() error {
+	if t.IsZero() {
+		return nil
+	}
+	if t.Channel != principal.ChannelDiscord && t.Channel != principal.ChannelTelegram {
+		return codedError(ErrorCodeInvalidArgument, "reply target channel must be discord or telegram")
+	}
+	if t.Account == "" || t.ChannelID == "" {
+		return codedError(ErrorCodeInvalidArgument, "reply target needs a channel, an account and a channel id together")
+	}
+	return nil
 }
 
 func (o *RunOrigin) Complete() bool {

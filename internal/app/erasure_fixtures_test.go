@@ -170,8 +170,8 @@ func seedWorkflowDefinition(t *testing.T, db *sql.DB, id string) {
 
 func seedWorkflowRun(t *testing.T, db *sql.DB, run *seededRun) {
 	t.Helper()
-	if _, err := db.ExecContext(t.Context(), `INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, reply_account, reply_channel_id, parent_run_id)
-		VALUES (?1, ?2, 1, NULLIF(?3, ''), 'goal', '{"objective":"private"}', ?4, ?5, ?5, ?6, 'trusted', 'main', NULLIF(?7, ''), 'acct', 'chan', NULLIF(?8, ''))`,
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO workflow_run (id, definition_id, definition_version, durable_key, goal, input_json, status, created_at, updated_at, principal_id, principal_class, agent_id, origin_session_id, reply_channel, reply_account, reply_channel_id, reply_thread_id, parent_run_id)
+		VALUES (?1, ?2, 1, NULLIF(?3, ''), 'goal', '{"objective":"private"}', ?4, ?5, ?5, ?6, 'trusted', 'main', NULLIF(?7, ''), 'discord', 'acct', 'chan', 'topic', NULLIF(?8, ''))`,
 		run.id, run.definition, run.durableKey, run.status, erasureWorkflowStamp, run.principal, run.originSession, run.parent); err != nil {
 		t.Fatalf("seed run %s: %v", run.id, err)
 	}
@@ -186,8 +186,8 @@ func seedWorkflowRun(t *testing.T, db *sql.DB, run *seededRun) {
 func seedProposalApproval(t *testing.T, db *sql.DB, proposal, session, definition string) {
 	t.Helper()
 	ctx := t.Context()
-	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at)
-		VALUES (?, ?, 'main', 'local-owner', '{}', 'digest', 'approved', ?)`, proposal, session, erasureWorkflowStamp); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, reply_channel, reply_account, reply_channel_id, reply_thread_id)
+		VALUES (?, ?, 'main', 'local-owner', '{}', 'digest', 'approved', ?, 'telegram', 'pocket', '5', '7')`, proposal, session, erasureWorkflowStamp); err != nil {
 		t.Fatalf("seed proposal %s: %v", proposal, err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_approval (definition_id, definition_version, spec_sha256, kind, agent_id, approver_id, proposal_id, approved_at)

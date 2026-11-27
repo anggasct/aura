@@ -19,14 +19,14 @@ func seedMigrationSession(t *testing.T, db *sql.DB, sessionID, ownerID string) {
 
 func TestWorkflowApprovalBaselineConstraints(t *testing.T) {
 	ctx := t.Context()
-	migrations, err := sqlite.Baseline(turnstore.Schema(), Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), Schema())
 	if err != nil {
-		t.Fatalf("Baseline: %v", err)
+		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
-	if err != nil || applied != 2 || latest != 2 {
-		t.Fatalf("schema = applied %d latest %d %v, want 2", applied, latest, err)
+	if err != nil || applied != replyTargetStepVersion || latest != replyTargetStepVersion {
+		t.Fatalf("schema = applied %d latest %d %v, want %d", applied, latest, err, replyTargetStepVersion)
 	}
 	seedMigrationSession(t, db, "sess-1", "owner-1")
 	for version := 1; version <= 12; version++ {

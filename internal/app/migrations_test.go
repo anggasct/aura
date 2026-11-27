@@ -414,7 +414,7 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
 	wantTriggers := listSchemaObjectsByType(t, wantDB, "trigger")
-	if len(gotTriggers) != 10 || !slices.Equal(gotTriggers, wantTriggers) {
+	if len(gotTriggers) != 12 || !slices.Equal(gotTriggers, wantTriggers) {
 		t.Fatalf("triggers (%d vs %d): got=%v want=%v", len(gotTriggers), len(wantTriggers), gotTriggers, wantTriggers)
 	}
 
@@ -489,12 +489,20 @@ func assertTableFKParentsExist(t *testing.T, db *sql.DB, version int, owner, tab
 
 func TestAll22OwnersRegisteredAndForeignKeysValid(t *testing.T) {
 	owners := Schemas()
-	if len(owners) != 22 {
-		t.Fatalf("len(Schemas()) = %d, want 22", len(owners))
+	wantOwners := []string{
+		"turn", "durable", "effect", "usage", "principal", "model", "storage", "webhook", "knowledge", "memory", "profile",
+		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email",
+	}
+	gotOwners := make([]string, 0, len(owners))
+	for _, owner := range owners {
+		gotOwners = append(gotOwners, owner.SchemaName())
+	}
+	if !slices.Equal(gotOwners, wantOwners) {
+		t.Fatalf("Schemas() owners = %v, want %v", gotOwners, wantOwners)
 	}
 	migrations := Migrations()
-	if len(migrations) != 22 {
-		t.Fatalf("len(Migrations()) = %d, want 22", len(migrations))
+	if want := len(wantOwners) + len(incrementalSteps(t)); len(migrations) != want {
+		t.Fatalf("len(Migrations()) = %d, want %d", len(migrations), want)
 	}
 
 	ctx := t.Context()
@@ -872,5 +880,171 @@ func TestMigrateRejectsVersionAboveBinary(t *testing.T) {
 	err := sqlite.Migrate(t.Context(), db, migrations)
 	if !fault.HasCode(err, sqlite.ErrorCodeMigrationSequenceInvalid) {
 		t.Fatalf("Migrate = %v, want %s", err, sqlite.ErrorCodeMigrationSequenceInvalid)
+	}
+}
+
+func incrementalSteps(t *testing.T) []sqlite.Migration {
+	t.Helper()
+	var steps []sqlite.Migration
+	for _, owner := range Schemas() {
+		for _, step := range owner.SchemaSteps() {
+			steps = append(steps, sqlite.Migration{Version: step.Version, Owner: owner.SchemaName(), SQL: step.SQL})
+		}
+	}
+	slices.SortFunc(steps, func(a, b sqlite.Migration) int { return a.Version - b.Version })
+	return steps
+}
+
+func TestIncrementalStepsAreUniqueAndContiguous(t *testing.T) {
+	steps := incrementalSteps(t)
+	if len(steps) < 1 {
+		t.Fatal("no owner declares an incremental step")
+	}
+	baselines := len(Schemas())
+	for i, step := range steps {
+		if want := baselines + 1 + i; step.Version != want {
+			t.Fatalf("step %d (%s) has version %d, want %d: pinned versions must be unique and contiguous from %d", i, step.Owner, step.Version, want, baselines+1)
+		}
+	}
+	history := Migrations()
+	if tail := history[baselines:]; !slices.Equal(tail, steps) {
+		t.Fatalf("Migrations() does not end with the owners' steps in version order: %+v", tail)
+	}
+}
+
+type replyTargetRow struct {
+	channel, account, channelID, threadID sql.NullString
+}
+
+const (
+	runTargetQuery      = `SELECT reply_channel, reply_account, reply_channel_id, reply_thread_id FROM workflow_run WHERE id = ?`
+	proposalTargetQuery = `SELECT reply_channel, reply_account, reply_channel_id, reply_thread_id FROM workflow_proposal WHERE id = ?`
+)
+
+func readReplyTarget(t *testing.T, row *sql.Row) replyTargetRow {
+	t.Helper()
+	var target replyTargetRow
+	if err := row.Scan(&target.channel, &target.account, &target.channelID, &target.threadID); err != nil {
+		t.Fatalf("read reply target: %v", err)
+	}
+	return target
+}
+
+func TestReplyTargetStepBackfillsAndConstrains(t *testing.T) {
+	ctx := t.Context()
+	history := Migrations()
+	const baselines = 22
+	db, err := sqlite.Open(ctx, filepath.Join(t.TempDir(), "reply-target.db"), sqlite.Options{})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	if err := sqlite.Migrate(ctx, db, history[:baselines]); err != nil {
+		t.Fatalf("Migrate baselines: %v", err)
+	}
+	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES ('wf', 1, 'goal', 'defined', '{}', 'digest', '2026-11-27T09:00:00Z')`); err != nil {
+		t.Fatalf("seed definition: %v", err)
+	}
+	for _, run := range []struct{ id, account, channelID string }{
+		{"run-full", "front", "333"},
+		{"run-account-only", "front", ""},
+		{"run-empty", "", ""},
+	} {
+		if _, err := db.ExecContext(ctx, `INSERT INTO workflow_run (id, definition_id, definition_version, goal, input_json, status, created_at, updated_at, reply_account, reply_channel_id)
+			VALUES (?1, 'wf', 1, 'goal', '{}', 'succeeded', '2026-11-27T09:00:00Z', '2026-11-27T09:00:00Z', NULLIF(?2, ''), NULLIF(?3, ''))`, run.id, run.account, run.channelID); err != nil {
+			t.Fatalf("seed %s: %v", run.id, err)
+		}
+	}
+	if err := sqlite.Migrate(ctx, db, history); err != nil {
+		t.Fatalf("Migrate step: %v", err)
+	}
+
+	backfilled := readReplyTarget(t, db.QueryRowContext(ctx, runTargetQuery, "run-full"))
+	if backfilled.channel.String != "discord" || backfilled.account.String != "front" || backfilled.channelID.String != "333" || backfilled.threadID.Valid {
+		t.Fatalf("a Discord target was not backfilled: %+v", backfilled)
+	}
+	for _, id := range []string{"run-account-only", "run-empty"} {
+		if got := readReplyTarget(t, db.QueryRowContext(ctx, runTargetQuery, id)); got != (replyTargetRow{}) {
+			t.Fatalf("%s kept a partial or empty target: %+v", id, got)
+		}
+	}
+
+	seedPersonaSession(t, db, "ops/session", "local-owner", "ops")
+	const insertRun = `INSERT INTO workflow_run (id, definition_id, definition_version, goal, input_json, status, created_at, updated_at, reply_channel, reply_account, reply_channel_id, reply_thread_id)
+		VALUES (?1, 'wf', 1, 'goal', '{}', 'queued', '2026-11-27T09:00:00Z', '2026-11-27T09:00:00Z', NULLIF(?2, ''), NULLIF(?3, ''), NULLIF(?4, ''), NULLIF(?5, ''))`
+	const insertProposal = `INSERT INTO workflow_proposal (id, session_id, agent_id, principal_id, spec_json, spec_sha256, status, created_at, reply_channel, reply_account, reply_channel_id, reply_thread_id)
+		VALUES (?1, 'ops/session', 'ops', 'local-owner', '{}', 'digest', 'proposed', '2026-11-27T09:00:00Z', NULLIF(?2, ''), NULLIF(?3, ''), NULLIF(?4, ''), NULLIF(?5, ''))`
+
+	partial := []struct {
+		name                                  string
+		channel, account, channelID, threadID string
+		runCode                               sqlite.ErrorCode
+	}{
+		{"channel without account", "discord", "", "333", "", sqlite.ErrorCodeConstraintCheck},
+		{"channel without channel id", "telegram", "pocket", "", "", sqlite.ErrorCodeConstraintCheck},
+		{"thread without channel", "", "", "", "7", sqlite.ErrorCodeConstraintCheck},
+		{"account without channel", "", "pocket", "", "", sqlite.ErrorCodeConstraint},
+		{"channel id without channel", "", "", "333", "", sqlite.ErrorCodeConstraint},
+		{"unsupported channel", "email", "mail", "guest", "", sqlite.ErrorCodeConstraintCheck},
+	}
+	for _, tc := range partial {
+		t.Run("run insert refuses "+tc.name, func(t *testing.T) {
+			_, err := db.ExecContext(ctx, insertRun, "run-bad", tc.channel, tc.account, tc.channelID, tc.threadID)
+			if !fault.HasCode(sqlite.Classify(err), tc.runCode) {
+				t.Fatalf("insert = %v, want %s", err, tc.runCode)
+			}
+		})
+		t.Run("proposal insert refuses "+tc.name, func(t *testing.T) {
+			_, err := db.ExecContext(ctx, insertProposal, "prop-bad", tc.channel, tc.account, tc.channelID, tc.threadID)
+			if !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
+				t.Fatalf("insert = %v, want %s", err, sqlite.ErrorCodeConstraintCheck)
+			}
+		})
+	}
+
+	updates := []struct {
+		name, statement string
+		code            sqlite.ErrorCode
+	}{
+		{"channel without account", `UPDATE workflow_run SET reply_channel = 'discord', reply_channel_id = '333' WHERE id = 'run-empty'`, sqlite.ErrorCodeConstraintCheck},
+		{"channel without channel id", `UPDATE workflow_run SET reply_channel = 'telegram', reply_account = 'pocket' WHERE id = 'run-empty'`, sqlite.ErrorCodeConstraintCheck},
+		{"thread without channel", `UPDATE workflow_run SET reply_thread_id = '7' WHERE id = 'run-empty'`, sqlite.ErrorCodeConstraintCheck},
+		{"account without channel", `UPDATE workflow_run SET reply_account = 'pocket' WHERE id = 'run-empty'`, sqlite.ErrorCodeConstraint},
+		{"channel id without channel", `UPDATE workflow_run SET reply_channel_id = '333' WHERE id = 'run-empty'`, sqlite.ErrorCodeConstraint},
+		{"channel cleared under an account", `UPDATE workflow_run SET reply_channel = NULL WHERE id = 'run-full'`, sqlite.ErrorCodeConstraint},
+		{"unsupported channel", `UPDATE workflow_run SET reply_channel = 'email' WHERE id = 'run-full'`, sqlite.ErrorCodeConstraintCheck},
+	}
+	for _, tc := range updates {
+		t.Run("run update refuses "+tc.name, func(t *testing.T) {
+			_, err := db.ExecContext(ctx, tc.statement)
+			if !fault.HasCode(sqlite.Classify(err), tc.code) {
+				t.Fatalf("update = %v, want %s", err, tc.code)
+			}
+		})
+	}
+	if got := readReplyTarget(t, db.QueryRowContext(ctx, runTargetQuery, "run-empty")); got != (replyTargetRow{}) {
+		t.Fatalf("a refused update changed the run: %+v", got)
+	}
+
+	for _, tc := range []struct {
+		name, channel, account, channelID, threadID string
+	}{
+		{"without a thread", "discord", "front", "333", ""},
+		{"with a topic", "telegram", "pocket", "-1001234567890", "7"},
+		{"empty", "", "", "", ""},
+	} {
+		t.Run("complete target "+tc.name, func(t *testing.T) {
+			id := "ok-" + strings.ReplaceAll(tc.name, " ", "-")
+			if _, err := db.ExecContext(ctx, insertRun, "run-"+id, tc.channel, tc.account, tc.channelID, tc.threadID); err != nil {
+				t.Fatalf("run insert: %v", err)
+			}
+			if _, err := db.ExecContext(ctx, insertProposal, "prop-"+id, tc.channel, tc.account, tc.channelID, tc.threadID); err != nil {
+				t.Fatalf("proposal insert: %v", err)
+			}
+			want := readReplyTarget(t, db.QueryRowContext(ctx, runTargetQuery, "run-"+id))
+			if got := readReplyTarget(t, db.QueryRowContext(ctx, proposalTargetQuery, "prop-"+id)); got != want || want.channel.String != tc.channel || want.threadID.String != tc.threadID {
+				t.Fatalf("stored targets differ: run %+v proposal %+v", want, got)
+			}
+		})
 	}
 }

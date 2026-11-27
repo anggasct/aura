@@ -26,6 +26,7 @@ type proposalHarness struct {
 	registry    *auraagent.Registry
 	showCall    workflow.ToolCallText
 	cfg         *appconfig.Config
+	targets     []workflow.ReplyTargeter
 	owner       *workflow.Caller
 	db          *sql.DB
 }
@@ -36,6 +37,7 @@ func (h *proposalHarness) rebuildController(t *testing.T, offerers ...workflow.P
 		Interpreter: h.interpreter,
 		Runs:        h.runs,
 		Registry:    h.registry,
+		Targets:     h.targets,
 		Offerers:    offerers,
 		ShowCall:    h.showCall,
 		Logger:      slog.New(slog.DiscardHandler),

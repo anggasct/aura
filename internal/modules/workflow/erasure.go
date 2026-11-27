@@ -155,7 +155,7 @@ func (e *Eraser) ErasePrincipal(ctx context.Context, state *principal.ErasureSta
 			return fmt.Errorf("encode owned sessions: %w", err)
 		}
 		if _, err := q.ExecContext(ctx,
-			`UPDATE workflow_run SET origin_session_id = NULL, reply_account = NULL, reply_channel_id = NULL
+			`UPDATE workflow_run SET origin_session_id = NULL, reply_channel = NULL, reply_account = NULL, reply_channel_id = NULL, reply_thread_id = NULL
 			WHERE principal_id IS NOT ?1 AND origin_session_id IN (SELECT value FROM json_each(?2))`,
 			principalID, string(encoded),
 		); err != nil {

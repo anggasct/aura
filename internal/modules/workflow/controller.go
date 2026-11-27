@@ -59,7 +59,7 @@ type RoutineSummary struct {
 }
 
 type ReplyTargeter interface {
-	DiscordReplyTarget(sessionID string) (account, channelID string, ok bool)
+	ReplyTarget(sessionID string) (ReplyTarget, bool)
 }
 
 type ProposalCard struct {
@@ -255,17 +255,21 @@ func (c *Controller) Start(ctx context.Context, caller *Caller, id, objective st
 	origin := &RunOrigin{
 		PrincipalID: caller.PrincipalID, PrincipalClass: string(caller.PrincipalClass), AgentID: caller.AgentID, SessionID: caller.SessionID, Tainted: caller.Tainted,
 	}
-	for _, targeter := range c.targets {
-		if account, channelID, ok := targeter.DiscordReplyTarget(caller.SessionID); ok {
-			origin.ReplyAccount, origin.ReplyChannelID = account, channelID
-			break
-		}
-	}
+	origin.Reply = c.replyTarget(caller.SessionID)
 	summary, err := c.interpreter.Start(ctx, id, &RunInput{Objective: strings.TrimSpace(objective)}, origin)
 	if err != nil {
 		return RunState{}, err
 	}
 	return RunState{RunID: summary.ID, WorkflowID: summary.DefinitionID, Status: summary.Status}, nil
+}
+
+func (c *Controller) replyTarget(sessionID string) ReplyTarget {
+	for _, targeter := range c.targets {
+		if target, ok := targeter.ReplyTarget(sessionID); ok {
+			return target
+		}
+	}
+	return ReplyTarget{}
 }
 
 func (c *Controller) visibleRun(ctx context.Context, caller *Caller, runID string) (*RunSummary, error) {
@@ -350,7 +354,7 @@ func (c *Controller) Propose(ctx context.Context, caller *Caller, raw json.RawMe
 		return ProposalSummary{}, err
 	}
 	if err := c.runs.CreateProposal(ctx, &Proposal{
-		ID: id, SessionID: caller.SessionID, AgentID: caller.AgentID, PrincipalID: caller.PrincipalID, Tainted: caller.Tainted,
+		ID: id, SessionID: caller.SessionID, AgentID: caller.AgentID, PrincipalID: caller.PrincipalID, Reply: c.replyTarget(caller.SessionID), Tainted: caller.Tainted,
 		Spec: normalized, PlanText: plan, Digest: digest, CreatedAt: c.now().UTC(),
 	}); err != nil {
 		return ProposalSummary{}, err

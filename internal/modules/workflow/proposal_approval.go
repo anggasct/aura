@@ -123,7 +123,7 @@ func approveOnStoredPlan(ctx context.Context, interpreter *Interpreter, runs *St
 		return "", err
 	}
 	summary, err := interpreter.StartApproved(ctx, id, &RunInput{}, &RunOrigin{
-		PrincipalID: proposal.PrincipalID, PrincipalClass: string(principal.ClassOwner), AgentID: proposal.AgentID, SessionID: proposal.SessionID, Tainted: proposal.Tainted,
+		PrincipalID: proposal.PrincipalID, PrincipalClass: string(principal.ClassOwner), AgentID: proposal.AgentID, SessionID: proposal.SessionID, Reply: proposal.Reply, Tainted: proposal.Tainted,
 	})
 	if err != nil {
 		return "", err

@@ -111,6 +111,25 @@ CREATE INDEX workflow_correlation_run_idx ON workflow_correlation(run_id);
 CREATE TRIGGER workflow_proposal_plan_text_immutable BEFORE UPDATE OF plan_text ON workflow_proposal WHEN NEW.plan_text IS NOT OLD.plan_text BEGIN SELECT RAISE(ABORT, 'workflow_proposal.plan_text is immutable'); END;
 `
 
+const replyTargetStepSQL = `
+ALTER TABLE workflow_run ADD COLUMN reply_channel TEXT CHECK (reply_channel IS NULL OR (reply_channel IN ('discord','telegram') AND reply_account IS NOT NULL AND reply_channel_id IS NOT NULL));
+ALTER TABLE workflow_run ADD COLUMN reply_thread_id TEXT CHECK (reply_thread_id IS NULL OR reply_channel IS NOT NULL);
+UPDATE workflow_run SET reply_account = NULL, reply_channel_id = NULL WHERE reply_account IS NULL OR reply_channel_id IS NULL;
+UPDATE workflow_run SET reply_channel = 'discord' WHERE reply_channel_id IS NOT NULL;
+CREATE TRIGGER workflow_run_reply_target_insert BEFORE INSERT ON workflow_run WHEN NEW.reply_channel IS NULL AND (NEW.reply_account IS NOT NULL OR NEW.reply_channel_id IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'workflow_run reply target is partial'); END;
+CREATE TRIGGER workflow_run_reply_target_update BEFORE UPDATE OF reply_channel, reply_account, reply_channel_id ON workflow_run WHEN NEW.reply_channel IS NULL AND (NEW.reply_account IS NOT NULL OR NEW.reply_channel_id IS NOT NULL) BEGIN SELECT RAISE(ABORT, 'workflow_run reply target is partial'); END;
+ALTER TABLE workflow_proposal ADD COLUMN reply_channel TEXT CHECK (reply_channel IS NULL OR reply_channel IN ('discord','telegram'));
+ALTER TABLE workflow_proposal ADD COLUMN reply_account TEXT;
+ALTER TABLE workflow_proposal ADD COLUMN reply_channel_id TEXT;
+ALTER TABLE workflow_proposal ADD COLUMN reply_thread_id TEXT CHECK ((reply_channel IS NULL) = (reply_account IS NULL) AND (reply_channel IS NULL) = (reply_channel_id IS NULL) AND (reply_thread_id IS NULL OR reply_channel IS NOT NULL));
+`
+
+const replyTargetStepVersion = 23
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "workflow", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "workflow",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: replyTargetStepVersion, SQL: replyTargetStepSQL}},
+	}
 }
