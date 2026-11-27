@@ -757,17 +757,18 @@ func (e *Engine) DriveTurn(ctx context.Context, inv durable.Invocation, desc *ru
 			}
 		}
 	}
-	if ctx.Err() == context.Canceled {
+	ended := &endedTurn{req: req, events: executed}
+	end := e.endOf(ctx.Err(), execErr)
+	if end.cancelled {
 		if !durable.Preempted(ctx) {
-			if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, &endedTurn{req: req, events: executed}); err != nil {
+			if err := e.journalPostTurn(context.WithoutCancel(ctx), scope, ended); err != nil {
 				e.logger.ErrorContext(ctx, "post-turn record failed", "error", err, "turn_id", req.TurnID)
 			}
 		}
 		e.closeCancelledPresence(ctx, req)
 		return ctx.Err()
 	}
-	ended := &endedTurn{req: req, events: executed}
-	final, err := e.journalFinalMessage(context.WithoutCancel(ctx), scope, ended, e.endOf(ctx.Err(), execErr))
+	final, err := e.journalFinalMessage(context.WithoutCancel(ctx), scope, ended, end)
 	if err != nil {
 		return err
 	}

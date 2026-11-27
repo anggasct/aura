@@ -5,14 +5,17 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"iter"
 	"log/slog"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -468,6 +471,133 @@ func TestCancelledTurnSendsNoFinalMessage(t *testing.T) {
 			t.Fatalf("delivered texts after the resume = %q, want the resumed answer only", got)
 		}
 	})
+}
+
+type lateCancelError struct{}
+
+func (lateCancelError) Error() string        { return "context canceled after the executor returned" }
+func (lateCancelError) Is(target error) bool { return target == context.Canceled }
+
+type lateCancelContext struct {
+	done chan struct{}
+	once sync.Once
+	racy atomic.Bool
+}
+
+func newLateCancelContext() *lateCancelContext {
+	return &lateCancelContext{done: make(chan struct{})}
+}
+
+func (c *lateCancelContext) Deadline() (time.Time, bool) { return time.Time{}, false }
+
+func (c *lateCancelContext) Done() <-chan struct{} { return c.done }
+
+func (c *lateCancelContext) Value(any) any { return nil }
+
+func (c *lateCancelContext) Err() error {
+	if c.racy.Load() {
+		return lateCancelError{}
+	}
+	return nil
+}
+
+func (c *lateCancelContext) cancel() {
+	c.once.Do(func() {
+		c.racy.Store(true)
+		close(c.done)
+	})
+}
+
+type executorCancelsLate struct {
+	inner TurnExecutor
+	late  *lateCancelContext
+}
+
+func (x *executorCancelsLate) Execute(ctx context.Context, req *turn.TurnRequest) iter.Seq2[turn.Event, error] {
+	return func(yield func(turn.Event, error) bool) {
+		for ev, err := range x.inner.Execute(ctx, req) {
+			if !yield(ev, err) {
+				return
+			}
+		}
+		x.late.cancel()
+		select {
+		case <-ctx.Done():
+		case <-time.After(hostRigTimeout):
+		}
+	}
+}
+
+type lateCancelInvocation struct {
+	payload []byte
+	mu      sync.Mutex
+	actions map[string][]byte
+}
+
+func (i *lateCancelInvocation) Run() durable.RunRef { return durable.RunRef{Key: "turn-1"} }
+
+func (i *lateCancelInvocation) Payload() []byte { return i.payload }
+
+func (i *lateCancelInvocation) Signal(context.Context, string) ([]byte, bool) { return nil, false }
+
+func (i *lateCancelInvocation) Sleep(time.Duration) error { return nil }
+
+func (i *lateCancelInvocation) Timer(time.Duration) <-chan time.Time { return make(chan time.Time) }
+
+func (i *lateCancelInvocation) Wait(context.Context, string, time.Duration) (payload []byte, timedOut, ok bool) {
+	return nil, false, false
+}
+
+func (i *lateCancelInvocation) RunAction(ctx context.Context, key string, fn func(context.Context) ([]byte, error)) ([]byte, error) {
+	i.mu.Lock()
+	if raw, ok := i.actions[key]; ok {
+		i.mu.Unlock()
+		return raw, nil
+	}
+	i.mu.Unlock()
+	raw, err := fn(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	i.actions[key] = raw
+	return raw, nil
+}
+
+func TestCancelledTurnEndAfterTheExecutorSendsNoFinalMessage(t *testing.T) {
+	capture := &capturingAdapter{}
+	hook, counter := &recordingHook{}, &recordingCounter{}
+	late := newLateCancelContext()
+	executor := &executorCancelsLate{inner: turntest.NewFakeExecutor([]turntest.FakeStep{textStep("the answer")}), late: late}
+	rig := newDurableHostRig(t, Deps{
+		Config:       testLimits(4, 16),
+		CountTurn:    counter.fn,
+		PostTurnHook: hook.fn,
+		Channels:     []runtimechannelhost.ChannelPort{capture},
+	}, executor)
+	mustCreateSession(t, rig.db, "channel:333")
+	req := channelTurnRequest("channel:333", "turn-1")
+	admitThroughStore(t, rig.sessions, req)
+	desc := turnDescriptorFromRequest(req)
+	payload, err := json.Marshal(desc)
+	if err != nil {
+		t.Fatalf("marshal descriptor: %v", err)
+	}
+	inv := &lateCancelInvocation{payload: payload, actions: map[string][]byte{}}
+	if err := rig.engine.DriveTurn(late, inv, &desc); !errors.Is(err, context.Canceled) {
+		t.Fatalf("DriveTurn = %v, want a cancelled turn end", err)
+	}
+	if got := capture.count(); got != 0 {
+		t.Fatalf("Deliver calls = %d, want 0", got)
+	}
+	if got := actionRecordsOf(t, rig.db, "turn-1", finalMessageAction); len(got) != 0 {
+		t.Fatalf("final-message records = %v, want none", got)
+	}
+	if got := terminalsOf(t, rig.db, "turn-1"); len(got) != 0 {
+		t.Fatalf("terminal events = %v, want none", got)
+	}
+	requireCalls(t, hook, counter, 1, 1)
 }
 
 func TestFallbackDeliveryFailureKeepsTheTurnCode(t *testing.T) {
