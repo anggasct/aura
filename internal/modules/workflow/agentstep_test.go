@@ -45,6 +45,7 @@ type scriptedTurns struct {
 	models    int
 	toolRuns  int
 	started   chan struct{}
+	beforeRun func(req *turn.TurnRequest) error
 }
 
 func (s *scriptedTurns) count(counter *int) {
@@ -95,6 +96,12 @@ func (s *scriptedTurns) Execute(ctx context.Context, req *turn.TurnRequest) iter
 		s.stepCalls = append(s.stepCalls, call)
 		replies := slices.Clone(s.replies)
 		s.mu.Unlock()
+		if s.beforeRun != nil {
+			if err := s.beforeRun(req); err != nil {
+				yield(turn.Event{}, err)
+				return
+			}
+		}
 		if !yieldEvent(yield, "user", "user", 0, &genai.Part{Text: req.Parts[0].Text}) {
 			return
 		}

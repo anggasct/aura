@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"reflect"
 	"slices"
 	"sync"
 	"testing"
@@ -160,7 +161,7 @@ func TestToolStepCarriesItsStepCall(t *testing.T) {
 	for i := range got {
 		got[i].DefinitionID, got[i].DefinitionVersion, got[i].Approval = "", 0, Approval{}
 	}
-	if !slices.Equal(got, want) {
+	if !slices.EqualFunc(got, want, func(a, b StepCall) bool { return reflect.DeepEqual(a, b) }) {
 		t.Fatalf("step calls = %+v, want %+v", got, want)
 	}
 }
@@ -186,7 +187,7 @@ func TestToolStepCarriesItsApproval(t *testing.T) {
 		t.Fatal("the runner saw no step call")
 	}
 	for i := range calls {
-		if calls[i].Approval != *stored {
+		if !reflect.DeepEqual(calls[i].Approval, *stored) {
 			t.Fatalf("call %d approval = %+v, want %+v", i, calls[i].Approval, *stored)
 		}
 		if calls[i].DefinitionID != spec.ID || calls[i].DefinitionVersion != spec.Version {

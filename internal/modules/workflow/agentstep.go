@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
 	"strconv"
@@ -74,6 +75,7 @@ type agentAttempt struct {
 	tainted   bool
 	private   bool
 	maxTokens int64
+	pin       *turn.PersonaFingerprint
 }
 
 func (r *AgentTurnRunner) RunStep(ctx context.Context, call *AgentStepCall) (AgentStepResult, error) {
@@ -115,6 +117,11 @@ func (r *AgentTurnRunner) admit(ctx context.Context, call *AgentStepCall) (*agen
 	if err := checkAgentStepCeiling(step, call.Origin.AgentID, class, r.validation); err != nil {
 		return nil, err
 	}
+	persona := deref(call.Executor.AgentID)
+	pin, err := r.pinnedPersona(approval, persona)
+	if err != nil {
+		return nil, err
+	}
 	for _, toolID := range call.Executor.Tools {
 		if _, registered := r.tools.Definition(toolID, tools.Version); !registered {
 			return nil, codedError(ErrorCodeToolUnavailable, "tool "+toolID+" is not registered on this host")
@@ -126,7 +133,8 @@ func (r *AgentTurnRunner) admit(ctx context.Context, call *AgentStepCall) (*agen
 	}
 	return &agentAttempt{
 		call:      call,
-		persona:   deref(call.Executor.AgentID),
+		persona:   persona,
+		pin:       pin,
 		sessionID: StepSessionID(call.RunID, call.StepID, call.Attempt),
 		approval:  approval,
 		tally:     &turnTally{},
@@ -134,6 +142,22 @@ func (r *AgentTurnRunner) admit(ctx context.Context, call *AgentStepCall) (*agen
 		private:   hasWorkspaceTool(step) || slices.ContainsFunc(call.Inputs, func(input AgentStepInput) bool { return input.Private }),
 		maxTokens: maxTokens,
 	}, nil
+}
+
+func (r *AgentTurnRunner) pinnedPersona(approval *Approval, personaID string) (*turn.PersonaFingerprint, error) {
+	pin, pinned, err := approval.personaPin(personaID)
+	if err != nil || !pinned {
+		return nil, err
+	}
+	definition, err := r.validation.Agents.Resolve(nil, &personaID)
+	if err != nil {
+		return nil, codedError(ErrorCodePersonaMissing, fmt.Sprintf("persona %q is not configured", personaID))
+	}
+	current := definition.Fingerprint()
+	if current.SoulSHA256 != pin.SoulSHA256 || current.ModelRoute != pin.ModelRoute {
+		return nil, codedError(ErrorCodeApprovalMissing, fmt.Sprintf("persona %q changed since definition %s version %d was approved", personaID, approval.DefinitionID, approval.DefinitionVersion))
+	}
+	return &turn.PersonaFingerprint{AgentID: personaID, SoulSHA256: pin.SoulSHA256, ModelRoute: pin.ModelRoute}, nil
 }
 
 func (r *AgentTurnRunner) ensureSession(ctx context.Context, attempt *agentAttempt) error {
@@ -224,6 +248,7 @@ func agentTurnRequest(ctx context.Context, attempt *agentAttempt, text string) *
 		Deadline:        deadline,
 		Budget:          turn.Budget{MaxTokens: attempt.maxTokens},
 		AgentID:         attempt.persona,
+		Persona:         attempt.pin,
 		InputTainted:    attempt.tainted,
 		ToolRestriction: &turn.ToolRestriction{Allowed: append([]string{}, call.Executor.Tools...)},
 	}
@@ -270,6 +295,8 @@ func mapAgentTurnError(ctx context.Context, err error) error {
 	switch {
 	case fault.HasCode(err, turn.ErrorCodeBudgetExhausted), fault.HasCode(err, usage.ErrorCodeBudgetExceeded), errors.Is(err, usage.ErrBudgetExceeded):
 		return codedError(ErrorCodeBudgetExhausted, "the agent step exceeded its token budget")
+	case fault.HasCode(err, turn.ErrorCodePersonaMismatch):
+		return codedError(ErrorCodeApprovalMissing, "the step persona changed after it was pinned")
 	case ctx.Err() != nil:
 		return ctx.Err()
 	case errors.Is(err, context.DeadlineExceeded):

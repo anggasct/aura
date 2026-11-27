@@ -18,8 +18,8 @@ func TestWorkflowRunTaintAndLineageBaselineConstraints(t *testing.T) {
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
-	if err != nil || applied != replyTargetStepVersion || latest != replyTargetStepVersion {
-		t.Fatalf("schema = applied %d latest %d %v, want %d", applied, latest, err, replyTargetStepVersion)
+	if err != nil || applied != personaPinsStepVersion || latest != personaPinsStepVersion {
+		t.Fatalf("schema = applied %d latest %d %v, want %d", applied, latest, err, personaPinsStepVersion)
 	}
 	seedMigrationSession(t, db, "sess-1", "owner-1")
 	if _, err := db.ExecContext(ctx, `INSERT INTO workflow_definition (id, version, goal, source, spec_json, spec_sha256, created_at) VALUES ('flow', 1, 'g', 'defined', '{}', 'digest', '2026-11-13T10:00:00Z')`); err != nil {

@@ -2,6 +2,7 @@ package app
 
 import (
 	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
 
@@ -46,7 +47,7 @@ func TestApprovedProposalRecordsTheApprover(t *testing.T) {
 					AgentID: "ops", ApproverID: principal.OwnerID, ProposalID: proposed.ProposalID, Tainted: tainted,
 				}
 				record.ApprovedAt = time.Time{}
-				if *record != want {
+				if !reflect.DeepEqual(*record, want) {
 					t.Fatalf("approval record = %+v, want %+v", *record, want)
 				}
 			})

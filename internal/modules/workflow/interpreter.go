@@ -53,6 +53,7 @@ type Interpreter struct {
 	options  *Options
 	inflight chan struct{}
 	depsMu   sync.Mutex
+	agentMu  sync.RWMutex
 	deps     ValidationDeps
 	writeMu  sync.Mutex
 }
@@ -256,6 +257,22 @@ func (i *Interpreter) load(ctx context.Context, specs []*Spec, deps *ValidationD
 		i.specs.put(spec, graphs[index])
 	}
 	return nil
+}
+
+func (i *Interpreter) bindAgentSteps(runner AgentStepRunner) error {
+	i.agentMu.Lock()
+	defer i.agentMu.Unlock()
+	if i.options.AgentSteps != nil {
+		return codedError(ErrorCodeInvalidArgument, "the agent step runner is already bound")
+	}
+	i.options.AgentSteps = runner
+	return nil
+}
+
+func (i *Interpreter) agentSteps() AgentStepRunner {
+	i.agentMu.RLock()
+	defer i.agentMu.RUnlock()
+	return i.options.AgentSteps
 }
 
 func (i *Interpreter) Definitions() []*Spec {

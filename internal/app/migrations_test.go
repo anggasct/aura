@@ -414,7 +414,7 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
 	wantTriggers := listSchemaObjectsByType(t, wantDB, "trigger")
-	if len(gotTriggers) != 12 || !slices.Equal(gotTriggers, wantTriggers) {
+	if len(gotTriggers) != 13 || !slices.Equal(gotTriggers, wantTriggers) {
 		t.Fatalf("triggers (%d vs %d): got=%v want=%v", len(gotTriggers), len(wantTriggers), gotTriggers, wantTriggers)
 	}
 

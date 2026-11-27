@@ -116,9 +116,13 @@ func approveOnStoredPlan(ctx context.Context, interpreter *Interpreter, runs *St
 	if err := interpreter.LoadAll(ctx, []*Spec{proposal.Spec}, interpreter.ValidationDeps()); err != nil {
 		return "", err
 	}
+	pins, err := pinAgentSteps(proposal.Spec, interpreter.ValidationDeps().Agents)
+	if err != nil {
+		return "", err
+	}
 	if err := runs.ApproveProposal(ctx, id, &Approval{
 		DefinitionID: proposal.Spec.ID, DefinitionVersion: proposal.Spec.Version, Digest: digest,
-		AgentID: proposal.AgentID, ApproverID: principal.OwnerID, Tainted: proposal.Tainted, ApprovedAt: now,
+		AgentID: proposal.AgentID, ApproverID: principal.OwnerID, Tainted: proposal.Tainted, PersonaPins: pins, ApprovedAt: now,
 	}); err != nil {
 		return "", err
 	}
