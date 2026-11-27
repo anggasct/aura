@@ -104,6 +104,38 @@ func TestLoad_BroadcastRejectsInvalid(t *testing.T) {
 	}
 }
 
+func TestLoad_BroadcastOwnerDestination(t *testing.T) {
+	t.Run("a key of the destinations is accepted", func(t *testing.T) {
+		path := writeBroadcastConfig(t, "version: 1\nbroadcast:\n  owner_destination: me\n  destinations:\n    me: telegram:owner\n")
+		res, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if alias, route := res.Config.Broadcast.OwnerRoute(); alias != "me" || route != "telegram:owner" {
+			t.Fatalf("OwnerRoute() = (%q, %q), want (me, telegram:owner)", alias, route)
+		}
+	})
+	t.Run("the default is empty", func(t *testing.T) {
+		res, err := Load(writeBroadcastConfig(t, "version: 1\n"))
+		if err != nil {
+			t.Fatalf("Load: %v", err)
+		}
+		if alias, route := res.Config.Broadcast.OwnerRoute(); alias != "" || route != "" {
+			t.Fatalf("OwnerRoute() = (%q, %q), want empty", alias, route)
+		}
+	})
+	t.Run("a key that names no destination is refused with its path and without its value", func(t *testing.T) {
+		path := writeBroadcastConfig(t, "version: 1\nbroadcast:\n  owner_destination: stranger\n  destinations:\n    me: telegram:owner\n")
+		_, err := Load(path)
+		if err == nil {
+			t.Fatal("an owner destination outside the destinations was accepted")
+		}
+		if !strings.Contains(err.Error(), "broadcast.owner_destination") || strings.Contains(err.Error(), "stranger") {
+			t.Fatalf("err = %q, want the field path and no value", err)
+		}
+	})
+}
+
 func TestLoad_BroadcastRejectsBadShapes(t *testing.T) {
 	path := writeBroadcastConfig(t, "version: 1\nbroadcast:\n  max_attempts: three\n")
 	if _, err := Load(path); err == nil {

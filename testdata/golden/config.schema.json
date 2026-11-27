@@ -882,6 +882,9 @@
           "additionalProperties": {
             "type": "string"
           }
+        },
+        "owner_destination": {
+          "type": "string"
         }
       },
       "additionalProperties": false
