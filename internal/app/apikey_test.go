@@ -319,16 +319,20 @@ func (h *bindSignal) Handle(ctx context.Context, record slog.Record) error {
 }
 
 func TestHTTPChatListenerBindsOnlyWhenEnabled(t *testing.T) {
-	address := freeLoopbackAddress(t)
-	disabled := writeHTTPChatConfig(t, false, address)
+	held, err := (&net.ListenConfig{}).Listen(t.Context(), "tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := held.Close(); err != nil {
+			t.Errorf("Close: %v", err)
+		}
+	})
+	disabled := writeHTTPChatConfig(t, false, held.Addr().String())
 	db := openAccessDB(t, disabled)
 	server, checks := buildTestHTTPChat(t, disabled, db, slog.New(slog.DiscardHandler))
 	if server != nil || len(checks) != 0 {
 		t.Fatalf("buildHTTPChat(disabled) = %v, %v; want nothing", server, checks)
-	}
-	if conn, err := (&net.Dialer{Timeout: time.Second}).DialContext(t.Context(), "tcp", address); err == nil {
-		_ = conn.Close()
-		t.Fatal("a disabled channel left its address bound")
 	}
 }
 
