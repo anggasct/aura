@@ -70,8 +70,9 @@ const (
 )
 
 const (
-	ReasonUntrustedInput = "untrusted_input"
-	UntrustedInputNotice = "untrusted input: content from outside your control shaped this request, so it can be approved only once"
+	ReasonUntrustedInput    = "untrusted_input"
+	ReasonContentUnverified = "content_unverified"
+	UntrustedInputNotice    = "untrusted input: content from outside your control shaped this request, so it can be approved only once"
 )
 
 type ToolResult struct {

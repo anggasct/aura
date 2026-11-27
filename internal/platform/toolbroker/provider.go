@@ -11,6 +11,7 @@ type ToolRegistration struct {
 	Rule          approval.Rule
 	ArgumentCheck ArgumentCheck
 	ApprovalGuard ApprovalGuard
+	Preview       Previewer
 }
 
 type ToolProvider interface {
@@ -40,6 +41,9 @@ func (b *Broker) RegisterProvider(provider ToolProvider) error {
 		}
 		if reg.Rule.ToolName != reg.Definition.Name || reg.Rule.ToolVersion != reg.Definition.Version {
 			return errorf(ResultInvalidArgument, "rule tool %q version %q does not match definition %q version %q", reg.Rule.ToolName, reg.Rule.ToolVersion, reg.Definition.Name, reg.Definition.Version)
+		}
+		if err := checkOperationRegistration(&reg.Definition, &reg.Rule, reg.Preview); err != nil {
+			return err
 		}
 		key := reg.Definition.Key()
 		if _, dup := seenKeys[key]; dup {
@@ -75,6 +79,11 @@ func (b *Broker) RegisterProvider(provider ToolProvider) error {
 			b.guards[defCopy.Name] = registrations[i].ApprovalGuard
 		} else {
 			delete(b.guards, defCopy.Name)
+		}
+		if registrations[i].Preview != nil {
+			b.previewers[key] = registrations[i].Preview
+		} else {
+			delete(b.previewers, key)
 		}
 	}
 	return nil

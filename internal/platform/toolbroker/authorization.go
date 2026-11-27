@@ -23,7 +23,13 @@ type authorization struct {
 	expiry     time.Time
 	standing   bool
 
+	previewLines []string
+
 	standingAllowed bool
+}
+
+func (a *authorization) forOperation() bool {
+	return a.definition != nil && a.definition.Operation != ""
 }
 
 type authorizationRecord struct {
@@ -56,6 +62,9 @@ func (b *Broker) decideAuthorizationWith(turnCtx, callCtx context.Context, call 
 	}
 	key := toolKey(call.canonical)
 	if call.decision.Outcome == approval.OutcomeRequireApproval && !call.standing {
+		if call.forOperation() && !b.sessionReachable(call.canonical.SessionID) {
+			return ApprovalMissing, operationNoApprover(call.canonical, call.definition)
+		}
 		if call.canonical.Tainted && requestClass(call.canonical) == principal.ClassPublic {
 			return ApprovalMissing, errorf(ResultUntrustedInputNoApprover, "tool %q needs approval because this turn carries untrusted input, and a public principal's turn never asks the owner", key)
 		}
@@ -83,8 +92,11 @@ func (b *Broker) decideAuthorizationWith(turnCtx, callCtx context.Context, call 
 	return state, nil
 }
 
-func unattendedRefusal(request *ToolRequest) error {
+func unattendedRefusal(request *ToolRequest, definition *tools.Definition) error {
 	key := toolKey(request)
+	if definition != nil && definition.Operation != "" {
+		return operationNoApprover(request, definition)
+	}
 	if request.Tainted {
 		return errorf(ResultUntrustedInputNoApprover, "tool %q needs approval because this turn carries untrusted input, and an unattended call never asks", key)
 	}

@@ -51,6 +51,7 @@ type BuiltinToolRequest struct {
 	Knowledge       []string
 	Tainted         bool
 	Unattended      bool
+	Origin          turn.Origin
 }
 
 type BuiltinToolExecutor interface {
@@ -77,10 +78,11 @@ type turnAccess struct {
 	agentID     string
 	knowledge   []string
 	tainted     bool
+	origin      turn.Origin
 }
 
 func withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
-	access := turnAccess{principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: req.Tainted()}
+	access := turnAccess{principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: req.Tainted(), origin: req.Origin}
 	return context.WithValue(ctx, turnAccessContextKey{}, access)
 }
 

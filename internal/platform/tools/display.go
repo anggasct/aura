@@ -32,7 +32,7 @@ func (d *Definition) FieldApproval() bool {
 }
 
 func (d *Definition) StandingGrantAllowed() bool {
-	return !d.FieldApproval() && !d.NoStandingGrant
+	return !d.FieldApproval() && !d.NoStandingGrant && d.Operation == ""
 }
 
 func (d *Definition) FieldDisplay() bool {
@@ -100,6 +100,26 @@ func (d *Definition) ExactApprovalText(arguments json.RawMessage, redact func(st
 		return d.fieldText(arguments, redact, true)
 	}
 	return exactJSONText(arguments, redact)
+}
+
+func (d *Definition) PreviewApprovalText(arguments json.RawMessage, lines []string, redact func(string) string) (string, error) {
+	text, err := d.ApprovalText(arguments, redact)
+	if err != nil {
+		return "", err
+	}
+	if redact == nil {
+		redact = func(text string) string { return text }
+	}
+	card := make([]string, 0, len(lines)+2)
+	card = append(card, text, d.Risk.previewHeading())
+	for _, line := range lines {
+		shown, err := redactedValue(line, redact, true)
+		if err != nil {
+			return "", err
+		}
+		card = append(card, escapeText(shown))
+	}
+	return fitLines(card)
 }
 
 func compactJSON(arguments json.RawMessage) string {

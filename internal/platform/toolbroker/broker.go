@@ -25,6 +25,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type ToolRequest struct {
@@ -50,6 +51,10 @@ type ToolRequest struct {
 	Knowledge       []string
 	Tainted         bool
 	Unattended      bool
+
+	Origin              turn.Origin
+	ContentTaintTracked bool
+	PreviewDigest       string
 
 	AllocateEventSequence bool
 }
@@ -157,6 +162,7 @@ type Broker struct {
 	guards               map[string]ApprovalGuard
 	approvalReachable    func(sessionID string) bool
 	argumentChecks       map[string]ArgumentCheck
+	previewers           map[string]Previewer
 }
 
 func New(options *Options) (*Broker, error) {
@@ -198,6 +204,7 @@ func New(options *Options) (*Broker, error) {
 		guards:               guards,
 		approvalReachable:    options.ApprovalReachable,
 		argumentChecks:       argumentChecks,
+		previewers:           map[string]Previewer{},
 	}, nil
 }
 
@@ -290,6 +297,9 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 	if rule.ToolName != definition.Name || rule.ToolVersion != definition.Version {
 		return errorf(ResultInvalidArgument, "rule tool %q version %q does not match definition %q version %q", rule.ToolName, rule.ToolVersion, definition.Name, definition.Version)
 	}
+	if err := checkOperationRegistration(definition, rule, nil); err != nil {
+		return err
+	}
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -299,9 +309,11 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 	key := defCopy.Key()
 	oldDef, hadOldDef := b.definitions[key]
 	oldAdapter, hadOldAdapter := b.adapters[key]
+	oldPreviewer, hadOldPreviewer := b.previewers[key]
 
 	b.definitions[key] = &defCopy
 	b.adapters[key] = adapter
+	delete(b.previewers, key)
 
 	if err := b.engine.RegisterRule(rule); err != nil {
 		if hadOldDef {
@@ -313,6 +325,9 @@ func (b *Broker) RegisterTool(definition *tools.Definition, adapter Adapter, rul
 			b.adapters[key] = oldAdapter
 		} else {
 			delete(b.adapters, key)
+		}
+		if hadOldPreviewer {
+			b.previewers[key] = oldPreviewer
 		}
 		return err
 	}
@@ -327,6 +342,7 @@ func (b *Broker) UnregisterTool(toolName, toolVersion string) {
 	delete(b.definitions, key)
 	delete(b.adapters, key)
 	delete(b.argumentChecks, key)
+	delete(b.previewers, key)
 	delete(b.guards, toolName)
 	b.engine.UnregisterRule(toolName)
 }
@@ -454,9 +470,35 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		return ToolResult{}, errorf(ResultCapabilityUnavailable, "tool %q is not available in this artifact", key)
 	}
 	class := requestClass(&canonical)
+	var previewLines []string
+	if definition.Operation != "" {
+		if err := operationPolicyOutcome(&decision, &canonical, definition); err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
+		if err := operationOwnerOnly(&canonical, class, definition); err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
+	}
 	if err := b.enforceToolTier(&canonical, class, definition); err != nil {
 		policyOutcome = PolicyOutcomeDeny
 		return ToolResult{}, err
+	}
+	if definition.Operation != "" {
+		if err := operationRefusal(&canonical, definition); err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
+		admitted, err := b.admitOperation(ctx, slot, &operationCall{canonical: &canonical, definition: definition})
+		if err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
+		if admitted.finished {
+			return b.finalize(ctx, &canonical, &pendingResult{result: admitted.result, limit: b.outputLimit(decision.Constraints)})
+		}
+		previewLines = admitted.lines
 	}
 	guarded, err := b.guardRequires(ctx, &canonical)
 	if err != nil {
@@ -467,6 +509,13 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	tainted := canonical.Tainted && definition.IsExternalSink()
 	if (guarded || tainted || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
 		decision.Outcome = approval.OutcomeRequireApproval
+		policyOutcome = decision.Outcome
+	}
+	if definition.Operation != "" {
+		if err := operationApproval(&decision, &canonical, definition); err != nil {
+			policyOutcome = PolicyOutcomeDeny
+			return ToolResult{}, err
+		}
 		policyOutcome = decision.Outcome
 	}
 	if canonical.Tainted && decision.Outcome == approval.OutcomeRequireApproval {
@@ -480,7 +529,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, err
 		}
 		if !scoped {
-			settled, err = b.settledReplay(ctx, &canonical)
+			settled, err = b.settledReplay(ctx, &canonical, providerFor(definition))
 			if err != nil {
 				return ToolResult{}, err
 			}
@@ -496,15 +545,15 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, mapApprovalError(err)
 		}
 	default:
-		if canonical.Unattended && decision.Outcome == approval.OutcomeRequireApproval {
+		if unattendedRequest(&canonical, definition) && decision.Outcome == approval.OutcomeRequireApproval {
 			approvalState = ApprovalMissing
-			err = unattendedRefusal(&canonical)
+			err = unattendedRefusal(&canonical, definition)
 			if fault.HasCode(err, ResultUntrustedInputNoApprover) {
 				policyOutcome = PolicyOutcomeDeny
 			}
 			return ToolResult{}, err
 		}
-		call := &authorization{canonical: &canonical, definition: definition, decision: decision, standingAllowed: definition.StandingGrantAllowed() && !guarded}
+		call := &authorization{canonical: &canonical, definition: definition, decision: decision, previewLines: previewLines, standingAllowed: definition.StandingGrantAllowed() && !guarded}
 		if decision.Outcome == approval.OutcomeRequireApproval && standingCovers(class, definition, guarded, canonical.Tainted) {
 			call.standing, err = b.standingGrant(ctx, slot, call)
 			if err != nil {
@@ -528,10 +577,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 	}
 	if scoped {
-		result, err = b.executeDurable(ctx, slot, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: definition.Effectful})
+		result, err = b.executeDurable(ctx, slot, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: definition.Effectful, provider: providerFor(definition)})
 	} else {
 		if definition.Effectful {
-			result, err = b.executeEffect(ctx, &canonical, decision.Constraints, adapter)
+			result, err = b.executeEffect(ctx, &journaledTool{canonical: &canonical, constraints: decision.Constraints, adapter: adapter, effectful: true, provider: providerFor(definition)})
 		} else {
 			result, err = adapter(ctx, &canonical, decision.Constraints)
 		}
@@ -749,22 +798,23 @@ const effectProvider = "builtin-tools"
 
 func effectPayload(request *ToolRequest) (json.RawMessage, error) {
 	payload, err := json.Marshal(struct {
-		ToolName    string          `json:"tool_name"`
-		ToolVersion string          `json:"tool_version"`
-		Arguments   json.RawMessage `json:"arguments"`
-	}{request.ToolName, request.ToolVersion, request.Arguments})
+		ToolName      string          `json:"tool_name"`
+		ToolVersion   string          `json:"tool_version"`
+		Arguments     json.RawMessage `json:"arguments"`
+		PreviewDigest string          `json:"preview_digest,omitempty"`
+	}{request.ToolName, request.ToolVersion, request.Arguments, request.PreviewDigest})
 	if err != nil {
 		return nil, errorf(ResultInvalidArgument, "encode effect request: %v", err)
 	}
 	return payload, nil
 }
 
-func (b *Broker) settledReplay(ctx context.Context, request *ToolRequest) (bool, error) {
+func (b *Broker) settledReplay(ctx context.Context, request *ToolRequest, provider string) (bool, error) {
 	payload, err := effectPayload(request)
 	if err != nil {
 		return false, err
 	}
-	intent, found, err := b.effects.Journal().Lookup(ctx, effectProvider, request.ToolName, request.IdempotencyKey, payload)
+	intent, found, err := b.effects.Journal().Lookup(ctx, provider, request.ToolName, request.IdempotencyKey, payload)
 	if err != nil {
 		if fault.HasCode(err, effect.ErrorCodeIdempotencyConflict) {
 			return false, errorf(ResultInvalidArgument, "tool %q was called again under its idempotency key with a different request", request.ToolName)
@@ -780,20 +830,21 @@ func (b *Broker) settledReplay(ctx context.Context, request *ToolRequest) (bool,
 	return intent.State != effect.StatePrepared, nil
 }
 
-func (b *Broker) executeEffect(ctx context.Context, request *ToolRequest, constraints approval.Constraints, adapter Adapter) (ToolResult, error) {
+func (b *Broker) executeEffect(ctx context.Context, call *journaledTool) (ToolResult, error) {
+	request := call.canonical
 	payload, err := effectPayload(request)
 	if err != nil {
 		return ToolResult{}, err
 	}
 	invocation := &effectInvocation{
-		adapter: adapter, request: request, constraints: constraints, limit: b.outputLimit(constraints),
+		adapter: call.adapter, request: request, constraints: call.constraints, limit: b.outputLimit(call.constraints),
 		finalize: func(ctx context.Context, pending *pendingResult) (ToolResult, error) {
 			return b.finalize(ctx, request, pending)
 		},
 	}
 	intent, err := b.effects.Execute(ctx, &effect.PrepareRequest{
 		SessionID: request.SessionID, TurnID: request.TurnID, ToolCallID: request.RequestID,
-		IdempotencyKey: request.IdempotencyKey, Provider: effectProvider, Operation: request.ToolName,
+		IdempotencyKey: request.IdempotencyKey, Provider: call.provider, Operation: request.ToolName,
 		Classification: effect.ClassificationEffectful, Request: payload,
 		EventSequence: request.EventSequence, AllocateSequence: request.AllocateEventSequence, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
@@ -935,6 +986,15 @@ func (b *Broker) approvalText(definition *tools.Definition, arguments json.RawMe
 	return b.renderedText(arguments, definition.Name, definition.ApprovalText)
 }
 
+func (b *Broker) cardText(definition *tools.Definition, arguments json.RawMessage, previewLines []string) (string, error) {
+	if len(previewLines) == 0 {
+		return b.approvalText(definition, arguments)
+	}
+	return b.renderedText(arguments, definition.Name, func(arguments json.RawMessage, redact func(string) string) (string, error) {
+		return definition.PreviewApprovalText(arguments, previewLines, redact)
+	})
+}
+
 func (b *Broker) renderedText(arguments json.RawMessage, toolName string, render func(json.RawMessage, func(string) string) (string, error)) (string, error) {
 	secrets := b.secretValues()
 	display, err := render(arguments, func(text string) string {
@@ -969,7 +1029,7 @@ func (b *Broker) ExactCallText(toolName string, args json.RawMessage) (string, e
 
 func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, error) {
 	request, decision := call.canonical, call.decision
-	display, err := b.approvalText(call.definition, request.Arguments)
+	display, err := b.cardText(call.definition, request.Arguments, call.previewLines)
 	if err != nil {
 		return nil, err
 	}
@@ -1008,6 +1068,17 @@ func (b *Broker) checkedArguments(definition *tools.Definition, raw json.RawMess
 }
 
 func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
+	canonical, err := b.validatedRequest(request)
+	if err != nil {
+		return ToolRequest{}, err
+	}
+	if err := b.digestRequest(&canonical); err != nil {
+		return ToolRequest{}, err
+	}
+	return canonical, nil
+}
+
+func (b *Broker) validatedRequest(request *ToolRequest) (ToolRequest, error) {
 	if request == nil {
 		return ToolRequest{}, errorf(ResultInvalidArgument, "request must not be nil")
 	}
@@ -1021,17 +1092,25 @@ func (b *Broker) canonicalRequest(request *ToolRequest) (ToolRequest, error) {
 	if err != nil {
 		return ToolRequest{}, err
 	}
-	canonical := *request
-	canonical.Arguments = arguments
-	canonical.Capabilities = slices.Clone(request.Capabilities)
-	slices.Sort(canonical.Capabilities)
-	canonical.Approval = request.Approval
-	canonicalDigest, err := requestDigest(&canonical, b.PolicyVersion())
-	if err != nil {
-		return ToolRequest{}, errorf(ResultInvalidArgument, "canonicalize request: %v", err)
+	validated := *request
+	validated.Arguments = arguments
+	validated.Capabilities = slices.Clone(request.Capabilities)
+	slices.Sort(validated.Capabilities)
+	validated.Approval = request.Approval
+	validated.PreviewDigest = ""
+	return validated, nil
+}
+
+func (b *Broker) digestRequest(request *ToolRequest) error {
+	if request == nil {
+		return errorf(ResultInvalidArgument, "request must not be nil")
 	}
-	canonical.RequestDigest = canonicalDigest
-	return canonical, nil
+	digest, err := requestDigest(request, b.PolicyVersion())
+	if err != nil {
+		return errorf(ResultInvalidArgument, "canonicalize request: %v", err)
+	}
+	request.RequestDigest = digest
+	return nil
 }
 
 func toApprovalRequest(request *ToolRequest, policyVersion string) *approval.ToolRequest {
@@ -1068,11 +1147,12 @@ func requestDigest(request *ToolRequest, policyVersion string) (string, error) {
 		Trust          string          `json:"trust"`
 		IdempotencyKey string          `json:"idempotency_key"`
 		PolicyVersion  string          `json:"policy_version"`
+		PreviewDigest  string          `json:"preview_digest,omitempty"`
 	}{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,
 		PrincipalID: request.PrincipalID, ToolName: request.ToolName, ToolVersion: request.ToolVersion,
 		Arguments: request.Arguments, Capabilities: slices.Clone(request.Capabilities), Trust: string(request.Trust),
-		IdempotencyKey: request.IdempotencyKey, PolicyVersion: policyVersion,
+		IdempotencyKey: request.IdempotencyKey, PolicyVersion: policyVersion, PreviewDigest: request.PreviewDigest,
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {
