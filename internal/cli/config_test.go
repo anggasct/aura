@@ -17,6 +17,19 @@ func TestConfigCheckReportsOKAndFailures(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 	missing := filepath.Join(t.TempDir(), "absent", "config.yaml")
+	nestedRoot, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	nested := filepath.Join(nestedRoot, "nested.yaml")
+	data := filepath.Join(nestedRoot, "data")
+	workspace := filepath.Join(data, "workspace")
+	if err := os.MkdirAll(workspace, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(nested, []byte("version: 1\ntools:\n  workspace: "+workspace+"\nstorage:\n  path: "+data+"\n"), 0o600); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
 
 	cases := []struct {
 		name     string
@@ -27,6 +40,7 @@ func TestConfigCheckReportsOKAndFailures(t *testing.T) {
 	}{
 		{name: "valid", path: "../../testdata/config/valid.yaml", wantCode: 0, wantOut: "config ok: valid.yaml\n"},
 		{name: "invalid", path: twoProblems, wantCode: 1, wantErr: []string{"server.typo (line 3, column 3): config_unknown_key", "logging.other (line 5, column 3): config_unknown_key"}},
+		{name: "workspace inside the data directory", path: nested, wantCode: 1, wantErr: []string{"tools.workspace (line 3, column 14): config_invalid", workspace, data, "set tools.workspace to a directory outside the data directory"}},
 		{name: "explicit path missing", path: missing, wantCode: 1, wantErr: []string{"file not found: " + missing}},
 	}
 	for _, tc := range cases {
