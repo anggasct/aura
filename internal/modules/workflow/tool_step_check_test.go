@@ -24,7 +24,10 @@ func specWithPath(id, path string) *Spec {
 
 func freshInterpreter(t *testing.T) *Interpreter {
 	t.Helper()
-	return mustNewInterpreter(t, newTestStore(t), durabletest.NewFake(), &Options{})
+	disk := newTestStore(t)
+	fake := durabletest.NewFake()
+	t.Cleanup(fake.Close)
+	return mustNewInterpreter(t, disk, fake, &Options{})
 }
 
 func TestCompileChecksEveryToolStepsArguments(t *testing.T) {

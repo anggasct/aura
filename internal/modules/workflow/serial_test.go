@@ -20,8 +20,9 @@ func serialTestSetup(t *testing.T, tools *fakeToolRunner) (*Interpreter, *durabl
 
 func driverTestSetup(t *testing.T, tools ToolRunner, driver Driver) (*Interpreter, *durabletest.Fake, *Store) {
 	t.Helper()
-	fake := durabletest.NewFake()
 	disk := newTestStore(t)
+	fake := durabletest.NewFake()
+	t.Cleanup(fake.Close)
 	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		MaxConcurrentSteps: 2,
 		AgentSteps:         &fakeAgentRunner{output: json.RawMessage(`{"decision":"approve"}`)},
@@ -297,8 +298,9 @@ func (k *keyRecordingInvocation) approvalRequestKeys() []string {
 
 func TestDriveSerialApprovalRequestRetryUsesDistinctKeys(t *testing.T) {
 	ctx := context.Background()
-	fake := durabletest.NewFake()
 	disk := newTestStore(t)
+	fake := durabletest.NewFake()
+	t.Cleanup(fake.Close)
 	requester := &flakyApprovalRequester{}
 	interpreter := mustNewInterpreter(t, disk, fake, &Options{
 		MaxConcurrentSteps: 2,
