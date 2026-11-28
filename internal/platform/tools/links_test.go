@@ -54,6 +54,15 @@ func TestLinkMatchCanonicalizesOnlySchemeHostPortAndFragment(t *testing.T) {
 	if !slices.Equal(extracted, wantExtracted) {
 		t.Errorf("ExtractURLs = %v, want %v", extracted, wantExtracted)
 	}
+
+	dottedI := ExtractURLs(strings.Repeat("İ", 30) + " https://example.com/a " + strings.Repeat("İ", 10) + " HTTP://Example.ORG/b")
+	if !slices.Equal(dottedI, []string{"https://example.com/a", "http://example.org/b"}) {
+		t.Errorf("ExtractURLs with U+0130 = %v", dottedI)
+	}
+	kelvin := ExtractURLs(strings.Repeat("\u212a", 10) + " https://a.co/1 " + strings.Repeat("\u212a", 5) + " https://b.co/2")
+	if !slices.Equal(kelvin, []string{"https://a.co/1", "https://b.co/2"}) {
+		t.Errorf("ExtractURLs with U+212A = %v", kelvin)
+	}
 }
 
 func TestTaintedGrantOperationValidation(t *testing.T) {

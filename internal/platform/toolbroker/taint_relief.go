@@ -22,7 +22,7 @@ import (
 )
 
 const (
-	maxReliefURLBytes = 250
+	maxReliefURLBytes = tools.MaxReliefURLBytes
 	maxBatchURLs      = 20
 	trackedBatchTurns = 256
 	resultBatchAction = "turn/result-batch"
@@ -98,23 +98,6 @@ func (s *batchGrantStore) put(turnID string, grant resultBatchGrant) {
 		}
 	}
 	s.grants[turnID] = grant
-}
-
-var searchOperators = []string{
-	"site:",
-	"inurl:",
-	"intitle:",
-	"intext:",
-	"allinurl:",
-	"allintitle:",
-	"allintext:",
-	"link:",
-	"related:",
-	"cache:",
-	"filetype:",
-	"ext:",
-	"inbody:",
-	"domain:",
 }
 
 func (b *Broker) recordTaintRelief(ctx context.Context, toolName, relief, outcome string) {
@@ -255,19 +238,35 @@ func (b *Broker) evaluateSearchBatch(ctx context.Context, request *ToolRequest, 
 		b.recordTaintRelief(ctx, request.ToolName, reliefSearchBatch, reliefOutcomeUnattended)
 		return reliefResult{}, nil
 	}
+	existing, hasExisting := b.batchGrants.get(request.TurnID)
+	if hasExisting {
+		if existing.Failure != nil {
+			return reliefResult{approvalState: ApprovalRejected}, fault.New(existing.Failure.Class, string(redact([]byte(existing.Failure.Detail), b.secretValues())))
+		}
+		if !existing.Approved {
+			return reliefResult{approvalState: ApprovalRejected}, errorf(ResultApprovalRequired, "tool %q search result batch approval was rejected", toolKey(request))
+		}
+		if !slices.Contains(existing.URLs, canonicalURL) {
+			return reliefResult{}, nil
+		}
+		usedFromBatch := request.FetchCount - existing.StartFetchCount
+		if request.FetchCount < 0 || request.FetchCount >= b.tainted.Fetches || usedFromBatch < 0 || usedFromBatch >= existing.Remaining {
+			b.recordTaintRelief(ctx, request.ToolName, reliefSearchBatch, reliefOutcomeCapExceeded)
+			return reliefResult{}, nil
+		}
+		b.recordTaintRelief(ctx, request.ToolName, reliefSearchBatch, reliefOutcomeGranted)
+		return reliefResult{relieved: true, approvalState: ApprovalApproved}, nil
+	}
 	if request.FetchCount < 0 || request.FetchCount >= b.tainted.Fetches {
 		b.recordTaintRelief(ctx, request.ToolName, reliefSearchBatch, reliefOutcomeCapExceeded)
 		return reliefResult{}, nil
 	}
-	existing, hasExisting := b.batchGrants.get(request.TurnID)
-	if !hasExisting {
-		if request.ResultBatch == nil {
-			return reliefResult{}, nil
-		}
-		candidates := batchURLSet(request.ResultBatch.URLs)
-		if !slices.Contains(candidates, canonicalURL) {
-			return reliefResult{}, nil
-		}
+	if request.ResultBatch == nil {
+		return reliefResult{}, nil
+	}
+	candidates := batchURLSet(request.ResultBatch.URLs)
+	if !slices.Contains(candidates, canonicalURL) {
+		return reliefResult{}, nil
 	}
 	grant, err := b.resolveBatchGrant(ctx, request, decision, existing, hasExisting)
 	if err != nil {
@@ -478,7 +477,7 @@ func (b *Broker) evaluateQueryRelief(ctx context.Context, request *ToolRequest, 
 		b.recordTaintRelief(ctx, request.ToolName, reliefBoundedQuery, reliefOutcomeTooLong)
 		return reliefResult{}
 	}
-	if containsURLPattern(query) || containsSearchOperator(query) {
+	if tools.QueryHasURLPattern(query) || tools.QueryHasSearchOperator(query) {
 		b.recordTaintRelief(ctx, request.ToolName, reliefBoundedQuery, reliefOutcomeOperator)
 		return reliefResult{}
 	}
@@ -488,34 +487,6 @@ func (b *Broker) evaluateQueryRelief(ctx context.Context, request *ToolRequest, 
 	}
 	b.recordTaintRelief(ctx, request.ToolName, reliefBoundedQuery, reliefOutcomeGranted)
 	return reliefResult{relieved: true}
-}
-
-func containsURLPattern(query string) bool {
-	lower := strings.ToLower(query)
-	return strings.Contains(lower, "://") || strings.Contains(lower, "www.")
-}
-
-func containsSearchOperator(query string) bool {
-	lower := strings.ToLower(query)
-	for _, op := range searchOperators {
-		offset := 0
-		for offset < len(lower) {
-			idx := strings.Index(lower[offset:], op)
-			if idx < 0 {
-				break
-			}
-			pos := offset + idx
-			if pos == 0 || !isASCIILetterOrDigit(lower[pos-1]) {
-				return true
-			}
-			offset = pos + len(op)
-		}
-	}
-	return false
-}
-
-func isASCIILetterOrDigit(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
 }
 
 func sessionRecordOutput(raw json.RawMessage) (json.RawMessage, error) {

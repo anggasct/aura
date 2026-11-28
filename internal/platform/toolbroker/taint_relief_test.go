@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
@@ -288,18 +289,101 @@ func TestBatchCardShowsTheExactQueryAndURLs(t *testing.T) {
 			t.Errorf("prompts=%d calls=%d, want 1 prompt and 0 fetches", rh.prompts, rh.calls["web_fetch"])
 		}
 	})
+
+	t.Run("rejection refuses later search result calls even at or past the fetch cap", func(t *testing.T) {
+		rh := newReliefBroker(t, TaintedLimits{Fetches: 1}, always, nil)
+		rh.answer = false
+		batch := &tools.ResultBatch{CallID: "s1", Queries: []string{"news"}, URLs: []string{"https://example.com/a", "https://example.com/b"}}
+		req1 := fetchRequest("https://example.com/a", tools.LinkProvenanceSearchResult, 0)
+		req1.TurnID = "turn-batch-reject-cap"
+		req1.ResultBatch = batch
+		if _, err := rh.execRequest(req1); !fault.HasCode(err, ResultApprovalRequired) {
+			t.Fatalf("first rejected call = %v, want %s", err, ResultApprovalRequired)
+		}
+		req2 := fetchRequest("https://example.com/b", tools.LinkProvenanceSearchResult, 1)
+		req2.TurnID = "turn-batch-reject-cap"
+		req2.ResultBatch = batch
+		if _, err := rh.execRequest(req2); !fault.HasCode(err, ResultApprovalRequired) {
+			t.Fatalf("second call at cap after rejection = %v, want %s", err, ResultApprovalRequired)
+		}
+		if rh.prompts != 1 || rh.calls["web_fetch"] != 0 {
+			t.Errorf("prompts=%d calls=%d, want 1 prompt and 0 fetches", rh.prompts, rh.calls["web_fetch"])
+		}
+	})
+
+	t.Run("durable replay of rejected batch refuses later calls at cap on a fresh broker", func(t *testing.T) {
+		hosted := startHostedRuntime(t)
+		seedSession(t, hosted.db)
+		batch := &tools.ResultBatch{CallID: "s1", Queries: []string{"news"}, URLs: []string{"https://example.com/a", "https://example.com/b"}}
+		makeBroker := func() *reliefHarness {
+			rh := newReliefBroker(t, TaintedLimits{Fetches: 1}, always, nil)
+			rh.answer = false
+			return rh
+		}
+		firstBroker := makeBroker()
+		replayBroker := makeBroker()
+		var firstErr, secondErr error
+		hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			req1 := fetchRequest("https://example.com/a", tools.LinkProvenanceSearchResult, 0)
+			req1.TurnID = "turn-durable-reject"
+			req1.RequestID = "req-1"
+			req1.IdempotencyKey = "key-1"
+			req1.ResultBatch = batch
+			_, firstErr = firstBroker.broker.Execute(inTurn(ctx, inv), req1)
+
+			_, _ = replayBroker.broker.Execute(inTurn(ctx, inv), req1)
+			req2 := fetchRequest("https://example.com/b", tools.LinkProvenanceSearchResult, 1)
+			req2.TurnID = "turn-durable-reject"
+			req2.RequestID = "req-2"
+			req2.IdempotencyKey = "key-2"
+			req2.ResultBatch = batch
+			_, secondErr = replayBroker.broker.Execute(inTurn(ctx, inv), req2)
+			return nil
+		})
+		if !fault.HasCode(firstErr, ResultApprovalRequired) || !fault.HasCode(secondErr, ResultApprovalRequired) {
+			t.Fatalf("firstErr=%v secondErr=%v, want %s for both", firstErr, secondErr, ResultApprovalRequired)
+		}
+		if firstBroker.prompts != 1 || replayBroker.prompts != 0 {
+			t.Errorf("firstBroker.prompts=%d replayBroker.prompts=%d, want 1 and 0", firstBroker.prompts, replayBroker.prompts)
+		}
+	})
 }
 
 func TestUnattendedTaintedTurnFollowsNoResultLinks(t *testing.T) {
-	rh := newReliefBroker(t, TaintedLimits{Fetches: 5}, always, nil)
-	req := fetchRequest("https://example.com/result", tools.LinkProvenanceSearchResult, 0)
-	req.Unattended = true
-	req.ResultBatch = &tools.ResultBatch{CallID: "s1", Queries: []string{"q"}, URLs: []string{"https://example.com/result"}}
-	if _, err := rh.execRequest(req); !fault.HasCode(err, ResultUntrustedInputNoApprover) {
-		t.Fatalf("err = %v, want %s", err, ResultUntrustedInputNoApprover)
+	cases := []struct {
+		name       string
+		origin     turn.Origin
+		unattended bool
+	}{
+		{"explicit unattended flag", turn.OriginTerminal, true},
+		{"schedule origin without flag", turn.OriginSchedule, false},
+		{"http origin without flag", turn.OriginHTTP, false},
 	}
-	if rh.prompts != 0 || rh.calls["web_fetch"] != 0 {
-		t.Errorf("prompts=%d calls=%d, want 0", rh.prompts, rh.calls["web_fetch"])
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rh := newReliefBroker(t, TaintedLimits{Fetches: 5}, always, nil)
+			req := fetchRequest("https://example.com/result", tools.LinkProvenanceSearchResult, 0)
+			req.Origin = tc.origin
+			req.Unattended = tc.unattended
+			req.ResultBatch = &tools.ResultBatch{CallID: "s1", Queries: []string{"q"}, URLs: []string{"https://example.com/result"}}
+			if _, err := rh.execRequest(req); !fault.HasCode(err, ResultUntrustedInputNoApprover) {
+				t.Fatalf("err = %v, want %s", err, ResultUntrustedInputNoApprover)
+			}
+			if rh.prompts != 0 || rh.calls["web_fetch"] != 0 {
+				t.Errorf("prompts=%d calls=%d, want 0", rh.prompts, rh.calls["web_fetch"])
+			}
+			wantMetric := "web_fetch:search_batch:unattended"
+			found := false
+			for _, m := range rh.reliefMetrics {
+				if m == wantMetric {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("reliefMetrics = %v, want %q", rh.reliefMetrics, wantMetric)
+			}
+		})
 	}
 }
 

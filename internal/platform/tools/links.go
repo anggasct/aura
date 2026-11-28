@@ -32,8 +32,9 @@ type ResultBatch struct {
 }
 
 const (
-	MaxTrackedURLs   = 4096
-	MaxMatchURLBytes = 2048
+	MaxTrackedURLs    = 4096
+	MaxMatchURLBytes  = 2048
+	MaxReliefURLBytes = 250
 )
 
 const (
@@ -45,16 +46,59 @@ const (
 	defaultPortHTTPS = "443"
 )
 
+var searchQueryOperators = []string{
+	"site:",
+	"inurl:",
+	"intitle:",
+	"intext:",
+	"allinurl:",
+	"allintitle:",
+	"allintext:",
+	"link:",
+	"related:",
+	"cache:",
+	"filetype:",
+	"ext:",
+	"inbody:",
+	"domain:",
+}
+
+func QueryHasURLPattern(query string) bool {
+	lower := strings.ToLower(query)
+	return strings.Contains(lower, "://") || strings.Contains(lower, "www.")
+}
+
+func QueryHasSearchOperator(query string) bool {
+	lower := strings.ToLower(query)
+	for _, op := range searchQueryOperators {
+		offset := 0
+		for offset < len(lower) {
+			idx := strings.Index(lower[offset:], op)
+			if idx < 0 {
+				break
+			}
+			pos := offset + idx
+			if pos == 0 || !isASCIILetterOrDigit(lower[pos-1]) {
+				return true
+			}
+			offset = pos + len(op)
+		}
+	}
+	return false
+}
+
+func isASCIILetterOrDigit(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+}
+
 func ExtractURLs(text string) []string {
 	var found []string
-	lower := strings.ToLower(text)
 	pos := 0
 	for pos < len(text) {
-		idx := nextSchemeIndex(lower[pos:])
-		if idx < 0 {
+		start := nextSchemeIndex(text, pos)
+		if start < 0 {
 			break
 		}
-		start := pos + idx
 		end := start
 		for end < len(text) {
 			if isURLStopByte(text[end]) {
@@ -71,19 +115,33 @@ func ExtractURLs(text string) []string {
 	return found
 }
 
-func nextSchemeIndex(lower string) int {
-	httpIdx := strings.Index(lower, "http://")
-	httpsIdx := strings.Index(lower, "https://")
-	switch {
-	case httpIdx < 0:
-		return httpsIdx
-	case httpsIdx < 0:
-		return httpIdx
-	case httpIdx < httpsIdx:
-		return httpIdx
-	default:
-		return httpsIdx
+func nextSchemeIndex(text string, from int) int {
+	for i := from; i+len("http://") <= len(text); i++ {
+		b := text[i]
+		if b != 'h' && b != 'H' {
+			continue
+		}
+		if asciiHasFoldPrefix(text[i:], "http://") || asciiHasFoldPrefix(text[i:], "https://") {
+			return i
+		}
 	}
+	return -1
+}
+
+func asciiHasFoldPrefix(s, lowerPrefix string) bool {
+	if len(s) < len(lowerPrefix) {
+		return false
+	}
+	for i := range len(lowerPrefix) {
+		b := s[i]
+		if b >= 'A' && b <= 'Z' {
+			b += 'a' - 'A'
+		}
+		if b != lowerPrefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func isURLStopByte(b byte) bool {

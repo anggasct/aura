@@ -173,10 +173,7 @@ func changeNeedsCard(request *ToolRequest, definition *tools.Definition) bool {
 }
 
 func unattendedRequest(request *ToolRequest, definition *tools.Definition) bool {
-	if request == nil || definition == nil || request.Unattended {
-		return true
-	}
-	return definition.Operation != "" && request.Origin.Unattended()
+	return request == nil || definition == nil || request.Unattended || request.Origin.Unattended()
 }
 
 func operationPolicyOutcome(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {

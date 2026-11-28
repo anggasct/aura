@@ -47,7 +47,11 @@ type callTaintRecord struct {
 }
 
 func decodeCallTaintRecord(raw []byte) (callTaintRecord, bool) {
-	decoder := json.NewDecoder(bytes.NewReader(raw))
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return callTaintRecord{}, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
 	var record callTaintRecord
 	if err := decoder.Decode(&record); err != nil {
@@ -62,7 +66,7 @@ func decodeCallTaintRecord(raw []byte) (callTaintRecord, bool) {
 	if record.Tainted && record.Source == "" {
 		return callTaintRecord{}, false
 	}
-	if record.Link != "" && !auratools.ValidLinkProvenance(auratools.LinkProvenance(record.Link)) {
+	if !auratools.ValidLinkProvenance(auratools.LinkProvenance(record.Link)) {
 		return callTaintRecord{}, false
 	}
 	return record, true
@@ -224,7 +228,7 @@ func (t *turnTaintTracker) ingestSessionEvents(events []turn.Event, currentTurnI
 			continue
 		}
 		adkEv, err := turnstore.RuntimeEventToADK(ev)
-		if err != nil || adkEv == nil || adkEv.Content == nil {
+		if err != nil || adkEv == nil || adkEv.Partial || adkEv.Content == nil {
 			continue
 		}
 		if adkEv.Author == userAuthor {
@@ -243,7 +247,7 @@ func (t *turnTaintTracker) ingestSessionEvents(events []turn.Event, currentTurnI
 			if part == nil {
 				continue
 			}
-			if fc := part.FunctionCall; fc != nil && fc.ID != "" {
+			if fc := part.FunctionCall; fc != nil && adkEv.Author != userAuthor && strings.HasPrefix(fc.ID, callIDPrefix) {
 				switch fc.Name {
 				case webFetchToolName:
 					if rawURL, ok := fc.Args["url"].(string); ok {
@@ -392,18 +396,21 @@ func isStepOneOwnerAuthoredOrigin(origin turn.Origin) bool {
 }
 
 var (
-	untrustedInputOpenPattern   = regexp.MustCompile(`(?i)\[untrusted_input\b[^\]]*\]`)
-	untrustedInputClosePattern  = regexp.MustCompile(`(?i)\[/untrusted_input\]`)
-	untrustedRecallOpenPattern  = regexp.MustCompile(`(?i)\[untrusted recall evidence\b[^\]]*\]`)
-	untrustedRecallClosePattern = regexp.MustCompile(`(?i)\[/untrusted recall evidence\]`)
-	untrustedProfOpenPattern    = regexp.MustCompile(`(?i)\[untrusted profile context\b[^\]]*\]`)
-	untrustedProfClosePattern   = regexp.MustCompile(`(?i)\[/untrusted profile context\]`)
-	untrustedSkillOpenPattern   = regexp.MustCompile(`(?i)\[untrusted_skill_context\b[^\]]*\]`)
-	untrustedSkillClosePattern  = regexp.MustCompile(`(?i)\[/untrusted_skill_context\]`)
+	untrustedInputOpenPattern      = regexp.MustCompile(`(?i)\[untrusted_input\b[^\]]*\]`)
+	untrustedInputClosePattern     = regexp.MustCompile(`(?i)\[/untrusted_input\]`)
+	untrustedKnowledgeOpenPattern  = regexp.MustCompile(`(?i)\[untrusted_knowledge\b[^\]]*\]`)
+	untrustedKnowledgeClosePattern = regexp.MustCompile(`(?i)\[/untrusted_knowledge\]`)
+	untrustedRecallOpenPattern     = regexp.MustCompile(`(?i)\[untrusted recall evidence\b[^\]]*\]`)
+	untrustedRecallClosePattern    = regexp.MustCompile(`(?i)\[/untrusted recall evidence\]`)
+	untrustedProfOpenPattern       = regexp.MustCompile(`(?i)\[untrusted profile context\b[^\]]*\]`)
+	untrustedProfClosePattern      = regexp.MustCompile(`(?i)\[/untrusted profile context\]`)
+	untrustedSkillOpenPattern      = regexp.MustCompile(`(?i)\[untrusted_skill_context\b[^\]]*\]`)
+	untrustedSkillClosePattern     = regexp.MustCompile(`(?i)\[/untrusted_skill_context\]`)
 )
 
 func stripUntrustedFromOwnerText(text string) string {
 	cleaned := stripTaggedBlocks(text, untrustedInputOpenPattern, untrustedInputClosePattern)
+	cleaned = stripTaggedBlocks(cleaned, untrustedKnowledgeOpenPattern, untrustedKnowledgeClosePattern)
 	cleaned = stripTaggedBlocks(cleaned, untrustedRecallOpenPattern, untrustedRecallClosePattern)
 	cleaned = stripTaggedBlocks(cleaned, untrustedProfOpenPattern, untrustedProfClosePattern)
 	cleaned = stripTaggedBlocks(cleaned, untrustedSkillOpenPattern, untrustedSkillClosePattern)
@@ -571,15 +578,15 @@ func (t *turnTaintTracker) applyRecordLocked(request *BuiltinToolRequest, defini
 }
 
 func (t *turnTaintTracker) shouldCountFetch(webOnly bool, link auratools.LinkProvenance, args json.RawMessage, argName string) bool {
-	if webOnly {
-		rawURL, ok := extractStringArg(args, argName)
-		if !ok || len(rawURL) > 250 {
-			return false
-		}
-		_, valid := auratools.CanonicalURL(rawURL)
-		return valid
+	if !webOnly && link != auratools.LinkProvenanceOwnerMessage && link != auratools.LinkProvenanceSearchResult {
+		return false
 	}
-	return link == auratools.LinkProvenanceOwnerMessage || link == auratools.LinkProvenanceSearchResult
+	rawURL, ok := extractStringArg(args, argName)
+	if !ok || len(rawURL) > auratools.MaxReliefURLBytes {
+		return false
+	}
+	_, valid := auratools.CanonicalURL(rawURL)
+	return valid
 }
 
 func (t *turnTaintTracker) shouldCountQuery(webOnly bool, args json.RawMessage, argName string, maxBytes int) bool {
@@ -593,34 +600,7 @@ func (t *turnTaintTracker) shouldCountQuery(webOnly bool, args json.RawMessage, 
 	if webOnly {
 		return true
 	}
-	lower := strings.ToLower(query)
-	if strings.Contains(lower, "://") || strings.Contains(lower, "www.") {
-		return false
-	}
-	for _, op := range queryOperators {
-		offset := 0
-		for offset < len(lower) {
-			idx := strings.Index(lower[offset:], op)
-			if idx < 0 {
-				break
-			}
-			pos := offset + idx
-			if pos == 0 || !isASCIILetterOrDigit(lower[pos-1]) {
-				return false
-			}
-			offset = pos + len(op)
-		}
-	}
-	return true
-}
-
-var queryOperators = []string{
-	"site:", "inurl:", "intitle:", "intext:", "allinurl:", "allintitle:", "allintext:",
-	"link:", "related:", "cache:", "filetype:", "ext:", "inbody:", "domain:",
-}
-
-func isASCIILetterOrDigit(b byte) bool {
-	return (b >= 'a' && b <= 'z') || (b >= '0' && b <= '9')
+	return !auratools.QueryHasURLPattern(query) && !auratools.QueryHasSearchOperator(query)
 }
 
 func (t *turnTaintTracker) resolveLinkLocked(args json.RawMessage, argName string) (auratools.LinkProvenance, string, json.RawMessage) {
