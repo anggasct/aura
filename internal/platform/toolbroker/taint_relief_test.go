@@ -387,6 +387,62 @@ func TestUnattendedTaintedTurnFollowsNoResultLinks(t *testing.T) {
 	}
 }
 
+func TestUnattendedTaintedTurnSearchAsksNoQueryRelief(t *testing.T) {
+	cases := []struct {
+		name       string
+		origin     turn.Origin
+		unattended bool
+	}{
+		{"explicit unattended flag", turn.OriginTerminal, true},
+		{"http origin without flag", turn.OriginHTTP, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rh := newReliefBroker(t, TaintedLimits{Queries: 5}, always, nil)
+			req := searchRequest("weather forecast", 0)
+			req.Origin = tc.origin
+			req.Unattended = tc.unattended
+			if _, err := rh.execRequest(req); !fault.HasCode(err, ResultUntrustedInputNoApprover) {
+				t.Fatalf("err = %v, want %s", err, ResultUntrustedInputNoApprover)
+			}
+			if rh.prompts != 0 || rh.calls["web_search"] != 0 {
+				t.Errorf("prompts=%d calls=%d, want 0", rh.prompts, rh.calls["web_search"])
+			}
+			wantMetric := "web_search:bounded_query:unattended"
+			found := false
+			for _, m := range rh.reliefMetrics {
+				if m == wantMetric {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("reliefMetrics = %v, want %q", rh.reliefMetrics, wantMetric)
+			}
+		})
+	}
+	rh := newReliefBroker(t, TaintedLimits{Queries: 5}, always, nil)
+	cleanJob := searchRequest("morning briefing", 0)
+	cleanJob.Origin = turn.OriginSchedule
+	if _, err := rh.execRequest(cleanJob); err != nil {
+		t.Fatalf("unattended clean job search = %v, want relieved", err)
+	}
+	if rh.calls["web_search"] != 1 || rh.prompts != 0 {
+		t.Errorf("calls=%d prompts=%d, want 1 and 0", rh.calls["web_search"], rh.prompts)
+	}
+	taintedJob := searchRequest("weather forecast", 1)
+	taintedJob.Origin = turn.OriginSchedule
+	taintedJob.TaintMark = turn.TaintMark{Source: turn.TaintSourceScheduleOrigin, Detail: "job-1"}
+	taintedJob.TaintSource = taintedJob.TaintMark.Label()
+	before := rh.calls["web_search"]
+	if _, err := rh.execRequest(taintedJob); !fault.HasCode(err, ResultUntrustedInputNoApprover) {
+		t.Fatalf("tainted job search = %v, want %s", err, ResultUntrustedInputNoApprover)
+	}
+	if rh.calls["web_search"] != before {
+		t.Errorf("tainted job search reached the adapter %d times, want 0", rh.calls["web_search"]-before)
+	}
+}
+
 func TestTaintedFetchOfAModelWrittenURLIsRefusedUnattended(t *testing.T) {
 	rh := newReliefBroker(t, TaintedLimits{Fetches: 5}, always, nil)
 	req := fetchRequest("https://evil.example/leak", tools.LinkProvenanceNone, 0)
@@ -471,6 +527,7 @@ func TestTaintedSearchQueriesAreBudgeted(t *testing.T) {
 		t.Errorf("search past cap prompted %d times, want 1", rh.prompts)
 	}
 	unattendedClean := searchRequest("clean scheduled search", 0)
+	unattendedClean.Origin = turn.OriginSchedule
 	unattendedClean.Unattended = true
 	if _, err := rh.execRequest(unattendedClean); err != nil {
 		t.Fatalf("unattended clean job search = %v, want relieved", err)

@@ -134,7 +134,7 @@ func (b *Broker) evaluateRelief(ctx context.Context, request *ToolRequest, defin
 	case tools.SinkReliefLinkProvenance:
 		return b.evaluateLinkRelief(ctx, request, definition, decision, value)
 	case tools.SinkReliefBoundedQuery:
-		return b.evaluateQueryRelief(ctx, request, relief, value), nil
+		return b.evaluateQueryRelief(ctx, request, definition, relief, value), nil
 	default:
 		return reliefResult{}, nil
 	}
@@ -464,9 +464,13 @@ func renderBatchCardText(toolName string, limit int, batch *tools.ResultBatch, s
 	return joined, urls, nil
 }
 
-func (b *Broker) evaluateQueryRelief(ctx context.Context, request *ToolRequest, relief *tools.SinkRelief, query string) reliefResult {
+func (b *Broker) evaluateQueryRelief(ctx context.Context, request *ToolRequest, definition *tools.Definition, relief *tools.SinkRelief, query string) reliefResult {
 	if request.TaintMark.Source == turn.TaintSourceScheduleOrigin {
 		b.recordTaintRelief(ctx, request.ToolName, reliefBoundedQuery, reliefOutcomeTaintedJob)
+		return reliefResult{}
+	}
+	if unattendedRequest(request, definition) && !cleanJobRequest(request) {
+		b.recordTaintRelief(ctx, request.ToolName, reliefBoundedQuery, reliefOutcomeUnattended)
 		return reliefResult{}
 	}
 	if containsSecret(query, b.secretValues()) {
@@ -487,6 +491,12 @@ func (b *Broker) evaluateQueryRelief(ctx context.Context, request *ToolRequest, 
 	}
 	b.recordTaintRelief(ctx, request.ToolName, reliefBoundedQuery, reliefOutcomeGranted)
 	return reliefResult{relieved: true}
+}
+
+func cleanJobRequest(request *ToolRequest) bool {
+	return request.Origin == turn.OriginSchedule &&
+		request.TaintMark.Source != turn.TaintSourceScheduleOrigin &&
+		request.TaintMark.Source != turn.TaintSourceWebOnly
 }
 
 func sessionRecordOutput(raw json.RawMessage) (json.RawMessage, error) {
