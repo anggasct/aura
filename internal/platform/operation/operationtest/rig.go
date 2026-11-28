@@ -34,16 +34,17 @@ const (
 )
 
 type Options struct {
-	DB          *sql.DB
-	Clock       *durabletest.ManualClock
-	Catalogs    []operation.Catalog
-	Bindings    func(stubs *Stubs) []operation.Binding
-	Tools       []toolbroker.ToolRegistration
-	NoApprover  bool
-	Observer    effect.Observer
-	Logger      *slog.Logger
-	Telemetry   *telemetry.OperationRecorder
-	AnswerCards func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error)
+	DB           *sql.DB
+	Clock        *durabletest.ManualClock
+	Catalogs     []operation.Catalog
+	Bindings     func(stubs *Stubs) []operation.Binding
+	Tools        []toolbroker.ToolRegistration
+	NoApprover   bool
+	Observer     effect.Observer
+	ToolObserver toolbroker.Observer
+	Logger       *slog.Logger
+	Telemetry    *telemetry.OperationRecorder
+	AnswerCards  func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error)
 
 	AllowInvalid bool
 
@@ -73,10 +74,15 @@ func OpenDatabase(tb testing.TB, extra ...sqlite.SchemaOwner) *sql.DB {
 	if err := turnstore.NewSessionService(db).Create(tb.Context(), &turn.Session{ID: SessionID, OwnerID: OwnerID, CreatedAt: now, UpdatedAt: now}); err != nil {
 		tb.Fatalf("create the session: %v", err)
 	}
+	CreateLedger(tb, db)
+	return db
+}
+
+func CreateLedger(tb testing.TB, db *sql.DB) {
+	tb.Helper()
 	if _, err := db.ExecContext(tb.Context(), ledgerSQL); err != nil {
 		tb.Fatalf("create the stub ledger: %v", err)
 	}
-	return db
 }
 
 func NewRig(tb testing.TB, options *Options) *Rig {
@@ -107,6 +113,7 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 		HostCapabilities: capabilitytest.Host(tb),
 		Effects:          rig.Executor,
 		Clock:            rig.Clock,
+		Observer:         options.ToolObserver,
 		ApprovalDecider: func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 			rig.mu.Lock()
 			rig.prompts = append(rig.prompts, *prompt)

@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -52,8 +53,16 @@ type lifeWiring struct {
 	knowledge    turn.ContextProvider
 }
 
+type ledgerOperation struct {
+	id         string
+	gateBefore bool
+	gateAfter  bool
+}
+
 type turnScenario struct {
 	steps         []string
+	arguments     map[string]map[string]any
+	operations    []ledgerOperation
 	tools         []stubTool
 	gated         string
 	approvingLife int
@@ -131,6 +140,27 @@ var turnScenarios = map[string]turnScenario{
 		steps:    []string{"tool-e", textStep},
 		tools:    []stubTool{{name: "tool-e", effectful: true}},
 		requests: []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-EFFECT-RETURNED")},
+	},
+	"operation-replay": {
+		steps:         []string{operationtest.ToolOf(operationtest.Change), textStep},
+		arguments:     map[string]map[string]any{operationtest.ToolOf(operationtest.Change): {"subject": "replayed"}},
+		operations:    []ledgerOperation{{id: operationtest.Change, gateBefore: true}},
+		requests:      []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-OPERATION-REPLAY")},
+		approvingLife: 1,
+	},
+	"operation-committed": {
+		steps:         []string{operationtest.ToolOf(operationtest.Change), textStep},
+		arguments:     map[string]map[string]any{operationtest.ToolOf(operationtest.Change): {"subject": "committed"}},
+		operations:    []ledgerOperation{{id: operationtest.Change, gateAfter: true}},
+		requests:      []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-OPERATION-COMMITTED")},
+		approvingLife: 1,
+	},
+	"operation-destructive": {
+		steps:         []string{operationtest.ToolOf(operationtest.Delete), textStep},
+		arguments:     map[string]map[string]any{operationtest.ToolOf(operationtest.Delete): {"subject": "doomed"}},
+		operations:    []ledgerOperation{{id: operationtest.Delete, gateBefore: true}},
+		requests:      []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-OPERATION-DESTRUCTIVE")},
+		approvingLife: 1,
 	},
 	"lost-lease": {
 		steps:    []string{"tool-a", textStep},
