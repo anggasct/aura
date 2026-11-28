@@ -13,7 +13,7 @@ func coarseNow() time.Time {
 	return time.Now().UTC()
 }
 
-func statAndHashWorkspaceFile(_, _ string) (string, int64, int64, error) {
+func statAndHashWorkspaceFile(_, _ string) (digest string, device, inode int64, err error) {
 	return "", 0, 0, fault.New(ErrorCodeOutside, "workspace provenance requires Linux")
 }
 
