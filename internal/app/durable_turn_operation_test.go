@@ -70,10 +70,10 @@ func (w *operationWiring) register(t *testing.T, parts *ledgerTurn) []runtimeadk
 		t.Fatalf("register the operation tools: %v", err)
 	}
 	var defs []runtimeadk.BuiltinToolDefinition
-	for _, registration := range registry.Tools() {
-		defs = append(defs, runtimeadk.BuiltinToolDefinition{
-			Name: registration.Definition.Name, Version: registration.Definition.Version, Schema: registration.Definition.Schema,
-		})
+	registrations := registry.Tools()
+	for i := range registrations {
+		definition := &registrations[i].Definition
+		defs = append(defs, runtimeadk.BuiltinToolDefinition{Name: definition.Name, Version: definition.Version, Schema: definition.Schema})
 	}
 	return defs
 }
