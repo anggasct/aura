@@ -642,3 +642,44 @@ func TestBroadcastStoreJoinsCallersTransaction(t *testing.T) {
 		t.Fatalf("cursor survived rollback: found=%v err=%v", found, err)
 	}
 }
+
+func TestBroadcastStore_PersistsTaintedAndEnforcesCheck(t *testing.T) {
+	db, s := mustNewSQLiteStore(t)
+	ctx := t.Context()
+	clean := testBroadcastItem("bcst-clean", "cron", "key-clean")
+	clean.State = StateHeld
+	if _, _, err := s.Insert(ctx, clean); err != nil {
+		t.Fatalf("insert clean: %v", err)
+	}
+	tainted := testBroadcastItem("bcst-tainted", "cron", "key-tainted")
+	tainted.State = StateHeld
+	tainted.Tainted = true
+	if _, _, err := s.Insert(ctx, tainted); err != nil {
+		t.Fatalf("insert tainted: %v", err)
+	}
+	loadedClean, err := s.Item(ctx, "bcst-clean")
+	if err != nil || loadedClean.Tainted {
+		t.Fatalf("clean item = %+v, %v", loadedClean, err)
+	}
+	loadedTainted, found, err := s.Load(ctx, "bcst-tainted")
+	if err != nil || !found || !loadedTainted.Tainted {
+		t.Fatalf("tainted load = %+v, %v, %v", loadedTainted, found, err)
+	}
+	held, err := s.ListHeld(ctx, "default", PriorityInfo, clean.NotBefore, 10)
+	if err != nil || len(held) != 2 {
+		t.Fatalf("ListHeld = %+v, %v", held, err)
+	}
+	parent := digestParentFixture("bcst-dg-tainted")
+	parent.Tainted = true
+	created, _, err := s.CreateDigest(ctx, parent, []string{"bcst-clean", "bcst-tainted"})
+	if err != nil || !created.Tainted {
+		t.Fatalf("CreateDigest = %+v, %v", created, err)
+	}
+	reloaded, err := s.Item(ctx, "bcst-dg-tainted")
+	if err != nil || !reloaded.Tainted {
+		t.Fatalf("reloaded digest = %+v, %v", reloaded, err)
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE broadcast_item SET tainted = 2 WHERE id = 'bcst-clean'`); !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
+		t.Errorf("invalid tainted value error = %v, want check constraint", err)
+	}
+}

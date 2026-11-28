@@ -25,6 +25,7 @@ type SendRequest struct {
 	Text           string `json:"text"`
 	SessionID      string `json:"session_id"`
 	IdempotencyKey string `json:"idempotency_key"`
+	Tainted        bool   `json:"tainted,omitempty"`
 }
 
 type SendOutcome struct {
@@ -408,6 +409,9 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		}
 		return r.settleObserved(ctx, item, StateFailed, "", now, 0, ResultFailed)
 	}
+	tainted := current.Tainted || item.Tainted
+	deliverable := *item
+	deliverable.Tainted = tainted
 	text := RenderText(item.ContentJSON)
 	sessionID := "broadcast:" + item.DestinationAlias
 	for attempt := 1; attempt <= r.maxAttempts; attempt++ {
@@ -445,6 +449,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 			Text:           text,
 			SessionID:      sessionID,
 			IdempotencyKey: "bcst:" + keyBase + ":a" + strconv.Itoa(attempt),
+			Tainted:        tainted,
 		}, keyBase, attempt)
 		if err := ctx.Err(); err != nil {
 			return err
@@ -457,7 +462,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 				}
 				continue
 			}
-			return r.fallbackOrFail(ctx, inv, item, keyBase, text, sessionID, "", attempt)
+			return r.fallbackOrFail(ctx, inv, &deliverable, keyBase, text, sessionID, "", attempt)
 		}
 		if outcome.Ambiguous {
 			return r.settleObserved(ctx, item, StateUnknown, outcome.IntentID, now, attempt, ResultUnknown)
@@ -465,7 +470,7 @@ func (r *Runner) deliverOne(ctx context.Context, inv durable.Invocation, item *I
 		if outcome.Succeeded {
 			return r.settleObserved(ctx, item, StateSucceeded, outcome.IntentID, now, attempt, ResultDelivered)
 		}
-		return r.fallbackOrFail(ctx, inv, item, keyBase, text, sessionID, outcome.IntentID, attempt)
+		return r.fallbackOrFail(ctx, inv, &deliverable, keyBase, text, sessionID, outcome.IntentID, attempt)
 	}
 	return nil
 }
@@ -496,6 +501,7 @@ func (r *Runner) fallbackOrFail(ctx context.Context, inv durable.Invocation, ite
 		Text:           text,
 		SessionID:      sessionID,
 		IdempotencyKey: "bcst:" + keyBase + ":fb",
+		Tainted:        item.Tainted,
 	}, keyBase, 0)
 	if err := ctx.Err(); err != nil {
 		return err

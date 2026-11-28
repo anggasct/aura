@@ -41,6 +41,7 @@ type Notification struct {
 	DestinationAlias string
 	ContentJSON      string
 	CreatedAt        time.Time
+	Tainted          bool
 }
 
 type Route struct {
@@ -59,6 +60,7 @@ type Item struct {
 	State            string
 	NotBefore        time.Time
 	CreatedAt        time.Time
+	Tainted          bool
 }
 
 type ItemRecord struct {
@@ -76,6 +78,7 @@ type ItemRecord struct {
 	AttemptCount     int64
 	EffectID         string
 	DigestParentID   string
+	Tainted          bool
 }
 
 type ItemStore interface {
@@ -271,6 +274,7 @@ func (b *Broadcaster) Submit(ctx context.Context, notification *Notification) (I
 		NotBefore:        notBefore,
 		CreatedAt:        createdAt,
 		UpdatedAt:        createdAt,
+		Tainted:          notification.Tainted,
 	})
 	if err != nil {
 		return Item{}, false, err
@@ -285,16 +289,5 @@ func (b *Broadcaster) Submit(ctx context.Context, notification *Notification) (I
 		State:    record.State,
 		Result:   ResultSubmitted,
 	})
-	return Item{
-		ID:               record.ID,
-		Producer:         record.Producer,
-		IdempotencyKey:   record.IdempotencyKey,
-		ContentDigest:    record.ContentDigest,
-		Priority:         record.Priority,
-		DestinationAlias: record.DestinationAlias,
-		ContentJSON:      record.ContentJSON,
-		State:            record.State,
-		NotBefore:        record.NotBefore,
-		CreatedAt:        record.CreatedAt,
-	}, replayed, nil
+	return recordToItem(&record), replayed, nil
 }
