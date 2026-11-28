@@ -139,15 +139,17 @@ func TestCatalogIsValid(t *testing.T) {
 	}
 }
 
+type knowledgeAddCase struct {
+	name     string
+	run      func(t *testing.T, rig *opsRig) error
+	wantURI  func(rig *opsRig) string
+	wantKind string
+}
+
 func TestKnowledgeAddSourcesBySurface(t *testing.T) {
 	const documentBody = "# Policy\nRefunds are issued within thirty days.\n"
 	var hostPath string
-	cases := []struct {
-		name     string
-		run      func(t *testing.T, rig *opsRig) error
-		wantURI  func(rig *opsRig) string
-		wantKind string
-	}{
+	cases := []knowledgeAddCase{
 		{
 			name: "the CLI reads a host path",
 			run: func(t *testing.T, rig *opsRig) error {
@@ -188,15 +190,6 @@ func TestKnowledgeAddSourcesBySurface(t *testing.T) {
 			wantKind: knowledge.SourceKindURL,
 		},
 		{
-			name: "the agent reads a workspace path",
-			run: func(t *testing.T, rig *opsRig) error {
-				rig.writeWorkspaceFile(t, "docs/policy.md", documentBody)
-				return requireOK(rig.tool("kb.add", `{"collection":"support","source":"docs/policy.md"}`))
-			},
-			wantURI:  func(*opsRig) string { return "workspace:docs/policy.md" },
-			wantKind: knowledge.SourceKindFile,
-		},
-		{
 			name: "the agent reads an attachment of its session",
 			run: func(t *testing.T, rig *opsRig) error {
 				id := rig.attach(t, operationtest.SessionID, "policy.md", "text/markdown; charset=utf-8", documentBody)
@@ -206,6 +199,7 @@ func TestKnowledgeAddSourcesBySurface(t *testing.T) {
 			wantKind: knowledge.SourceKindFile,
 		},
 	}
+	cases = append(cases, workspaceAddCases(documentBody)...)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newOpsRig(t)
@@ -252,44 +246,20 @@ func (o outcomeError) Error() string {
 	return string(o.Class) + ": " + o.Output
 }
 
+type agentSourceRefusalCase struct {
+	name      string
+	source    func(t *testing.T, rig *opsRig) string
+	wantClass toolbroker.ResultClass
+	wantCode  string
+}
+
 func TestAgentSourcesStayInWorkspaceAndSession(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "outside-secret.md")
 	if err := os.WriteFile(outside, []byte("# Secret\nnot for the index\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cases := []struct {
-		name      string
-		source    func(t *testing.T, rig *opsRig) string
-		wantClass toolbroker.ResultClass
-		wantCode  string
-	}{
-		{
-			name:      "an absolute host path",
-			source:    func(*testing.T, *opsRig) string { return outside },
-			wantClass: toolbroker.ResultPolicyDenied,
-		},
-		{
-			name:      "a path climbing out of the workspace",
-			source:    func(*testing.T, *opsRig) string { return "../outside-secret.md" },
-			wantClass: toolbroker.ResultPolicyDenied,
-		},
-		{
-			name: "a symlink leaving the workspace",
-			source: func(t *testing.T, rig *opsRig) string {
-				if err := os.Symlink(outside, filepath.Join(rig.workspace, "link.md")); err != nil {
-					t.Fatal(err)
-				}
-				return "link.md"
-			},
-			wantClass: toolbroker.ResultPolicyDenied,
-		},
-		{
-			name:      "a missing workspace file",
-			source:    func(*testing.T, *opsRig) string { return "nothing.md" },
-			wantClass: toolbroker.ResultExecutionFailed,
-			wantCode:  "source_unavailable",
-		},
-		{
+	cases := append(workspaceSourceRefusalCases(outside),
+		agentSourceRefusalCase{
 			name: "an attachment of another session",
 			source: func(t *testing.T, rig *opsRig) string {
 				return "artifact:" + rig.attach(t, otherSessionID, "policy.md", "text/markdown", "# Policy\nother session\n")
@@ -297,24 +267,24 @@ func TestAgentSourcesStayInWorkspaceAndSession(t *testing.T) {
 			wantClass: toolbroker.ResultExecutionFailed,
 			wantCode:  "source_unavailable",
 		},
-		{
+		agentSourceRefusalCase{
 			name:      "an unknown attachment",
 			source:    func(*testing.T, *opsRig) string { return "artifact:art-0000000000000000" },
 			wantClass: toolbroker.ResultExecutionFailed,
 			wantCode:  "source_unavailable",
 		},
-		{
+		agentSourceRefusalCase{
 			name:      "an attachment id that is too long",
 			source:    func(*testing.T, *opsRig) string { return "artifact:" + strings.Repeat("a", 200) },
 			wantClass: toolbroker.ResultExecutionFailed,
 			wantCode:  "source_unavailable",
 		},
-		{
+		agentSourceRefusalCase{
 			name:      "a plain http URL",
 			source:    func(*testing.T, *opsRig) string { return "http://docs.example.test/refunds" },
 			wantClass: toolbroker.ResultExecutionFailed,
 		},
-	}
+	)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newOpsRig(t)
