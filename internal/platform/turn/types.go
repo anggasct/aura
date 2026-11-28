@@ -23,6 +23,10 @@ const (
 	OriginWorkflow Origin = "workflow"
 )
 
+func (o Origin) Unattended() bool {
+	return o == OriginSchedule || o == OriginHTTP
+}
+
 type Budget struct {
 	MaxTokens int64
 	MaxCost   float64
