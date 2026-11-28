@@ -287,43 +287,17 @@ func TestOnlyTheOperationsThatReachTheNetworkSayTheirCardUsesIt(t *testing.T) {
 	}
 }
 
-func TestAnApprovedAddIsRefusedWhenTheFileChangedAfterThePreview(t *testing.T) {
-	var rig *opsRig
-	replace := func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
-		rig.writeWorkspaceFile(t, "docs/policy.md", "# Policy\nA different document than the one on the card.\n")
-		return true, nil
-	}
-	rig = newOpsRigAnswering(t, replace)
-	rig.writeWorkspaceFile(t, "docs/policy.md", "# Policy\nRefunds are issued within thirty days.\n")
-	request := operationtest.RequestFor(operation.ToolName("kb.add"), json.RawMessage(`{"collection":"support","source":"docs/policy.md"}`), "stale-add")
-	request.Tainted = true
-
-	outcome := rig.Execute(t.Context(), request)
-
-	if outcome.Class == toolbroker.ResultOK || outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "operation_preview_stale") {
-		t.Fatalf("outcome = %+v, want the add refused as stale", outcome)
-	}
-	if sources := rig.sources(t); len(sources) != 0 {
-		t.Errorf("sources = %+v, want nothing stored", sources)
-	}
-	if actions := rig.kb.Ledger.Actions(); len(actions) != 0 {
-		t.Errorf("owner actions = %+v, want none", actions)
-	}
+type approvedAddCase struct {
+	name   string
+	source func(t *testing.T, rig *opsRig) string
 }
 
 func TestAnApprovedAddIngestsAFileThatDidNotChange(t *testing.T) {
-	cases := []struct {
-		name   string
-		source func(t *testing.T, rig *opsRig) string
-	}{
-		{name: "a workspace file", source: func(t *testing.T, rig *opsRig) string {
-			rig.writeWorkspaceFile(t, "docs/policy.md", "# Policy\nRefunds are issued within thirty days.\n")
-			return "docs/policy.md"
-		}},
-		{name: "an attachment", source: func(t *testing.T, rig *opsRig) string {
+	cases := append(workspaceApprovedAddCases(),
+		approvedAddCase{name: "an attachment", source: func(t *testing.T, rig *opsRig) string {
 			return "artifact:" + rig.attach(t, operationtest.SessionID, "policy.md", "text/markdown", "# Policy\nRefunds are issued within thirty days.\n")
 		}},
-	}
+	)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newOpsRig(t)

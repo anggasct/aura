@@ -32,6 +32,15 @@ func (o attachmentOpener) Open(_ context.Context, refID string) (io.ReadCloser, 
 	return file, meta, nil
 }
 
+type fileAuthorityCase struct {
+	name     string
+	files    *surfaceFiles
+	source   string
+	wantCode ErrorCode
+	wantName string
+	wantType string
+}
+
 func TestFileAuthorityOpensOnlyWhatTheCallerMayRead(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "policy.md"), []byte("policy body"), 0o600); err != nil {
@@ -46,26 +55,15 @@ func TestFileAuthorityOpensOnlyWhatTheCallerMayRead(t *testing.T) {
 	}}
 	agent := &surfaceFiles{deps: deps, ownerOnly: true, sessionID: "session-1"}
 	cli := &surfaceFiles{deps: deps, sessionID: "session-1"}
-	cases := []struct {
-		name     string
-		files    *surfaceFiles
-		source   string
-		wantCode ErrorCode
-		wantName string
-		wantType string
-	}{
-		{name: "a workspace file", files: agent, source: "policy.md", wantName: "policy.md"},
+	cases := []fileAuthorityCase{
 		{name: "an attachment of the session", files: agent, source: "artifact:art-own", wantName: "own.md", wantType: "text/markdown"},
 		{name: "an attachment of another session for the agent", files: agent, source: "artifact:art-other", wantCode: ErrorCodeSourceUnavailable},
 		{name: "an attachment of another session for the owner CLI", files: cli, source: "artifact:art-other", wantName: "other.md", wantType: "text/plain"},
 		{name: "an unknown attachment", files: agent, source: "artifact:art-none", wantCode: ErrorCodeSourceUnavailable},
 		{name: "an empty attachment id", files: agent, source: "artifact:", wantCode: ErrorCodeSourceUnavailable},
-		{name: "an escaping path", files: agent, source: "../policy.md", wantCode: ErrorCodePolicyDenied},
-		{name: "an absolute path", files: agent, source: filepath.Join(workspace, "policy.md"), wantCode: ErrorCodePolicyDenied},
-		{name: "a missing file", files: agent, source: "missing.md", wantCode: ErrorCodeSourceUnavailable},
-		{name: "a directory", files: agent, source: "directory", wantCode: ErrorCodeSourceUnavailable},
 		{name: "a URL", files: agent, source: "https://docs.example.test/a", wantCode: ErrorCodeInputInvalid},
 	}
+	cases = append(cases, workspaceAuthorityCases(workspace, agent)...)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			file, err := tc.files.Open(t.Context(), tc.source)

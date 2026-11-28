@@ -81,6 +81,16 @@ func cliPathCall(surface operation.Surface, input string) *operation.Call {
 	}
 }
 
+type pathResolutionCase struct {
+	name      string
+	surface   operation.Surface
+	source    string
+	wantName  string
+	wantRef   string
+	wantBody  string
+	wantInput map[string]string
+}
+
 func TestTheKernelResolvesAPathParameterBeforeTheHandlerSeesIt(t *testing.T) {
 	workspace := t.TempDir()
 	if err := os.WriteFile(filepath.Join(workspace, "policy.md"), []byte("workspace body"), 0o600); err != nil {
@@ -91,20 +101,12 @@ func TestTheKernelResolvesAPathParameterBeforeTheHandlerSeesIt(t *testing.T) {
 	if err := os.WriteFile(hostFile, []byte("host body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cases := []struct {
-		name      string
-		surface   operation.Surface
-		source    string
-		wantName  string
-		wantRef   string
-		wantBody  string
-		wantInput map[string]string
-	}{
+	cases := []pathResolutionCase{
 		{name: "a host path on the CLI", surface: operation.SurfaceCLI, source: hostFile, wantName: "notes.md", wantRef: hostFile, wantBody: "host body", wantInput: map[string]string{}},
-		{name: "a workspace path with its scheme on the CLI", surface: operation.SurfaceCLI, source: "workspace:policy.md", wantName: "policy.md", wantRef: "workspace:policy.md", wantBody: "workspace body", wantInput: map[string]string{}},
 		{name: "an address on the CLI", surface: operation.SurfaceCLI, source: "https://docs.example.test/a", wantInput: map[string]string{"url": "https://docs.example.test/a"}},
 		{name: "an address in chat", surface: operation.SurfaceChat, source: "", wantInput: map[string]string{"url": "https://docs.example.test/b"}},
 	}
+	cases = append(cases, workspacePathResolutionCases()...)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			var seen pathObservation
