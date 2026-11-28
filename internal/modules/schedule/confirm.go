@@ -110,10 +110,10 @@ func (o *Operations) confirm(ctx context.Context, call *operation.Call) (operati
 	if err := o.checkWorkflow(ctx, &JobSpec{WorkflowID: pending.job.WorkflowID}); err != nil {
 		return operation.Result{}, err
 	}
-	if pending.nothingToDo() || pending.digest(pending.lines(o.routeOf(pending.job.OriginDestination))) != call.PreviewDigest {
-		return operation.Result{}, stalePreview("the job changed after the preview")
-	}
 	return call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
+		if pending.nothingToDo() || pending.digest(pending.lines(o.routeOf(pending.job.OriginDestination))) != call.PreviewDigest {
+			return operation.Result{}, stalePreview("the job changed after the preview")
+		}
 		confirmed, err := o.service.Confirm(ctx, pending.job.ID, &JobConfirmation{ExpectedVersion: pending.job.Version, Context: pending.context})
 		if fault.HasCode(err, ErrorCodeOccurrenceConflict) {
 			return operation.Result{}, stalePreview("the job changed after the preview")

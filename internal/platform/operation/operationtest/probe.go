@@ -100,13 +100,13 @@ func RequireWritesOnlyInCommit(tb testing.TB, probe *WriteProbe) {
 func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 	tb.Helper()
 	caller := operation.Caller{Surface: operation.SurfaceChat, PrincipalID: OwnerID, Class: principal.ClassOwner, SessionID: SessionID, Direct: true}
-	var bound string
+	var bound, code string
 	if probe.Previewed {
 		preview, err := probe.Registry.Preview(tb.Context(), probe.ID, &operation.Call{Caller: caller, Input: probe.Input})
 		if err != nil {
 			tb.Fatalf("%s: preview: %v", probe.ID, err)
 		}
-		bound = preview.Digest
+		bound, code = preview.Digest, preview.Code
 	}
 	newCall := func() *operation.Call {
 		return &operation.Call{
@@ -115,6 +115,7 @@ func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 			IdempotencyKey: "write-probe-" + probe.ID,
 			RequestDigest:  operation.Digest(probe.Input),
 			PreviewDigest:  bound,
+			Confirmation:   code,
 		}
 	}
 	first, err := probe.Registry.Invoke(tb.Context(), probe.ID, newCall())

@@ -94,8 +94,12 @@ type turnAccess struct {
 
 func (x *ADKExecutor) withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
 	mark, tainted := req.AdmissionTaint()
+	knowledge := slices.Clone(req.Knowledge)
+	if req.WebOnly {
+		knowledge = nil
+	}
 	access := turnAccess{
-		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: tainted, origin: req.Origin,
+		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: knowledge, tainted: tainted, origin: req.Origin,
 		unattended:    x.turnKind(req.Origin) == operation.TurnUnattended,
 		webOnlyRelief: req.WebOnly && req.JobTaint == "",
 	}

@@ -134,3 +134,21 @@ func TestAcceptedTurnReachesTheExecutorWithItsKnowledgeList(t *testing.T) {
 		t.Fatalf("executor requests = %+v", seen)
 	}
 }
+
+func TestStampPersonaGivesAWebOnlyRunNoKnowledgeAndOnlyWebTools(t *testing.T) {
+	personas := newKnowledgePersonas()
+	engine, _, _ := newTestRuntime(t, Deps{Config: Default(), DefaultAgentID: "main", Personas: personas}, turntest.NewFakeExecutor(nil))
+	req := sampleRequest("session-a", "turn-0")
+	req.PrincipalClass = principal.ClassOwner
+	req.WebOnly = true
+	req.Knowledge = []string{"hr-docs"}
+	if err := engine.stampPersona(req); err != nil {
+		t.Fatalf("stampPersona: %v", err)
+	}
+	if len(req.Knowledge) != 0 || len(personas.asked) != 0 {
+		t.Errorf("Knowledge = %v after asking %v, want none", req.Knowledge, personas.asked)
+	}
+	if req.ToolRestriction == nil || !slices.Equal(req.ToolRestriction.Allowed, []string{"web_search", "web_fetch"}) {
+		t.Errorf("ToolRestriction = %+v, want only the two web tools", req.ToolRestriction)
+	}
+}
