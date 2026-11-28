@@ -38,7 +38,7 @@ func TestRootCommandMountsEverySubcommand(t *testing.T) {
 		"broadcast":   {"reconcile", "status"},
 		"children":    {"cancel", "list", "show"},
 		"config":      {"check", "schema"},
-		"cron":        {"add", "delete", "list", "pause", "resume", "run-now", "runs"},
+		"cron":        {"add", "confirm", "delete", "list", "pause", "resume", "run-now", "runs"},
 		"effects":     {"approve", "list", "mark", "prune", "reconcile", "retry"},
 		"grants":      {"list", "revoke"},
 		"handoff":     {"list", "release"},

@@ -155,7 +155,8 @@ func validateJobSpec(spec *JobSpec) error {
 	if _, err := time.LoadLocation(spec.Timezone); err != nil {
 		return Errorf(ErrorCodeTimezoneInvalid, "timezone is not a valid IANA name")
 	}
-	if spec.WorkflowID != "" {
+	switch {
+	case spec.WorkflowID != "":
 		if spec.Prompt != "" {
 			return Errorf(ErrorCodeInvalidArgument, "a job runs either a prompt or a workflow, not both")
 		}
@@ -165,9 +166,9 @@ func validateJobSpec(spec *JobSpec) error {
 		if spec.Context != "" {
 			return Errorf(ErrorCodeInvalidArgument, "a workflow job has no context")
 		}
-	} else if strings.TrimSpace(spec.Prompt) == "" || len(spec.Prompt) > maxPromptBytes {
+	case strings.TrimSpace(spec.Prompt) == "" || len(spec.Prompt) > maxPromptBytes:
 		return Errorf(ErrorCodeInvalidArgument, "job prompt is not within bounds")
-	} else if !validContext(spec.Context) {
+	case !validContext(spec.Context):
 		return Errorf(ErrorCodeInvalidArgument, "a prompt job states its context as full or web_only")
 	}
 	if len(spec.TaintSource) > maxTaintSourceSize {

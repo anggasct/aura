@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -56,6 +57,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
@@ -2422,6 +2424,39 @@ func mcpServerFromBackend(s *plugin.BackendServer) mcp.ServerConfig {
 		out.ConnectTimeout = &ct
 	}
 	return out
+}
+
+func checkMCPWorkingDir(cfg *appconfig.Config, plugins []mcp.PluginServer) error {
+	if !runsStdioServer(cfg, plugins) {
+		return nil
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve the working directory: %w", err)
+	}
+	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
+	if err != nil {
+		return err
+	}
+	if !appconfig.ContainsPath(workingDir, dataRoot) {
+		return nil
+	}
+	return configkit.Invalid("mcp", fmt.Sprintf("a stdio server gets the working directory %s read-write, which holds the data directory %s; start the daemon from another directory", workingDir, dataRoot))
+}
+
+func runsStdioServer(cfg *appconfig.Config, plugins []mcp.PluginServer) bool {
+	servers := configuredMCPServers(cfg)
+	for i := range servers {
+		if servers[i].Transport == mcp.TransportStdio {
+			return true
+		}
+	}
+	for i := range plugins {
+		if plugins[i].Server.Transport == mcp.TransportStdio {
+			return true
+		}
+	}
+	return false
 }
 
 func mcpPluginsFromBackends(backends []plugin.Active) []mcp.PluginServer {

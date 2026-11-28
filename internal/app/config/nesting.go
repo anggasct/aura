@@ -39,10 +39,7 @@ func validateWorkspaceNesting(cfg *Config) error {
 		return nil
 	}
 	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
-	if err != nil {
-		return nil
-	}
-	if ContainsPath(cfg.Tools.Workspace, dataRoot) || ContainsPath(dataRoot, cfg.Tools.Workspace) {
+	if err == nil && (ContainsPath(cfg.Tools.Workspace, dataRoot) || ContainsPath(dataRoot, cfg.Tools.Workspace)) {
 		return configkit.Invalid("tools.workspace", "must not contain, equal or sit inside the data directory "+dataRoot)
 	}
 	return nil

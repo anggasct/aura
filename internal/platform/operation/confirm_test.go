@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -24,9 +25,9 @@ import (
 
 var codePattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$`)
 
-func newConfirmer(t *testing.T) (*operation.Confirmer, string) {
+func newConfirmer(t *testing.T) (confirmer *operation.Confirmer, dir string) {
 	t.Helper()
-	dir := t.TempDir()
+	dir = t.TempDir()
 	confirmer, err := operation.NewConfirmer(dir)
 	if err != nil {
 		t.Fatalf("NewConfirmer: %v", err)
@@ -168,7 +169,7 @@ func (c *codedOperation) preview(_ context.Context, call *operation.Call) (opera
 	if err := json.Unmarshal(call.Input, &input); err != nil {
 		return operation.Preview{}, err
 	}
-	digest := "subject-" + input.Subject + "-version-" + string(rune('0'+c.version.Load()))
+	digest := "subject-" + input.Subject + "-version-" + strconv.Itoa(int(c.version.Load()))
 	return operation.Preview{Lines: []string{"subject: " + input.Subject}, Digest: digest}, nil
 }
 

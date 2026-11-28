@@ -40,7 +40,7 @@ func (r *chatRigE2E) taintMark(t *testing.T, id string) (tainted bool, version i
 	return tainted, version
 }
 
-func previewCode(t *testing.T, lines []string) (command, code string) {
+func previewCode(t *testing.T, lines []string) (invocation, code string) {
 	t.Helper()
 	for _, line := range lines {
 		if match := confirmLine.FindStringSubmatch(line); match != nil {

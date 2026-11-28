@@ -78,7 +78,7 @@ func TestCLICommandsComeFromTheRegistry(t *testing.T) {
 
 func TestCronCommandsAreAllGenerated(t *testing.T) {
 	generated, _ := commandLeaves(NewRootCommand())
-	want := []string{"cron add", "cron delete", "cron list", "cron pause", "cron resume", "cron run-now", "cron runs"}
+	want := []string{"cron add", "cron confirm", "cron delete", "cron list", "cron pause", "cron resume", "cron run-now", "cron runs"}
 	var got []string
 	for _, name := range generated {
 		if strings.HasPrefix(name, "cron ") {

@@ -223,8 +223,8 @@ const (
 	webOnlyLeavesLine  = "This prompt's text may be sent to any website the run visits."
 )
 
-func contextLines(context string) []string {
-	if context == ContextWebOnly {
+func contextLines(value string) []string {
+	if value == ContextWebOnly {
 		return []string{contextWebOnlyLine, webOnlyLeavesLine}
 	}
 	return []string{contextFullLine}

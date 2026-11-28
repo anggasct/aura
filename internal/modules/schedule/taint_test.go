@@ -18,7 +18,7 @@ import (
 const (
 	hostileSource = "a webhook"
 	destination   = `"channel":"telegram","destination":"me"`
-	ownerAddInput      = `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full",` + destination + `}`
+	ownerAddInput = `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full",` + destination + `}`
 )
 
 func taintedCaller(source string) operation.Caller {
@@ -347,7 +347,7 @@ func TestConfirmCodeNeverEntersSessionEvents(t *testing.T) {
 		t.Error("the agent surface ran cron.confirm")
 	}
 	outcome := rig.Execute(t.Context(), operationtest.RequestFor("aura_cron_list", json.RawMessage(`{}`), "list-1"))
-	if outcome.Class != "ok" || strings.Contains(string(outcome.Output), "--apply") {
+	if outcome.Class != "ok" || strings.Contains(outcome.Output, "--apply") {
 		t.Errorf("the list the agent reads = %+v, want no confirmation command", outcome)
 	}
 	ownerPreview := rig.preview(t, "cron.confirm", string(input), operation.SurfaceChat)

@@ -27,14 +27,17 @@ func confirmInvocation(descriptor *Descriptor, call *Call, code string) string {
 	}
 	surface := call.Caller.Surface
 	words := commandWords(descriptor, surface)
-	for _, positional := range descriptor.Positionals(surface) {
-		if value, ok := plainValue(values[positional.Param]); ok {
+	positionals := descriptor.Positionals(surface)
+	for i := range positionals {
+		if value, ok := plainValue(values[positionals[i].Param]); ok {
 			words = append(words, value)
 		}
 	}
-	for _, flag := range descriptor.Flags(surface) {
+	flags := descriptor.Flags(surface)
+	for i := range flags {
+		flag := &flags[i]
 		value, ok := plainValue(values[flag.Param])
-		if !ok || value == defaultText(&flag) {
+		if !ok || value == defaultText(flag) {
 			continue
 		}
 		if flag.Kind == KindBoolean {
