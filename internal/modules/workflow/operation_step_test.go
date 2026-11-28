@@ -54,8 +54,8 @@ func TestWorkflowStepRefusesOperationTools(t *testing.T) {
 		deps := testValidationDeps()
 		deps.KnownTools = append(deps.KnownTools, "aura_cron_list")
 		err := Validate(operationToolSpec("aura_cron_list"), deps)
-		if !hasCode(err, ErrorCodeCapabilityExceeded) {
-			t.Fatalf("Validate = %v, want %s", err, ErrorCodeCapabilityExceeded)
+		if !hasCode(err, ErrorCodeSpecInvalid) {
+			t.Fatalf("Validate = %v, want %s", err, ErrorCodeSpecInvalid)
 		}
 	})
 	t.Run("the runner refuses a registered operation tool before the broker", func(t *testing.T) {

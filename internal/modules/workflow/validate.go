@@ -160,7 +160,7 @@ func validateExecutor(step *StepSpec, deps *ValidationDeps, stepsByID map[string
 			return codedError(ErrorCodeExecutorInvalid, field+" needs tool_id")
 		}
 		if tools.IsOperationEntry(*step.Executor.ToolID) {
-			return codedError(ErrorCodeCapabilityExceeded, field+" names an operation tool, which a workflow step cannot run")
+			return codedError(ErrorCodeSpecInvalid, field+" names an operation tool, which a workflow step cannot run")
 		}
 		if !slices.Contains(deps.KnownTools, *step.Executor.ToolID) {
 			return codedError(ErrorCodeExecutorInvalid, field+" references unknown tool "+fmt.Sprintf("%q", *step.Executor.ToolID))
