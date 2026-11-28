@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"path"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -366,7 +368,7 @@ func digestOf(parts ...string) string {
 }
 
 func removalDigest(record *SourceRecord) string {
-	return digestOf(record.Collection, record.URI, record.ID, record.ContentSHA256, fmt.Sprint(record.Chunks), fmt.Sprint(record.IngestVersion))
+	return digestOf(record.Collection, record.URI, record.ID, record.ContentSHA256, strconv.Itoa(record.Chunks), strconv.Itoa(record.IngestVersion))
 }
 
 func (o *Operations) previewRemove(ctx context.Context, call *operation.Call) (operation.Preview, error) {
@@ -429,7 +431,8 @@ func staleSet(detail string) error {
 }
 
 func removedResult(outcome *RemoveOutcome, truncated bool) (operation.Result, error) {
-	lines := []string{fmt.Sprintf("removed: %d chunks", outcome.Chunks)}
+	lines := make([]string, 0, len(removalNotes)+2)
+	lines = append(lines, fmt.Sprintf("removed: %d chunks", outcome.Chunks))
 	lines = append(lines, walLines(truncated)...)
 	lines = append(lines, removalNotes...)
 	return linesResult(lines, map[string]any{"removed": outcome.Chunks, "wal_truncated": truncated})
@@ -517,21 +520,21 @@ func (o *Operations) embed(ctx context.Context, call *operation.Call) (operation
 	})
 }
 
+var refusalsBeforeSend = []ErrorCode{
+	ErrorCodeCollectionInvalid, ErrorCodeSourceNotFound, ErrorCodeEmbeddingUnavailable,
+	ErrorCodeSecretInvalid, ErrorCodeSecretUnavailable, ErrorCodeReembedRequired,
+}
+
 func refusedBeforeSend(err error) error {
 	code, coded := fault.CodeOf[ErrorCode](err)
-	if !coded {
-		return moduleFailure(err)
-	}
-	switch code {
-	case ErrorCodeCollectionInvalid, ErrorCodeSourceNotFound, ErrorCodeEmbeddingUnavailable,
-		ErrorCodeSecretInvalid, ErrorCodeSecretUnavailable, ErrorCodeReembedRequired:
+	if coded && slices.Contains(refusalsBeforeSend, code) {
 		return operation.NotPerformed(code, err)
 	}
 	return moduleFailure(err)
 }
 
 func unembedDigest(collection string, outcome *DisableOutcome) string {
-	return digestOf(collection, fmt.Sprint(outcome.OptedIn), fmt.Sprint(outcome.Vectors))
+	return digestOf(collection, strconv.FormatBool(outcome.OptedIn), strconv.Itoa(outcome.Vectors))
 }
 
 func (o *Operations) previewUnembed(ctx context.Context, call *operation.Call) (operation.Preview, error) {
@@ -588,7 +591,8 @@ func (o *Operations) unembed(ctx context.Context, call *operation.Call) (operati
 }
 
 func unembeddedResult(outcome *DisableOutcome, truncated bool) (operation.Result, error) {
-	lines := []string{fmt.Sprintf("embedding off: %d vectors deleted and the opt-in cleared", outcome.Vectors)}
+	lines := make([]string, 0, len(removalNotes)+2)
+	lines = append(lines, fmt.Sprintf("embedding off: %d vectors deleted and the opt-in cleared", outcome.Vectors))
 	lines = append(lines, walLines(truncated)...)
 	lines = append(lines, removalNotes...)
 	return linesResult(lines, map[string]any{"vectors": outcome.Vectors, "wal_truncated": truncated})

@@ -120,7 +120,7 @@ func Settings() *knowledge.EmbeddingSettings {
 	}
 }
 
-func identityReducer(_ context.Context, source []byte, _ int64) (string, bool, error) {
+func identityReducer(_ context.Context, source []byte, _ int64) (markdown string, truncated bool, err error) {
 	return string(source), false, nil
 }
 

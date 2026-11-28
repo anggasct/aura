@@ -18,42 +18,49 @@ var (
 	paritySourceID  = regexp.MustCompile(`kb[sc]_[0-9a-z]+`)
 )
 
+func tableState(t *testing.T, db *sql.DB, table string) []string {
+	t.Helper()
+	rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+table)
+	if err != nil {
+		t.Fatalf("read %s: %v", table, err)
+	}
+	defer func() { _ = rows.Close() }()
+	columns, err := rows.Columns()
+	if err != nil {
+		t.Fatalf("columns of %s: %v", table, err)
+	}
+	var lines []string
+	for rows.Next() {
+		values := make([]any, len(columns))
+		targets := make([]any, len(columns))
+		for i := range values {
+			targets[i] = &values[i]
+		}
+		if err := rows.Scan(targets...); err != nil {
+			t.Fatalf("scan %s: %v", table, err)
+		}
+		cells := make([]string, len(columns))
+		for i, value := range values {
+			text := fmt.Sprint(value)
+			if raw, isBytes := value.([]byte); isBytes {
+				text = string(raw)
+			}
+			text = parityTimestamp.ReplaceAllString(text, "<time>")
+			cells[i] = columns[i] + "=" + paritySourceID.ReplaceAllString(text, "<id>")
+		}
+		lines = append(lines, table+": "+strings.Join(cells, " | "))
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("read %s: %v", table, err)
+	}
+	return lines
+}
+
 func knowledgeState(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	var lines []string
 	for _, table := range []string{"kb_collection", "kb_source", "kb_chunk", "kb_embedding"} {
-		rows, err := db.QueryContext(t.Context(), "SELECT * FROM "+table)
-		if err != nil {
-			t.Fatalf("read %s: %v", table, err)
-		}
-		columns, err := rows.Columns()
-		if err != nil {
-			t.Fatalf("columns of %s: %v", table, err)
-		}
-		for rows.Next() {
-			values := make([]any, len(columns))
-			targets := make([]any, len(columns))
-			for i := range values {
-				targets[i] = &values[i]
-			}
-			if err := rows.Scan(targets...); err != nil {
-				t.Fatalf("scan %s: %v", table, err)
-			}
-			cells := make([]string, len(columns))
-			for i, value := range values {
-				text := fmt.Sprint(value)
-				if raw, isBytes := value.([]byte); isBytes {
-					text = string(raw)
-				}
-				text = parityTimestamp.ReplaceAllString(text, "<time>")
-				cells[i] = columns[i] + "=" + paritySourceID.ReplaceAllString(text, "<id>")
-			}
-			lines = append(lines, table+": "+strings.Join(cells, " | "))
-		}
-		if err := rows.Err(); err != nil {
-			t.Fatalf("read %s: %v", table, err)
-		}
-		_ = rows.Close()
+		lines = append(lines, tableState(t, db, table)...)
 	}
 	slices.Sort(lines)
 	return strings.Join(lines, "\n")

@@ -61,7 +61,7 @@ func (r *opsRig) key(label string) string {
 	return "ops-" + label + "-" + strconv.Itoa(r.calls)
 }
 
-func (r *opsRig) tool(id string, input string) operationtest.Outcome {
+func (r *opsRig) tool(id, input string) operationtest.Outcome {
 	return r.Execute(context.Background(), operationtest.RequestFor(operation.ToolName(id), json.RawMessage(input), r.key(id)))
 }
 
