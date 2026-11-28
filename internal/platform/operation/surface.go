@@ -82,8 +82,18 @@ func (d *Descriptor) Projects(surface Surface) bool {
 	return onSurface(d.Surfaces, surface)
 }
 
+func (d *Descriptor) OwnerConfirmation() OwnerConfirmation {
+	switch {
+	case !d.Preview:
+		return ""
+	case d.Risk == RiskDestructive:
+		return ConfirmPreviewUntilApply
+	}
+	return d.Confirmation
+}
+
 func (d *Descriptor) previews() bool {
-	return d.Preview && (d.Risk == RiskDestructive || d.Risk == RiskChange)
+	return d.OwnerConfirmation() == ConfirmPreviewUntilApply
 }
 
 func (d *Descriptor) GeneratesTool() bool {
@@ -148,4 +158,21 @@ func (d *Descriptor) OutputFieldsOn(surface Surface) []string {
 func ToolName(id string) string {
 	replacer := strings.NewReplacer(".", "_", "-", "_")
 	return tools.OperationToolPrefix + replacer.Replace(id)
+}
+
+func textOn(base string, texts []SurfaceText, surface Surface) string {
+	for i := range texts {
+		if texts[i].Surface == surface {
+			return texts[i].Text
+		}
+	}
+	return base
+}
+
+func (d *Descriptor) DescriptionOn(surface Surface) string {
+	return textOn(d.Description, d.Texts, surface)
+}
+
+func (p *Param) SummaryOn(surface Surface) string {
+	return textOn(p.Summary, p.Texts, surface)
 }

@@ -73,7 +73,17 @@ type Descriptor struct {
 	Needs                []string
 	Interactive          bool
 	Preview              bool
+	Confirmation         OwnerConfirmation
+	ReachesNetwork       bool
+	Texts                []SurfaceText
 }
+
+type OwnerConfirmation string
+
+const (
+	ConfirmPreviewUntilApply OwnerConfirmation = "preview_until_apply"
+	ConfirmRunDirectly       OwnerConfirmation = "run_directly"
+)
 
 type ParamKind string
 
@@ -105,6 +115,13 @@ type Param struct {
 	Surfaces  []Surface
 	Schema    json.RawMessage
 	Prompt    string
+	URLParam  string
+	Texts     []SurfaceText
+}
+
+type SurfaceText struct {
+	Surface Surface
+	Text    string
 }
 
 type EnumValue struct {
@@ -188,6 +205,7 @@ type File interface {
 	Name() string
 	MediaType() string
 	Size() int64
+	Reference() string
 }
 
 type FileAuthority interface {

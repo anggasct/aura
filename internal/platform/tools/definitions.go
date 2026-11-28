@@ -97,6 +97,7 @@ type Definition struct {
 	OptIn                bool
 	OwnerOptIn           bool
 	ExternalSink         bool
+	ReachesNetwork       bool
 	NoStandingGrant      bool
 	Orchestration        bool
 	RepliesToRequester   bool

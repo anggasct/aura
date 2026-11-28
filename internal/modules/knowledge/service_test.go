@@ -3,7 +3,6 @@ package knowledge
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,7 +18,7 @@ type fakeStore struct {
 	writeErr  error
 	removed   []string
 	removeErr error
-	applied   bool
+	walStuck  bool
 	unchanged bool
 }
 
@@ -42,15 +41,22 @@ func (s *fakeStore) ListSources(_ context.Context, collection string) ([]SourceR
 	return s.sources[collection], nil
 }
 
-func (s *fakeStore) RemoveSource(_ context.Context, collection, uri string, apply bool) (RemoveOutcome, error) {
+func (s *fakeStore) GetSource(_ context.Context, collection, uri string) (SourceRecord, bool, error) {
 	if s.removeErr != nil {
-		return RemoveOutcome{Applied: s.applied}, s.removeErr
+		return SourceRecord{}, false, s.removeErr
 	}
-	if apply {
-		s.removed = append(s.removed, collection+"|"+uri)
-	}
-	return RemoveOutcome{SourceID: "kbs_1", Chunks: 2, Applied: apply, WALTruncated: true}, nil
+	return SourceRecord{ID: "kbs_1", Collection: collection, URI: uri, Chunks: 2}, true, nil
 }
+
+func (s *fakeStore) DeleteSource(_ context.Context, collection, uri string) (RemoveOutcome, error) {
+	if s.removeErr != nil {
+		return RemoveOutcome{}, s.removeErr
+	}
+	s.removed = append(s.removed, collection+"|"+uri)
+	return RemoveOutcome{SourceID: "kbs_1", Chunks: 2}, nil
+}
+
+func (s *fakeStore) TruncateWAL(context.Context) (bool, error) { return !s.walStuck, nil }
 
 func (s *fakeStore) Check(context.Context) (IndexReport, error) { return s.report, nil }
 
@@ -168,13 +174,13 @@ func TestCollectionIDValidation(t *testing.T) {
 			if tc.valid {
 				return
 			}
-			_, err := fixture.service.Add(t.Context(), tc.id, "irrelevant.md")
+			_, err := fixture.add(t.Context(), tc.id, "irrelevant.md")
 			requireCode(t, err, ErrorCodeCollectionInvalid)
 			_, err = fixture.service.Show(t.Context(), tc.id)
 			requireCode(t, err, ErrorCodeCollectionInvalid)
-			_, err = fixture.service.Remove(t.Context(), tc.id, "x", true)
+			_, err = fixture.service.Remove(t.Context(), tc.id, "x")
 			requireCode(t, err, ErrorCodeCollectionInvalid)
-			_, err = fixture.service.Refresh(t.Context(), tc.id, "")
+			_, err = fixture.refresh(t.Context(), tc.id, "")
 			requireCode(t, err, ErrorCodeCollectionInvalid)
 		})
 	}
@@ -183,7 +189,7 @@ func TestCollectionIDValidation(t *testing.T) {
 func TestAddFileWritesNormalizedChunksAndRecordsTheOwnerAction(t *testing.T) {
 	fixture := newFixture(t)
 	path := writeSource(t, "Policy.md", []byte("# Refunds\nRefunds take "+runeText(0x200B)+"ten days.<!-- hidden -->\n"))
-	result, err := fixture.service.Add(t.Context(), "support", path)
+	result, err := fixture.add(t.Context(), "support", path)
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -209,7 +215,7 @@ func TestAddFileWritesNormalizedChunksAndRecordsTheOwnerAction(t *testing.T) {
 
 func TestAddRefusesASourceWithHeadingsOnly(t *testing.T) {
 	fixture := newFixture(t)
-	_, err := fixture.service.Add(t.Context(), "support", writeSource(t, "Empty.md", []byte("# Refunds\n## Returns\n")))
+	_, err := fixture.add(t.Context(), "support", writeSource(t, "Empty.md", []byte("# Refunds\n## Returns\n")))
 	if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeSourceUnsupported {
 		t.Fatalf("err = %v, want %s", err, ErrorCodeSourceUnsupported)
 	}
@@ -224,7 +230,7 @@ func TestAddDigestIgnoresHiddenCharactersAndFollowsContent(t *testing.T) {
 	hidden := writeSource(t, "b.md", []byte("same"+runeText(0x200B)+" text"))
 	other := writeSource(t, "c.md", []byte("other text"))
 	for _, path := range []string{plain, hidden, other} {
-		if _, err := fixture.service.Add(t.Context(), "support", path); err != nil {
+		if _, err := fixture.add(t.Context(), "support", path); err != nil {
 			t.Fatalf("Add %s: %v", path, err)
 		}
 	}
@@ -240,7 +246,7 @@ func TestAddDigestIgnoresHiddenCharactersAndFollowsContent(t *testing.T) {
 func TestAddHTMLFileGoesThroughTheReducer(t *testing.T) {
 	fixture := newFixture(t)
 	path := writeSource(t, "page.html", []byte("<p>refund page</p>"))
-	if _, err := fixture.service.Add(t.Context(), "support", path); err != nil {
+	if _, err := fixture.add(t.Context(), "support", path); err != nil {
 		t.Fatalf("Add: %v", err)
 	}
 	if got := fixture.store.writes[0].Chunks[0].Content; got != "refund page" {
@@ -265,7 +271,7 @@ func TestAddHTMLReducerFailuresFailClosed(t *testing.T) {
 			fixture := newFixture(t)
 			fixture.service.reducer = tc.reducer
 			path := writeSource(t, "page.html", []byte("<p>x</p>"))
-			_, err := fixture.service.Add(t.Context(), "support", path)
+			_, err := fixture.add(t.Context(), "support", path)
 			requireCode(t, err, tc.want)
 			if len(fixture.store.writes) != 0 || len(fixture.actions.actions) != 0 {
 				t.Error("a failed ingest wrote data or recorded an action")
@@ -276,7 +282,7 @@ func TestAddHTMLReducerFailuresFailClosed(t *testing.T) {
 
 func TestAddURLUsesTheHTTPClientAndStoresTheQueryInTheURI(t *testing.T) {
 	fixture := newFixture(t)
-	result, err := fixture.service.Add(t.Context(), "support", "https://Docs.Example.com/refunds?lang=en#top")
+	result, err := fixture.add(t.Context(), "support", "https://Docs.Example.com/refunds?lang=en#top")
 	if err != nil {
 		t.Fatalf("Add: %v", err)
 	}
@@ -290,10 +296,10 @@ func TestAddURLUsesTheHTTPClientAndStoresTheQueryInTheURI(t *testing.T) {
 
 func TestAddRefusesNonHTTPSURLsAndEgressDenials(t *testing.T) {
 	fixture := newFixture(t)
-	_, err := fixture.service.Add(t.Context(), "support", "http://docs.example.com/a")
+	_, err := fixture.add(t.Context(), "support", "http://docs.example.com/a")
 	requireCode(t, err, ErrorCodeURLRefused)
 	fixture.doer.err = Errorf(ErrorCodeURLRefused, "destination is not permitted")
-	_, err = fixture.service.Add(t.Context(), "support", "https://10.0.0.5/a")
+	_, err = fixture.add(t.Context(), "support", "https://10.0.0.5/a")
 	requireCode(t, err, ErrorCodeURLRefused)
 	if len(fixture.store.writes) != 0 {
 		t.Error("a refused URL wrote data")
@@ -316,7 +322,7 @@ func TestAddRejectsSecretBearingSourcesWholeWithoutPrintingTheMatch(t *testing.T
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newFixture(t)
 			path := writeSource(t, "notes.md", []byte("# Intro\nharmless first section\n\n# Later\n"+tc.content+"\n"))
-			_, err := fixture.service.Add(t.Context(), "support", path)
+			_, err := fixture.add(t.Context(), "support", path)
 			requireCode(t, err, ErrorCodeSecretInvalid)
 			if strings.Contains(err.Error(), tc.secret) {
 				t.Errorf("error %q prints the match", err.Error())
@@ -330,7 +336,7 @@ func TestAddRejectsSecretBearingSourcesWholeWithoutPrintingTheMatch(t *testing.T
 
 func TestAddRejectsAURLThatCarriesAVaultValue(t *testing.T) {
 	fixture := newFixture(t)
-	_, err := fixture.service.Add(t.Context(), "support", "https://docs.example.com/a?key=vault-secret-value")
+	_, err := fixture.add(t.Context(), "support", "https://docs.example.com/a?key=vault-secret-value")
 	requireCode(t, err, ErrorCodeSecretInvalid)
 	if len(fixture.store.writes) != 0 {
 		t.Error("a URL carrying a secret was ingested")
@@ -341,7 +347,7 @@ func TestAddFailsClosedWhenASecretReferenceCannotBeResolved(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.secrets.err = errors.New("unresolved secret references: telegram_bot_token_main")
 	path := writeSource(t, "notes.md", []byte("harmless"))
-	_, err := fixture.service.Add(t.Context(), "support", path)
+	_, err := fixture.add(t.Context(), "support", path)
 	requireCode(t, err, ErrorCodeSecretUnavailable)
 	if !strings.Contains(err.Error(), "telegram_bot_token_main") {
 		t.Errorf("error %q does not name the unresolved reference", err.Error())
@@ -361,7 +367,7 @@ func TestAddEnforcesTheChunkCapPerSource(t *testing.T) {
 		builder.WriteString("# H\nx\n")
 	}
 	path := writeSource(t, "many.md", []byte(builder.String()))
-	_, err := fixture.service.Add(t.Context(), "support", path)
+	_, err := fixture.add(t.Context(), "support", path)
 	requireCode(t, err, ErrorCodeCapExceeded)
 	if len(fixture.store.writes) != 0 {
 		t.Error("an over-cap source was written")
@@ -373,7 +379,7 @@ func TestAddEmptyAndWhitespaceOnlySourcesAreRefused(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			fixture := newFixture(t)
 			path := writeSource(t, "empty.txt", []byte(content))
-			_, err := fixture.service.Add(t.Context(), "support", path)
+			_, err := fixture.add(t.Context(), "support", path)
 			requireCode(t, err, ErrorCodeSourceUnsupported)
 		})
 	}
@@ -383,20 +389,20 @@ func TestAddStoreErrorsPassThroughWithoutAnOwnerAction(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.store.writeErr = Errorf(ErrorCodeCapExceeded, "chunk cap would be exceeded")
 	path := writeSource(t, "notes.md", []byte("harmless"))
-	_, err := fixture.service.Add(t.Context(), "support", path)
+	_, err := fixture.add(t.Context(), "support", path)
 	requireCode(t, err, ErrorCodeCapExceeded)
 	if len(fixture.actions.actions) != 0 {
 		t.Error("an action was recorded for a failed write")
 	}
 }
 
-func TestAddReportsAFailedOwnerActionButKeepsTheResult(t *testing.T) {
+func TestWriteReportsAFailedOwnerActionSoItsTransactionRollsBack(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.actions.err = errors.New("event store unavailable")
 	path := writeSource(t, "notes.md", []byte("harmless"))
-	result, err := fixture.service.Add(t.Context(), "support", path)
-	if err == nil || result.SourceID != "kbs_1" {
-		t.Fatalf("Add = %+v, %v; want the written result and the audit error", result, err)
+	result, err := fixture.add(t.Context(), "support", path)
+	if err == nil || result.SourceID != "" {
+		t.Fatalf("Write = %+v, %v; want the audit error and no result", result, err)
 	}
 }
 
@@ -408,7 +414,7 @@ func TestRefreshKeepsOldChunksWhenASourceFailsAndStillRefreshesTheOthers(t *test
 		{ID: "kbs_a", Collection: "support", Kind: SourceKindFile, URI: missing, Label: "gone.md"},
 		{ID: "kbs_b", Collection: "support", Kind: SourceKindFile, URI: good, Label: "good.md"},
 	}
-	results, err := fixture.service.Refresh(t.Context(), "support", "")
+	results, err := fixture.refresh(t.Context(), "support", "")
 	requireCode(t, err, ErrorCodeSourceNotFound)
 	if !strings.Contains(err.Error(), "gone.md") {
 		t.Errorf("error %q does not name the failing source", err.Error())
@@ -427,7 +433,7 @@ func TestRefreshKeepsOldChunksWhenASourceFailsAndStillRefreshesTheOthers(t *test
 func TestRefreshOfAURLSourceUsesTheStoredKindAndURI(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.store.sources["support"] = []SourceRecord{{ID: "kbs_a", Collection: "support", Kind: SourceKindURL, URI: "https://docs.example.com/refunds?lang=en", Label: "docs.example.com/refunds"}}
-	results, err := fixture.service.Refresh(t.Context(), "support", "https://docs.example.com/refunds?lang=en")
+	results, err := fixture.refresh(t.Context(), "support", "https://docs.example.com/refunds?lang=en")
 	if err != nil || len(results) != 1 {
 		t.Fatalf("Refresh = %+v, %v", results, err)
 	}
@@ -444,51 +450,38 @@ func TestRefreshSelectsOneSourceByStoredURIAndRejectsUnknownOnes(t *testing.T) {
 		{Collection: "support", Kind: SourceKindFile, URI: first, Label: "a.md"},
 		{Collection: "support", Kind: SourceKindFile, URI: second, Label: "b.md"},
 	}
-	results, err := fixture.service.Refresh(t.Context(), "support", second)
+	results, err := fixture.refresh(t.Context(), "support", second)
 	if err != nil || len(results) != 1 || results[0].URI != second {
 		t.Fatalf("Refresh one = %+v, %v", results, err)
 	}
-	_, err = fixture.service.Refresh(t.Context(), "support", "/not/stored.md")
+	_, err = fixture.refresh(t.Context(), "support", "/not/stored.md")
 	requireCode(t, err, ErrorCodeSourceNotFound)
-	_, err = fixture.service.Refresh(t.Context(), "empty-one", "")
+	_, err = fixture.refresh(t.Context(), "empty-one", "")
 	requireCode(t, err, ErrorCodeSourceNotFound)
 }
 
-func TestRemoveDryRunRecordsNothingAndApplyRecordsTheAction(t *testing.T) {
+func TestPreviewRemoveRecordsNothingAndRemoveRecordsTheAction(t *testing.T) {
 	fixture := newFixture(t)
-	outcome, err := fixture.service.Remove(t.Context(), "support", "/docs/a.md", false)
-	if err != nil || outcome.Applied || len(fixture.store.removed) != 0 || len(fixture.actions.actions) != 0 {
-		t.Fatalf("dry run = %+v, %v, removed %v, actions %v", outcome, err, fixture.store.removed, fixture.actions.actions)
+	record, err := fixture.service.PreviewRemove(t.Context(), "support", "/docs/a.md")
+	if err != nil || record.Chunks != 2 || len(fixture.store.removed) != 0 || len(fixture.actions.actions) != 0 {
+		t.Fatalf("preview = %+v, %v, removed %v, actions %v", record, err, fixture.store.removed, fixture.actions.actions)
 	}
-	outcome, err = fixture.service.Remove(t.Context(), "support", "/docs/a.md", true)
-	if err != nil || !outcome.Applied || len(fixture.store.removed) != 1 {
+	outcome, err := fixture.service.Remove(t.Context(), "support", "/docs/a.md")
+	if err != nil || outcome.Chunks != 2 || len(fixture.store.removed) != 1 {
 		t.Fatalf("apply = %+v, %v", outcome, err)
 	}
 	if len(fixture.actions.actions) != 1 || fixture.actions.actions[0].Action != ActionRemove || fixture.actions.actions[0].Chunks != 2 {
 		t.Fatalf("owner actions = %+v", fixture.actions.actions)
 	}
-	if _, err := fixture.service.Remove(t.Context(), "support", "", true); err == nil {
-		t.Fatal("Remove accepted an empty source")
+	if _, err := fixture.service.PreviewRemove(t.Context(), "support", ""); err == nil {
+		t.Fatal("PreviewRemove accepted an empty source")
 	}
 }
 
-func TestRemoveStillRecordsTheActionWhenOnlyTheLogTruncationFailed(t *testing.T) {
-	fixture := newFixture(t)
-	fixture.store.removeErr = errors.New("truncate write-ahead log")
-	fixture.store.applied = true
-	outcome, err := fixture.service.Remove(t.Context(), "support", "/docs/a.md", true)
-	if err == nil || !outcome.Applied {
-		t.Fatalf("Remove = %+v, %v; want the applied outcome with the error", outcome, err)
-	}
-	if len(fixture.actions.actions) != 1 {
-		t.Fatalf("owner actions = %+v, want the applied removal recorded", fixture.actions.actions)
-	}
-}
-
-func TestRemoveNotAppliedErrorsAreReturnedUnchanged(t *testing.T) {
+func TestRemoveErrorsAreReturnedUnchangedAndRecordNothing(t *testing.T) {
 	fixture := newFixture(t)
 	fixture.store.removeErr = Errorf(ErrorCodeSourceNotFound, "source does not exist in the collection")
-	_, err := fixture.service.Remove(t.Context(), "support", "/docs/a.md", true)
+	_, err := fixture.service.Remove(t.Context(), "support", "/docs/a.md")
 	requireCode(t, err, ErrorCodeSourceNotFound)
 	if len(fixture.actions.actions) != 0 {
 		t.Error("an action was recorded for a removal that did not happen")
@@ -517,19 +510,5 @@ func TestCheckReportsAnIndexWithProblemsAsDamaged(t *testing.T) {
 	requireCode(t, err, ErrorCodeIndexDamaged)
 	if len(report.Problems) != 1 {
 		t.Fatalf("report = %+v, want the problems returned with the error", report)
-	}
-}
-
-func TestIngestedFilesUseTheNoFollowOpen(t *testing.T) {
-	fixture := newFixture(t)
-	target := writeSource(t, "real.md", []byte("content"))
-	link := filepath.Join(t.TempDir(), "link.md")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-	_, err := fixture.service.Add(t.Context(), "support", link)
-	requireCode(t, err, ErrorCodeSourceNotRegular)
-	if len(fixture.store.writes) != 0 {
-		t.Error("a symlink was ingested")
 	}
 }

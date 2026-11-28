@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -58,31 +57,15 @@ func fileFormat(name string) (Format, bool) {
 	return "", false
 }
 
-func loadFile(location string) (*loadedSource, error) {
-	absolute, err := filepath.Abs(location)
+func loadStream(stream *Stream) (*loadedSource, error) {
+	format, err := streamFormat(stream.Name, stream.MediaType)
 	if err != nil {
-		return nil, Errorf(ErrorCodeSourceNotFound, "source path cannot be resolved")
+		return nil, err
 	}
-	format, ok := fileFormat(absolute)
-	if !ok {
-		return nil, Errorf(ErrorCodeSourceUnsupported, "only .md, .txt and .html files are supported")
-	}
-	file, err := openNoFollow(absolute)
-	if err != nil {
-		return nil, classifyOpenError(err)
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, Errorf(ErrorCodeSourceNotRegular, "source cannot be inspected")
-	}
-	if !info.Mode().IsRegular() {
-		return nil, Errorf(ErrorCodeSourceNotRegular, "source is not a regular file")
-	}
-	if info.Size() > MaxSourceBytes {
+	if stream.Size > MaxSourceBytes {
 		return nil, Errorf(ErrorCodeSourceTooLarge, "source exceeds %d bytes", MaxSourceBytes)
 	}
-	data, err := readBounded(file)
+	data, err := readBounded(stream.Reader)
 	if err != nil {
 		return nil, err
 	}
@@ -91,21 +74,33 @@ func loadFile(location string) (*loadedSource, error) {
 	}
 	return &loadedSource{
 		kind:   SourceKindFile,
-		uri:    absolute,
-		label:  sanitizeLabel(filepath.Base(absolute)),
+		uri:    stream.URI,
+		label:  sanitizeLabel(path.Base(stream.Name)),
 		format: format,
 		data:   data,
 	}, nil
 }
 
-func classifyOpenError(err error) error {
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return Errorf(ErrorCodeSourceNotFound, "source file does not exist")
-	case isSymlinkOpenError(err):
-		return Errorf(ErrorCodeSourceNotRegular, "source is a symbolic link")
+func streamFormat(name, mediaType string) (Format, error) {
+	if mediaType == "" {
+		format, ok := fileFormat(name)
+		if !ok {
+			return "", Errorf(ErrorCodeSourceUnsupported, "only .md, .txt and .html files are supported")
+		}
+		return format, nil
 	}
-	return Errorf(ErrorCodeSourceNotRegular, "source cannot be opened as a regular file")
+	switch mediaType {
+	case "text/html":
+		return FormatHTML, nil
+	case "text/markdown":
+		return FormatMarkdown, nil
+	case "text/plain":
+		if strings.EqualFold(path.Ext(name), ".md") {
+			return FormatMarkdown, nil
+		}
+		return FormatText, nil
+	}
+	return "", Errorf(ErrorCodeSourceUnsupported, "only Markdown, plain text and HTML attachments are supported")
 }
 
 func readBounded(reader io.Reader) ([]byte, error) {

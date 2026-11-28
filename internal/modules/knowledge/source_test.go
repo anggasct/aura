@@ -32,7 +32,20 @@ func writeSource(t *testing.T, name string, content []byte) string {
 	return path
 }
 
-func TestLoadFileAcceptsSupportedFormats(t *testing.T) {
+func loadPath(path string) (*loadedSource, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return loadStream(&Stream{URI: path, Name: filepath.Base(path), Size: info.Size(), Reader: file})
+}
+
+func TestLoadStreamAcceptsSupportedFormats(t *testing.T) {
 	cases := []struct {
 		name   string
 		file   string
@@ -45,9 +58,9 @@ func TestLoadFileAcceptsSupportedFormats(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			path := writeSource(t, tc.file, []byte("hello"))
-			loaded, err := loadFile(path)
+			loaded, err := loadPath(path)
 			if err != nil {
-				t.Fatalf("loadFile: %v", err)
+				t.Fatalf("loadPath: %v", err)
 			}
 			if loaded.format != tc.format || loaded.kind != SourceKindFile || loaded.uri != path || string(loaded.data) != "hello" {
 				t.Fatalf("loaded = %+v", loaded)
@@ -56,11 +69,11 @@ func TestLoadFileAcceptsSupportedFormats(t *testing.T) {
 	}
 }
 
-func TestLoadFileLabelNeverCarriesTheHostPath(t *testing.T) {
+func TestLoadStreamLabelNeverCarriesTheHostPath(t *testing.T) {
 	path := writeSource(t, "refund policy [v2].md", []byte("hello"))
-	loaded, err := loadFile(path)
+	loaded, err := loadPath(path)
 	if err != nil {
-		t.Fatalf("loadFile: %v", err)
+		t.Fatalf("loadPath: %v", err)
 	}
 	if loaded.label != "refund-policy-v2-.md" {
 		t.Errorf("label = %q", loaded.label)
@@ -70,7 +83,7 @@ func TestLoadFileLabelNeverCarriesTheHostPath(t *testing.T) {
 	}
 }
 
-func TestLoadFileRefusals(t *testing.T) {
+func TestLoadStreamRefusals(t *testing.T) {
 	big := bytes.Repeat([]byte("a"), MaxSourceBytes+1)
 	cases := []struct {
 		name  string
@@ -80,36 +93,13 @@ func TestLoadFileRefusals(t *testing.T) {
 		{"unsupported extension", func(t *testing.T) string { return writeSource(t, "doc.pdf", []byte("%PDF")) }, ErrorCodeSourceUnsupported},
 		{"no extension", func(t *testing.T) string { return writeSource(t, "README", []byte("x")) }, ErrorCodeSourceUnsupported},
 		{"htm extension", func(t *testing.T) string { return writeSource(t, "page.htm", []byte("x")) }, ErrorCodeSourceUnsupported},
-		{"missing file", func(t *testing.T) string { return filepath.Join(t.TempDir(), "missing.md") }, ErrorCodeSourceNotFound},
-		{"directory named like a file", func(t *testing.T) string {
-			path := filepath.Join(t.TempDir(), "dir.md")
-			if err := os.Mkdir(path, 0o700); err != nil {
-				t.Fatal(err)
-			}
-			return path
-		}, ErrorCodeSourceNotRegular},
-		{"symlink to a regular file", func(t *testing.T) string {
-			target := writeSource(t, "real.md", []byte("x"))
-			link := filepath.Join(t.TempDir(), "link.md")
-			if err := os.Symlink(target, link); err != nil {
-				t.Fatal(err)
-			}
-			return link
-		}, ErrorCodeSourceNotRegular},
-		{"dangling symlink", func(t *testing.T) string {
-			link := filepath.Join(t.TempDir(), "dangling.md")
-			if err := os.Symlink(filepath.Join(t.TempDir(), "gone.md"), link); err != nil {
-				t.Fatal(err)
-			}
-			return link
-		}, ErrorCodeSourceNotRegular},
 		{"oversized", func(t *testing.T) string { return writeSource(t, "big.md", big) }, ErrorCodeSourceTooLarge},
 		{"invalid utf8", func(t *testing.T) string { return writeSource(t, "latin.txt", []byte{0x63, 0x61, 0x66, 0xE9}) }, ErrorCodeSourceNotUTF8},
 		{"nul bytes", func(t *testing.T) string { return writeSource(t, "binary.txt", []byte("ab\x00cd")) }, ErrorCodeSourceNotUTF8},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := loadFile(tc.setup(t))
+			_, err := loadPath(tc.setup(t))
 			requireCode(t, err, tc.want)
 			if strings.Contains(err.Error(), os.TempDir()) {
 				t.Errorf("error %q carries a host path", err.Error())
@@ -118,10 +108,10 @@ func TestLoadFileRefusals(t *testing.T) {
 	}
 }
 
-func TestLoadFileAcceptsASourceAtTheSizeLimit(t *testing.T) {
+func TestLoadStreamAcceptsASourceAtTheSizeLimit(t *testing.T) {
 	path := writeSource(t, "limit.txt", bytes.Repeat([]byte("a"), MaxSourceBytes))
-	if _, err := loadFile(path); err != nil {
-		t.Fatalf("loadFile at the limit: %v", err)
+	if _, err := loadPath(path); err != nil {
+		t.Fatalf("loadPath at the limit: %v", err)
 	}
 }
 

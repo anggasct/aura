@@ -373,7 +373,24 @@ func (l *skillActivationLog) Activations(ctx context.Context, sessionID string, 
 	return out, nil
 }
 
+func (b *build) buildKnowledgeOperations() error {
+	service, err := newKnowledgeService(b.cfg, b.db, nil)
+	if err != nil {
+		return err
+	}
+	operations, err := knowledge.NewOperations(&knowledge.OperationDeps{Service: service, Logger: b.logger})
+	if err != nil {
+		return err
+	}
+	return b.registerModule("knowledge_operations", operations)
+}
+
 func (b *build) buildKnowledge(ctx context.Context) error {
+	if b.onServer() {
+		if err := b.buildKnowledgeOperations(); err != nil {
+			return err
+		}
+	}
 	scopes := personaKnowledgeScopes(b.cfg.Agents)
 	if len(scopes) == 0 {
 		if b.cfg.Knowledge != nil && b.cfg.Knowledge.Embedding != nil {

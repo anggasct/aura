@@ -1079,7 +1079,7 @@ func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, erro
 		TurnID:         request.TurnID,
 		PrincipalID:    request.PrincipalID,
 		Arguments:      display,
-		Network:        decision.Constraints.AllowNetwork,
+		Network:        decision.Constraints.AllowNetwork || (call.definition.Operation != "" && call.definition.ReachesNetwork),
 		Timeout:        decision.Constraints.Timeout,
 		MaxOutputBytes: decision.Constraints.MaxOutputBytes,
 		PolicyVersion:  decision.PolicyVersion,

@@ -86,6 +86,7 @@ type WriteProbe struct {
 	ID       string
 	Input    json.RawMessage
 	Outside  func() string
+	Recorded func(live json.RawMessage) json.RawMessage
 }
 
 func RequireWritesOnlyInCommit(tb testing.TB, probe *WriteProbe) {
@@ -115,8 +116,12 @@ func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 	if err != nil {
 		tb.Fatalf("%s: replayed call: %v", probe.ID, err)
 	}
-	if string(first.Data) != string(replayed.Data) {
-		return fmt.Sprintf("%s: a replayed call returned %s, want the recorded %s", probe.ID, replayed.Data, first.Data)
+	recorded := first.Data
+	if probe.Recorded != nil {
+		recorded = probe.Recorded(first.Data)
+	}
+	if string(recorded) != string(replayed.Data) {
+		return fmt.Sprintf("%s: a replayed call returned %s, want the recorded %s", probe.ID, replayed.Data, recorded)
 	}
 	if Snapshot(tb, probe.DB) != before {
 		return probe.ID + ": a replayed call changed the database, so the handler writes outside Commit"

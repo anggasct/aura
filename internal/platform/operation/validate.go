@@ -147,6 +147,7 @@ func (v *validation) descriptor(group string, d *Descriptor) {
 	if d.Summary == "" || len(d.Summary) > maxSummaryBytes {
 		v.reject(id, "the summary is empty or over %d bytes", maxSummaryBytes)
 	}
+	v.texts(id, "the description", d.Texts, maxDescriptionBytes)
 	if len(d.Description) > maxDescriptionBytes {
 		v.reject(id, "the description is over %d bytes", maxDescriptionBytes)
 	}
@@ -210,6 +211,23 @@ func (v *validation) surfaces(d *Descriptor) {
 	}
 }
 
+func (v *validation) confirmation(d *Descriptor) {
+	id := d.ID
+	valid := d.Confirmation == ConfirmPreviewUntilApply || d.Confirmation == ConfirmRunDirectly
+	switch {
+	case d.Confirmation != "" && !d.Preview:
+		v.reject(id, "an owner confirmation needs a preview")
+	case d.Confirmation != "" && d.Risk == RiskRead:
+		v.reject(id, "a read has no owner confirmation")
+	case d.Confirmation != "" && !valid:
+		v.reject(id, "the owner confirmation %q is unknown", d.Confirmation)
+	case d.Preview && d.Risk == RiskDestructive && d.Confirmation == ConfirmRunDirectly:
+		v.reject(id, "a destructive operation always previews until --apply")
+	case d.Preview && d.Risk != RiskDestructive && d.Risk != RiskRead && d.Confirmation == "":
+		v.reject(id, "a preview on a non-destructive operation needs an owner confirmation")
+	}
+}
+
 func (v *validation) preview(d *Descriptor) {
 	id := d.ID
 	needs := d.Exposure == ExposureAgent && (d.Risk == RiskTrustGrant || d.Risk == RiskDestructive)
@@ -219,6 +237,7 @@ func (v *validation) preview(d *Descriptor) {
 	if d.Risk == RiskRead && d.Preview {
 		v.reject(id, "a read has no preview")
 	}
+	v.confirmation(d)
 	if v.checked && v.bindings[id] != nil {
 		bound := v.bindings[id].Preview != nil
 		if d.Preview && !bound {
@@ -339,6 +358,8 @@ func (v *validation) params(d *Descriptor) {
 		}
 		names[param.Name] = true
 		v.param(id, d.Exposure, d.Projects(SurfaceChat), param)
+		v.pathParam(d, param)
+		v.texts(id, "the parameter "+param.Name, param.Texts, maxDescriptionBytes)
 		if param.Position > 0 {
 			positions = append(positions, param.Position)
 		}
@@ -355,6 +376,44 @@ func (v *validation) params(d *Descriptor) {
 	}
 	if slices.ContainsFunc(d.Params, func(p Param) bool { return p.Rest }) && (restPosition == 0 || restPosition != len(positions)) {
 		v.reject(id, "the rest parameter is not the last positional")
+	}
+}
+
+func (v *validation) texts(id, what string, texts []SurfaceText, limit int) {
+	seen := map[Surface]bool{}
+	for i := range texts {
+		switch {
+		case !texts[i].Surface.valid():
+			v.reject(id, "%s names an unknown surface", what)
+		case seen[texts[i].Surface]:
+			v.reject(id, "%s has two texts for %s", what, texts[i].Surface)
+		case texts[i].Text == "" || len(texts[i].Text) > limit:
+			v.reject(id, "%s has a text for %s that is empty or over %d bytes", what, texts[i].Surface, limit)
+		}
+		seen[texts[i].Surface] = true
+	}
+}
+
+func (v *validation) pathParam(d *Descriptor, p *Param) {
+	id := d.ID
+	if p.Kind != KindPath {
+		if p.URLParam != "" {
+			v.reject(id, "the parameter %q names a URL parameter and is not a path", p.Name)
+		}
+		return
+	}
+	if p.URLParam == "" {
+		return
+	}
+	index := slices.IndexFunc(d.Params, func(candidate Param) bool { return candidate.Name == p.URLParam })
+	if index < 0 || d.Params[index].Kind != KindString {
+		v.reject(id, "the URL parameter %q of %q is not a string parameter of the operation", p.URLParam, p.Name)
+		return
+	}
+	for _, surface := range allSurfaces() {
+		if p.on(surface) && d.Params[index].on(surface) {
+			v.reject(id, "the URL parameter %q of %q is projected on %s with the path", p.URLParam, p.Name, surface)
+		}
 	}
 }
 
@@ -375,8 +434,8 @@ func (v *validation) param(id string, exposure Exposure, chat bool, p *Param) {
 	if p.Secret && exposure != ExposureHost {
 		v.reject(id, "the parameter %q is secret and the operation is not host", name)
 	}
-	if p.Kind == KindPath && p.Required && chat {
-		v.reject(id, "the required path parameter %q can never be supplied in chat", name)
+	if p.Kind == KindPath && chat && onSurface(p.Surfaces, SurfaceChat) {
+		v.reject(id, "the path parameter %q projects to chat, where no file can be opened", name)
 	}
 	if p.Prompt != "" && !p.Required {
 		v.reject(id, "the optional parameter %q has a prompt", name)

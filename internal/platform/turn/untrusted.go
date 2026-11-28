@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -23,6 +24,10 @@ func QuoteUntrusted(text string) string {
 		return `""`
 	}
 	return strings.TrimSuffix(encoded.String(), "\n")
+}
+
+func QuoteUntrustedName(text string) string {
+	return strconv.Quote(NeutralizeUntrustedMarkers(text))
 }
 
 func (r *TurnRequest) Tainted() bool {

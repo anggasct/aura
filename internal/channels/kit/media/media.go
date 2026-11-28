@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/storage"
 )
 
 const maxFilenameRunes = 128
@@ -38,13 +39,8 @@ type Receipt struct {
 	SizeBytes int64
 }
 
-func BaseType(contentType string) string {
-	head, _, _ := strings.Cut(contentType, ";")
-	return strings.ToLower(strings.TrimSpace(head))
-}
-
 func Eligible(contentType string) bool {
-	mediaType := BaseType(contentType)
+	mediaType := storage.BaseMediaType(contentType)
 	if mediaType == pdfMediaType {
 		return true
 	}
@@ -57,7 +53,7 @@ func Eligible(contentType string) bool {
 }
 
 func IsVisionImage(contentType string) bool {
-	mediaType := BaseType(contentType)
+	mediaType := storage.BaseMediaType(contentType)
 	for _, candidate := range visionImageTypes {
 		if mediaType == candidate {
 			return true

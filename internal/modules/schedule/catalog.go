@@ -55,7 +55,7 @@ func Catalog() operation.Catalog {
 		Descriptors: []operation.Descriptor{
 			{
 				ID: operationAdd, Summary: "Create a scheduled job and start its run", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskTrustGrant, Commit: operation.CommitTransactional, Sink: true, Preview: true,
+				Risk: operation.RiskTrustGrant, Commit: operation.CommitTransactional, Sink: true, Preview: true, Confirmation: operation.ConfirmRunDirectly,
 				Description: "Stores a prompt or workflow start that later runs unattended with the owner's authority. The owner picks the destination of its output; a call from the agent always uses the owner destination.",
 				Params:      addParams(), Needs: []string{"durable"},
 				Output: operation.Output{Kind: operation.OutputRecord, Fields: []operation.OutputField{{Name: "id"}}},

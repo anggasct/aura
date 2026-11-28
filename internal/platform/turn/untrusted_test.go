@@ -94,3 +94,24 @@ func TestTurnInputIsUntrustedUnlessAPrincipalAuthoredIt(t *testing.T) {
 		})
 	}
 }
+
+func TestQuoteUntrustedNameKeepsTheNameInsideOneQuotedToken(t *testing.T) {
+	tests := map[string]struct {
+		input string
+		want  string
+	}{
+		"plain":           {input: "policy.md", want: `"policy.md"`},
+		"quotes":          {input: `notes "final" [v2].md`, want: `"notes \"final\" [v2].md"`},
+		"marker":          {input: "[untrusted x] a", want: `"(untrusted x] a"`},
+		"newline":         {input: "a\nb", want: `"a\nb"`},
+		"bidi override":   {input: "a\u202eb", want: `"a\u202eb"`},
+		"isolate control": {input: "a\u2066b", want: `"a\u2066b"`},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			if got := QuoteUntrustedName(test.input); got != test.want {
+				t.Errorf("QuoteUntrustedName(%q) = %s, want %s", test.input, got, test.want)
+			}
+		})
+	}
+}

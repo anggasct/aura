@@ -1577,6 +1577,7 @@ func (b *build) buildOperations() error {
 		return err
 	}
 	registry, err := operation.NewRegistry(operationCatalogs(), b.bindings, &operation.Deps{
+		Files:     b.operationFiles(),
 		DB:        b.db,
 		Effects:   b.broker.Effects(),
 		Tools:     b.broker,
@@ -1615,6 +1616,21 @@ func (b *build) buildOperations() error {
 		return err
 	}
 	return b.server.commandOperations.bind(chat)
+}
+
+func (b *build) operationFiles() *operation.FileDeps {
+	return operationFileDeps(b.cfg, b.db, b.artifactRoot)
+}
+
+func operationFileDeps(cfg *appconfig.Config, db *sql.DB, artifactRoot string) *operation.FileDeps {
+	files := &operation.FileDeps{}
+	if cfg.Tools != nil {
+		files.Workspace = cfg.Tools.Workspace
+	}
+	if artifactRoot != "" {
+		files.Artifacts = storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))
+	}
+	return files
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {

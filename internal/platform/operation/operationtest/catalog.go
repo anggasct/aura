@@ -46,6 +46,7 @@ func Catalog() operation.Catalog {
 	fresh.FreshApproval = true
 	grant := descriptor(Grant, operation.ExposureAgent, operation.RiskTrustGrant, operation.CommitTransactional)
 	grant.Preview = true
+	grant.Confirmation = operation.ConfirmRunDirectly
 	deletion := descriptor(Delete, operation.ExposureAgent, operation.RiskDestructive, operation.CommitTransactional)
 	deletion.Preview = true
 	external := descriptor(External, operation.ExposureAgent, operation.RiskChange, operation.CommitExternal)

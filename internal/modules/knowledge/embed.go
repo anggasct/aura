@@ -74,10 +74,8 @@ type CommitOutcome struct {
 }
 
 type DisableOutcome struct {
-	OptedIn      bool
-	Vectors      int
-	Applied      bool
-	WALTruncated bool
+	OptedIn bool
+	Vectors int
 }
 
 type EmbeddingStore interface {
@@ -85,7 +83,8 @@ type EmbeddingStore interface {
 	StartEmbedding(ctx context.Context, collection, fingerprint string) error
 	PendingChunks(ctx context.Context, collection, fingerprint string, afterRowID int64, limit int) ([]PendingChunk, error)
 	CommitVectors(ctx context.Context, collection, fingerprint string, vectors []VectorWrite) (CommitOutcome, error)
-	DisableEmbedding(ctx context.Context, collection string, apply bool) (DisableOutcome, error)
+	PreviewDisableEmbedding(ctx context.Context, collection string) (DisableOutcome, error)
+	DisableEmbedding(ctx context.Context, collection string) (DisableOutcome, error)
 }
 
 type EmbedOutcome struct {
@@ -188,29 +187,36 @@ func (s *Service) Embed(ctx context.Context, collection string) (EmbedResult, er
 	return result, runErr
 }
 
-func (s *Service) EmbedOff(ctx context.Context, collection string, apply bool) (DisableOutcome, error) {
+func (s *Service) PreviewEmbedOff(ctx context.Context, collection string) (DisableOutcome, error) {
 	if err := requireCollection(collection); err != nil {
 		return DisableOutcome{}, err
 	}
 	if s.vectors == nil {
 		return DisableOutcome{}, Errorf(ErrorCodeEmbeddingUnavailable, "%s", embedUnavailableDetail)
 	}
-	outcome, err := s.vectors.DisableEmbedding(ctx, collection, apply)
-	if err != nil && !outcome.Applied {
-		return DisableOutcome{}, err
-	}
-	if !apply {
-		return outcome, err
-	}
-	if actionErr := s.actions.RecordOwnerAction(ctx, &OwnerAction{
-		Action: ActionEmbedOff, Collection: collection, Outcome: embedOutcomeOptedOut, Chunks: outcome.Vectors, At: s.now().UTC(),
-	}); actionErr != nil {
-		return outcome, errors.Join(err, fmt.Errorf("record owner action: %w", actionErr))
-	}
-	return outcome, err
+	return s.vectors.PreviewDisableEmbedding(ctx, collection)
 }
 
-func (s *Service) embedAfterWrite(ctx context.Context, collection string) (EmbedOutcome, error) {
+func (s *Service) EmbedOff(ctx context.Context, collection string) (DisableOutcome, error) {
+	if err := requireCollection(collection); err != nil {
+		return DisableOutcome{}, err
+	}
+	if s.vectors == nil {
+		return DisableOutcome{}, Errorf(ErrorCodeEmbeddingUnavailable, "%s", embedUnavailableDetail)
+	}
+	outcome, err := s.vectors.DisableEmbedding(ctx, collection)
+	if err != nil {
+		return DisableOutcome{}, err
+	}
+	if err := s.actions.RecordOwnerAction(ctx, &OwnerAction{
+		Action: ActionEmbedOff, Collection: collection, Outcome: embedOutcomeOptedOut, Chunks: outcome.Vectors, At: s.now().UTC(),
+	}); err != nil {
+		return DisableOutcome{}, fmt.Errorf("record owner action: %w", err)
+	}
+	return outcome, nil
+}
+
+func (s *Service) EmbedAfterWrite(ctx context.Context, collection string) (EmbedOutcome, error) {
 	if s.vectors == nil {
 		return EmbedOutcome{}, nil
 	}

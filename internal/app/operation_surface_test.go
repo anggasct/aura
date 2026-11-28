@@ -57,10 +57,27 @@ func TestOperationDescriptionOfTheRealRegistryFitsTheBound(t *testing.T) {
 	}
 }
 
-func cronMarkers(t *testing.T, description string) map[string]string {
+var describedGroups = []string{"cron", "kb"}
+
+func groupTools(t *testing.T, rig *registryRig, group string) []toolbroker.ToolRegistration {
+	t.Helper()
+	var found []toolbroker.ToolRegistration
+	registrations := registeredTools(t, rig)
+	for i := range registrations {
+		if strings.HasPrefix(registrations[i].Definition.Operation, group+".") {
+			found = append(found, registrations[i])
+		}
+	}
+	if len(found) == 0 {
+		t.Fatalf("the registry holds no %s tool", group)
+	}
+	return found
+}
+
+func groupMarkers(t *testing.T, description, group string) map[string]string {
 	t.Helper()
 	for line := range strings.SplitSeq(description, "\n") {
-		if !strings.HasPrefix(line, "- cron: ") {
+		if !strings.HasPrefix(line, "- "+group+": ") {
 			continue
 		}
 		verbs := line[strings.LastIndex(line, ": ")+2:]
@@ -71,45 +88,47 @@ func cronMarkers(t *testing.T, description string) map[string]string {
 		}
 		return markers
 	}
-	t.Fatalf("the description lists no cron group:\n%s", description)
+	t.Fatalf("the description lists no %s group:\n%s", group, description)
 	return nil
 }
 
 func TestOperationDescriptionMarkersMatchTheBrokerForTheRealRegistry(t *testing.T) {
-	for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
-		for _, tracked := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s tracked=%t", kind, tracked), func(t *testing.T) {
-				rig := newRegistryRig(t, nil)
-				markers := cronMarkers(t, describeRealRegistry(t, rig, kind, tracked))
-				registrations := registeredTools(t, rig)
-				if len(markers) != len(registrations) {
-					t.Fatalf("the description lists %d cron verbs, the registry holds %d tools", len(markers), len(registrations))
-				}
-				for i := range registrations {
-					name := registrations[i].Definition.Name
-					verb := strings.TrimPrefix(registrations[i].Definition.Operation, "cron.")
-					marker, listed := markers[strings.ReplaceAll(verb, "_", "-")]
-					if !listed {
-						t.Fatalf("the description does not list %s", verb)
+	for _, group := range describedGroups {
+		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
+			for _, tracked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s %s tracked=%t", group, kind, tracked), func(t *testing.T) {
+					rig := newRegistryRig(t, nil)
+					markers := groupMarkers(t, describeRealRegistry(t, rig, kind, tracked), group)
+					registrations := groupTools(t, rig, group)
+					if len(markers) != len(registrations) {
+						t.Fatalf("the description lists %d %s verbs, the registry holds %d tools", len(markers), group, len(registrations))
 					}
-					request := rig.request(name, rig.sampleInput(t, name))
-					request.Unattended = kind == operation.TurnUnattended
-					request.ContentTaintTracked = tracked
-					before := len(rig.Prompts())
+					for i := range registrations {
+						name := registrations[i].Definition.Name
+						verb := strings.TrimPrefix(registrations[i].Definition.Operation, group+".")
+						marker, listed := markers[strings.ReplaceAll(verb, "_", "-")]
+						if !listed {
+							t.Fatalf("the description does not list %s", verb)
+						}
+						request := rig.request(name, rig.sampleInput(t, name))
+						request.Unattended = kind == operation.TurnUnattended
+						request.ContentTaintTracked = tracked
+						before := len(rig.Prompts())
 
-					got := rig.Execute(t.Context(), request)
-					asked := len(rig.Prompts()) - before
+						got := rig.Execute(t.Context(), request)
+						asked := len(rig.Prompts()) - before
 
-					switch {
-					case marker == "" && (got.Class == toolbroker.ResultOwnerTurnRequired || asked != 0):
-						t.Errorf("%s is unmarked and the broker answered %s after %d cards", verb, got.Class, asked)
-					case marker != "" && kind == operation.TurnAttended && asked != 1:
-						t.Errorf("%s is marked %q and the broker raised %d cards, want one", verb, marker, asked)
-					case marker != "" && kind == operation.TurnUnattended && (got.Class != toolbroker.ResultOwnerTurnRequired || asked != 0):
-						t.Errorf("%s is marked %q on an unattended turn and the broker answered %s after %d cards, want a refusal", verb, marker, got.Class, asked)
+						switch {
+						case marker == "" && (got.Class == toolbroker.ResultOwnerTurnRequired || asked != 0):
+							t.Errorf("%s is unmarked and the broker answered %s after %d cards", verb, got.Class, asked)
+						case marker != "" && kind == operation.TurnAttended && asked != 1:
+							t.Errorf("%s is marked %q and the broker raised %d cards, want one", verb, marker, asked)
+						case marker != "" && kind == operation.TurnUnattended && (got.Class != toolbroker.ResultOwnerTurnRequired || asked != 0):
+							t.Errorf("%s is marked %q on an unattended turn and the broker answered %s after %d cards, want a refusal", verb, marker, got.Class, asked)
+						}
 					}
-				}
-			})
+				})
+			}
 		}
 	}
 }
@@ -223,7 +242,7 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 	rig := newRegistryRig(t, func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) { return true, nil })
 	model := &operationtest.ScriptedModel{}
 	session := &surfaceSession{t: t, rig: rig, executor: operationSurfaceExecutor(t, rig, model), model: model, events: turnstore.NewEventStore(rig.DB)}
-	cron := len(registeredTools(t, rig))
+	cron := len(groupTools(t, rig, "cron"))
 	add := operationtest.CallOf("aura_cron_add", map[string]any{"name": "nightly", "schedule": "0 21 * * *", "timezone": "UTC", "prompt": "summarize"})
 	list := operationtest.CallOf("aura_cron_list", map[string]any{})
 	var jobID string
@@ -357,37 +376,39 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 
 func TestOperationDescriptionNeverClaimsLessFrictionThanTheBrokerOnTaintedTurns(t *testing.T) {
 	const clause = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
-	for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
-		for _, tracked := range []bool{false, true} {
-			t.Run(fmt.Sprintf("%s tracked=%t", kind, tracked), func(t *testing.T) {
-				rig := newRegistryRig(t, nil)
-				description := describeRealRegistry(t, rig, kind, tracked)
-				markers := cronMarkers(t, description)
-				registrations := registeredTools(t, rig)
-				for i := range registrations {
-					name := registrations[i].Definition.Name
-					verb := strings.ReplaceAll(strings.TrimPrefix(registrations[i].Definition.Operation, "cron."), "_", "-")
-					request := rig.request(name, rig.sampleInput(t, name))
-					request.Tainted = true
-					request.Unattended = kind == operation.TurnUnattended
-					request.ContentTaintTracked = tracked
-					before := len(rig.Prompts())
+	for _, group := range describedGroups {
+		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
+			for _, tracked := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s %s tracked=%t", group, kind, tracked), func(t *testing.T) {
+					rig := newRegistryRig(t, nil)
+					description := describeRealRegistry(t, rig, kind, tracked)
+					markers := groupMarkers(t, description, group)
+					registrations := groupTools(t, rig, group)
+					for i := range registrations {
+						name := registrations[i].Definition.Name
+						verb := strings.ReplaceAll(strings.TrimPrefix(registrations[i].Definition.Operation, group+"."), "_", "-")
+						request := rig.request(name, rig.sampleInput(t, name))
+						request.Tainted = true
+						request.Unattended = kind == operation.TurnUnattended
+						request.ContentTaintTracked = tracked
+						before := len(rig.Prompts())
 
-					got := rig.Execute(t.Context(), request)
-					asked := len(rig.Prompts()) - before
+						got := rig.Execute(t.Context(), request)
+						asked := len(rig.Prompts()) - before
 
-					refusedWithoutCard := got.Class == toolbroker.ResultUntrustedInputTrustGrant
-					if refusedWithoutCard && (markers[verb] != "^" || !strings.Contains(description, clause)) {
-						t.Errorf("%s is refused as a trust grant on a tainted turn but the description marks it %q (clause present: %t)", verb, markers[verb], strings.Contains(description, clause))
+						refusedWithoutCard := got.Class == toolbroker.ResultUntrustedInputTrustGrant
+						if refusedWithoutCard && (markers[verb] != "^" || !strings.Contains(description, clause)) {
+							t.Errorf("%s is refused as a trust grant on a tainted turn but the description marks it %q (clause present: %t)", verb, markers[verb], strings.Contains(description, clause))
+						}
+						if asked > 0 && markers[verb] == "" && !strings.Contains(description, "unless this conversation carries untrusted input") && kind == operation.TurnAttended {
+							t.Errorf("%s asks on a tainted turn but the description promises no card for it", verb)
+						}
+						if got.Class == toolbroker.ResultOwnerTurnRequired && markers[verb] == "" {
+							t.Errorf("%s is refused on a tainted %s turn but the description marks it as running", verb, kind)
+						}
 					}
-					if asked > 0 && markers[verb] == "" && !strings.Contains(description, "unless this conversation carries untrusted input") && kind == operation.TurnAttended {
-						t.Errorf("%s asks on a tainted turn but the description promises no card for it", verb)
-					}
-					if got.Class == toolbroker.ResultOwnerTurnRequired && markers[verb] == "" {
-						t.Errorf("%s is refused on a tainted %s turn but the description marks it as running", verb, kind)
-					}
-				}
-			})
+				})
+			}
 		}
 	}
 }

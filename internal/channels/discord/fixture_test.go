@@ -442,8 +442,9 @@ func (f *fakeEffectRunner) Execute(ctx context.Context, req *effect.PrepareReque
 }
 
 type fakeMediaStore struct {
-	mu   sync.Mutex
-	puts int
+	mu    sync.Mutex
+	puts  int
+	types []string
 }
 
 func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *media.Meta) (media.Receipt, error) {
@@ -455,6 +456,7 @@ func (s *fakeMediaStore) Put(ctx context.Context, content io.Reader, meta *media
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.puts++
+	s.types = append(s.types, meta.MediaType)
 	return media.Receipt{
 		RefID:     "ref-" + hex.EncodeToString(sum[:])[:12],
 		Digest:    hex.EncodeToString(sum[:]),

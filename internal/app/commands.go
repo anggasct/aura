@@ -112,7 +112,6 @@ func MountCommands(root *cobra.Command, gf *GlobalFlags) {
 	root.AddCommand(model.Commands(modelOpener(gf))...)
 	root.AddCommand(shellexec.Commands(NewUsageError)...)
 	root.AddCommand(gitsync.Commands(syncOpener(gf))...)
-	root.AddCommand(knowledge.Commands(knowledgeOpener(gf))...)
 	root.AddCommand(memory.Commands(memoryOpener(gf))...)
 	root.AddCommand(profile.Commands(profileOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
@@ -450,18 +449,6 @@ func skillsOpener(gf *GlobalFlags) skills.Opener {
 	}
 }
 
-func knowledgeOpener(gf *GlobalFlags) knowledge.Opener {
-	return func(cmd *cobra.Command, fn func(ctx context.Context, logger *slog.Logger, service *knowledge.Service) error) error {
-		result, err := appconfig.Load(gf.ConfigPath)
-		if err != nil {
-			return err
-		}
-		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartKnowledge}}, func(ctx context.Context, app *App) error {
-			return fn(ctx, app.logger, app.knowledge)
-		})
-	}
-}
-
 func memoryOpener(gf *GlobalFlags) memory.Opener {
 	return func(cmd *cobra.Command, fn func(ctx context.Context, logger *slog.Logger, service *memory.Service) error) error {
 		result, err := appconfig.Load(gf.ConfigPath)
@@ -556,7 +543,7 @@ func broadcastOpener(gf *GlobalFlags) broadcast.Opener {
 }
 
 func operationCatalogs() []operation.Catalog {
-	return []operation.Catalog{schedule.Catalog()}
+	return []operation.Catalog{schedule.Catalog(), knowledge.Catalog()}
 }
 
 func operationToolNames() []string {
@@ -645,6 +632,13 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	knowledgeOperations := knowledge.UnavailableOperations()
+	if a.knowledge != nil {
+		knowledgeOperations, err = knowledge.NewOperations(&knowledge.OperationDeps{Service: a.knowledge, Logger: a.logger})
+		if err != nil {
+			return nil, err
+		}
+	}
 	effects, err := newChannelEffects(a.db, a.logger)
 	if err != nil {
 		return nil, err
@@ -653,10 +647,16 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	return operation.NewRegistry(operationCatalogs(), operations.Bindings(), &operation.Deps{
+	_, artifactRoot, _, err := storage.ResolvePaths(&cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
+	bindings := append(operations.Bindings(), knowledgeOperations.Bindings()...)
+	return operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{
 		DB:      a.db,
 		Effects: effects,
 		Tools:   lookup,
+		Files:   operationFileDeps(cfg, a.db, artifactRoot),
 		Logger:  a.logger,
 	})
 }

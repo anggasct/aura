@@ -57,8 +57,8 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 		}
 	}
 	description := descriptor.Summary
-	if descriptor.Description != "" {
-		description += "\n\n" + descriptor.Description
+	if text := descriptor.DescriptionOn(SurfaceAgent); text != "" {
+		description += "\n\n" + text
 	}
 	definition := tools.Definition{
 		Name:                 ToolName(descriptor.ID),
@@ -66,6 +66,7 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 		Schema:               schema,
 		RequiredCapabilities: append([]string(nil), descriptor.RequiredCapabilities...),
 		ExternalSink:         descriptor.Sink,
+		ReachesNetwork:       descriptor.ReachesNetwork,
 		Risk:                 tools.Risk(descriptor.Risk),
 		Operation:            descriptor.ID,
 		FreshApproval:        descriptor.FreshApproval,
@@ -164,6 +165,8 @@ func mapToBroker(err error) error {
 	switch {
 	case failure.Code == ErrorCodeInputInvalid:
 		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "%s", detail)
+	case failure.Code == ErrorCodePolicyDenied:
+		return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "%s", detail)
 	case deniedAtTier(failure.Code):
 		return toolbroker.Errorf(toolbroker.ResultToolTierDenied, "%s", detail)
 	}

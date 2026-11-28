@@ -353,6 +353,349 @@
       "untrusted_output": false
     },
     {
+      "key": "aura_kb_add@v1",
+      "name": "aura_kb_add",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Ingest a document into a collection\n\nReads Markdown, plain text or HTML from an https URL, a file in the workspace or an attachment of this session and stores its text as searchable chunks. An address you choose is fetched from this host.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.add/v1",
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "collection id"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "a file path in the workspace, artifact:\u003cid\u003e of an attachment of this session, or an https URL"
+          }
+        },
+        "required": [
+          "collection",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": true,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "collection",
+        "source"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "kb.add",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_kb_check@v1",
+      "name": "aura_kb_check",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Verify the knowledge index against its content",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.check/v1",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": null,
+      "has_validator": false,
+      "risk": "read",
+      "operation": "kb.check",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_kb_embed@v1",
+      "name": "aura_kb_embed",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Send a collection's chunks to the embedding provider for vectors\n\nOpts the collection in to sending its chunk text to the configured embedding provider and stores the vectors; it also rebuilds vectors after the model or destination changed.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.embed/v1",
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "collection id"
+          }
+        },
+        "required": [
+          "collection"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": true,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "collection"
+      ],
+      "has_validator": false,
+      "risk": "trust_grant",
+      "operation": "kb.embed",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_kb_list@v1",
+      "name": "aura_kb_list",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "List collections that have sources",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.list/v1",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": null,
+      "has_validator": false,
+      "risk": "read",
+      "operation": "kb.list",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_kb_refresh@v1",
+      "name": "aura_kb_refresh",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Re-read the stored sources of a collection\n\nReads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a workspace file is refreshed from the CLI or the agent and a file on the host only from the CLI.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.refresh/v1",
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "collection id"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "stored source uri as kb show lists it"
+          }
+        },
+        "required": [
+          "collection"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "collection",
+        "source"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "kb.refresh",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_kb_remove@v1",
+      "name": "aura_kb_remove",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Remove a source and its chunks from a collection",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.remove/v1",
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "collection id"
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4096,
+            "description": "stored source uri as kb show lists it"
+          }
+        },
+        "required": [
+          "collection",
+          "source"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": true,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "collection",
+        "source"
+      ],
+      "has_validator": false,
+      "risk": "destructive",
+      "operation": "kb.remove",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_kb_show@v1",
+      "name": "aura_kb_show",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Show the sources of a collection\n\nSource labels and addresses come from documents and pages, not from the owner.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.show/v1",
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "collection id"
+          }
+        },
+        "required": [
+          "collection"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": [
+        "collection"
+      ],
+      "has_validator": false,
+      "risk": "read",
+      "operation": "kb.show",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": true
+    },
+    {
+      "key": "aura_kb_unembed@v1",
+      "name": "aura_kb_unembed",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Clear a collection's embedding opt-in and erase its vectors",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/kb.unembed/v1",
+        "type": "object",
+        "properties": {
+          "collection": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 48,
+            "description": "collection id"
+          }
+        },
+        "required": [
+          "collection"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "collection"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "kb.unembed",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
       "key": "aura_operation_search@v1",
       "name": "aura_operation_search",
       "version": "v1",
@@ -1381,6 +1724,134 @@
     },
     {
       "tool_name": "aura_cron_runs",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_add",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_check",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_embed",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_list",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_refresh",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_remove",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_show",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_kb_unembed",
       "tool_version": "v1",
       "requires_approval": false,
       "required_capabilities": null,

@@ -230,39 +230,29 @@ func (r *embedRig) generation(t *testing.T, collection string) int {
 
 const twoSectionDocument = "# Refunds\nRefunds are issued within thirty days.\n\n# Shipping\nShipping takes five days.\n"
 
-func TestKBEmbedDryRunChangesNothingAndSendsNothing(t *testing.T) {
-	rig := newEmbedRig(t, 4, "")
+func TestKBEmbedShowsItsPreviewAndSendsNothingUntilApplied(t *testing.T) {
+	t.Setenv("KB_EMBED_TEST_KEY", "kb-embed-test-bearer-value")
+	rig := newEmbedRig(t, 4, "    credential_ref: env://KB_EMBED_TEST_KEY\n    batch_size: 1\n")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	before := rig.generation(t, "support")
 
 	out, err := rig.run(t, "embed", "support")
+
 	if err != nil {
-		t.Fatalf("embed dry run: %v\n%s", err, out)
+		t.Fatalf("embed without apply: %v", err)
 	}
-	host := strings.TrimPrefix(rig.provider.server.URL, "http://")
-	for _, want := range []string{
-		"dry-run: collection support would send 2 of 2 chunks (about ", "estimated", "model test-model at 4 dimensions",
-		"destination: " + host + " (this host; nothing leaves it)",
-		"public queries are not sent", "owner and trusted queries", "rerun with --apply",
-	} {
+	for _, want := range []string{"would send 2 of 2 chunks", "model test-model at 4 dimensions", "destination:", "queries:"} {
 		if !strings.Contains(out, want) {
-			t.Errorf("dry run output lacks %q:\n%s", want, out)
+			t.Errorf("preview %q lacks %q", out, want)
 		}
 	}
-	if rig.provider.callCount() != 0 {
-		t.Fatalf("provider calls = %d, want none", rig.provider.callCount())
+	if rig.provider.callCount() != 0 || rig.vectors(t) != 0 {
+		t.Fatalf("the preview sent %d requests and stored %d vectors", rig.provider.callCount(), rig.vectors(t))
 	}
-	if rig.vectors(t) != 0 || rig.storedFingerprint(t, "support").Valid || rig.generation(t, "support") != before {
-		t.Fatal("the dry run changed the database")
+	if stored := rig.storedFingerprint(t, "support"); stored.Valid {
+		t.Fatalf("the preview recorded the opt-in %+v", stored)
 	}
-}
-
-func TestKBEmbedDryRunStatesThatPublicQueriesAreSentWhenConfigured(t *testing.T) {
-	rig := newEmbedRig(t, 4, "    public_queries: true\n")
-	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	out, err := rig.run(t, "embed", "support")
-	if err != nil || !strings.Contains(out, "public_queries is true") {
-		t.Fatalf("embed dry run = %q, %v", out, err)
+	if applied, err := rig.run(t, "embed", "support", "--apply"); err != nil || !strings.Contains(applied, "embedded: 2 chunks") {
+		t.Fatalf("embed apply = %q, %v", applied, err)
 	}
 }
 
@@ -335,7 +325,13 @@ func TestKBEmbedResumesAfterAProviderFailureAndSkipsStoredVectors(t *testing.T) 
 
 	out, err := rig.run(t, "embed", "support", "--apply")
 	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
-	if !strings.Contains(out, "partial: rerun aura kb embed support --apply to resume") || rig.vectors(t) != 1 {
+	if !strings.Contains(err.Error(), "1 chunks were sent, rerun aura kb embed support --apply to resume") {
+		t.Errorf("error %q lacks the resume hint", err)
+	}
+	if strings.Count(err.Error(), string(knowledge.ErrorCodeEmbeddingFailed)) != 1 {
+		t.Errorf("error %q prints the code more than once", err)
+	}
+	if out != "" || rig.vectors(t) != 1 {
 		t.Fatalf("after failure: out %q vectors %d", out, rig.vectors(t))
 	}
 	if rig.generation(t, "support") != before {
@@ -393,7 +389,7 @@ func TestKBWithoutEmbeddingConfigurationBehavesAsTextOnly(t *testing.T) {
 
 func TestKBEmbedRejectsAMissingOrInvalidCollection(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
-	_, err := rig.run(t, "embed", "missing", "--apply")
+	_, err := rig.run(t, "embed", "missing")
 	requireKBCode(t, err, knowledge.ErrorCodeSourceNotFound)
 	_, err = rig.run(t, "embed", "Bad Name")
 	requireKBCode(t, err, knowledge.ErrorCodeCollectionInvalid)
@@ -423,10 +419,6 @@ func TestKBChangedConfigurationStopsSendingUntilReembedded(t *testing.T) {
 	out, err := rig.run(t, "add", "support", second)
 	if err != nil || !strings.Contains(out, "added: faq.md") || !strings.Contains(out, "kb_reembed_required") {
 		t.Fatalf("add after a model change = %q, %v", out, err)
-	}
-	preview, err := rig.run(t, "embed", "support")
-	if err != nil || !strings.Contains(preview, "reembed:") {
-		t.Fatalf("dry run after a model change = %q, %v", preview, err)
 	}
 	if rig.provider.callCount() != 0 {
 		t.Fatalf("provider calls = %d after a changed configuration, want none", rig.provider.callCount())
@@ -494,8 +486,7 @@ func TestKBAddKeepsTheTextWhenEmbeddingFails(t *testing.T) {
 	rig.provider.failCall = 2
 	second := writeKBDocument(t, "faq.md", "# Hours\nWe open at nine.\n")
 	out, err := rig.run(t, "add", "support", second)
-	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
-	if !strings.Contains(out, "added: faq.md") || countRows(t, rig.db, `SELECT count(*) FROM kb_chunk`) != 3 || rig.vectors(t) != 2 {
+	if err != nil || !strings.Contains(out, "embedding: failed (kb_embedding_failed)") || !strings.Contains(out, "added: faq.md") || countRows(t, rig.db, `SELECT count(*) FROM kb_chunk`) != 3 || rig.vectors(t) != 2 {
 		t.Fatalf("out %q chunks %d vectors %d; the text must stay committed and the collection partial",
 			out, countRows(t, rig.db, `SELECT count(*) FROM kb_chunk`), rig.vectors(t))
 	}
@@ -552,13 +543,13 @@ func TestKBEmbedOffErasesVectorsFromDatabaseAndWriteAheadLogWithoutConfiguration
 	}
 	before := rig.generation(t, "support")
 
-	out, err := rig.run(t, "embed", "support", "--off")
-	if err != nil || !strings.Contains(out, "dry-run: would delete 2 vectors") || rig.vectors(t) != 2 {
+	out, err := rig.run(t, "unembed", "support")
+	if err != nil || !strings.Contains(out, "would delete 2 vectors of collection support") || rig.vectors(t) != 2 {
 		t.Fatalf("--off dry run = %q, %v, vectors %d", out, err, rig.vectors(t))
 	}
 
 	replaceEmbeddingSection(t, rig.cfgPath, "")
-	out, err = rig.run(t, "embed", "support", "--off", "--apply")
+	out, err = rig.run(t, "unembed", "support", "--apply")
 	if err != nil || !strings.Contains(out, "embedding off: 2 vectors deleted") ||
 		!strings.Contains(out, "copies an embedding provider holds under its own terms") || !strings.Contains(out, "until its next retrieval or restart") {
 		t.Fatalf("--off --apply = %q, %v", out, err)
@@ -621,7 +612,7 @@ func TestKBEmbedOffDuringAFirstApplyStopsThatRun(t *testing.T) {
 		if n != 1 {
 			return
 		}
-		if out, err := runKBCommand(t, rig.cfgPath, "embed", "support", "--off", "--apply"); err != nil {
+		if out, err := runKBCommand(t, rig.cfgPath, "unembed", "support", "--apply"); err != nil {
 			t.Errorf("--off during the run: %v\n%s", err, out)
 		}
 	}

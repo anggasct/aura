@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"errors"
 	"math"
 	"os"
 	"strings"
@@ -71,7 +72,7 @@ func vectorRows(t *testing.T, db *sql.DB) int {
 	return rows
 }
 
-func TestDisableEmbeddingRefusesCallersTransaction(t *testing.T) {
+func TestDisableEmbeddingRunsOnlyInsideATransaction(t *testing.T) {
 	db, kb := newEmbeddingStore(t)
 	ctx := t.Context()
 	writeKBSource(t, kb, "support", "/docs/a.md", "alpha text")
@@ -81,13 +82,38 @@ func TestDisableEmbeddingRefusesCallersTransaction(t *testing.T) {
 	if _, err := kb.CommitVectors(ctx, "support", embedFingerprintA, vectorWrites(pendingChunks(t, kb, "support", embedFingerprintA), 8)); err != nil {
 		t.Fatalf("CommitVectors: %v", err)
 	}
-	err := sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
-		_, err := kb.DisableEmbedding(txCtx, "support", true)
-		return err
-	})
+	_, err := kb.DisableEmbedding(ctx, "support")
 	requireCode(t, err, ErrorCodeInvalidArgument)
 	if rows := vectorRows(t, db); rows != 1 {
-		t.Fatalf("vectors = %d, want 1 preserved after active tx refusal", rows)
+		t.Fatalf("vectors = %d, want 1 preserved after the refusal outside a transaction", rows)
+	}
+}
+
+func TestDisableEmbeddingRollsBackWithItsTransaction(t *testing.T) {
+	db, kb := newEmbeddingStore(t)
+	ctx := t.Context()
+	writeKBSource(t, kb, "support", "/docs/a.md", "alpha text")
+	if err := kb.StartEmbedding(ctx, "support", embedFingerprintA); err != nil {
+		t.Fatalf("StartEmbedding: %v", err)
+	}
+	if _, err := kb.CommitVectors(ctx, "support", embedFingerprintA, vectorWrites(pendingChunks(t, kb, "support", embedFingerprintA), 8)); err != nil {
+		t.Fatalf("CommitVectors: %v", err)
+	}
+	abort := errors.New("abort")
+	err := sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		if _, err := kb.DisableEmbedding(txCtx, "support"); err != nil {
+			return err
+		}
+		return abort
+	})
+	if !errors.Is(err, abort) {
+		t.Fatalf("RunInTx = %v, want the abort", err)
+	}
+	if rows := vectorRows(t, db); rows != 1 {
+		t.Fatalf("vectors = %d, want 1 kept by the rollback", rows)
+	}
+	if got := pragmaValue(t, db, "secure_delete"); got != "0" {
+		t.Errorf("secure_delete leaked into the pool: %q", got)
 	}
 }
 
@@ -281,7 +307,7 @@ func TestKnowledgeEmbeddingRejectsAWriteAfterOptOutOrFingerprintChange(t *testin
 	_, err := kb.CommitVectors(ctx, "support", embedFingerprintB, vectorWrites(pending, 8))
 	requireCode(t, err, ErrorCodeEmbeddingFailed)
 
-	if _, err := kb.DisableEmbedding(ctx, "support", true); err != nil {
+	if _, _, err := kb.disableAndTruncate(ctx, "support"); err != nil {
 		t.Fatalf("DisableEmbedding: %v", err)
 	}
 	_, err = kb.CommitVectors(ctx, "support", embedFingerprintA, vectorWrites(pending, 8))
@@ -372,10 +398,10 @@ func TestKnowledgeEmbeddingOperationsReportAMissingCollection(t *testing.T) {
 		t.Fatalf("EmbeddingState = %+v, %v; want not found without error", state, err)
 	}
 	requireCode(t, kb.StartEmbedding(ctx, "missing", embedFingerprintA), ErrorCodeSourceNotFound)
-	for _, apply := range []bool{false, true} {
-		_, err := kb.DisableEmbedding(ctx, "missing", apply)
-		requireCode(t, err, ErrorCodeSourceNotFound)
-	}
+	_, err = kb.PreviewDisableEmbedding(ctx, "missing")
+	requireCode(t, err, ErrorCodeSourceNotFound)
+	_, _, err = kb.disableAndTruncate(ctx, "missing")
+	requireCode(t, err, ErrorCodeSourceNotFound)
 	if err := kb.StartEmbedding(ctx, "missing", ""); err == nil {
 		t.Error("StartEmbedding accepted an empty fingerprint")
 	}
@@ -433,16 +459,16 @@ func TestKnowledgeDisableEmbeddingErasesVectorsFromDatabaseAndWriteAheadLog(t *t
 	requireVectorBytes(t, db, markers, true)
 	before := kbGeneration(t, db, "support")
 
-	preview, err := kb.DisableEmbedding(ctx, "support", false)
-	if err != nil || preview.Applied || !preview.OptedIn || preview.Vectors != 1 {
+	preview, err := kb.PreviewDisableEmbedding(ctx, "support")
+	if err != nil || !preview.OptedIn || preview.Vectors != 1 {
 		t.Fatalf("preview = %+v, %v", preview, err)
 	}
 	if rows := vectorRows(t, db); rows != 1 || kbGeneration(t, db, "support") != before {
 		t.Fatal("the preview changed the collection")
 	}
 
-	result, err := kb.DisableEmbedding(ctx, "support", true)
-	if err != nil || !result.Applied || !result.WALTruncated || !result.OptedIn || result.Vectors != 1 {
+	result, truncated, err := kb.disableAndTruncate(ctx, "support")
+	if err != nil || !truncated || !result.OptedIn || result.Vectors != 1 {
 		t.Fatalf("DisableEmbedding = %+v, %v", result, err)
 	}
 	requireVectorBytes(t, db, markers, false)
@@ -460,7 +486,7 @@ func TestKnowledgeDisableEmbeddingErasesVectorsFromDatabaseAndWriteAheadLog(t *t
 		t.Errorf("secure_delete leaked into the pool: %q", got)
 	}
 
-	again, err := kb.DisableEmbedding(ctx, "support", true)
+	again, _, err := kb.disableAndTruncate(ctx, "support")
 	if err != nil || again.OptedIn || again.Vectors != 0 {
 		t.Fatalf("second DisableEmbedding = %+v, %v", again, err)
 	}
@@ -478,9 +504,9 @@ func TestKnowledgeRemoveSourceErasesVectorsFromDatabaseAndWriteAheadLog(t *testi
 	markers := vectorMarkers(vector)
 	requireVectorBytes(t, db, markers, true)
 
-	result, err := kb.RemoveSource(ctx, "support", "/docs/a.md", true)
-	if err != nil || !result.Applied || !result.WALTruncated {
-		t.Fatalf("RemoveSource = %+v, %v", result, err)
+	result, truncated, err := kb.removeAndTruncate(ctx, "support", "/docs/a.md")
+	if err != nil || !truncated {
+		t.Fatalf("DeleteSource = %+v, %v", result, err)
 	}
 	requireVectorBytes(t, db, markers, false)
 	if rows := vectorRows(t, db); rows != 0 {

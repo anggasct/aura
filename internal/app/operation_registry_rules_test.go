@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/knowledge/knowledgetest"
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/durable"
@@ -74,6 +76,7 @@ func (c *handlerCounts) handled(id string) int {
 type registryRig struct {
 	*operationtest.Rig
 	access   *ceilingAccess
+	kb       *knowledgetest.Rig
 	starts   *recordedStarts
 	handlers *handlerCounts
 	calls    int
@@ -81,7 +84,23 @@ type registryRig struct {
 
 func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.ApprovalPrompt) (bool, error)) *registryRig {
 	t.Helper()
-	db := operationtest.OpenDatabase(t, schedule.Schema())
+	db := operationtest.OpenDatabase(t, schedule.Schema(), knowledge.Schema())
+	kb := knowledgetest.NewRig(t, db)
+	seedKnowledgeSource := func(ctx context.Context) error {
+		prepared, err := kb.Service.PrepareURL(ctx, knowledgetest.Collection, knowledgetest.PageURL)
+		if err != nil {
+			return err
+		}
+		_, err = kb.Service.Write(ctx, knowledge.ActionAdd, prepared)
+		return err
+	}
+	if err := seedKnowledgeSource(t.Context()); err != nil {
+		t.Fatalf("seed the knowledge source: %v", err)
+	}
+	knowledgeOperations, err := knowledge.NewOperations(&knowledge.OperationDeps{Service: kb.Service})
+	if err != nil {
+		t.Fatalf("knowledge.NewOperations: %v", err)
+	}
 	store, err := schedule.NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("schedule.NewSQLiteStore: %v", err)
@@ -104,12 +123,26 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 		DB:       db,
 		Catalogs: operationCatalogs(),
 		Bindings: func(*operationtest.Stubs) []operation.Binding {
-			bindings := operations.Bindings()
+			bindings := append(operations.Bindings(), knowledgeOperations.Bindings()...)
 			for i := range bindings {
-				id, handle := bindings[i].ID, bindings[i].Handle
+				id, handle, preview := bindings[i].ID, bindings[i].Handle, bindings[i].Preview
+				reseed := id == "kb.remove"
 				bindings[i].Handle = func(ctx context.Context, call *operation.Call) (operation.Result, error) {
 					handlers.count(id)
+					if reseed {
+						if err := seedKnowledgeSource(ctx); err != nil {
+							return operation.Result{}, err
+						}
+					}
 					return handle(ctx, call)
+				}
+				if preview != nil && reseed {
+					bindings[i].Preview = func(ctx context.Context, call *operation.Call) (operation.Preview, error) {
+						if err := seedKnowledgeSource(ctx); err != nil {
+							return operation.Preview{}, err
+						}
+						return preview(ctx, call)
+					}
 				}
 			}
 			return bindings
@@ -124,7 +157,7 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 	for i := range registrations {
 		access.tools = append(access.tools, registrations[i].Definition.Name)
 	}
-	return &registryRig{Rig: rig, access: access, starts: starts, handlers: handlers}
+	return &registryRig{Rig: rig, access: access, kb: kb, starts: starts, handlers: handlers}
 }
 
 func (r *registryRig) request(name string, input json.RawMessage) *toolbroker.ToolRequest {
@@ -158,6 +191,14 @@ var registrySampleInput = map[string]string{
 	"aura_cron_resume":  `{"id":"job-1"}`,
 	"aura_cron_run_now": `{"id":"job-1"}`,
 	"aura_cron_runs":    `{"id":"job-1"}`,
+	"aura_kb_add":       `{"collection":"support","source":"https://docs.example.test/refunds"}`,
+	"aura_kb_check":     `{}`,
+	"aura_kb_embed":     `{"collection":"support"}`,
+	"aura_kb_list":      `{}`,
+	"aura_kb_refresh":   `{"collection":"support"}`,
+	"aura_kb_remove":    `{"collection":"support","source":"https://docs.example.test/refunds"}`,
+	"aura_kb_show":      `{"collection":"support"}`,
+	"aura_kb_unembed":   `{"collection":"support"}`,
 }
 
 func (r *registryRig) sampleInput(t *testing.T, name string) json.RawMessage {

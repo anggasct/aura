@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"slices"
+	"io"
 	"strings"
 	"time"
 
@@ -75,10 +74,8 @@ type SourceRecord struct {
 }
 
 type RemoveOutcome struct {
-	SourceID     string
-	Chunks       int
-	Applied      bool
-	WALTruncated bool
+	SourceID string
+	Chunks   int
 }
 
 type IndexReport struct {
@@ -93,7 +90,9 @@ type Store interface {
 	ReplaceSource(ctx context.Context, write *SourceWrite) (WriteResult, error)
 	ListCollections(ctx context.Context) ([]CollectionSummary, error)
 	ListSources(ctx context.Context, collection string) ([]SourceRecord, error)
-	RemoveSource(ctx context.Context, collection, uri string, apply bool) (RemoveOutcome, error)
+	GetSource(ctx context.Context, collection, uri string) (SourceRecord, bool, error)
+	DeleteSource(ctx context.Context, collection, uri string) (RemoveOutcome, error)
+	TruncateWAL(ctx context.Context) (bool, error)
 	Check(ctx context.Context) (IndexReport, error)
 }
 
@@ -175,27 +174,39 @@ type IngestResult struct {
 	WriteResult
 }
 
-func (s *Service) Add(ctx context.Context, collection, source string) (IngestResult, error) {
-	if err := requireCollection(collection); err != nil {
-		return IngestResult{}, err
-	}
-	if strings.TrimSpace(source) == "" {
-		return IngestResult{}, Errorf(ErrorCodeInvalidArgument, "source must not be empty")
-	}
-	result, err := s.ingest(ctx, ActionAdd, collection, source, isURLReference(source))
-	if result.SourceID == "" || result.Status == StatusUnchanged {
-		return result, err
-	}
-	outcome, embedErr := s.embedAfterWrite(ctx, collection)
-	result.Embedding = outcome
-	return result, errors.Join(err, embedErr)
+type Prepared struct {
+	collection string
+	kind       string
+	uri        string
+	label      string
+	sha        string
+	chunks     []Chunk
 }
 
-func isURLReference(source string) bool {
+type Stream struct {
+	URI       string
+	Name      string
+	MediaType string
+	Size      int64
+	Reader    io.Reader
+}
+
+func (s *Service) PrepareURL(ctx context.Context, collection, raw string) (*Prepared, error) {
+	return s.prepare(ctx, collection, func() (*loadedSource, error) { return loadURL(ctx, s.http, raw) })
+}
+
+func (s *Service) PrepareStream(ctx context.Context, collection string, stream *Stream) (*Prepared, error) {
+	if stream == nil || stream.Reader == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "source stream must not be nil")
+	}
+	return s.prepare(ctx, collection, func() (*loadedSource, error) { return loadStream(stream) })
+}
+
+func IsURLReference(source string) bool {
 	return strings.Contains(source, "://")
 }
 
-func (s *Service) Refresh(ctx context.Context, collection, source string) ([]IngestResult, error) {
+func (s *Service) Sources(ctx context.Context, collection, source string) ([]SourceRecord, error) {
 	if err := requireCollection(collection); err != nil {
 		return nil, err
 	}
@@ -209,25 +220,7 @@ func (s *Service) Refresh(ctx context.Context, collection, source string) ([]Ing
 	if len(records) == 0 {
 		return nil, Errorf(ErrorCodeSourceNotFound, "no matching source in collection")
 	}
-	var results []IngestResult
-	var failures []error
-	for i := range records {
-		result, err := s.ingest(ctx, ActionRefresh, collection, records[i].URI, records[i].Kind == SourceKindURL)
-		if err != nil {
-			failures = append(failures, fmt.Errorf("refresh %s: %w", records[i].Label, err))
-			continue
-		}
-		results = append(results, result)
-	}
-	changed := slices.ContainsFunc(results, func(result IngestResult) bool { return result.Status != StatusUnchanged })
-	if changed {
-		outcome, embedErr := s.embedAfterWrite(ctx, collection)
-		for i := range results {
-			results[i].Embedding = outcome
-		}
-		failures = append(failures, embedErr)
-	}
-	return results, errors.Join(failures...)
+	return records, nil
 }
 
 func filterSources(records []SourceRecord, uri string) []SourceRecord {
@@ -240,63 +233,69 @@ func filterSources(records []SourceRecord, uri string) []SourceRecord {
 	return matched
 }
 
-func (s *Service) ingest(ctx context.Context, action, collection, source string, isURL bool) (IngestResult, error) {
+func (s *Service) prepare(ctx context.Context, collection string, load func() (*loadedSource, error)) (*Prepared, error) {
+	if err := requireCollection(collection); err != nil {
+		return nil, err
+	}
 	screen, err := s.secrets.Snapshot(ctx)
 	if err != nil {
-		return IngestResult{}, fault.Wrap(ErrorCodeSecretUnavailable, "a configured secret reference could not be resolved", err)
+		return nil, fault.Wrap(ErrorCodeSecretUnavailable, "a configured secret reference could not be resolved", err)
 	}
-	loaded, err := s.load(ctx, source, isURL)
+	loaded, err := load()
 	if err != nil {
-		return IngestResult{}, err
+		return nil, err
 	}
 	text, err := s.readableText(ctx, loaded)
 	if err != nil {
-		return IngestResult{}, err
+		return nil, err
 	}
 	if strings.TrimSpace(text) == "" {
-		return IngestResult{}, Errorf(ErrorCodeSourceUnsupported, "source has no readable text")
+		return nil, Errorf(ErrorCodeSourceUnsupported, "source has no readable text")
 	}
 	if err := screenText(loaded.uri+"\n"+text, screen); err != nil {
-		return IngestResult{}, err
+		return nil, err
 	}
 	chunks, exceeded := SplitChunks(text, MaxChunksPerSource)
 	if exceeded {
-		return IngestResult{}, Errorf(ErrorCodeCapExceeded, "source exceeds %d chunks", MaxChunksPerSource)
+		return nil, Errorf(ErrorCodeCapExceeded, "source exceeds %d chunks", MaxChunksPerSource)
 	}
 	if len(chunks) == 0 {
-		return IngestResult{}, Errorf(ErrorCodeSourceUnsupported, "source has no readable text")
+		return nil, Errorf(ErrorCodeSourceUnsupported, "source has no readable text")
 	}
 	sum := sha256.Sum256([]byte(text))
+	return &Prepared{
+		collection: collection, kind: loaded.kind, uri: loaded.uri, label: loaded.label,
+		sha: hex.EncodeToString(sum[:]), chunks: chunks,
+	}, nil
+}
+
+func (s *Service) Write(ctx context.Context, action string, prepared *Prepared) (IngestResult, error) {
+	if prepared == nil {
+		return IngestResult{}, Errorf(ErrorCodeInvalidArgument, "prepared source must not be nil")
+	}
 	written, err := s.store.ReplaceSource(ctx, &SourceWrite{
-		Collection:    collection,
-		Kind:          loaded.kind,
-		URI:           loaded.uri,
-		Label:         loaded.label,
-		ContentSHA256: hex.EncodeToString(sum[:]),
+		Collection:    prepared.collection,
+		Kind:          prepared.kind,
+		URI:           prepared.uri,
+		Label:         prepared.label,
+		ContentSHA256: prepared.sha,
 		IngestVersion: IngestVersion,
 		IngestedAt:    s.now().UTC(),
-		Chunks:        chunks,
+		Chunks:        prepared.chunks,
 		CollectionCap: MaxChunksPerCollection,
 		TotalCap:      MaxChunksTotal,
 	})
 	if err != nil {
 		return IngestResult{}, err
 	}
-	result := IngestResult{Collection: collection, Kind: loaded.kind, URI: loaded.uri, Label: loaded.label, WriteResult: written}
+	result := IngestResult{Collection: prepared.collection, Kind: prepared.kind, URI: prepared.uri, Label: prepared.label, WriteResult: written}
 	if err := s.actions.RecordOwnerAction(ctx, &OwnerAction{
-		Action: action, Collection: collection, SourceID: written.SourceID, Kind: loaded.kind,
+		Action: action, Collection: prepared.collection, SourceID: written.SourceID, Kind: prepared.kind,
 		Outcome: written.Status, Chunks: written.Chunks, At: s.now().UTC(),
 	}); err != nil {
-		return result, fmt.Errorf("record owner action: %w", err)
+		return IngestResult{}, fmt.Errorf("record owner action: %w", err)
 	}
 	return result, nil
-}
-
-func (s *Service) load(ctx context.Context, source string, isURL bool) (*loadedSource, error) {
-	if isURL {
-		return loadURL(ctx, s.http, source)
-	}
-	return loadFile(source)
 }
 
 func (s *Service) readableText(ctx context.Context, loaded *loadedSource) (string, error) {
@@ -341,27 +340,42 @@ func (s *Service) Show(ctx context.Context, collection string) (CollectionDetail
 	return detail, nil
 }
 
-func (s *Service) Remove(ctx context.Context, collection, source string, apply bool) (RemoveOutcome, error) {
+func (s *Service) PreviewRemove(ctx context.Context, collection, source string) (SourceRecord, error) {
+	if err := requireCollection(collection); err != nil {
+		return SourceRecord{}, err
+	}
+	if source == "" {
+		return SourceRecord{}, Errorf(ErrorCodeInvalidArgument, "source must not be empty")
+	}
+	record, found, err := s.store.GetSource(ctx, collection, source)
+	if err != nil {
+		return SourceRecord{}, err
+	}
+	if !found {
+		return SourceRecord{}, Errorf(ErrorCodeSourceNotFound, "knowledge source does not exist")
+	}
+	return record, nil
+}
+
+func (s *Service) Remove(ctx context.Context, collection, source string) (RemoveOutcome, error) {
 	if err := requireCollection(collection); err != nil {
 		return RemoveOutcome{}, err
 	}
-	if source == "" {
-		return RemoveOutcome{}, Errorf(ErrorCodeInvalidArgument, "source must not be empty")
-	}
-	outcome, err := s.store.RemoveSource(ctx, collection, source, apply)
-	if err != nil && !outcome.Applied {
+	outcome, err := s.store.DeleteSource(ctx, collection, source)
+	if err != nil {
 		return RemoveOutcome{}, err
 	}
-	if !apply {
-		return outcome, err
-	}
-	if actionErr := s.actions.RecordOwnerAction(ctx, &OwnerAction{
+	if err := s.actions.RecordOwnerAction(ctx, &OwnerAction{
 		Action: ActionRemove, Collection: collection, SourceID: outcome.SourceID,
 		Outcome: "removed", Chunks: outcome.Chunks, At: s.now().UTC(),
-	}); actionErr != nil {
-		return outcome, errors.Join(err, fmt.Errorf("record owner action: %w", actionErr))
+	}); err != nil {
+		return RemoveOutcome{}, fmt.Errorf("record owner action: %w", err)
 	}
-	return outcome, err
+	return outcome, nil
+}
+
+func (s *Service) TruncateWAL(ctx context.Context) (bool, error) {
+	return s.store.TruncateWAL(ctx)
 }
 
 func (s *Service) Check(ctx context.Context) (IndexReport, error) {

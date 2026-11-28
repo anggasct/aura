@@ -645,6 +645,11 @@ func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, en
 		a.logger.WarnContext(ctx, "attachment reference failed", "component", "discord")
 		return false
 	}
+	for index := range msg.Attachments {
+		if media.IsTextDocument(msg.Attachments[index].ContentType) {
+			envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Text: media.ReferencePart(&summaries[index], msg.Attachments[index].ContentType)})
+		}
+	}
 	for _, raw := range images {
 		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Image: raw})
 	}

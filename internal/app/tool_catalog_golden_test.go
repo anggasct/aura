@@ -154,7 +154,8 @@ func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
 	if err != nil {
 		t.Fatalf("schedule.NewOperations: %v", err)
 	}
-	registry, err := operation.NewRegistry(operationCatalogs(), operations.Bindings(), &operation.Deps{DB: db, Effects: effects, Tools: broker})
+	bindings := append(operations.Bindings(), knowledge.UnavailableOperations().Bindings()...)
+	registry, err := operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{DB: db, Effects: effects, Tools: broker})
 	if err != nil {
 		t.Fatalf("operation.NewRegistry: %v", err)
 	}
@@ -182,8 +183,8 @@ func TestToolCatalogGolden(t *testing.T) {
 	registerOperationToolProvider(t, broker)
 
 	definitions := broker.Definitions()
-	if len(definitions) != 24 {
-		t.Fatalf("registered definitions = %d, want 24", len(definitions))
+	if len(definitions) != 32 {
+		t.Fatalf("registered definitions = %d, want 32", len(definitions))
 	}
 
 	catalog := toolCatalog{}

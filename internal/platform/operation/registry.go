@@ -21,6 +21,7 @@ type Deps struct {
 	Clock     durable.Clock
 	Logger    *slog.Logger
 	Telemetry *telemetry.OperationRecorder
+	Files     *FileDeps
 }
 
 type entry struct {
@@ -41,11 +42,15 @@ type Registry struct {
 	clock         durable.Clock
 	logger        *slog.Logger
 	recorder      *telemetry.OperationRecorder
+	files         *FileDeps
 }
 
 func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry, error) {
 	if deps == nil || deps.DB == nil || deps.Effects == nil || deps.Tools == nil {
 		return nil, NewError(ErrorCodeInvalidArgument, "operation: the registry needs a database, an effect executor and the tool lookup")
+	}
+	if err := deps.Files.validate(); err != nil {
+		return nil, err
 	}
 	bound := make(map[string]*Binding, len(bindings))
 	v := &validation{tools: deps.Tools, checked: true, bindings: bound}
@@ -73,6 +78,7 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 		clock:    deps.Clock,
 		logger:   deps.Logger,
 		recorder: deps.Telemetry,
+		files:    deps.Files,
 	}
 	if registry.clock == nil {
 		registry.clock = durable.RealClock()
@@ -112,6 +118,7 @@ func (d *Descriptor) clone() Descriptor {
 	copied.Display = slices.Clone(d.Display)
 	copied.RequiredCapabilities = slices.Clone(d.RequiredCapabilities)
 	copied.Needs = slices.Clone(d.Needs)
+	copied.Texts = slices.Clone(d.Texts)
 	copied.Output.Fields = slices.Clone(d.Output.Fields)
 	for i := range copied.Output.Fields {
 		copied.Output.Fields[i].Surfaces = slices.Clone(copied.Output.Fields[i].Surfaces)
@@ -120,6 +127,7 @@ func (d *Descriptor) clone() Descriptor {
 	for i := range copied.Params {
 		param := &copied.Params[i]
 		param.Surfaces = slices.Clone(param.Surfaces)
+		param.Texts = slices.Clone(param.Texts)
 		param.Default = slices.Clone(param.Default)
 		param.Schema = slices.Clone(param.Schema)
 		param.Enum = slices.Clone(param.Enum)
