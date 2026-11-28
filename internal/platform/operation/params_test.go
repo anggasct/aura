@@ -279,8 +279,8 @@ func TestASurfaceLengthBoundsTheSchemaAndTheValidationOfThatSurfaceOnly(t *testi
 
 func TestACatalogRejectsASurfaceLengthOutsideTheParameterRange(t *testing.T) {
 	cases := map[string]operation.SurfaceLength{
-		"over the range":    {Surface: operation.SurfaceAgent, MaxLength: 51},
-		"zero":              {Surface: operation.SurfaceAgent, MaxLength: 0},
+		"over the range":     {Surface: operation.SurfaceAgent, MaxLength: 51},
+		"zero":               {Surface: operation.SurfaceAgent, MaxLength: 0},
 		"an unknown surface": {Surface: operation.Surface("nowhere"), MaxLength: 5},
 	}
 	for name, bound := range cases {
