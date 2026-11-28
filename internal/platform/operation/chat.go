@@ -426,11 +426,7 @@ func safeText(err error) string {
 }
 
 func safeDetail(code ErrorCode) bool {
-	switch code {
-	case ErrorCodeInputInvalid, ErrorCodeFailed, ErrorCodePolicyDenied, ErrorCodeSourceUnavailable:
-		return true
-	}
-	return false
+	return slices.Contains([]ErrorCode{ErrorCodeInputInvalid, ErrorCodeFailed, ErrorCodePolicyDenied, ErrorCodeSourceUnavailable}, code)
 }
 
 type detailedError interface {
