@@ -28,11 +28,21 @@ import (
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
+func kbCommand(gf *GlobalFlags) *cobra.Command {
+	root := &cobra.Command{Use: "aura", SilenceUsage: true, SilenceErrors: true}
+	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return NewUsageError(err) })
+	mountOperationCommands(root, gf)
+	cmd, _, _ := root.Find([]string{"kb"})
+	root.RemoveCommand(cmd)
+	cmd.SilenceUsage, cmd.SilenceErrors = true, true
+	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return NewUsageError(err) })
+	return cmd
+}
+
 func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	cmds := knowledge.Commands(knowledgeOpener(&GlobalFlags{ConfigPath: cfg}))
-	cmd := cmds[0]
+	cmd := kbCommand(&GlobalFlags{ConfigPath: cfg})
 	out := &bytes.Buffer{}
 	errBuf := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -40,6 +50,20 @@ func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	cmd.SetArgs(args)
 	err := cmd.ExecuteContext(t.Context())
 	return out.String(), err
+}
+
+func addKBSource(ctx context.Context, service *knowledge.Service, collection, location string) (knowledge.IngestResult, error) {
+	var prepared *knowledge.Prepared
+	var err error
+	if knowledge.IsURLReference(location) {
+		prepared, err = service.PrepareURL(ctx, collection, location)
+	} else {
+		prepared, err = service.PrepareHostFile(ctx, collection, location)
+	}
+	if err != nil {
+		return knowledge.IngestResult{}, err
+	}
+	return service.Write(ctx, knowledge.ActionAdd, prepared)
 }
 
 func requireKBCode(t *testing.T, err error, want knowledge.ErrorCode) {
@@ -107,8 +131,13 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list --json: %v", err)
 	}
-	var listed knowledge.ListOutput
-	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Collections) != 1 || listed.Collections[0].ID != "support" || listed.Collections[0].Chunks != 2 {
+	var listed struct {
+		Rows []struct {
+			Collection string `json:"collection"`
+			Chunks     int    `json:"chunks"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal([]byte(out), &listed); err != nil || len(listed.Rows) != 1 || listed.Rows[0].Collection != "support" || listed.Rows[0].Chunks != 2 {
 		t.Fatalf("list --json = %q, %v", out, err)
 	}
 	out, err = runKBCommand(t, cfg, "show", "support")
@@ -129,7 +158,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 	}
 
 	out, err = runKBCommand(t, cfg, "remove", "support", doc)
-	if err != nil || !strings.Contains(out, "dry-run: would remove 2 chunks") {
+	if err != nil || !strings.Contains(out, "would remove 2 chunks of the source") {
 		t.Fatalf("remove dry run = %q, %v", out, err)
 	}
 	if out, err = runKBCommand(t, cfg, "list"); err != nil || !strings.Contains(out, "support\t1\t2\t") {
@@ -139,7 +168,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 	if err != nil || !strings.Contains(out, "removed: 2 chunks") || !strings.Contains(out, "not removed: earlier replies") || !strings.Contains(out, "vacuumed") {
 		t.Fatalf("remove apply = %q, %v", out, err)
 	}
-	if out, err = runKBCommand(t, cfg, "list"); err != nil || !strings.Contains(out, "no collections") {
+	if out, err = runKBCommand(t, cfg, "list"); err != nil || out != "COLLECTION\tSOURCES\tCHUNKS\tGENERATION\n" {
 		t.Fatalf("list after remove = %q, %v", out, err)
 	}
 	_, err = runKBCommand(t, cfg, "show", "support")
@@ -278,7 +307,7 @@ func TestKnowledgeURLThroughEgressRefusesAHostnameResolvingToAPrivateAddress(t *
 	if err != nil {
 		t.Fatalf("newKnowledgeService: %v", err)
 	}
-	_, err = service.Add(t.Context(), "support", "https://docs.example.test/refunds?token=abc")
+	_, err = addKBSource(t.Context(), service, "support", "https://docs.example.test/refunds?token=abc")
 	requireKBCode(t, err, knowledge.ErrorCodeURLRefused)
 	if strings.Contains(err.Error(), "token=abc") || strings.Contains(err.Error(), "10.0.0.5") {
 		t.Errorf("error %q leaks the URL or the resolved address", err.Error())
@@ -297,12 +326,12 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 	}
 
 	clean := writeKBDocument(t, "clean.md", "Refunds are issued within thirty days.")
-	if _, err := service.Add(t.Context(), "support", clean); err != nil {
+	if _, err := addKBSource(t.Context(), service, "support", clean); err != nil {
 		t.Fatalf("clean Add: %v", err)
 	}
 
 	leaky := writeKBDocument(t, "leaky.md", "# Intro\nfine\n\n# Ops\nThe webhook secret is "+secretValue+" in production.\n")
-	_, err = service.Add(t.Context(), "support", leaky)
+	_, err = addKBSource(t.Context(), service, "support", leaky)
 	requireKBCode(t, err, knowledge.ErrorCodeSecretInvalid)
 	if strings.Contains(err.Error(), secretValue) {
 		t.Errorf("error %q prints the matched secret", err.Error())
@@ -312,7 +341,7 @@ func TestKnowledgeIngestRejectsSecretBearingSourcesAndFailsClosedOnUnresolvableR
 	}
 
 	cfg.Webhook.Keys = []platformwebhook.Key{{ID: "hook", SecretEnv: "KB_TEST_UNSET_SECRET_VARIABLE"}}
-	_, err = service.Add(t.Context(), "support", writeKBDocument(t, "other.md", "harmless text"))
+	_, err = addKBSource(t.Context(), service, "support", writeKBDocument(t, "other.md", "harmless text"))
 	requireKBCode(t, err, knowledge.ErrorCodeSecretUnavailable)
 	if !strings.Contains(err.Error(), "webhook_hook") {
 		t.Errorf("error %q does not name the unresolved reference", err.Error())
@@ -441,8 +470,8 @@ func TestKBCheckReportsADamagedIndexAndFailsOtherwiseClean(t *testing.T) {
 	}
 	out, err = runKBCommand(t, cfg, "check")
 	requireKBCode(t, err, knowledge.ErrorCodeIndexDamaged)
-	if !strings.Contains(out, "problem:") {
-		t.Errorf("check output %q lists no problem", out)
+	if out != "" || !strings.Contains(err.Error(), "problem") {
+		t.Errorf("check output %q error %v; want the problems in the error", out, err)
 	}
 }
 
@@ -464,7 +493,10 @@ func TestKnowledgeStoreAdapterTranslatesStoreErrors(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
-	_, err = kbStore.RemoveSource(t.Context(), "support", "/missing.md", false)
+	err = sqlite.RunInTx(t.Context(), db, func(txCtx context.Context) error {
+		_, err := kbStore.DeleteSource(txCtx, "support", "/missing.md")
+		return err
+	})
 	requireKBCode(t, err, knowledge.ErrorCodeSourceNotFound)
 	if _, err := kbStore.ReplaceSource(t.Context(), nil); err == nil {
 		t.Fatal("ReplaceSource accepted nil")

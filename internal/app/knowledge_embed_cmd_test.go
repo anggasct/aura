@@ -230,49 +230,13 @@ func (r *embedRig) generation(t *testing.T, collection string) int {
 
 const twoSectionDocument = "# Refunds\nRefunds are issued within thirty days.\n\n# Shipping\nShipping takes five days.\n"
 
-func TestKBEmbedDryRunChangesNothingAndSendsNothing(t *testing.T) {
-	rig := newEmbedRig(t, 4, "")
-	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	before := rig.generation(t, "support")
-
-	out, err := rig.run(t, "embed", "support")
-	if err != nil {
-		t.Fatalf("embed dry run: %v\n%s", err, out)
-	}
-	host := strings.TrimPrefix(rig.provider.server.URL, "http://")
-	for _, want := range []string{
-		"dry-run: collection support would send 2 of 2 chunks (about ", "estimated", "model test-model at 4 dimensions",
-		"destination: " + host + " (this host; nothing leaves it)",
-		"public queries are not sent", "owner and trusted queries", "rerun with --apply",
-	} {
-		if !strings.Contains(out, want) {
-			t.Errorf("dry run output lacks %q:\n%s", want, out)
-		}
-	}
-	if rig.provider.callCount() != 0 {
-		t.Fatalf("provider calls = %d, want none", rig.provider.callCount())
-	}
-	if rig.vectors(t) != 0 || rig.storedFingerprint(t, "support").Valid || rig.generation(t, "support") != before {
-		t.Fatal("the dry run changed the database")
-	}
-}
-
-func TestKBEmbedDryRunStatesThatPublicQueriesAreSentWhenConfigured(t *testing.T) {
-	rig := newEmbedRig(t, 4, "    public_queries: true\n")
-	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	out, err := rig.run(t, "embed", "support")
-	if err != nil || !strings.Contains(out, "public_queries is true") {
-		t.Fatalf("embed dry run = %q, %v", out, err)
-	}
-}
-
 func TestKBEmbedApplyStoresUnitVectorsFingerprintAndOneGenerationBump(t *testing.T) {
 	t.Setenv("KB_EMBED_TEST_KEY", "kb-embed-test-bearer-value")
 	rig := newEmbedRig(t, 4, "    credential_ref: env://KB_EMBED_TEST_KEY\n    batch_size: 1\n")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
 	before := rig.generation(t, "support")
 
-	out, err := rig.run(t, "embed", "support", "--apply")
+	out, err := rig.run(t, "embed", "support")
 	if err != nil || !strings.Contains(out, "embedded: 2 chunks in 2 batches") || !strings.Contains(out, "complete: every chunk has a vector") {
 		t.Fatalf("embed apply = %q, %v", out, err)
 	}
@@ -318,7 +282,7 @@ func TestKBEmbedApplyStoresUnitVectorsFingerprintAndOneGenerationBump(t *testing
 	}
 
 	rig.provider.reset()
-	out, err = rig.run(t, "embed", "support", "--apply")
+	out, err = rig.run(t, "embed", "support")
 	if err != nil || !strings.Contains(out, "embedded: 0 chunks") || rig.provider.callCount() != 0 {
 		t.Fatalf("second apply = %q, %v, calls %d", out, err, rig.provider.callCount())
 	}
@@ -333,9 +297,9 @@ func TestKBEmbedResumesAfterAProviderFailureAndSkipsStoredVectors(t *testing.T) 
 	before := rig.generation(t, "support")
 	rig.provider.failCall = 2
 
-	out, err := rig.run(t, "embed", "support", "--apply")
+	out, err := rig.run(t, "embed", "support")
 	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
-	if !strings.Contains(out, "partial: rerun aura kb embed support --apply to resume") || rig.vectors(t) != 1 {
+	if out != "" || rig.vectors(t) != 1 {
 		t.Fatalf("after failure: out %q vectors %d", out, rig.vectors(t))
 	}
 	if rig.generation(t, "support") != before {
@@ -349,7 +313,7 @@ func TestKBEmbedResumesAfterAProviderFailureAndSkipsStoredVectors(t *testing.T) 
 	rig.provider.mu.Lock()
 	rig.provider.failCall = 0
 	rig.provider.mu.Unlock()
-	out, err = rig.run(t, "embed", "support", "--apply")
+	out, err = rig.run(t, "embed", "support")
 	if err != nil || !strings.Contains(out, "embedded: 2 chunks") {
 		t.Fatalf("resume = %q, %v", out, err)
 	}
@@ -362,7 +326,7 @@ func TestKBEmbedStoresNothingForAMalformedProviderResponse(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
 	rig.provider.badShape = true
-	_, err := rig.run(t, "embed", "support", "--apply")
+	_, err := rig.run(t, "embed", "support")
 	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
 	if rig.vectors(t) != 0 {
 		t.Fatalf("vectors = %d, want none for a malformed batch", rig.vectors(t))
@@ -379,7 +343,7 @@ func TestKBWithoutEmbeddingConfigurationBehavesAsTextOnly(t *testing.T) {
 	if err != nil || !strings.Contains(out, "added: policy.md chunks=2") || strings.Contains(out, "embedding:") {
 		t.Fatalf("add = %q, %v", out, err)
 	}
-	for _, args := range [][]string{{"embed", "support"}, {"embed", "support", "--apply"}} {
+	for _, args := range [][]string{{"embed", "support"}} {
 		_, err = runKBCommand(t, cfgPath, args...)
 		requireKBCode(t, err, knowledge.ErrorCodeEmbeddingUnavailable)
 	}
@@ -393,7 +357,7 @@ func TestKBWithoutEmbeddingConfigurationBehavesAsTextOnly(t *testing.T) {
 
 func TestKBEmbedRejectsAMissingOrInvalidCollection(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
-	_, err := rig.run(t, "embed", "missing", "--apply")
+	_, err := rig.run(t, "embed", "missing")
 	requireKBCode(t, err, knowledge.ErrorCodeSourceNotFound)
 	_, err = rig.run(t, "embed", "Bad Name")
 	requireKBCode(t, err, knowledge.ErrorCodeCollectionInvalid)
@@ -409,7 +373,7 @@ func TestKBEmbedRejectsAMissingOrInvalidCollection(t *testing.T) {
 func TestKBChangedConfigurationStopsSendingUntilReembedded(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	rig.provider.reset()
@@ -424,10 +388,6 @@ func TestKBChangedConfigurationStopsSendingUntilReembedded(t *testing.T) {
 	if err != nil || !strings.Contains(out, "added: faq.md") || !strings.Contains(out, "kb_reembed_required") {
 		t.Fatalf("add after a model change = %q, %v", out, err)
 	}
-	preview, err := rig.run(t, "embed", "support")
-	if err != nil || !strings.Contains(preview, "reembed:") {
-		t.Fatalf("dry run after a model change = %q, %v", preview, err)
-	}
 	if rig.provider.callCount() != 0 {
 		t.Fatalf("provider calls = %d after a changed configuration, want none", rig.provider.callCount())
 	}
@@ -435,7 +395,7 @@ func TestKBChangedConfigurationStopsSendingUntilReembedded(t *testing.T) {
 		t.Fatalf("stored fingerprint = %q, want the old one kept until the owner re-embeds", got.String)
 	}
 
-	out, err = rig.run(t, "embed", "support", "--apply")
+	out, err = rig.run(t, "embed", "support")
 	if err != nil || !strings.Contains(out, "embedded: 3 chunks") {
 		t.Fatalf("re-embed = %q, %v", out, err)
 	}
@@ -453,7 +413,7 @@ func TestKBAddAndRefreshEmbedOnlyChangedChunksOfAnOptedInCollection(t *testing.T
 	if rig.provider.callCount() != 0 {
 		t.Fatal("add sent text before the collection opted in")
 	}
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	rig.provider.reset()
@@ -488,14 +448,13 @@ func TestKBAddAndRefreshEmbedOnlyChangedChunksOfAnOptedInCollection(t *testing.T
 func TestKBAddKeepsTheTextWhenEmbeddingFails(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	rig.provider.failCall = 2
 	second := writeKBDocument(t, "faq.md", "# Hours\nWe open at nine.\n")
 	out, err := rig.run(t, "add", "support", second)
-	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
-	if !strings.Contains(out, "added: faq.md") || countRows(t, rig.db, `SELECT count(*) FROM kb_chunk`) != 3 || rig.vectors(t) != 2 {
+	if err != nil || !strings.Contains(out, "embedding: failed (kb_embedding_failed)") || !strings.Contains(out, "added: faq.md") || countRows(t, rig.db, `SELECT count(*) FROM kb_chunk`) != 3 || rig.vectors(t) != 2 {
 		t.Fatalf("out %q chunks %d vectors %d; the text must stay committed and the collection partial",
 			out, countRows(t, rig.db, `SELECT count(*) FROM kb_chunk`), rig.vectors(t))
 	}
@@ -507,7 +466,7 @@ func TestKBEmbedNeverSendsAChunkMatchingACurrentVaultValue(t *testing.T) {
 	rig.addDoc(t, "support", "policy.md", "# Notes\nThe shared key is "+credential+" for the vendor.\n\n# Shipping\nShipping takes five days.\n")
 	t.Setenv("KB_EMBED_VAULT_KEY", credential)
 
-	out, err := rig.run(t, "embed", "support", "--apply")
+	out, err := rig.run(t, "embed", "support")
 	requireKBCode(t, err, knowledge.ErrorCodeSecretInvalid)
 	if rig.provider.callCount() != 0 || strings.Contains(out, credential) || strings.Contains(fmt.Sprint(err), credential) {
 		t.Fatalf("provider calls %d; output %q error %v", rig.provider.callCount(), out, err)
@@ -520,7 +479,7 @@ func TestKBEmbedNeverSendsAChunkMatchingACurrentVaultValue(t *testing.T) {
 func TestKBEmbedWithAnUnresolvedCredentialSendsNothingAndKeepsTextRetrieval(t *testing.T) {
 	rig := newEmbedRig(t, 4, "    credential_ref: env://KB_EMBED_UNSET_KEY\n")
 	doc := rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	_, err := rig.run(t, "embed", "support", "--apply")
+	_, err := rig.run(t, "embed", "support")
 	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingUnavailable)
 	if rig.provider.callCount() != 0 || rig.storedFingerprint(t, "support").Valid {
 		t.Fatal("an unresolved credential sent text or recorded an opt-in")
@@ -537,7 +496,7 @@ func TestKBEmbedOffErasesVectorsFromDatabaseAndWriteAheadLogWithoutConfiguration
 	rig := newEmbedRig(t, 1024, "")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
 	rig.addDoc(t, "other", "faq.md", "# Hours\nWe open at nine.\n")
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	var blob []byte
@@ -552,13 +511,13 @@ func TestKBEmbedOffErasesVectorsFromDatabaseAndWriteAheadLogWithoutConfiguration
 	}
 	before := rig.generation(t, "support")
 
-	out, err := rig.run(t, "embed", "support", "--off")
-	if err != nil || !strings.Contains(out, "dry-run: would delete 2 vectors") || rig.vectors(t) != 2 {
+	out, err := rig.run(t, "unembed", "support")
+	if err != nil || !strings.Contains(out, "would delete 2 vectors of collection support") || rig.vectors(t) != 2 {
 		t.Fatalf("--off dry run = %q, %v, vectors %d", out, err, rig.vectors(t))
 	}
 
 	replaceEmbeddingSection(t, rig.cfgPath, "")
-	out, err = rig.run(t, "embed", "support", "--off", "--apply")
+	out, err = rig.run(t, "unembed", "support", "--apply")
 	if err != nil || !strings.Contains(out, "embedding off: 2 vectors deleted") ||
 		!strings.Contains(out, "copies an embedding provider holds under its own terms") || !strings.Contains(out, "until its next retrieval or restart") {
 		t.Fatalf("--off --apply = %q, %v", out, err)
@@ -588,7 +547,7 @@ func TestKBRemoveApplyErasesVectorsFromDatabaseAndWriteAheadLog(t *testing.T) {
 	rig := newEmbedRig(t, 1024, "")
 	doc := rig.addDoc(t, "support", "policy.md", twoSectionDocument)
 	rig.addDoc(t, "support", "faq.md", "# Hours\nWe open at nine.\n")
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	var blob []byte
@@ -621,11 +580,11 @@ func TestKBEmbedOffDuringAFirstApplyStopsThatRun(t *testing.T) {
 		if n != 1 {
 			return
 		}
-		if out, err := runKBCommand(t, rig.cfgPath, "embed", "support", "--off", "--apply"); err != nil {
+		if out, err := runKBCommand(t, rig.cfgPath, "unembed", "support", "--apply"); err != nil {
 			t.Errorf("--off during the run: %v\n%s", err, out)
 		}
 	}
-	_, err := rig.run(t, "embed", "support", "--apply")
+	_, err := rig.run(t, "embed", "support")
 	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
 	if rig.provider.callCount() != 1 || rig.vectors(t) != 0 || rig.storedFingerprint(t, "support").Valid {
 		t.Fatalf("calls %d vectors %d stored %+v; the run must stop and leave nothing", rig.provider.callCount(), rig.vectors(t), rig.storedFingerprint(t, "support"))
@@ -636,7 +595,7 @@ func TestKBEmbedHandlesOnlyTheNamedCollection(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
 	rig.addDoc(t, "other", "faq.md", "# Hours\nWe open at nine.\n")
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embed: %v", err)
 	}
 	if rig.provider.inputCount() != 2 || rig.storedFingerprint(t, "other").Valid {
@@ -652,7 +611,7 @@ func TestKBEmbedHandlesOnlyTheNamedCollection(t *testing.T) {
 func TestKnowledgeServiceUsesTheLoopbackClientOnlyForEmbeddings(t *testing.T) {
 	rig := newEmbedRig(t, 4, "")
 	rig.addDoc(t, "support", "policy.md", twoSectionDocument)
-	if _, err := rig.run(t, "embed", "support", "--apply"); err != nil {
+	if _, err := rig.run(t, "embed", "support"); err != nil {
 		t.Fatalf("embedding reached no loopback server: %v", err)
 	}
 	client := knowledge.NewHTTPClient(nil)

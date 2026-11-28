@@ -366,9 +366,8 @@ func TestKnowledgeServerSeesACLIChangeAtItsNextRetrieval(t *testing.T) {
 		t.Fatalf("after the reload: mode %q, hits %+v, want the new chunk by meaning", found.Mode, found.Hits)
 	}
 
-	outcome, err := rig.service.EmbedOff(t.Context(), "support", true)
-	if err != nil || !outcome.Applied {
-		t.Fatalf("EmbedOff = %+v, %v", outcome, err)
+	if out, err := runKBCommand(t, rig.cfgPath, "unembed", "support", "--apply"); err != nil {
+		t.Fatalf("unembed: %v\n%s", err, out)
 	}
 	rig.provider.reset()
 	erased := rig.searchOnce(t, []string{"support"}, meaningQuery, principal.ClassOwner)

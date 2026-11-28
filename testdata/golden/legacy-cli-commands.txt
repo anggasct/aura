@@ -27,13 +27,6 @@ handoff release
 interpreter install
 interpreter list
 interpreter remove
-kb add
-kb check
-kb embed
-kb list
-kb refresh
-kb remove
-kb show
 mcp list
 mcp trust approve
 mcp trust revoke

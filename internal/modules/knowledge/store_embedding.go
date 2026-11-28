@@ -193,43 +193,26 @@ func completeEmbedding(ctx context.Context, conn sqlite.Querier, collection, fin
 	return true, nil
 }
 
-func (s *SQLiteStore) DisableEmbedding(ctx context.Context, collection string, apply bool) (DisableOutcome, error) {
+func (s *SQLiteStore) DisableEmbedding(ctx context.Context, collection string) (DisableOutcome, error) {
 	if s == nil || s.db == nil {
 		return DisableOutcome{}, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
-	if !apply {
-		return s.previewDisableEmbedding(ctx, collection)
+	if !sqlite.InTx(ctx, s.db) {
+		return DisableOutcome{}, Errorf(ErrorCodeInvalidArgument, "disable embedding runs inside a transaction")
 	}
-	if sqlite.InTx(ctx, s.db) {
-		return DisableOutcome{}, Errorf(ErrorCodeInvalidArgument, "disable embedding cannot run inside an active transaction")
-	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return DisableOutcome{}, sqlite.Classify(fmt.Errorf("open knowledge connection: %w", err))
-	}
-	defer func() { _ = conn.Close() }()
+	conn := sqlite.Conn(ctx, s.db)
 	restore, err := enableSecureDelete(ctx, conn)
 	if err != nil {
 		return DisableOutcome{}, err
 	}
 	defer restore()
-	result, err := deleteVectors(ctx, conn, collection)
-	if err != nil {
-		return DisableOutcome{}, err
-	}
-	result.Applied = true
-	truncated, err := truncateWAL(ctx, conn)
-	if err != nil {
-		return result, err
-	}
-	result.WALTruncated = truncated
-	return result, nil
+	return deleteVectors(ctx, conn, collection)
 }
 
 const kbCollectionVectorsSQL = `FROM kb_embedding WHERE chunk_rowid IN (
 	SELECT c.rowid FROM kb_chunk c JOIN kb_source s ON s.id = c.source_id WHERE s.collection = ?)`
 
-func (s *SQLiteStore) previewDisableEmbedding(ctx context.Context, collection string) (DisableOutcome, error) {
+func (s *SQLiteStore) PreviewDisableEmbedding(ctx context.Context, collection string) (DisableOutcome, error) {
 	conn := sqlite.Conn(ctx, s.db)
 	var stored sql.NullString
 	err := conn.QueryRowContext(ctx, `SELECT embedding_fingerprint FROM kb_collection WHERE id = ?`, collection).Scan(&stored)
@@ -246,14 +229,9 @@ func (s *SQLiteStore) previewDisableEmbedding(ctx context.Context, collection st
 	return result, nil
 }
 
-func deleteVectors(ctx context.Context, conn *sql.Conn, collection string) (DisableOutcome, error) {
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return DisableOutcome{}, sqlite.Classify(err)
-	}
-	defer func() { _ = tx.Rollback() }()
+func deleteVectors(ctx context.Context, tx sqlite.Querier, collection string) (DisableOutcome, error) {
 	var stored sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT embedding_fingerprint FROM kb_collection WHERE id = ?`, collection).Scan(&stored)
+	err := tx.QueryRowContext(ctx, `SELECT embedding_fingerprint FROM kb_collection WHERE id = ?`, collection).Scan(&stored)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DisableOutcome{}, Errorf(ErrorCodeSourceNotFound, "knowledge collection does not exist")
 	}
@@ -272,9 +250,6 @@ func deleteVectors(ctx context.Context, conn *sql.Conn, collection string) (Disa
 		if _, err := tx.ExecContext(ctx, `UPDATE kb_collection SET embedding_fingerprint = NULL, generation = generation + 1 WHERE id = ?`, collection); err != nil {
 			return DisableOutcome{}, sqlite.Classify(fmt.Errorf("clear knowledge embedding opt-in: %w", err))
 		}
-	}
-	if err := tx.Commit(); err != nil {
-		return DisableOutcome{}, sqlite.Classify(err)
 	}
 	return DisableOutcome{OptedIn: stored.Valid, Vectors: int(vectors)}, nil
 }

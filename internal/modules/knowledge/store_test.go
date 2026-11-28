@@ -142,7 +142,7 @@ func TestReplaceSourceJoinsCallersTransaction(t *testing.T) {
 	}
 }
 
-func TestRemoveSourceRefusesCallersTransaction(t *testing.T) {
+func TestDeleteSourceRunsOnlyInsideATransactionAndRollsBackWithIt(t *testing.T) {
 	db := newKBTestDB(t)
 	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
@@ -150,14 +150,34 @@ func TestRemoveSourceRefusesCallersTransaction(t *testing.T) {
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha text"))); err != nil {
 		t.Fatalf("ReplaceSource: %v", err)
 	}
-	err := sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
-		_, err := kb.RemoveSource(txCtx, "support", "/docs/a.md", true)
+	_, err := kb.DeleteSource(ctx, "support", "/docs/a.md")
+	requireCode(t, err, ErrorCodeInvalidArgument)
+	abort := errors.New("abort")
+	err = sqlite.RunInTx(ctx, db, func(txCtx context.Context) error {
+		if _, err := kb.DeleteSource(txCtx, "support", "/docs/a.md"); err != nil {
+			return err
+		}
+		return abort
+	})
+	if !errors.Is(err, abort) {
+		t.Fatalf("RunInTx = %v, want the abort", err)
+	}
+	if _, found, err := kb.GetSource(ctx, "support", "/docs/a.md"); err != nil || !found {
+		t.Fatalf("source was removed despite the rollback: found=%t err=%v", found, err)
+	}
+	if got := pragmaValue(t, db, "secure_delete"); got != "0" {
+		t.Errorf("secure_delete leaked into the pool: %q", got)
+	}
+}
+
+func TestTruncateWALRefusesACallersTransaction(t *testing.T) {
+	db := newKBTestDB(t)
+	kb := mustNewSQLiteStore(t, db)
+	err := sqlite.RunInTx(t.Context(), db, func(txCtx context.Context) error {
+		_, err := kb.TruncateWAL(txCtx)
 		return err
 	})
 	requireCode(t, err, ErrorCodeInvalidArgument)
-	if _, found, err := kb.GetSource(ctx, "support", "/docs/a.md"); err != nil || !found {
-		t.Fatalf("source was removed despite active tx refusal: found=%t err=%v", found, err)
-	}
 }
 
 func TestKnowledgeSchemaHasSecureDeletePorterAndScope(t *testing.T) {
@@ -345,24 +365,24 @@ func TestKnowledgeCascadeDeleteKeepsIndexConsistent(t *testing.T) {
 	kbCheckClean(t, kb)
 }
 
-func TestKnowledgeRemoveSourceDryRunChangesNothing(t *testing.T) {
+func TestKnowledgeGetSourceAndMissingDeleteChangeNothing(t *testing.T) {
 	db := newKBTestDB(t)
 	kb := mustNewSQLiteStore(t, db)
 	ctx := t.Context()
 	if _, err := kb.ReplaceSource(ctx, kbWrite("support", "/docs/a.md", "a", kbChunks("alpha", "beta"))); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	result, err := kb.RemoveSource(ctx, "support", "/docs/a.md", false)
-	if err != nil || result.Applied || result.Chunks != 2 {
-		t.Fatalf("dry run = %+v, %v", result, err)
+	found, ok, err := kb.GetSource(ctx, "support", "/docs/a.md")
+	if err != nil || !ok || found.Chunks != 2 {
+		t.Fatalf("GetSource = %+v, %v, %v", found, ok, err)
 	}
 	if generation := kbGeneration(t, db, "support"); generation != 1 {
 		t.Errorf("generation after dry run = %d, want 1", generation)
 	}
-	if _, err := kb.RemoveSource(ctx, "support", "/docs/missing.md", false); !fault.HasCode(err, ErrorCodeSourceNotFound) {
-		t.Fatalf("missing dry run error = %v, want %s", err, ErrorCodeSourceNotFound)
+	if _, ok, err := kb.GetSource(ctx, "support", "/docs/missing.md"); err != nil || ok {
+		t.Fatalf("missing GetSource = %v, %v, want not found without error", ok, err)
 	}
-	if _, err := kb.RemoveSource(ctx, "support", "/docs/missing.md", true); !fault.HasCode(err, ErrorCodeSourceNotFound) {
+	if _, _, err := kb.removeAndTruncate(ctx, "support", "/docs/missing.md"); !fault.HasCode(err, ErrorCodeSourceNotFound) {
 		t.Fatalf("missing apply error = %v, want %s", err, ErrorCodeSourceNotFound)
 	}
 	sources, err := kb.ListSources(ctx, "support")
@@ -382,9 +402,9 @@ func TestKnowledgeCollectionOutlivesItsLastSourceAndKeepsGeneration(t *testing.T
 	if err != nil || len(listed) != 1 || listed[0].ID != "support" || listed[0].Sources != 1 || listed[0].Chunks != 1 {
 		t.Fatalf("ListCollections = %+v, %v", listed, err)
 	}
-	result, err := kb.RemoveSource(ctx, "support", "/docs/a.md", true)
-	if err != nil || !result.Applied || result.Chunks != 1 {
-		t.Fatalf("RemoveSource = %+v, %v", result, err)
+	result, _, err := kb.removeAndTruncate(ctx, "support", "/docs/a.md")
+	if err != nil || result.Chunks != 1 {
+		t.Fatalf("DeleteSource = %+v, %v", result, err)
 	}
 	listed, err = kb.ListCollections(ctx)
 	if err != nil || len(listed) != 0 {
@@ -493,9 +513,9 @@ func TestKnowledgeRemoveErasesTermFromIndexAndWriteAheadLog(t *testing.T) {
 		t.Fatalf("write-ahead log does not hold the term before removal: %v", err)
 	}
 
-	result, err := kb.RemoveSource(ctx, "support", "/docs/a.md", true)
-	if err != nil || !result.Applied || !result.WALTruncated {
-		t.Fatalf("RemoveSource = %+v, %v", result, err)
+	result, truncated, err := kb.removeAndTruncate(ctx, "support", "/docs/a.md")
+	if err != nil || !truncated {
+		t.Fatalf("DeleteSource = %+v, %v", result, err)
 	}
 
 	if indexBlocksContain(t, db, termStem) {

@@ -98,6 +98,52 @@ func loadFile(location string) (*loadedSource, error) {
 	}, nil
 }
 
+func loadStream(stream *Stream) (*loadedSource, error) {
+	format, err := streamFormat(stream.Name, stream.MediaType)
+	if err != nil {
+		return nil, err
+	}
+	if stream.Size > MaxSourceBytes {
+		return nil, Errorf(ErrorCodeSourceTooLarge, "source exceeds %d bytes", MaxSourceBytes)
+	}
+	data, err := readBounded(stream.Reader)
+	if err != nil {
+		return nil, err
+	}
+	if err := requireText(data); err != nil {
+		return nil, err
+	}
+	return &loadedSource{
+		kind:   SourceKindFile,
+		uri:    stream.URI,
+		label:  sanitizeLabel(path.Base(stream.Name)),
+		format: format,
+		data:   data,
+	}, nil
+}
+
+func streamFormat(name, mediaType string) (Format, error) {
+	if mediaType == "" {
+		format, ok := fileFormat(name)
+		if !ok {
+			return "", Errorf(ErrorCodeSourceUnsupported, "only .md, .txt and .html files are supported")
+		}
+		return format, nil
+	}
+	switch mediaType {
+	case "text/html":
+		return FormatHTML, nil
+	case "text/markdown":
+		return FormatMarkdown, nil
+	case "text/plain":
+		if strings.EqualFold(path.Ext(name), ".md") {
+			return FormatMarkdown, nil
+		}
+		return FormatText, nil
+	}
+	return "", Errorf(ErrorCodeSourceUnsupported, "only Markdown, plain text and HTML attachments are supported")
+}
+
 func classifyOpenError(err error) error {
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

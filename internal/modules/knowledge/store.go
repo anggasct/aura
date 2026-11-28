@@ -338,47 +338,38 @@ func (s *SQLiteStore) GetSource(ctx context.Context, collection, uri string) (So
 	return source, true, nil
 }
 
-func (s *SQLiteStore) RemoveSource(ctx context.Context, collection, uri string, apply bool) (RemoveOutcome, error) {
+func (s *SQLiteStore) DeleteSource(ctx context.Context, collection, uri string) (RemoveOutcome, error) {
 	if s == nil || s.db == nil {
 		return RemoveOutcome{}, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
-	if !apply {
-		source, found, err := s.GetSource(ctx, collection, uri)
-		if err != nil {
-			return RemoveOutcome{}, err
-		}
-		if !found {
-			return RemoveOutcome{}, Errorf(ErrorCodeSourceNotFound, "knowledge source does not exist")
-		}
-		return RemoveOutcome{SourceID: source.ID, Chunks: source.Chunks}, nil
+	if !sqlite.InTx(ctx, s.db) {
+		return RemoveOutcome{}, Errorf(ErrorCodeInvalidArgument, "remove source runs inside a transaction")
 	}
-	if sqlite.InTx(ctx, s.db) {
-		return RemoveOutcome{}, Errorf(ErrorCodeInvalidArgument, "remove source cannot run inside an active transaction")
-	}
-	conn, err := s.db.Conn(ctx)
-	if err != nil {
-		return RemoveOutcome{}, sqlite.Classify(fmt.Errorf("open knowledge connection: %w", err))
-	}
-	defer func() { _ = conn.Close() }()
+	conn := sqlite.Conn(ctx, s.db)
 	restore, err := enableSecureDelete(ctx, conn)
 	if err != nil {
 		return RemoveOutcome{}, err
 	}
 	defer restore()
-	result, err := deleteSource(ctx, conn, collection, uri)
-	if err != nil {
-		return RemoveOutcome{}, err
-	}
-	result.Applied = true
-	truncated, err := truncateWAL(ctx, conn)
-	if err != nil {
-		return result, err
-	}
-	result.WALTruncated = truncated
-	return result, nil
+	return deleteSource(ctx, conn, collection, uri)
 }
 
-func enableSecureDelete(ctx context.Context, conn *sql.Conn) (restore func(), err error) {
+func (s *SQLiteStore) TruncateWAL(ctx context.Context) (bool, error) {
+	if s == nil || s.db == nil {
+		return false, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
+	}
+	if sqlite.InTx(ctx, s.db) {
+		return false, Errorf(ErrorCodeInvalidArgument, "truncate write-ahead log cannot run inside an active transaction")
+	}
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return false, sqlite.Classify(fmt.Errorf("open knowledge connection: %w", err))
+	}
+	defer func() { _ = conn.Close() }()
+	return truncateWAL(ctx, conn)
+}
+
+func enableSecureDelete(ctx context.Context, conn sqlite.Querier) (restore func(), err error) {
 	var previous int
 	if err := conn.QueryRowContext(ctx, `PRAGMA secure_delete`).Scan(&previous); err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("read secure_delete: %w", err))
@@ -391,13 +382,8 @@ func enableSecureDelete(ctx context.Context, conn *sql.Conn) (restore func(), er
 	}, nil
 }
 
-func deleteSource(ctx context.Context, conn *sql.Conn, collection, uri string) (RemoveOutcome, error) {
-	tx, err := conn.BeginTx(ctx, nil)
-	if err != nil {
-		return RemoveOutcome{}, sqlite.Classify(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	source, err := scanSource(tx.QueryRowContext(ctx,
+func deleteSource(ctx context.Context, conn sqlite.Querier, collection, uri string) (RemoveOutcome, error) {
+	source, err := scanSource(conn.QueryRowContext(ctx,
 		`SELECT `+selectSourceColumns+` FROM kb_source s WHERE s.collection = ? AND s.uri = ?`, collection, uri))
 	if errors.Is(err, sql.ErrNoRows) {
 		return RemoveOutcome{}, Errorf(ErrorCodeSourceNotFound, "knowledge source does not exist")
@@ -405,14 +391,11 @@ func deleteSource(ctx context.Context, conn *sql.Conn, collection, uri string) (
 	if err != nil {
 		return RemoveOutcome{}, sqlite.Classify(fmt.Errorf("get knowledge source: %w", err))
 	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM kb_source WHERE id = ?`, source.ID); err != nil {
+	if _, err := conn.ExecContext(ctx, `DELETE FROM kb_source WHERE id = ?`, source.ID); err != nil {
 		return RemoveOutcome{}, sqlite.Classify(fmt.Errorf("delete knowledge source: %w", err))
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE kb_collection SET generation = generation + 1 WHERE id = ?`, collection); err != nil {
+	if _, err := conn.ExecContext(ctx, `UPDATE kb_collection SET generation = generation + 1 WHERE id = ?`, collection); err != nil {
 		return RemoveOutcome{}, sqlite.Classify(fmt.Errorf("advance knowledge collection generation: %w", err))
-	}
-	if err := tx.Commit(); err != nil {
-		return RemoveOutcome{}, sqlite.Classify(err)
 	}
 	return RemoveOutcome{SourceID: source.ID, Chunks: source.Chunks}, nil
 }

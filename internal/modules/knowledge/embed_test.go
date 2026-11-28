@@ -99,14 +99,16 @@ func (s *fakeVectorStore) CommitVectors(_ context.Context, _, fingerprint string
 	return CommitOutcome{Written: len(vectors), Completed: true}, nil
 }
 
-func (s *fakeVectorStore) DisableEmbedding(_ context.Context, _ string, apply bool) (DisableOutcome, error) {
-	outcome := DisableOutcome{OptedIn: s.stored != "", Vectors: len(s.vectors), Applied: apply, WALTruncated: apply}
-	if apply {
-		s.stored = ""
-		s.vectors = map[int64]VectorWrite{}
-		s.vectorPrint = map[int64]string{}
-		s.generation++
-	}
+func (s *fakeVectorStore) PreviewDisableEmbedding(context.Context, string) (DisableOutcome, error) {
+	return DisableOutcome{OptedIn: s.stored != "", Vectors: len(s.vectors)}, nil
+}
+
+func (s *fakeVectorStore) DisableEmbedding(context.Context, string) (DisableOutcome, error) {
+	outcome := DisableOutcome{OptedIn: s.stored != "", Vectors: len(s.vectors)}
+	s.stored = ""
+	s.vectors = map[int64]VectorWrite{}
+	s.vectorPrint = map[int64]string{}
+	s.generation++
 	return outcome, nil
 }
 
@@ -243,7 +245,7 @@ func TestEmbedRejectsInvalidAndMissingCollections(t *testing.T) {
 	requireCode(t, err, ErrorCodeCollectionInvalid)
 	_, err = fixture.service.EmbedPreview(t.Context(), "Bad Name")
 	requireCode(t, err, ErrorCodeCollectionInvalid)
-	_, err = fixture.service.EmbedOff(t.Context(), "Bad Name", true)
+	_, err = fixture.embedOff(t.Context(), "Bad Name", true)
 	requireCode(t, err, ErrorCodeCollectionInvalid)
 	fixture.vectors.exists = false
 	_, err = fixture.service.Embed(t.Context(), "support")
@@ -408,7 +410,7 @@ func TestEmbedSendsNothingWhenSecretsCannotBeResolved(t *testing.T) {
 func TestEmbedStopsWhenTheOptInIsClearedDuringTheRun(t *testing.T) {
 	fixture := newEmbedFixture(t, 1, "alpha text", "beta text")
 	fixture.embedder.onCall = func() {
-		if _, err := fixture.service.EmbedOff(t.Context(), "support", true); err != nil {
+		if _, err := fixture.embedOff(t.Context(), "support", true); err != nil {
 			t.Errorf("EmbedOff: %v", err)
 		}
 	}
@@ -437,15 +439,15 @@ func TestEmbedOffNeedsNoConfigurationAndRecordsTheAction(t *testing.T) {
 	fixture.rebuild(t, nil)
 	fixture.actions.actions = nil
 
-	preview, err := fixture.service.EmbedOff(t.Context(), "support", false)
-	if err != nil || preview.Applied || preview.Vectors != 1 || !preview.OptedIn {
+	preview, err := fixture.embedOff(t.Context(), "support", false)
+	if err != nil || preview.Vectors != 1 || !preview.OptedIn {
 		t.Fatalf("preview = %+v, %v", preview, err)
 	}
 	if len(fixture.vectors.vectors) != 1 || len(fixture.actions.actions) != 0 {
 		t.Fatal("the preview changed state")
 	}
-	outcome, err := fixture.service.EmbedOff(t.Context(), "support", true)
-	if err != nil || !outcome.Applied || !outcome.WALTruncated || outcome.Vectors != 1 {
+	outcome, err := fixture.embedOff(t.Context(), "support", true)
+	if err != nil || outcome.Vectors != 1 {
 		t.Fatalf("EmbedOff = %+v, %v", outcome, err)
 	}
 	if len(fixture.vectors.vectors) != 0 || fixture.vectors.stored != "" {
@@ -461,7 +463,7 @@ func TestAddEmbedsChangedChunksOnlyForAnOptedInCollection(t *testing.T) {
 
 	t.Run("not opted in", func(t *testing.T) {
 		fixture := newEmbedFixture(t, 5, "alpha text")
-		result, err := fixture.service.Add(t.Context(), "support", path)
+		result, err := fixture.add(t.Context(), "support", path)
 		if err != nil || result.Embedding != (EmbedOutcome{}) || len(fixture.embedder.calls) != 0 {
 			t.Fatalf("Add = %+v, %v, calls %d; want text only", result, err, len(fixture.embedder.calls))
 		}
@@ -470,7 +472,7 @@ func TestAddEmbedsChangedChunksOnlyForAnOptedInCollection(t *testing.T) {
 	t.Run("opted in with the current fingerprint", func(t *testing.T) {
 		fixture := newEmbedFixture(t, 5, "alpha text")
 		fixture.vectors.stored = testFingerprint
-		result, err := fixture.service.Add(t.Context(), "support", path)
+		result, err := fixture.add(t.Context(), "support", path)
 		if err != nil || result.Embedding.State != EmbedOutcomeEmbedded || result.Embedding.Sent != 1 || fixture.embedder.sent() != 1 {
 			t.Fatalf("Add = %+v, %v, sent %d", result, err, fixture.embedder.sent())
 		}
@@ -479,7 +481,7 @@ func TestAddEmbedsChangedChunksOnlyForAnOptedInCollection(t *testing.T) {
 	t.Run("opted in under another fingerprint", func(t *testing.T) {
 		fixture := newEmbedFixture(t, 5, "alpha text")
 		fixture.vectors.stored = "fingerprint-old"
-		result, err := fixture.service.Add(t.Context(), "support", path)
+		result, err := fixture.add(t.Context(), "support", path)
 		if err != nil || result.Embedding.State != EmbedOutcomeReembedRequired || len(fixture.embedder.calls) != 0 {
 			t.Fatalf("Add = %+v, %v, calls %d; want nothing sent", result, err, len(fixture.embedder.calls))
 		}
@@ -492,7 +494,7 @@ func TestAddEmbedsChangedChunksOnlyForAnOptedInCollection(t *testing.T) {
 		fixture := newEmbedFixture(t, 5, "alpha text")
 		fixture.vectors.stored = testFingerprint
 		fixture.rebuild(t, nil)
-		result, err := fixture.service.Add(t.Context(), "support", path)
+		result, err := fixture.add(t.Context(), "support", path)
 		if err != nil || result.Embedding.State != EmbedOutcomeUnavailable || len(fixture.embedder.calls) != 0 {
 			t.Fatalf("Add = %+v, %v, calls %d; want nothing sent", result, err, len(fixture.embedder.calls))
 		}
@@ -503,7 +505,7 @@ func TestAddEmbedsChangedChunksOnlyForAnOptedInCollection(t *testing.T) {
 		fixture.vectors.stored = testFingerprint
 		fixture.embedder.failAt = 1
 		fixture.embedder.failErr = errors.New("provider unavailable")
-		result, err := fixture.service.Add(t.Context(), "support", path)
+		result, err := fixture.add(t.Context(), "support", path)
 		requireCode(t, err, ErrorCodeEmbeddingFailed)
 		if result.SourceID == "" || len(fixture.store.writes) != 1 {
 			t.Fatalf("result %+v writes %d; the text must stay committed", result, len(fixture.store.writes))
@@ -514,7 +516,7 @@ func TestAddEmbedsChangedChunksOnlyForAnOptedInCollection(t *testing.T) {
 		fixture := newEmbedFixture(t, 5, "alpha text")
 		fixture.vectors.stored = testFingerprint
 		fixture.store.unchanged = true
-		result, err := fixture.service.Add(t.Context(), "support", path)
+		result, err := fixture.add(t.Context(), "support", path)
 		if err != nil || result.Embedding != (EmbedOutcome{}) || len(fixture.embedder.calls) != 0 {
 			t.Fatalf("Add = %+v, %v, calls %d", result, err, len(fixture.embedder.calls))
 		}
@@ -530,7 +532,7 @@ func TestRefreshEmbedsOnceAfterAllSourcesForAnOptedInCollection(t *testing.T) {
 		{Collection: "support", Kind: SourceKindFile, URI: first, Label: "a.md"},
 		{Collection: "support", Kind: SourceKindFile, URI: second, Label: "b.md"},
 	}
-	results, err := fixture.service.Refresh(t.Context(), "support", "")
+	results, err := fixture.refresh(t.Context(), "support", "")
 	if err != nil || len(results) != 2 {
 		t.Fatalf("Refresh = %+v, %v", results, err)
 	}
@@ -550,7 +552,7 @@ func TestRefreshOfUnchangedSourcesSendsNothing(t *testing.T) {
 	fixture.store.unchanged = true
 	path := writeSource(t, "a.md", []byte("alpha"))
 	fixture.store.sources["support"] = []SourceRecord{{Collection: "support", Kind: SourceKindFile, URI: path, Label: "a.md"}}
-	if _, err := fixture.service.Refresh(t.Context(), "support", ""); err != nil || len(fixture.embedder.calls) != 0 {
+	if _, err := fixture.refresh(t.Context(), "support", ""); err != nil || len(fixture.embedder.calls) != 0 {
 		t.Fatalf("Refresh = %v, calls %d", err, len(fixture.embedder.calls))
 	}
 }

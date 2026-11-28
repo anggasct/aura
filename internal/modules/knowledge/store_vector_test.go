@@ -43,7 +43,7 @@ func TestKBVectorReaderReportsGenerationAndFingerprintPerCollection(t *testing.T
 	}
 
 	before := byCollection["support"].Generation
-	if _, err := kb.DisableEmbedding(t.Context(), "support", true); err != nil {
+	if _, _, err := kb.disableAndTruncate(t.Context(), "support"); err != nil {
 		t.Fatalf("DisableEmbedding: %v", err)
 	}
 	after, err := reader.Versions(t.Context(), []string{"support"})

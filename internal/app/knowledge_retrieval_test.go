@@ -49,7 +49,7 @@ func newKBRetrievalRig(t *testing.T) *kbRetrievalRig {
 
 func (r *kbRetrievalRig) add(t *testing.T, collection, name, content string) {
 	t.Helper()
-	if _, err := r.service.Add(t.Context(), collection, writeKBDocument(t, name, content)); err != nil {
+	if _, err := addKBSource(t.Context(), r.service, collection, writeKBDocument(t, name, content)); err != nil {
 		t.Fatalf("Add %s: %v", name, err)
 	}
 }
