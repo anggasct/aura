@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"iter"
+	"strings"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -22,6 +23,10 @@ const (
 	OriginSchedule Origin = "schedule"
 	OriginWorkflow Origin = "workflow"
 )
+
+func (o Origin) OnChannel(name string) bool {
+	return name != "" && (string(o) == name || strings.HasPrefix(string(o), name+":"))
+}
 
 func (o Origin) Unattended() bool {
 	return o == OriginSchedule || o == OriginHTTP

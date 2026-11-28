@@ -84,7 +84,7 @@ func (d *Discovery) sessionFull(origin turn.Origin) string {
 	switch {
 	case origin == turn.OriginTerminal:
 		return sessionFullNew
-	case d.chatCommands && (origin == turn.Origin(principal.ChannelTelegram) || origin == turn.Origin(principal.ChannelDiscord)):
+	case d.chatCommands && (origin.OnChannel(principal.ChannelTelegram) || origin.OnChannel(principal.ChannelDiscord)):
 		return sessionFullNew
 	}
 	return sessionFullElsewhere
