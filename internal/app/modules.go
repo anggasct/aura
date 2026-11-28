@@ -621,6 +621,25 @@ func ownerResolver(cfg *appconfig.Config) (*principal.Resolver, error) {
 	return principal.NewResolver(identities)
 }
 
+func ownerReachableInChat(cfg *appconfig.Config, owners *principal.Resolver) bool {
+	if cfg == nil {
+		return false
+	}
+	if cfg.Channels.Telegram.Enabled && len(cfg.Channels.Telegram.Accounts) > 0 && owners.Count(principal.ChannelTelegram) > 0 {
+		return true
+	}
+	if !cfg.Channels.Discord.Enabled || owners.Count(principal.ChannelDiscord) == 0 {
+		return false
+	}
+	accounts := cfg.Channels.Discord.Accounts
+	for i := range accounts {
+		if accounts[i].AcceptDMs {
+			return true
+		}
+	}
+	return false
+}
+
 func allowlistedPrincipals(cfg *appconfig.Config, owners *principal.Resolver) []principal.AllowlistedPrincipal {
 	var out []principal.AllowlistedPrincipal
 	if cfg == nil {

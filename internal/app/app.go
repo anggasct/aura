@@ -1572,6 +1572,10 @@ func (b *build) buildOperations() error {
 	if err != nil {
 		return err
 	}
+	owners, err := ownerResolver(b.cfg)
+	if err != nil {
+		return err
+	}
 	registry, err := operation.NewRegistry(operationCatalogs(), b.bindings, &operation.Deps{
 		DB:        b.db,
 		Effects:   b.broker.Effects(),
@@ -1591,7 +1595,7 @@ func (b *build) buildOperations() error {
 		Behaviors:    b.behaviors,
 		Capabilities: b.result.CapabilityReport.Active(),
 		Withholdable: b.executor.WithholdableTools(),
-		ChatCommands: b.cfg.Channels.Telegram.Enabled || b.cfg.Channels.Discord.Enabled,
+		ChatCommands: ownerReachableInChat(b.cfg, owners),
 		Telemetry:    recorder,
 	})
 	if err != nil {

@@ -7,7 +7,10 @@ import (
 	"strings"
 	"testing"
 
+	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/chatcommand"
+	"github.com/anggasct/aura/internal/channels/telegram"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/operation"
@@ -199,5 +202,48 @@ func TestChatCommandRegistryListsEveryOperationGroupOnBothMessengers(t *testing.
 	}
 	if _, err := newChatCommandDispatcher(nil); err == nil {
 		t.Error("a dispatcher was built without its ports")
+	}
+}
+
+func TestChatCommandsAreNamedOnlyWhereTheOwnerCanUseThem(t *testing.T) {
+	tests := []struct {
+		name     string
+		identity []string
+		telegram *telegram.Config
+		discord  *discord.Config
+		want     bool
+	}{
+		{"nothing enabled", []string{"telegram:1", "discord:2"}, nil, nil, false},
+		{"telegram with an owner identity", []string{"telegram:1"}, &telegram.Config{Enabled: true, Accounts: []telegram.Account{{Name: "main"}}}, nil, true},
+		{"telegram without an owner identity", []string{"discord:2"}, &telegram.Config{Enabled: true, Accounts: []telegram.Account{{Name: "main"}}}, nil, false},
+		{"telegram without accounts", []string{"telegram:1"}, &telegram.Config{Enabled: true}, nil, false},
+		{"telegram disabled", []string{"telegram:1"}, &telegram.Config{Accounts: []telegram.Account{{Name: "main"}}}, nil, false},
+		{"discord accepting direct messages", []string{"discord:2"}, nil, &discord.Config{Enabled: true, Accounts: []discord.Account{{Name: "main", AcceptDMs: true}}}, true},
+		{"discord refusing direct messages", []string{"discord:2"}, nil, &discord.Config{Enabled: true, Accounts: []discord.Account{{Name: "main"}}}, false},
+		{"discord without an owner identity", []string{"telegram:1"}, nil, &discord.Config{Enabled: true, Accounts: []discord.Account{{Name: "main", AcceptDMs: true}}}, false},
+		{"one account accepting direct messages among others", []string{"discord:2"}, nil, &discord.Config{Enabled: true, Accounts: []discord.Account{{Name: "a"}, {Name: "b", AcceptDMs: true}}}, true},
+		{"discord refusing but telegram reachable", []string{"telegram:1", "discord:2"}, &telegram.Config{Enabled: true, Accounts: []telegram.Account{{Name: "main"}}}, &discord.Config{Enabled: true, Accounts: []discord.Account{{Name: "main"}}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := appconfig.Default()
+			cfg.Owner = &principal.Owner{Identities: tt.identity}
+			if tt.telegram != nil {
+				cfg.Channels.Telegram = *tt.telegram
+			}
+			if tt.discord != nil {
+				cfg.Channels.Discord = *tt.discord
+			}
+			owners, err := ownerResolver(&cfg)
+			if err != nil {
+				t.Fatalf("ownerResolver: %v", err)
+			}
+			if got := ownerReachableInChat(&cfg, owners); got != tt.want {
+				t.Errorf("ownerReachableInChat = %t, want %t", got, tt.want)
+			}
+		})
+	}
+	if ownerReachableInChat(nil, nil) {
+		t.Error("a missing config reported a reachable owner")
 	}
 }
