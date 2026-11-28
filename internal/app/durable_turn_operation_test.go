@@ -5,13 +5,16 @@ package app
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/tools"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 )
 
@@ -28,7 +31,7 @@ type operationWiring struct {
 	effects *effect.Executor
 }
 
-func (w *operationWiring) register(t *testing.T, parts *ledgerTurn) []runtimeadk.BuiltinToolDefinition {
+func (w *operationWiring) register(t *testing.T, parts *ledgerTurn) (defs []runtimeadk.BuiltinToolDefinition, discovery *operation.Discovery) {
 	t.Helper()
 	db, broker, effects := w.db, w.broker, w.effects
 	ledger := parts.ledger
@@ -69,13 +72,41 @@ func (w *operationWiring) register(t *testing.T, parts *ledgerTurn) []runtimeadk
 	if err := broker.RegisterProvider(registry); err != nil {
 		t.Fatalf("register the operation tools: %v", err)
 	}
-	var defs []runtimeadk.BuiltinToolDefinition
 	registrations := registry.Tools()
 	for i := range registrations {
 		definition := &registrations[i].Definition
-		defs = append(defs, runtimeadk.BuiltinToolDefinition{Name: definition.Name, Version: definition.Version, Schema: definition.Schema})
+		defs = append(defs, runtimeadk.BuiltinToolDefinition{
+			Name: definition.Name, Version: definition.Version, Schema: definition.Schema,
+			OptIn: parts.scenario.discovery && definition.OptIn, OwnerOptIn: parts.scenario.discovery && definition.OwnerOptIn,
+			Operation: operationOf(parts.scenario.discovery, definition),
+		})
 	}
-	return defs
+	if !parts.scenario.discovery {
+		return defs, nil
+	}
+	discovery, err = operation.NewDiscovery(&operation.DiscoveryDeps{Registry: registry, Capabilities: capabilitytest.Host(t)})
+	if err != nil {
+		t.Fatalf("operation.NewDiscovery: %v", err)
+	}
+	if err := broker.RegisterProvider(discovery); err != nil {
+		t.Fatalf("register the discovery tool: %v", err)
+	}
+	search := discovery.Tools()
+	for i := range search {
+		definition := &search[i].Definition
+		defs = append(defs, runtimeadk.BuiltinToolDefinition{
+			Name: definition.Name, Version: definition.Version, Description: definition.Description, Schema: definition.Schema,
+			OptIn: definition.OptIn, OwnerOptIn: definition.OwnerOptIn,
+		})
+	}
+	return defs, discovery
+}
+
+func operationOf(discovery bool, definition *tools.Definition) string {
+	if !discovery {
+		return ""
+	}
+	return definition.Operation
 }
 
 func expireEffectLeases(t *testing.T, db *sql.DB) {
@@ -175,4 +206,36 @@ func TestDurableTurnApprovedDestructiveCallSurvivesReplay(t *testing.T) {
 	suite.ledger.requireCount(t, previewCalls, 1)
 	suite.ledger.requireCount(t, handlerEntries+"."+operationtest.Delete, 2)
 	requireOneAppliedChange(t, suite, operationtest.Delete)
+}
+
+func TestDurableTurnLoadedOperationsReplayDeterministically(t *testing.T) {
+	suite := startKilledSuite(t, "operation-search-replay")
+	suite.child.waitKillPoint(t, "the handler is entered before its commit", suite.ledger.exists(t, beforeCommitGate+".entered"))
+	if n := len(suite.ledger.records(t, modelDeclarations)); n != 2 {
+		t.Fatalf("model calls at the kill = %d, want 2", n)
+	}
+
+	suite.child.kill(t)
+	expireEffectLeases(t, suite.db)
+	life := suite.openSecondLife(t)
+	suite.release(t, beforeCommitGate)
+
+	suite.requireResumed(t, life)
+	declared := suite.ledger.records(t, modelDeclarations)
+	if len(declared) != 3 {
+		t.Fatalf("model calls = %d, want 3", len(declared))
+	}
+	if declared[0].Text == declared[1].Text {
+		t.Error("the search loaded nothing: the first two model calls declare the same tools")
+	}
+	if !strings.Contains(declared[1].Text, operationtest.ToolOf(operationtest.Change)) {
+		t.Errorf("the call after the search declares %q, want the loaded group", declared[1].Text)
+	}
+	if declared[1].Life != 1 || declared[2].Life != 2 {
+		t.Errorf("lives of the calls = %d and %d, want the second call before the kill and the third after it", declared[1].Life, declared[2].Life)
+	}
+	if declared[1].Text != declared[2].Text {
+		t.Errorf("the replayed model call declares %q, want exactly what the call before the kill declared: %q", declared[2].Text, declared[1].Text)
+	}
+	requireOneAppliedChange(t, suite, operationtest.Change)
 }

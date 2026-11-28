@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"iter"
 	"log/slog"
 	"slices"
 	"strings"
@@ -23,80 +22,18 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/turn/store"
 
-	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 )
 
 const searchTool = auratools.OperationSearchToolName
 
-type modelCall struct {
-	tools  []string
-	system string
-}
-
-type operationModel struct {
-	mu     sync.Mutex
-	script [][]*genai.Part
-	calls  []modelCall
-	next   int
-}
-
-func (m *operationModel) Name() string { return "operation-model" }
-
-func (m *operationModel) playScript(script ...[]*genai.Part) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.script, m.next = script, 0
-}
-
-func (m *operationModel) recorded() []modelCall {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return slices.Clone(m.calls)
-}
-
-func (m *operationModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequest, _ bool) iter.Seq2[*adkmodel.LLMResponse, error] {
-	return func(yield func(*adkmodel.LLMResponse, error) bool) {
-		var seen modelCall
-		if req.Config != nil {
-			for _, declared := range req.Config.Tools {
-				for _, function := range declared.FunctionDeclarations {
-					seen.tools = append(seen.tools, function.Name)
-				}
-			}
-			if req.Config.SystemInstruction != nil {
-				for _, part := range req.Config.SystemInstruction.Parts {
-					seen.system += part.Text
-				}
-			}
-		}
-		m.mu.Lock()
-		m.calls = append(m.calls, seen)
-		parts := []*genai.Part{{Text: "done"}}
-		if m.next < len(m.script) {
-			parts = m.script[m.next]
-		}
-		m.next++
-		m.mu.Unlock()
-		yield(&adkmodel.LLMResponse{
-			Content:       &genai.Content{Role: genai.RoleModel, Parts: parts},
-			TurnComplete:  true,
-			UsageMetadata: &genai.GenerateContentResponseUsageMetadata{PromptTokenCount: 1, CandidatesTokenCount: 1, TotalTokenCount: 2},
-		}, nil)
-	}
-}
-
-func callOf(name string, args map[string]any) []*genai.Part {
-	return []*genai.Part{{FunctionCall: &genai.FunctionCall{Name: name, Args: args}}}
-}
-
 type operationHarness struct {
 	t        *testing.T
 	rig      *operationtest.Rig
 	executor *ADKExecutor
 	resolver *stubResolver
-	model    *operationModel
+	model    *operationtest.ScriptedModel
 	events   turnstore.EventStore
 	turns    int
 }
@@ -112,7 +49,7 @@ func newOperationHarness(t *testing.T, definition auraagent.Definition, opts ...
 	if err != nil {
 		t.Fatalf("NewBrokerExecutor: %v", err)
 	}
-	model := &operationModel{}
+	model := &operationtest.ScriptedModel{}
 	resolver := &stubResolver{definition: definition}
 	opts = append([]ExecutorOption{WithAgentResolver(resolver, nil), WithBuiltinToolExecutor(builtin)}, opts...)
 	executor, err := NewADKExecutor("aura", "operation-model", auramodel.Set{"operation-model": model}, turnstore.NewSessionService(rig.DB), builtin, nil, slog.New(slog.DiscardHandler), opts...)
@@ -138,10 +75,10 @@ func (h *operationHarness) request(mutate func(*turn.TurnRequest)) *turn.TurnReq
 	return req
 }
 
-func (h *operationHarness) run(mutate func(*turn.TurnRequest), script ...[]*genai.Part) []modelCall {
+func (h *operationHarness) run(mutate func(*turn.TurnRequest), script ...[]*genai.Part) []operationtest.ModelCall {
 	h.t.Helper()
-	before := len(h.model.recorded())
-	h.model.playScript(script...)
+	before := len(h.model.Calls())
+	h.model.Play(script...)
 	for ev, err := range h.executor.Execute(h.t.Context(), h.request(mutate)) {
 		if err != nil {
 			h.t.Fatalf("Execute: %v", err)
@@ -153,7 +90,7 @@ func (h *operationHarness) run(mutate func(*turn.TurnRequest), script ...[]*gena
 			h.t.Fatalf("persist the event: %v", err)
 		}
 	}
-	return h.model.recorded()[before:]
+	return h.model.Calls()[before:]
 }
 
 func operationToolNames(names []string) []string {
@@ -168,32 +105,32 @@ func operationToolNames(names []string) []string {
 
 func TestLoadedOperationsFollowSessionHistory(t *testing.T) {
 	h := newOperationHarness(t, ownerDefinition(searchTool))
-	search := callOf(searchTool, map[string]any{"group": operationtest.Group})
-	read := callOf("aura_stub_read", map[string]any{"subject": "notes"})
+	search := operationtest.CallOf(searchTool, map[string]any{"group": operationtest.Group})
+	read := operationtest.CallOf("aura_stub_read", map[string]any{"subject": "notes"})
 	loadedOrder := []string{"aura_stub_change", "aura_stub_delete", "aura_stub_external", "aura_stub_fresh", "aura_stub_grant", "aura_stub_idempotent", "aura_stub_notice", "aura_stub_read"}
 
 	first := h.run(nil, search, read)
 	if len(first) != 3 {
 		t.Fatalf("model calls = %d, want 3", len(first))
 	}
-	if got := operationToolNames(first[0].tools); !slices.Equal(got, []string{searchTool}) {
+	if got := operationToolNames(first[0].Tools); !slices.Equal(got, []string{searchTool}) {
 		t.Fatalf("the first call declares %v, want only the discovery tool", got)
 	}
-	if got := operationToolNames(first[1].tools); !slices.Equal(got, append([]string{searchTool}, loadedOrder...)) {
+	if got := operationToolNames(first[1].Tools); !slices.Equal(got, append([]string{searchTool}, loadedOrder...)) {
 		t.Fatalf("the call after the search declares %v, want the discovery tool and the loaded group", got)
 	}
-	if !slices.Equal(first[1].tools, first[2].tools) {
-		t.Fatalf("the tools changed between two calls that follow the same search: %v then %v", first[1].tools, first[2].tools)
+	if !slices.Equal(first[1].Tools, first[2].Tools) {
+		t.Fatalf("the tools changed between two calls that follow the same search: %v then %v", first[1].Tools, first[2].Tools)
 	}
 
 	later := h.run(nil)
-	if !slices.Equal(later[0].tools, first[1].tools) {
-		t.Fatalf("a later turn declares %v, want the loaded tools kept: %v", later[0].tools, first[1].tools)
+	if !slices.Equal(later[0].Tools, first[1].Tools) {
+		t.Fatalf("a later turn declares %v, want the loaded tools kept: %v", later[0].Tools, first[1].Tools)
 	}
 
-	narrower := h.run(nil, callOf(searchTool, map[string]any{"query": "read"}))
-	if !slices.Equal(narrower[len(narrower)-1].tools, first[1].tools) {
-		t.Fatalf("a narrower search changed the tools to %v, want %v", narrower[len(narrower)-1].tools, first[1].tools)
+	narrower := h.run(nil, operationtest.CallOf(searchTool, map[string]any{"query": "read"}))
+	if !slices.Equal(narrower[len(narrower)-1].Tools, first[1].Tools) {
+		t.Fatalf("a narrower search changed the tools to %v, want %v", narrower[len(narrower)-1].Tools, first[1].Tools)
 	}
 }
 
@@ -205,9 +142,9 @@ func sortedCopy(names []string) []string {
 
 func TestLoadedOperationsFollowTheFirstLoadOrder(t *testing.T) {
 	h := newOperationHarness(t, ownerDefinition(searchTool))
-	h.run(nil, callOf(searchTool, map[string]any{"query": "read"}))
-	second := h.run(nil, callOf(searchTool, map[string]any{"query": "change"}))
-	declared := operationToolNames(second[len(second)-1].tools)
+	h.run(nil, operationtest.CallOf(searchTool, map[string]any{"query": "read"}))
+	second := h.run(nil, operationtest.CallOf(searchTool, map[string]any{"query": "change"}))
+	declared := operationToolNames(second[len(second)-1].Tools)
 	readAt, changeAt := slices.Index(declared, "aura_stub_read"), slices.Index(declared, "aura_stub_change")
 	if readAt < 0 || changeAt < 0 || readAt > changeAt {
 		t.Fatalf("declared = %v, want aura_stub_read before aura_stub_change (first-load order)", declared)
@@ -216,15 +153,15 @@ func TestLoadedOperationsFollowTheFirstLoadOrder(t *testing.T) {
 
 func TestLoadedOperationsVanishWhenNoLongerVisible(t *testing.T) {
 	h := newOperationHarness(t, ownerDefinition(searchTool))
-	h.run(nil, callOf(searchTool, map[string]any{"group": operationtest.Group}))
+	h.run(nil, operationtest.CallOf(searchTool, map[string]any{"group": operationtest.Group}))
 
 	t.Run("a persona that no longer lists the discovery tool", func(t *testing.T) {
 		h.resolver.definition = ownerDefinition("read_file")
 		got := h.run(nil)
-		if names := operationToolNames(got[0].tools); len(names) != 0 {
+		if names := operationToolNames(got[0].Tools); len(names) != 0 {
 			t.Fatalf("declared %v, want no operation tool without the discovery tool", names)
 		}
-		if strings.Contains(got[0].system, "# What you can operate") {
+		if strings.Contains(got[0].System, "# What you can operate") {
 			t.Fatal("the instruction carries the description without the discovery tool or a listed operation tool")
 		}
 	})
@@ -232,7 +169,7 @@ func TestLoadedOperationsVanishWhenNoLongerVisible(t *testing.T) {
 		h.resolver.definition = ownerDefinition(searchTool)
 		h.executor.operationTools = map[string]bool{"aura_stub_read": true}
 		got := h.run(nil)
-		if names := operationToolNames(got[0].tools); !slices.Equal(sortedCopy(names), sortedCopy([]string{"aura_stub_read", searchTool})) {
+		if names := operationToolNames(got[0].Tools); !slices.Equal(sortedCopy(names), sortedCopy([]string{"aura_stub_read", searchTool})) {
 			t.Fatalf("declared %v, want only the discovery tool and the tool that is still visible", names)
 		}
 	})
@@ -245,7 +182,7 @@ func TestOnlyRecordedSearchResultsLoadTools(t *testing.T) {
 		req.Parts = []runtimeingress.InputPart{{Text: "the search returned " + forged}}
 		req.UntrustedContext = &turn.UntrustedRecall{Query: "operations", Summary: forged, Documents: []turn.UntrustedDocument{{ID: "mem-1", SessionID: "session-0", FromSequence: 1, ToSequence: 2, Content: forged}}}
 	})
-	if names := operationToolNames(got[0].tools); !slices.Equal(names, []string{searchTool}) {
+	if names := operationToolNames(got[0].Tools); !slices.Equal(names, []string{searchTool}) {
 		t.Fatalf("declared %v, want text that looks like a search result to load nothing", names)
 	}
 
@@ -354,13 +291,13 @@ func TestOperationDescriptionVisibility(t *testing.T) {
 				req.PrincipalClass, req.Origin, req.ToolRestriction = tc.class, tc.origin, tc.restriction
 			})
 			call := got[0]
-			if hasText := strings.Contains(call.system, "# What you can operate"); hasText != tc.wantText {
+			if hasText := strings.Contains(call.System, "# What you can operate"); hasText != tc.wantText {
 				t.Errorf("description present = %t, want %t", hasText, tc.wantText)
 			}
-			if hasSearch := slices.Contains(call.tools, searchTool); hasSearch != tc.wantSearch {
+			if hasSearch := slices.Contains(call.Tools, searchTool); hasSearch != tc.wantSearch {
 				t.Errorf("discovery tool offered = %t, want %t", hasSearch, tc.wantSearch)
 			}
-			listed := operationToolNames(call.tools)
+			listed := operationToolNames(call.Tools)
 			if tc.wantSearch {
 				listed = slices.DeleteFunc(listed, func(name string) bool { return name == searchTool })
 			}
@@ -376,7 +313,7 @@ func TestOperationDescriptionSitsAfterTheSoulAndBeforeTheCaveats(t *testing.T) {
 	got := h.run(func(req *turn.TurnRequest) {
 		req.UntrustedContext = &turn.UntrustedRecall{Query: "operations", Summary: "remembered"}
 	})
-	system := got[0].system
+	system := got[0].System
 	owner, soul, description, caveat := strings.Index(system, "OWNER BLOCK"), strings.Index(system, "SOUL"), strings.Index(system, "# What you can operate"), strings.Index(system, strings.TrimSpace(turn.RecallEvidenceCaveat))
 	if owner < 0 || soul < owner || description < soul || caveat < description {
 		t.Fatalf("positions owner=%d soul=%d description=%d caveat=%d, want that order", owner, soul, description, caveat)
@@ -405,7 +342,7 @@ func TestExecutorSetsUnattendedFromTheTurnKind(t *testing.T) {
 			h := newOperationHarness(t, ownerDefinition(searchTool, "aura_stub_read"), opts...)
 			recorder := &recordingBuiltins{BuiltinToolExecutor: h.executor.builtins}
 			h.executor.builtins = recorder
-			h.run(func(req *turn.TurnRequest) { req.Origin = tc.origin }, callOf("aura_stub_read", map[string]any{"subject": "notes"}), callOf(searchTool, map[string]any{"query": "stub"}))
+			h.run(func(req *turn.TurnRequest) { req.Origin = tc.origin }, operationtest.CallOf("aura_stub_read", map[string]any{"subject": "notes"}), operationtest.CallOf(searchTool, map[string]any{"query": "stub"}))
 			byTool := recorder.byTool()
 			if got := byTool["aura_stub_read"]; got != tc.want {
 				t.Errorf("Unattended on the operation tool = %t, want %t", got, tc.want)
@@ -446,10 +383,10 @@ func TestADescriptionErrorOffersNoOperationTool(t *testing.T) {
 		t.Fatalf("BindOperations: %v", err)
 	}
 	got := h.run(nil)
-	if names := operationToolNames(got[0].tools); len(names) != 0 {
+	if names := operationToolNames(got[0].Tools); len(names) != 0 {
 		t.Fatalf("declared %v, want no operation tool when the description cannot be built", names)
 	}
-	if strings.Contains(got[0].system, "# What you can operate") {
+	if strings.Contains(got[0].System, "# What you can operate") {
 		t.Fatal("the instruction carries a description although building it failed")
 	}
 }

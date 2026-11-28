@@ -26,18 +26,21 @@ import (
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/durable"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolbroker/toolbrokertest"
+	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
@@ -55,6 +58,7 @@ const (
 	suiteHostTTL       = 2 * time.Second
 	stubToolVersion    = "v1"
 	modelCalls         = "model"
+	modelDeclarations      = "declared"
 	scriptedModelName  = "scripted-model"
 	scriptedAnswerText = "done"
 	textStep           = ""
@@ -237,6 +241,10 @@ func (m *scriptedModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequ
 			yield(nil, err)
 			return
 		}
+		if _, err := m.ledger.record(modelDeclarations, modelDeclaration(req)); err != nil {
+			yield(nil, err)
+			return
+		}
 		part := &genai.Part{Text: scriptedAnswerText}
 		if position < len(m.steps) && m.steps[position] != textStep {
 			args, scripted := m.args[m.steps[position]]
@@ -257,6 +265,24 @@ func (m *scriptedModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequ
 			},
 		}, nil)
 	}
+}
+
+func modelDeclaration(req *adkmodel.LLMRequest) string {
+	var seen strings.Builder
+	if req == nil || req.Config == nil {
+		return ""
+	}
+	for _, declared := range req.Config.Tools {
+		for _, function := range declared.FunctionDeclarations {
+			seen.WriteString(function.Name + ",")
+		}
+	}
+	if req.Config.SystemInstruction != nil {
+		for _, part := range req.Config.SystemInstruction.Parts {
+			seen.WriteString("\n" + part.Text)
+		}
+	}
+	return seen.String()
 }
 
 func modelRequestText(req *adkmodel.LLMRequest) string {
@@ -421,16 +447,33 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Effectful: stub.effectful, Run: parts.ledger.adapter(stub)})
 		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
 	}
+	var discovery *operation.Discovery
 	if len(parts.scenario.operations) > 0 {
-		tools.defs = append(tools.defs, (&operationWiring{db: db, broker: broker, effects: options.Effects}).register(t, parts)...)
+		var defs []runtimeadk.BuiltinToolDefinition
+		defs, discovery = (&operationWiring{db: db, broker: broker, effects: options.Effects}).register(t, parts)
+		tools.defs = append(tools.defs, defs...)
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
+	if discovery != nil {
+		opts = append(opts, runtimeadk.WithAgentResolver(ownerSearchPersona{}, nil))
+	}
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps, args: parts.scenario.arguments}
 	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, turnstore.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
+	if discovery != nil {
+		if err := executor.BindOperations(discovery); err != nil {
+			t.Fatalf("BindOperations: %v", err)
+		}
+	}
 	return executor
+}
+
+type ownerSearchPersona struct{}
+
+func (ownerSearchPersona) Resolve([]string, *string) (auraagent.Definition, error) {
+	return auraagent.Definition{ID: "main", Name: "main", Audience: auraagent.AudienceOwner, Instructions: "SOUL", Tools: []string{tools.OperationSearchToolName}}, nil
 }
 
 func openLife(t *testing.T, plan lifePlan) *turnLife {

@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 )
@@ -63,6 +64,7 @@ type turnScenario struct {
 	steps         []string
 	arguments     map[string]map[string]any
 	operations    []ledgerOperation
+	discovery     bool
 	tools         []stubTool
 	gated         string
 	approvingLife int
@@ -160,6 +162,17 @@ var turnScenarios = map[string]turnScenario{
 		arguments:     map[string]map[string]any{operationtest.ToolOf(operationtest.Delete): {"subject": "doomed"}},
 		operations:    []ledgerOperation{{id: operationtest.Delete, gateBefore: true}},
 		requests:      []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-OPERATION-DESTRUCTIVE")},
+		approvingLife: 1,
+	},
+	"operation-search-replay": {
+		steps: []string{tools.OperationSearchToolName, operationtest.ToolOf(operationtest.Change), textStep},
+		arguments: map[string]map[string]any{
+			tools.OperationSearchToolName:              {"group": operationtest.Group},
+			operationtest.ToolOf(operationtest.Change): {"subject": "searched"},
+		},
+		operations:    []ledgerOperation{{id: operationtest.Change, gateBefore: true}},
+		discovery:     true,
+		requests:      []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-OPERATION-SEARCH-REPLAY")},
 		approvingLife: 1,
 	},
 	"lost-lease": {
