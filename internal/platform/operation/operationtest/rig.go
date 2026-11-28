@@ -49,6 +49,9 @@ type Options struct {
 
 	AllowInvalid bool
 
+	WithDiscovery bool
+	Behaviors     []operation.Behavior
+
 	WithoutRegistry bool
 }
 
@@ -59,6 +62,8 @@ type Rig struct {
 	Broker   *toolbroker.Broker
 	Registry *operation.Registry
 	Stubs    *Stubs
+
+	Discovery *operation.Discovery
 
 	RegistryErr error
 
@@ -159,6 +164,15 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 	}
 	if err := rig.Broker.RegisterProvider(rig.Registry); err != nil {
 		tb.Fatalf("register the operation tools: %v", err)
+	}
+	if options.WithDiscovery {
+		rig.Discovery, err = operation.NewDiscovery(&operation.DiscoveryDeps{Registry: rig.Registry, Behaviors: options.Behaviors, Capabilities: capabilitytest.Host(tb)})
+		if err != nil {
+			tb.Fatalf("new discovery: %v", err)
+		}
+		if err := rig.Broker.RegisterProvider(rig.Discovery); err != nil {
+			tb.Fatalf("register the discovery tool: %v", err)
+		}
 	}
 	return rig
 }

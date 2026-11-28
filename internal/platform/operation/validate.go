@@ -282,6 +282,9 @@ func (v *validation) toolName(d *Descriptor) {
 	if len(name) > maxToolNameBytes {
 		v.reject(id, "the tool name is over %d bytes", maxToolNameBytes)
 	}
+	if name == tools.OperationSearchToolName {
+		v.reject(id, "the tool name %q is reserved for discovery", name)
+	}
 	if v.tools != nil {
 		if _, taken := v.tools.Definition(name, tools.Version); taken {
 			v.reject(id, "the tool name %q is already registered", name)

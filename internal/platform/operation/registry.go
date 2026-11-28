@@ -11,6 +11,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 type Deps struct {
@@ -25,6 +26,7 @@ type Deps struct {
 type entry struct {
 	descriptor *Descriptor
 	binding    Binding
+	definition *tools.Definition
 }
 
 type Registry struct {
@@ -32,6 +34,7 @@ type Registry struct {
 	byTool        map[string]*entry
 	ids           []string
 	groups        []Group
+	members       map[string][]string
 	registrations []toolbroker.ToolRegistration
 	receipts      receiptStore
 	effects       *effect.Executor
@@ -64,6 +67,7 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 	registry := &Registry{
 		entries:  map[string]*entry{},
 		byTool:   map[string]*entry{},
+		members:  map[string][]string{},
 		receipts: receiptStore{db: deps.DB},
 		effects:  deps.Effects,
 		clock:    deps.Clock,
@@ -81,6 +85,7 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 		for j := range catalogs[i].Descriptors {
 			descriptor := catalogs[i].Descriptors[j].clone()
 			registry.entries[descriptor.ID] = &entry{descriptor: &descriptor, binding: *bound[descriptor.ID]}
+			registry.members[catalogs[i].Group.Name] = append(registry.members[catalogs[i].Group.Name], descriptor.ID)
 		}
 	}
 	registry.ids = slices.Sorted(maps.Keys(registry.entries))
