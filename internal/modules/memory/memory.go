@@ -452,8 +452,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if event.SessionID == "" {
 		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event session must not be empty")
 	}
-	from, err := sequenceToDB(event.Sequence)
-	if err != nil {
+	if _, err := sequenceToDB(event.Sequence); err != nil {
 		return Document{}, false, err
 	}
 	trust, indexable := trustFor(ownerID, event.Author, event.Kind)
@@ -464,6 +463,30 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if !ok {
 		return Document{}, false, nil
 	}
+	return s.writeProjection(ctx, ownerID, &projection{
+		sessionID: event.SessionID, from: event.Sequence, to: event.Sequence, text: text, trust: trust, createdAt: event.CreatedAt,
+	})
+}
+
+type projection struct {
+	sessionID string
+	from      uint64
+	to        uint64
+	text      string
+	trust     approval.TrustLabel
+	createdAt time.Time
+}
+
+func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projection) (Document, bool, error) {
+	from, err := sequenceToDB(p.from)
+	if err != nil {
+		return Document{}, false, err
+	}
+	to, err := sequenceToDB(p.to)
+	if err != nil {
+		return Document{}, false, err
+	}
+	text := p.text
 	if stripped, had := stripRecallEvidence(text); had {
 		if strings.TrimSpace(stripped) == "" {
 			return Document{}, false, nil
@@ -478,19 +501,19 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 		s.secretDrops.Add(1)
 		return Document{}, false, nil
 	}
-	createdAt := event.CreatedAt.UTC()
+	createdAt := p.createdAt.UTC()
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
 	document := Document{
-		ID:           documentID(event.SessionID, KindEventText, event.Sequence, event.Sequence, ""),
+		ID:           documentID(p.sessionID, KindEventText, p.from, p.to, ""),
 		OwnerID:      ownerID,
-		SessionID:    event.SessionID,
+		SessionID:    p.sessionID,
 		Kind:         KindEventText,
-		FromSequence: event.Sequence,
-		ToSequence:   event.Sequence,
+		FromSequence: p.from,
+		ToSequence:   p.to,
 		Content:      content,
-		Trust:        trust,
+		Trust:        p.trust,
 		CreatedAt:    createdAt,
 	}
 	inserted, err := s.documents.UpsertDocument(ctx, &StoredDocument{
@@ -499,7 +522,7 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 		SessionID:    document.SessionID,
 		Kind:         document.Kind,
 		FromSequence: from,
-		ToSequence:   from,
+		ToSequence:   to,
 		Content:      document.Content,
 		TrustLabel:   string(document.Trust),
 		CreatedAt:    document.CreatedAt,
@@ -507,8 +530,8 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if err != nil {
 		return Document{}, false, err
 	}
-	if inserted && s.eventReopenedSummary(ctx, ownerID, event.SessionID, event.Sequence) {
-		if _, err := s.documents.DeleteSessionSummaries(ctx, ownerID, event.SessionID); err != nil {
+	if inserted && s.eventReopenedSummary(ctx, ownerID, p.sessionID, p.from) {
+		if _, err := s.documents.DeleteSessionSummaries(ctx, ownerID, p.sessionID); err != nil {
 			return Document{}, false, err
 		}
 	}

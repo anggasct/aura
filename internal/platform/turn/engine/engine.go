@@ -559,6 +559,11 @@ func (e *Engine) stampPersona(req *turn.TurnRequest) error {
 		return codedError(turn.ErrorCodePersonaNotFound, fmt.Sprintf("persona %q is not registered", req.AgentID), nil)
 	}
 	req.Persona = &fingerprint
+	if req.WebOnly {
+		req.Knowledge = nil
+		req.ToolRestriction = turn.WebOnlyRestriction()
+		return nil
+	}
 	req.Knowledge = e.deps.Personas.Knowledge(req.AgentID, req.PrincipalClass)
 	return nil
 }

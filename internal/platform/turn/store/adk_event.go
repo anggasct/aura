@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/adk/v2/session"
@@ -133,4 +134,65 @@ func ReplayTurn(ctx context.Context, db *sql.DB, sessionID, turnID string) (even
 		return nil, false, classify(fmt.Errorf("replay turn %s: %w", turnID, err))
 	}
 	return terminal, terminal != nil, nil
+}
+
+func ModelText(payload json.RawMessage, includePartial bool) string {
+	if len(payload) == 0 {
+		return ""
+	}
+	var decoded struct {
+		Content *struct {
+			Role  string `json:"role"`
+			Parts []struct {
+				Text *string `json:"text"`
+			} `json:"parts"`
+		} `json:"content"`
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return ""
+	}
+	if decoded.Content == nil {
+		return ""
+	}
+	if decoded.Content.Role == "user" {
+		return ""
+	}
+	if decoded.Partial && !includePartial {
+		return ""
+	}
+	var out strings.Builder
+	for _, part := range decoded.Content.Parts {
+		if part.Text == nil {
+			continue
+		}
+		out.WriteString(*part.Text)
+	}
+	return out.String()
+}
+
+func HasToolActivity(payload json.RawMessage) bool {
+	if len(payload) == 0 {
+		return false
+	}
+	var decoded struct {
+		Content *struct {
+			Parts []struct {
+				FunctionCall     *struct{} `json:"functionCall"`
+				FunctionResponse *struct{} `json:"functionResponse"`
+			} `json:"parts"`
+		} `json:"content"`
+		Partial bool `json:"partial"`
+	}
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		return false
+	}
+	if decoded.Content != nil {
+		for _, part := range decoded.Content.Parts {
+			if part.FunctionCall != nil || part.FunctionResponse != nil {
+				return true
+			}
+		}
+	}
+	return false
 }
