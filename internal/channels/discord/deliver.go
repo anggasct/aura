@@ -303,7 +303,7 @@ func (a *Adapter) deleteStatus(ctx context.Context, req *runtimechannelhost.Deli
 }
 
 func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyTo *string, index int, text string, upload *uploadChunk) (string, error) {
-	operation := SendOperation{ChannelID: channelID, Text: text}
+	operation := SendOperation{ChannelID: channelID, Text: text, Previews: !req.Tainted}
 	if replyTo != nil {
 		operation.ReplyTo = *replyTo
 	}
@@ -333,7 +333,7 @@ func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.Deliv
 }
 
 func (a *Adapter) executeEdit(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID, messageID string, index int, text string) error {
-	request, err := marshalOperation(editOperation{ChannelID: channelID, MessageID: messageID, Text: text})
+	request, err := marshalOperation(editOperation{ChannelID: channelID, MessageID: messageID, Text: text, Previews: !req.Tainted})
 	if err != nil {
 		return err
 	}

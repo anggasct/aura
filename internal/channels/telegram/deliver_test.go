@@ -306,9 +306,9 @@ func previewsDisabledIn(t *testing.T, body map[string]any) bool {
 	return options["is_disabled"] == true
 }
 
-func editInvocation(t *testing.T, text string) *effect.Invocation {
+func editInvocation(t *testing.T, text string, previews bool) *effect.Invocation {
 	t.Helper()
-	request, err := json.Marshal(editOperation{ChatID: ownerUserID, MessageID: 701, Text: text})
+	request, err := json.Marshal(editOperation{ChatID: ownerUserID, MessageID: 701, Text: text, Previews: previews})
 	if err != nil {
 		t.Fatalf("marshal edit: %v", err)
 	}
@@ -323,7 +323,7 @@ func TestDeliverDisablesLinkPreviewsByDefault(t *testing.T) {
 	if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-links", link)); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link)); err != nil || !outcome.Succeeded {
+	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link, true)); err != nil || !outcome.Succeeded {
 		t.Fatalf("Invoke edit = %+v, %v", outcome, err)
 	}
 	sends := h.api.sends()
@@ -356,7 +356,7 @@ func TestDeliverKeepsLinkPreviewsOnOptedInAccount(t *testing.T) {
 	if _, err := adapter.Deliver(t.Context(), deliveryRequest(t, h, "turn-links", link)); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link)); err != nil || !outcome.Succeeded {
+	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link, true)); err != nil || !outcome.Succeeded {
 		t.Fatalf("Invoke edit = %+v, %v", outcome, err)
 	}
 	sends := h.api.sends()
@@ -371,6 +371,38 @@ func TestDeliverKeepsLinkPreviewsOnOptedInAccount(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if _, present := body["link_preview_options"]; present {
 				t.Errorf("body = %v, want no link_preview_options", body)
+			}
+		})
+	}
+}
+
+func TestDeliverDisablesLinkPreviewsWhenTaintedOnOptedInAccount(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapterWith(t, nil, func(_ *Config, account *Account) {
+		account.LinkPreviews = true
+	})
+	const link = "see https://evil.example/?d=x"
+	req := deliveryRequest(t, h, "turn-tainted", link)
+	req.Tainted = true
+	h.api.failNextOn("sendMessage", describedFailure(http.StatusBadRequest, entityParseFailure, 0))
+	if _, err := adapter.Deliver(t.Context(), req); err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if outcome, err := adapter.Invoke(t.Context(), editInvocation(t, link, false)); err != nil || !outcome.Succeeded {
+		t.Fatalf("Invoke edit = %+v, %v", outcome, err)
+	}
+	sends := h.api.sends()
+	if len(sends) != 2 {
+		t.Fatalf("sendMessage calls = %d, want the formatted attempt and one plain resend", len(sends))
+	}
+	for name, body := range map[string]map[string]any{
+		"formatted send":    sends[0],
+		"plain-text resend": sends[1],
+		"edit":              h.api.bodies("editMessageText")[0],
+	} {
+		t.Run(name, func(t *testing.T) {
+			if !previewsDisabledIn(t, body) {
+				t.Errorf("link_preview_options = %v, want is_disabled true", body["link_preview_options"])
 			}
 		})
 	}

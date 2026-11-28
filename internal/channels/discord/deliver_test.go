@@ -20,7 +20,7 @@ type startedPost struct {
 func (f *fakeEffectRunner) seedStartedPost(t *testing.T, post startedPost) {
 	t.Helper()
 	text := post.req.Parts[0].Text
-	request, err := marshalOperation(SendOperation{ChannelID: post.channelID, Text: text})
+	request, err := marshalOperation(SendOperation{ChannelID: post.channelID, Text: text, Previews: !post.req.Tainted})
 	if err != nil {
 		t.Fatalf("marshal the send: %v", err)
 	}

@@ -25,6 +25,7 @@ type DeliveryRequest struct {
 	Parts          []OutputPart
 	IdempotencyKey string
 	Deadline       time.Time
+	Tainted        bool
 }
 
 type ProviderReceipt struct {

@@ -13,7 +13,7 @@ import (
 func seedStartedSend(t *testing.T, h *harness, req *runtimechannelhost.DeliveryRequest) {
 	t.Helper()
 	text := req.Parts[0].Text
-	request, err := json.Marshal(&sendOperation{ChatID: ownerUserID, Text: text, HTML: renderHTML(text), ReplyTo: 100})
+	request, err := json.Marshal(&sendOperation{ChatID: ownerUserID, Text: text, HTML: renderHTML(text), ReplyTo: 100, Previews: !req.Tainted})
 	if err != nil {
 		t.Fatalf("marshal the send: %v", err)
 	}

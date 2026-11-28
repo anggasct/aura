@@ -35,6 +35,7 @@ type sendOperation struct {
 	ReplyTo     int64           `json:"reply_to_message_id,omitempty"`
 	ReplyMarkup *inlineKeyboard `json:"reply_markup,omitempty"`
 	Status      bool            `json:"status,omitempty"`
+	Previews    bool            `json:"previews,omitempty"`
 }
 
 type editOperation struct {
@@ -42,6 +43,7 @@ type editOperation struct {
 	MessageID   int64           `json:"message_id"`
 	Text        string          `json:"text"`
 	ReplyMarkup *inlineKeyboard `json:"reply_markup,omitempty"`
+	Previews    bool            `json:"previews,omitempty"`
 }
 
 type deleteOperation struct {
@@ -87,7 +89,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	var receipt runtimechannelhost.ProviderReceipt
 	quote := a.shouldQuote(&target)
 	for index, chunk := range splitMessage(strings.Join(texts, "\n")) {
-		operation := sendOperation{ChatID: target.ChatID, ThreadID: target.ThreadID, Text: chunk, HTML: renderHTML(chunk)}
+		operation := sendOperation{ChatID: target.ChatID, ThreadID: target.ThreadID, Text: chunk, HTML: renderHTML(chunk), Previews: !req.Tainted}
 		if index == 0 && quote {
 			operation.ReplyTo = target.MessageID
 		}
@@ -240,7 +242,7 @@ func (a *Adapter) invokeSend(ctx context.Context, raw json.RawMessage) (effect.O
 	if operation.ChatID == 0 || strings.TrimSpace(operation.Text) == "" {
 		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "send request is missing chat or text")
 	}
-	request := &sendMessageRequest{ChatID: operation.ChatID, MessageThreadID: operation.ThreadID, Text: operation.Text, ReplyMarkup: operation.ReplyMarkup, LinkPreviewOptions: previewsDisabledUnlessOptedIn(a.account.LinkPreviews)}
+	request := &sendMessageRequest{ChatID: operation.ChatID, MessageThreadID: operation.ThreadID, Text: operation.Text, ReplyMarkup: operation.ReplyMarkup, LinkPreviewOptions: previewsDisabledUnlessOptedIn(a.account.LinkPreviews && operation.Previews)}
 	if operation.HTML != "" {
 		request.Text = operation.HTML
 		request.ParseMode = parseModeHTML
@@ -267,7 +269,7 @@ func (a *Adapter) invokeEdit(ctx context.Context, raw json.RawMessage) (effect.O
 	if operation.ChatID == 0 || operation.MessageID == 0 || strings.TrimSpace(operation.Text) == "" {
 		return effect.Outcome{}, fault.New(ErrorCodeInvalidArgument, "edit request is missing chat, message, or text")
 	}
-	request := &editMessageTextRequest{ChatID: operation.ChatID, MessageID: operation.MessageID, Text: operation.Text, ReplyMarkup: operation.ReplyMarkup, LinkPreviewOptions: previewsDisabledUnlessOptedIn(a.account.LinkPreviews)}
+	request := &editMessageTextRequest{ChatID: operation.ChatID, MessageID: operation.MessageID, Text: operation.Text, ReplyMarkup: operation.ReplyMarkup, LinkPreviewOptions: previewsDisabledUnlessOptedIn(a.account.LinkPreviews && operation.Previews)}
 	return a.dispatch(ctx, operation.ChatID, false, func(call context.Context, token string) (int64, error) {
 		edited, err := a.bot.editMessageText(call, token, request)
 		if err != nil {

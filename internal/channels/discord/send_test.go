@@ -486,7 +486,7 @@ type deliveredBodies struct {
 	upload []byte
 }
 
-func deliverLinkBodies(t *testing.T, linkPreviews bool) deliveredBodies {
+func deliverLinkBodies(t *testing.T, linkPreviews, tainted bool) deliveredBodies {
 	t.Helper()
 	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
 		writeMessage(t, w, "m1")
@@ -496,13 +496,19 @@ func deliverLinkBodies(t *testing.T, linkPreviews bool) deliveredBodies {
 		cfg.Accounts[0].LinkPreviews = linkPreviews
 	})
 	const link = "https://evil.example/?d=x"
-	if _, err := adapter.Deliver(t.Context(), deliverTestRequest("link-edit", "discord", link)); err != nil {
+	postReq := deliverTestRequest("link-edit", "discord", link)
+	postReq.Tainted = tainted
+	if _, err := adapter.Deliver(t.Context(), postReq); err != nil {
 		t.Fatalf("post: %v", err)
 	}
-	if _, err := adapter.Deliver(t.Context(), deliverTestRequest("link-edit", "discord", link+" edited")); err != nil {
+	editReq := deliverTestRequest("link-edit", "discord", link+" edited")
+	editReq.Tainted = tainted
+	if _, err := adapter.Deliver(t.Context(), editReq); err != nil {
 		t.Fatalf("edit: %v", err)
 	}
-	if _, err := adapter.Deliver(t.Context(), deliverTestRequest("link-upload", "discord", link+strings.Repeat("x", 2000*3+100))); err != nil {
+	uploadReq := deliverTestRequest("link-upload", "discord", link+strings.Repeat("x", 2000*3+100))
+	uploadReq.Tainted = tainted
+	if _, err := adapter.Deliver(t.Context(), uploadReq); err != nil {
 		t.Fatalf("upload: %v", err)
 	}
 	stub.mu.Lock()
@@ -525,7 +531,7 @@ func deliverLinkBodies(t *testing.T, linkPreviews bool) deliveredBodies {
 }
 
 func TestDeliverSuppressesEmbedsByDefault(t *testing.T) {
-	bodies := deliverLinkBodies(t, false)
+	bodies := deliverLinkBodies(t, false, false)
 	for name, raw := range map[string][]byte{"post": bodies.post, "edit": bodies.edit, "upload": bodies.upload} {
 		t.Run(name, func(t *testing.T) {
 			if flags, present := embedFlags(t, raw); !present || flags != suppressEmbedsFlags {
@@ -536,7 +542,7 @@ func TestDeliverSuppressesEmbedsByDefault(t *testing.T) {
 }
 
 func TestDeliverShowsEmbedsOnOptedInAccount(t *testing.T) {
-	bodies := deliverLinkBodies(t, true)
+	bodies := deliverLinkBodies(t, true, false)
 	for name, raw := range map[string][]byte{"post": bodies.post, "edit": bodies.edit, "upload": bodies.upload} {
 		t.Run(name, func(t *testing.T) {
 			if flags, present := embedFlags(t, raw); present {
@@ -546,26 +552,58 @@ func TestDeliverShowsEmbedsOnOptedInAccount(t *testing.T) {
 	}
 }
 
+func TestDeliverSuppressesEmbedsWhenTaintedOnOptedInAccount(t *testing.T) {
+	bodies := deliverLinkBodies(t, true, true)
+	for name, raw := range map[string][]byte{"post": bodies.post, "edit": bodies.edit, "upload": bodies.upload} {
+		t.Run(name, func(t *testing.T) {
+			if flags, present := embedFlags(t, raw); !present || flags != suppressEmbedsFlags {
+				t.Errorf("flags = %v (present %t), want %d", flags, present, suppressEmbedsFlags)
+			}
+		})
+	}
+}
+
 func TestBroadcastSuppressesEmbeds(t *testing.T) {
-	stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
-		writeMessage(t, w, "m1")
-	})
-	adapter, _ := newSendTestAdapter(t, stub, nil)
-	request, err := json.Marshal(SendOperation{ChannelID: "333", Text: "https://evil.example/?d=x"})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
+	cases := []struct {
+		name           string
+		accountOptIn   bool
+		opPreviews     bool
+		wantSuppressed bool
+	}{
+		{name: "account default suppresses even with previews requested", accountOptIn: false, opPreviews: true, wantSuppressed: true},
+		{name: "opted-in account suppresses when operation omits previews", accountOptIn: true, opPreviews: false, wantSuppressed: true},
+		{name: "opted-in account shows embeds when operation requests previews", accountOptIn: true, opPreviews: true, wantSuppressed: false},
 	}
-	outcome, err := adapter.Invoke(t.Context(), &effect.Invocation{Provider: "discord", Operation: OpSendMessage, Request: request})
-	if err != nil || !outcome.Succeeded {
-		t.Fatalf("Invoke = %+v, %v", outcome, err)
-	}
-	stub.mu.Lock()
-	defer stub.mu.Unlock()
-	if len(stub.calls) != 1 {
-		t.Fatalf("calls = %d, want 1", len(stub.calls))
-	}
-	if flags, present := embedFlags(t, stub.calls[0].body); !present || flags != suppressEmbedsFlags {
-		t.Errorf("flags = %v (present %t), want %d", flags, present, suppressEmbedsFlags)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := newRestStub(t, func(call int, w http.ResponseWriter, r *http.Request) {
+				writeMessage(t, w, "m1")
+			})
+			adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
+				cfg.Accounts[0].LinkPreviews = tc.accountOptIn
+			})
+			request, err := json.Marshal(SendOperation{ChannelID: "333", Text: "https://evil.example/?d=x", Previews: tc.opPreviews})
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			outcome, err := adapter.Invoke(t.Context(), &effect.Invocation{Provider: "discord", Operation: OpSendMessage, Request: request})
+			if err != nil || !outcome.Succeeded {
+				t.Fatalf("Invoke = %+v, %v", outcome, err)
+			}
+			stub.mu.Lock()
+			defer stub.mu.Unlock()
+			if len(stub.calls) != 1 {
+				t.Fatalf("calls = %d, want 1", len(stub.calls))
+			}
+			flags, present := embedFlags(t, stub.calls[0].body)
+			if tc.wantSuppressed {
+				if !present || flags != suppressEmbedsFlags {
+					t.Errorf("flags = %v (present %t), want %d", flags, present, suppressEmbedsFlags)
+				}
+			} else if present {
+				t.Errorf("flags = %v, want the key omitted", flags)
+			}
+		})
 	}
 }
 
