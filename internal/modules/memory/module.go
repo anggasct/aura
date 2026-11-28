@@ -77,7 +77,7 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
-	operations, err := NewOperations(&OperationDeps{Service: service, Logger: deps.Logger})
+	operations, err := NewOperations(&OperationDeps{Service: service, Scopes: deps.Scopes, Logger: deps.Logger})
 	if err != nil {
 		return nil, err
 	}

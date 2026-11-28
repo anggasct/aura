@@ -20,15 +20,16 @@ type forgetScope struct {
 }
 
 func forgetWith(ctx context.Context, service *Service, scope *forgetScope) ([]StoredDocument, int, error) {
+	query := &DocumentQuery{OwnerID: scope.owner, SessionID: scope.session, DocumentID: scope.id, Terms: scope.query, Limit: scope.limit}
 	var preview []StoredDocument
 	var err error
 	switch {
 	case scope.id != "":
-		preview, err = service.PreviewForgetByID(ctx, scope.owner, scope.id)
+		preview, err = service.PreviewForgetByID(ctx, query)
 	case scope.query != "":
-		preview, err = service.PreviewForgetByQuery(ctx, scope.owner, scope.session, scope.query, scope.limit)
+		preview, err = service.PreviewForgetByQuery(ctx, query)
 	default:
-		preview, err = service.PreviewForgetBySession(ctx, scope.owner, scope.session, scope.limit)
+		preview, err = service.PreviewForgetBySession(ctx, query)
 	}
 	if err != nil || !scope.apply {
 		return preview, 0, err
@@ -211,7 +212,7 @@ func TestInspectProvenanceAndScreening(t *testing.T) {
 	if _, err := service.documents.UpsertDocument(t.Context(), leaky); err != nil {
 		t.Fatalf("seed leaky: %v", err)
 	}
-	documents, err := service.Inspect(t.Context(), "owner-1", "sess-a", "", 10)
+	documents, err := service.Inspect(t.Context(), &DocumentQuery{OwnerID: "owner-1", SessionID: "sess-a", Terms: "", Limit: 10})
 	if err != nil {
 		t.Fatalf("Inspect(): %v", err)
 	}
@@ -239,11 +240,11 @@ func TestInspectProvenanceAndScreening(t *testing.T) {
 	if found.ExpiresAt == nil || !found.ExpiresAt.After(now) {
 		t.Errorf("expiry = %+v", found.ExpiresAt)
 	}
-	queried, err := service.Inspect(t.Context(), "owner-1", "sess-a", "alpha", 10)
+	queried, err := service.Inspect(t.Context(), &DocumentQuery{OwnerID: "owner-1", SessionID: "sess-a", Terms: "alpha", Limit: 10})
 	if err != nil || len(queried) != 1 || queried[0].ID != "mem-a1" {
 		t.Errorf("query inspect = %+v, %v", queried, err)
 	}
-	foreign, err := service.Inspect(t.Context(), "owner-2", "sess-a", "", 10)
+	foreign, err := service.Inspect(t.Context(), &DocumentQuery{OwnerID: "owner-2", SessionID: "sess-a", Terms: "", Limit: 10})
 	if err != nil || len(foreign) != 0 {
 		t.Errorf("cross-owner inspect = %d, %v; want none", len(foreign), err)
 	}

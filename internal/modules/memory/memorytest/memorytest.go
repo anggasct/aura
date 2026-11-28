@@ -15,6 +15,11 @@ import (
 )
 
 const (
+	AlphaPersona = "alpha"
+	BetaPersona  = "beta"
+	AlphaSession = "session-alpha"
+	BetaSession  = "session-beta"
+
 	FirstSession  = "session-1"
 	SecondSession = "memory-session-2"
 
@@ -97,4 +102,43 @@ func (r *Rig) AddExpiredSummary(ctx context.Context, document *Document) error {
 		TrustLabel: "owner_input", CreatedAt: seededAt, ExpiresAt: &expired,
 	})
 	return err
+}
+
+type Scopes map[string][]string
+
+func (s Scopes) RecallScope(agentID string) ([]string, bool) {
+	readable, known := s[agentID]
+	return readable, known
+}
+
+func PersonaScopes() Scopes {
+	return Scopes{AlphaPersona: {AlphaPersona}, BetaPersona: {BetaPersona}}
+}
+
+func (r *Rig) SeedPersonas(ctx context.Context) error {
+	for _, session := range []struct{ id, persona string }{{AlphaSession, AlphaPersona}, {BetaSession, BetaPersona}} {
+		err := turnstore.NewSessionService(r.db).Create(ctx, &turn.Session{
+			ID: session.id, OwnerID: principal.OwnerID, AgentID: session.persona, CreatedAt: seededAt, UpdatedAt: seededAt, Metadata: []byte(`{}`),
+		})
+		if err != nil && !fault.HasCode(err, turnstore.ErrorCodeSessionIDConflict) {
+			return err
+		}
+	}
+	for _, document := range []Document{
+		{ID: "mem-alpha-1", Session: AlphaSession, Content: "alpha notes about trains", Sequence: 1},
+		{ID: "mem-beta-1", Session: BetaSession, Content: "beta notes about trains", Sequence: 1},
+	} {
+		if err := r.Add(ctx, &document); err != nil {
+			return err
+		}
+	}
+	for _, document := range []Document{
+		{ID: "mem-alpha-old", Session: AlphaSession, Content: "alpha old summary", Sequence: 2},
+		{ID: "mem-beta-old", Session: BetaSession, Content: "beta old summary", Sequence: 2},
+	} {
+		if err := r.AddExpiredSummary(ctx, &document); err != nil {
+			return err
+		}
+	}
+	return nil
 }

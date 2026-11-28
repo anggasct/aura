@@ -14,21 +14,25 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const (
-	previewLabelCap     = 10
+	previewLabelCap     = 20
 	inspectContentRunes = 120
+	nothingToDelete     = "nothing to delete"
 )
 
 type OperationDeps struct {
 	Service *Service
+	Scopes  RecallScopes
 	Logger  *slog.Logger
 	Now     func() time.Time
 }
 
 type Operations struct {
 	service *Service
+	scopes  RecallScopes
 	logger  *slog.Logger
 	now     func() time.Time
 }
@@ -45,7 +49,7 @@ func NewOperations(deps *OperationDeps) (*Operations, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Operations{service: deps.Service, logger: logger, now: now}, nil
+	return &Operations{service: deps.Service, scopes: deps.Scopes, logger: logger, now: now}, nil
 }
 
 func UnavailableOperations() *Operations {
@@ -76,7 +80,24 @@ func (o *Operations) ready(call *operation.Call, into any) error {
 	if o.service == nil {
 		return fault.New(ErrorCodeInvalidArgument, "the memory service is not available in this command")
 	}
+	if call == nil {
+		return fault.New(ErrorCodeInvalidArgument, "call must not be nil")
+	}
 	return call.Decode(into)
+}
+
+func (o *Operations) readable(call *operation.Call) ([]string, error) {
+	if call.Caller.Surface != operation.SurfaceAgent {
+		return nil, nil
+	}
+	if o.scopes == nil {
+		return nil, fault.New(ErrorCodeUnavailable, "the persona memory scopes are not available")
+	}
+	readable, known := o.scopes.RecallScope(call.Caller.AgentID)
+	if !known || len(readable) == 0 {
+		return nil, fault.New(ErrorCodeQueryInvalid, "the calling persona is not registered")
+	}
+	return readable, nil
 }
 
 func oneLine(text string) string {
@@ -96,54 +117,54 @@ func truncateRunes(text string, limit int) string {
 	return string(runes[:limit]) + "..."
 }
 
-func documentLine(document *StoredDocument) string {
-	expires := "never"
-	if document.ExpiresAt != nil {
-		expires = document.ExpiresAt.UTC().Format(time.RFC3339)
+func expiresText(expires *time.Time) string {
+	if expires == nil {
+		return "never"
 	}
-	prompt := document.PromptVersion
-	if prompt == "" {
-		prompt = "-"
+	return expires.UTC().Format(time.RFC3339)
+}
+
+func promptText(version string) string {
+	if version == "" {
+		return "-"
+	}
+	return version
+}
+
+func documentLine(document *StoredDocument) string {
+	if document == nil {
+		return ""
 	}
 	return fmt.Sprintf("%s agent=%s session=%s kind=%s range=%d-%d trust=%s prompt=%s expires=%s content=%s",
 		document.ID, document.AgentID, document.SessionID, document.Kind,
 		document.FromSequence, document.ToSequence,
-		document.TrustLabel, prompt, expires,
+		document.TrustLabel, promptText(document.PromptVersion), expiresText(document.ExpiresAt),
 		oneLine(truncateRunes(document.Content, inspectContentRunes)))
-}
-
-func documentLines(documents []StoredDocument) []string {
-	if len(documents) == 0 {
-		return []string{"no documents"}
-	}
-	lines := make([]string, 0, len(documents))
-	for i := range documents {
-		lines = append(lines, documentLine(&documents[i]))
-	}
-	return lines
 }
 
 func documentsDigest(documents []StoredDocument) string {
 	parts := make([]string, 0, len(documents))
 	for i := range documents {
 		content := sha256.Sum256([]byte(documents[i].Content))
-		expires := ""
-		if documents[i].ExpiresAt != nil {
-			expires = documents[i].ExpiresAt.UTC().Format(time.RFC3339Nano)
-		}
-		parts = append(parts, strings.Join([]string{documents[i].ID, hex.EncodeToString(content[:]), expires}, "|"))
+		parts = append(parts, strings.Join([]string{documents[i].ID, hex.EncodeToString(content[:]), expiresText(documents[i].ExpiresAt)}, "|"))
 	}
 	slices.Sort(parts)
 	sum := sha256.Sum256([]byte(strings.Join(parts, "\n")))
 	return hex.EncodeToString(sum[:])
 }
 
+func cardLabel(document *StoredDocument) string {
+	if document == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s session=%s persona=%s %s %d-%d", document.ID, document.SessionID, document.AgentID, document.Kind, document.FromSequence, document.ToSequence)
+}
+
 func cardLines(headline string, documents []StoredDocument) []string {
 	lines := []string{headline}
 	shown := min(len(documents), previewLabelCap)
 	for i := range shown {
-		document := &documents[i]
-		lines = append(lines, fmt.Sprintf("%s %s %d-%d", document.ID, document.Kind, document.FromSequence, document.ToSequence))
+		lines = append(lines, cardLabel(&documents[i]))
 	}
 	if more := len(documents) - shown; more > 0 {
 		lines = append(lines, fmt.Sprintf("and %d more", more))
@@ -151,11 +172,23 @@ func cardLines(headline string, documents []StoredDocument) []string {
 	return append(lines, "this cannot be undone")
 }
 
-func previewLines(surface operation.Surface, noun string, documents []StoredDocument) []string {
-	if surface == operation.SurfaceCLI || surface == operation.SurfaceChat {
-		return append([]string{fmt.Sprintf("dry-run: %d would be deleted", len(documents))}, documentLines(documents)...)
+func ownerLines(documents []StoredDocument) []string {
+	lines := []string{fmt.Sprintf("dry-run: %d would be deleted", len(documents))}
+	for i := range documents {
+		lines = append(lines, documentLine(&documents[i]))
 	}
-	return cardLines(fmt.Sprintf("would delete %d %s", len(documents), noun), documents)
+	return lines
+}
+
+func deletionPreview(surface operation.Surface, headline string, documents []StoredDocument) operation.Preview {
+	if len(documents) == 0 {
+		return operation.Preview{Lines: []string{nothingToDelete}, Digest: documentsDigest(documents), Empty: true}
+	}
+	lines := ownerLines(documents)
+	if surface == operation.SurfaceAgent {
+		lines = cardLines(headline, documents)
+	}
+	return operation.Preview{Lines: lines, Digest: documentsDigest(documents)}
 }
 
 type inspectInput struct {
@@ -164,16 +197,45 @@ type inspectInput struct {
 	Limit   int    `json:"limit"`
 }
 
+type inspectRow struct {
+	ID      string `json:"id"`
+	Agent   string `json:"agent"`
+	Session string `json:"session"`
+	Kind    string `json:"kind"`
+	From    int64  `json:"from"`
+	To      int64  `json:"to"`
+	Trust   string `json:"trust"`
+	Prompt  string `json:"prompt"`
+	Expires string `json:"expires"`
+	Content string `json:"content"`
+}
+
 func (o *Operations) inspect(ctx context.Context, call *operation.Call) (operation.Result, error) {
 	var in inspectInput
 	if err := o.ready(call, &in); err != nil {
 		return operation.Result{}, err
 	}
-	documents, err := o.service.Inspect(ctx, principal.OwnerID, in.Session, in.Query, in.Limit)
+	readable, err := o.readable(call)
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	return operation.JSONResult(map[string]any{"text": strings.Join(documentLines(documents), "\n")})
+	documents, err := o.service.Inspect(ctx, &DocumentQuery{
+		OwnerID: principal.OwnerID, AgentIDs: readable, SessionID: in.Session, Terms: in.Query, Limit: in.Limit,
+	})
+	if err != nil {
+		return operation.Result{}, moduleFailure(err)
+	}
+	rows := make([]inspectRow, 0, len(documents))
+	for i := range documents {
+		document := &documents[i]
+		rows = append(rows, inspectRow{
+			ID: document.ID, Agent: document.AgentID, Session: document.SessionID, Kind: document.Kind,
+			From: document.FromSequence, To: document.ToSequence, Trust: document.TrustLabel,
+			Prompt: promptText(document.PromptVersion), Expires: expiresText(document.ExpiresAt),
+			Content: oneLine(truncateRunes(document.Content, inspectContentRunes)),
+		})
+	}
+	return operation.JSONResult(map[string]any{"rows": rows})
 }
 
 type forgetInput struct {
@@ -184,6 +246,9 @@ type forgetInput struct {
 }
 
 func (in *forgetInput) scope() (string, error) {
+	if in == nil {
+		return "", usage("forget requires exactly one of session, id, query")
+	}
 	var scopes []string
 	if in.Session != "" {
 		scopes = append(scopes, "session")
@@ -200,38 +265,67 @@ func (in *forgetInput) scope() (string, error) {
 	return scopes[0], nil
 }
 
-func (o *Operations) forgetRequest(call *operation.Call) (in forgetInput, scope string, err error) {
-	if err := o.ready(call, &in); err != nil {
-		return in, "", err
-	}
-	scope, err = in.scope()
-	return in, scope, err
+type forgetRequest struct {
+	input    forgetInput
+	scope    string
+	readable []string
 }
 
-func (o *Operations) doomed(ctx context.Context, in *forgetInput) ([]StoredDocument, error) {
-	switch {
-	case in.Session != "":
-		return o.service.PreviewForgetBySession(ctx, principal.OwnerID, in.Session, in.Limit)
-	case in.ID != "":
-		return o.service.PreviewForgetByID(ctx, principal.OwnerID, in.ID)
+func (o *Operations) forgetRequestOf(call *operation.Call) (*forgetRequest, error) {
+	request := &forgetRequest{}
+	if err := o.ready(call, &request.input); err != nil {
+		return nil, err
 	}
-	return o.service.PreviewForgetByQuery(ctx, principal.OwnerID, "", in.Query, in.Limit)
+	scope, err := request.input.scope()
+	if err != nil {
+		return nil, err
+	}
+	request.scope = scope
+	if request.readable, err = o.readable(call); err != nil {
+		return nil, moduleFailure(err)
+	}
+	return request, nil
+}
+
+func (o *Operations) doomed(ctx context.Context, request *forgetRequest) ([]StoredDocument, error) {
+	if request == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "forget request must not be nil")
+	}
+	query := &DocumentQuery{
+		OwnerID: principal.OwnerID, AgentIDs: request.readable, SessionID: request.input.Session,
+		DocumentID: request.input.ID, Terms: request.input.Query, Limit: request.input.Limit,
+	}
+	switch request.scope {
+	case "session":
+		return o.service.PreviewForgetBySession(ctx, query)
+	case "id":
+		return o.service.PreviewForgetByID(ctx, query)
+	}
+	query.SessionID = ""
+	return o.service.PreviewForgetByQuery(ctx, query)
+}
+
+func forgetHeadline(request *forgetRequest, count int) string {
+	headline := fmt.Sprintf("would delete %d memory documents", count)
+	switch request.scope {
+	case "query":
+		return headline + " matching " + turn.QuoteUntrustedName(request.input.Query)
+	case "session":
+		return headline + " of session " + turn.QuoteUntrustedName(request.input.Session)
+	}
+	return headline
 }
 
 func (o *Operations) previewForget(ctx context.Context, call *operation.Call) (operation.Preview, error) {
-	in, _, err := o.forgetRequest(call)
+	request, err := o.forgetRequestOf(call)
 	if err != nil {
 		return operation.Preview{}, err
 	}
-	documents, err := o.doomed(ctx, &in)
+	documents, err := o.doomed(ctx, request)
 	if err != nil {
 		return operation.Preview{}, moduleFailure(err)
 	}
-	return operation.Preview{
-		Lines:  previewLines(call.Caller.Surface, "memory documents", documents),
-		Digest: documentsDigest(documents),
-		Empty:  len(documents) == 0,
-	}, nil
+	return deletionPreview(call.Caller.Surface, forgetHeadline(request, len(documents)), documents), nil
 }
 
 func requirePreview(call *operation.Call) error {
@@ -241,12 +335,8 @@ func requirePreview(call *operation.Call) error {
 	return nil
 }
 
-func deletedResult(deleted int) (operation.Result, error) {
-	return operation.JSONResult(map[string]any{"text": "deleted: " + strconv.Itoa(deleted), "deleted": deleted})
-}
-
 func (o *Operations) forget(ctx context.Context, call *operation.Call) (operation.Result, error) {
-	in, scope, err := o.forgetRequest(call)
+	request, err := o.forgetRequestOf(call)
 	if err != nil {
 		return operation.Result{}, err
 	}
@@ -256,7 +346,7 @@ func (o *Operations) forget(ctx context.Context, call *operation.Call) (operatio
 	var applied bool
 	var deleted int
 	committed, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
-		documents, err := o.doomed(ctx, &in)
+		documents, err := o.doomed(ctx, request)
 		if err != nil {
 			return operation.Result{}, err
 		}
@@ -271,15 +361,14 @@ func (o *Operations) forget(ctx context.Context, call *operation.Call) (operatio
 			return operation.Result{}, fault.New(ErrorCodeMemoryInvalid, "the delete did not remove the previewed documents")
 		}
 		deleted, applied = count, true
-		return deletedResult(count)
+		return operation.JSONResult(map[string]any{"text": "deleted: " + strconv.Itoa(count), "deleted": count})
 	})
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	if !applied {
-		return committed, nil
+	if applied {
+		o.logger.InfoContext(ctx, "memory forget applied", "component", "memory", "operation", "forget", "scope", request.scope, "deleted", deleted)
 	}
-	o.logger.InfoContext(ctx, "memory forget applied", "component", "memory", "operation", "forget", "scope", scope, "deleted", deleted)
 	return committed, nil
 }
 
@@ -296,11 +385,8 @@ func (o *Operations) previewPurge(ctx context.Context, call *operation.Call) (op
 	if err != nil {
 		return operation.Preview{}, moduleFailure(err)
 	}
-	return operation.Preview{
-		Lines:  previewLines(call.Caller.Surface, "expired summary documents", documents),
-		Digest: documentsDigest(documents),
-		Empty:  len(documents) == 0,
-	}, nil
+	headline := fmt.Sprintf("would delete %d expired summary documents", len(documents))
+	return deletionPreview(call.Caller.Surface, headline, documents), nil
 }
 
 func (o *Operations) purge(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -335,9 +421,8 @@ func (o *Operations) purge(ctx context.Context, call *operation.Call) (operation
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	if !applied {
-		return committed, nil
+	if applied {
+		o.logger.InfoContext(ctx, "memory purge complete", "component", "memory", "operation", "purge", "pruned", pruned)
 	}
-	o.logger.InfoContext(ctx, "memory purge complete", "component", "memory", "operation", "purge", "pruned", pruned)
 	return committed, nil
 }
