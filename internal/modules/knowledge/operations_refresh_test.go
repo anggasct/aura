@@ -41,7 +41,12 @@ type refreshReport struct {
 	Text string `json:"text"`
 }
 
-func seedMixedCollection(t *testing.T, rig *opsRig, withHostFile bool) mixedCollection {
+type mixedFiles struct {
+	host      bool
+	workspace bool
+}
+
+func seedMixedCollection(t *testing.T, rig *opsRig, files mixedFiles) mixedCollection {
 	t.Helper()
 	seedSource(t, rig)
 	prepared, err := rig.kb.Service.PrepareURL(t.Context(), knowledgetest.Collection, deadURL)
@@ -51,16 +56,19 @@ func seedMixedCollection(t *testing.T, rig *opsRig, withHostFile bool) mixedColl
 	if _, err := rig.kb.Service.Write(t.Context(), knowledge.ActionAdd, prepared); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	rig.writeWorkspaceFile(t, "docs/policy.md", policyBefore)
-	if err := requireOK(rig.tool("kb.add", `{"collection":"support","source":"docs/policy.md"}`)); err != nil {
-		t.Fatalf("add the workspace file: %v", err)
+	wantSources := 3
+	if files.workspace {
+		wantSources++
+		rig.writeWorkspaceFile(t, "docs/policy.md", policyBefore)
+		if err := requireOK(rig.tool("kb.add", `{"collection":"support","source":"docs/policy.md"}`)); err != nil {
+			t.Fatalf("add the workspace file: %v", err)
+		}
 	}
 	mixed := mixedCollection{attachment: rig.attach(t, operationtest.SessionID, "faq.md", "text/markdown", "# Faq\nHow do refunds work?\n")}
 	if err := requireOK(rig.tool("kb.add", `{"collection":"support","source":"artifact:`+mixed.attachment+`"}`)); err != nil {
 		t.Fatalf("add the attachment: %v", err)
 	}
-	wantSources := 4
-	if withHostFile {
+	if files.host {
 		wantSources++
 		mixed.hostFile = filepath.Join(t.TempDir(), "notes.md")
 		if err := os.WriteFile(mixed.hostFile, []byte(notesBefore), 0o600); err != nil {
@@ -73,8 +81,10 @@ func seedMixedCollection(t *testing.T, rig *opsRig, withHostFile bool) mixedColl
 	if got := len(rig.sources(t)); got != wantSources {
 		t.Fatalf("seeded %d sources, want %d", got, wantSources)
 	}
-	rig.writeWorkspaceFile(t, "docs/policy.md", policyAfter)
-	if withHostFile {
+	if files.workspace {
+		rig.writeWorkspaceFile(t, "docs/policy.md", policyAfter)
+	}
+	if files.host {
 		if err := os.WriteFile(mixed.hostFile, []byte(notesAfter), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -116,6 +126,7 @@ func TestRefreshWorksSourceBySourceOnEverySurface(t *testing.T) {
 		run          func(t *testing.T, rig *opsRig) []byte
 		wantHostFile string
 		wantSkipped  bool
+		wantPolicy   string
 	}{
 		{
 			name: "the CLI refreshes the host file too",
@@ -127,9 +138,10 @@ func TestRefreshWorksSourceBySourceOnEverySurface(t *testing.T) {
 				return result.Data
 			},
 			wantHostFile: "replaced",
+			wantPolicy:   knowledge.StatusReplaced,
 		},
 		{
-			name: "chat skips the host file",
+			name: "chat skips every file it cannot open",
 			run: func(t *testing.T, rig *opsRig) []byte {
 				result, err := rig.invoke(t, operation.SurfaceChat, "kb.refresh", `{"collection":"support"}`)
 				if err != nil {
@@ -149,12 +161,13 @@ func TestRefreshWorksSourceBySourceOnEverySurface(t *testing.T) {
 				return []byte(outcome.Output)
 			},
 			wantSkipped: true,
+			wantPolicy:  knowledge.StatusReplaced,
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newOpsRig(t)
-			mixed := seedMixedCollection(t, rig, true)
+			mixed := seedMixedCollection(t, rig, mixedFiles{host: true, workspace: true})
 			chunksBefore := map[string]int{}
 			for _, record := range rig.sources(t) {
 				chunksBefore[record.URI] = record.Chunks
@@ -165,8 +178,13 @@ func TestRefreshWorksSourceBySourceOnEverySurface(t *testing.T) {
 			if got := report.statusOf("refunds"); got != knowledge.StatusUnchanged {
 				t.Errorf("the reachable page = %q, want unchanged", got)
 			}
-			if got := report.statusOf("policy.md"); got != knowledge.StatusReplaced {
-				t.Errorf("the workspace file = %q, want replaced", got)
+			if got := report.statusOf("policy.md"); got != tc.wantPolicy {
+				t.Errorf("the workspace file = %q, want %q", got, tc.wantPolicy)
+			}
+			if tc.wantPolicy == "" {
+				if status, code := report.noteFor("policy.md"); status != "skipped" || code != string(operation.ErrorCodePolicyDenied) {
+					t.Errorf("the workspace file note = %q %q, want a skip", status, code)
+				}
 			}
 			if got := report.statusOf("notes.md"); got != tc.wantHostFile {
 				t.Errorf("the host file = %q, want %q", got, tc.wantHostFile)
@@ -180,7 +198,7 @@ func TestRefreshWorksSourceBySourceOnEverySurface(t *testing.T) {
 			if status, code := report.noteFor("notes.md"); tc.wantSkipped && (status != "skipped" || code != string(operation.ErrorCodePolicyDenied)) {
 				t.Errorf("the host file note = %q %q, want a skip", status, code)
 			}
-			if !strings.Contains(report.Text, "refresh this source from the host") == tc.wantSkipped {
+			if !strings.Contains(report.Text, "refresh this source from the CLI") == tc.wantSkipped {
 				t.Errorf("text %q, want the host skip reported = %v", report.Text, tc.wantSkipped)
 			}
 			for _, record := range rig.sources(t) {
@@ -250,7 +268,7 @@ func TestRefreshFailsOnlyWhenNoSourceCouldBeRefreshed(t *testing.T) {
 func TestRefreshLeavesTheSameStateOnEverySurface(t *testing.T) {
 	agent, cli, chat := newOpsRig(t), newOpsRig(t), newOpsRig(t)
 	for _, rig := range []*opsRig{agent, cli, chat} {
-		seedMixedCollection(t, rig, false)
+		seedMixedCollection(t, rig, mixedFiles{})
 	}
 
 	if outcome := agent.tool("kb.refresh", `{"collection":"support"}`); outcome.Class != toolbroker.ResultOK {

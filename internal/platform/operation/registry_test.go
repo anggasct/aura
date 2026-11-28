@@ -300,28 +300,32 @@ func TestRegistryRejectsTwoOperationsGeneratingOneToolName(t *testing.T) {
 	}
 }
 
-func TestRegistryRejectsARequiredPathParameterThatChatProjects(t *testing.T) {
+func TestRegistryRejectsAPathParameterThatChatProjects(t *testing.T) {
 	path := operation.Param{Name: "file", Kind: operation.KindPath, Required: true, Position: 2}
+	optional := path
+	optional.Required = false
+	limited := path
+	limited.Surfaces = []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}
+	limitedOptional := limited
+	limitedOptional.Required = false
 	cases := []struct {
 		name   string
 		mutate func(d *operation.Descriptor)
 		want   int
 	}{
-		{name: "an operation that projects to chat", mutate: func(d *operation.Descriptor) { d.Params = append(d.Params, path) }, want: 1},
+		{name: "a required path on an operation that projects to chat", mutate: func(d *operation.Descriptor) { d.Params = append(d.Params, path) }, want: 1},
+		{name: "an optional path on an operation that projects to chat", mutate: func(d *operation.Descriptor) { d.Params = append(d.Params, optional) }, want: 1},
+		{name: "a path that names chat among its surfaces", mutate: func(d *operation.Descriptor) {
+			named := optional
+			named.Surfaces = []operation.Surface{operation.SurfaceChat, operation.SurfaceCLI}
+			d.Params = append(d.Params, named)
+		}, want: 1},
 		{name: "an operation that does not project to chat", mutate: func(d *operation.Descriptor) {
 			d.Params = append(d.Params, path)
 			d.Surfaces, d.SurfaceReason = []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}, "files are not chat input"
 		}},
-		{name: "a required path parameter limited to the CLI and the agent", mutate: func(d *operation.Descriptor) {
-			limited := path
-			limited.Surfaces = []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}
-			d.Params = append(d.Params, limited)
-		}},
-		{name: "an optional path parameter", mutate: func(d *operation.Descriptor) {
-			optional := path
-			optional.Required = false
-			d.Params = append(d.Params, optional)
-		}},
+		{name: "a required path limited to the CLI and the agent", mutate: func(d *operation.Descriptor) { d.Params = append(d.Params, limited) }},
+		{name: "an optional path limited to the CLI and the agent", mutate: func(d *operation.Descriptor) { d.Params = append(d.Params, limitedOptional) }},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

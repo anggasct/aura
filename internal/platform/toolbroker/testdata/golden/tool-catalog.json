@@ -514,7 +514,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Re-read the stored sources of a collection\n\nReads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a file on the host is refreshed only from the host.",
+      "description": "Re-read the stored sources of a collection\n\nReads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a workspace file is refreshed from the CLI or the agent and a file on the host only from the CLI.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/kb.refresh/v1",

@@ -65,15 +65,18 @@ type surfaceFiles struct {
 	deps      *FileDeps
 	ownerOnly bool
 	hostPaths bool
+	noFiles   bool
 	sessionID string
 }
 
 func (r *Registry) filesFor(caller *Caller) FileAuthority {
-	return &surfaceFiles{deps: r.files, ownerOnly: caller.Surface == SurfaceAgent, hostPaths: caller.Surface == SurfaceCLI, sessionID: caller.SessionID}
+	return &surfaceFiles{deps: r.files, ownerOnly: caller.Surface == SurfaceAgent, hostPaths: caller.Surface == SurfaceCLI, noFiles: caller.Surface == SurfaceChat, sessionID: caller.SessionID}
 }
 
 func (f *surfaceFiles) Open(ctx context.Context, source string) (File, error) {
 	switch {
+	case f.noFiles:
+		return nil, NewError(ErrorCodePolicyDenied, "this surface cannot open files")
 	case strings.Contains(source, "://"):
 		return nil, NewError(ErrorCodeInputInvalid, "a URL is not a file source")
 	case strings.HasPrefix(source, artifactPrefix):

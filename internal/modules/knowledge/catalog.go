@@ -92,7 +92,7 @@ func Catalog() operation.Catalog {
 			{
 				ID: operationRefresh, Summary: "Re-read the stored sources of a collection", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskChange, Commit: operation.CommitTransactional, ReachesNetwork: true, Needs: needs,
-				Description: "Reads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a file on the host is refreshed only from the host.",
+				Description: "Reads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a workspace file is refreshed from the CLI or the agent and a file on the host only from the CLI.",
 				Params:      []operation.Param{collectionParam(), storedSourceParam(false)}, Output: textOutput(),
 			},
 			{

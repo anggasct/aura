@@ -112,3 +112,25 @@ func TestFileDepsRequireAnAbsoluteWorkspace(t *testing.T) {
 		t.Fatalf("validate of no deps: %v", err)
 	}
 }
+
+func TestTheChatSurfaceOpensNoFile(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "policy.md"), []byte("policy body"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	deps := &FileDeps{Workspace: workspace, Artifacts: attachmentOpener{"art-own": {SessionID: "session-1", Filename: "own.md", MediaType: "text/markdown"}}}
+	registry := &Registry{files: deps}
+	files := registry.filesFor(&Caller{Surface: SurfaceChat, SessionID: "session-1"})
+	for _, source := range []string{"policy.md", "workspace:policy.md", "artifact:art-own", filepath.Join(workspace, "policy.md")} {
+		t.Run(source, func(t *testing.T) {
+			file, err := files.Open(t.Context(), source)
+
+			if !fault.HasCode(err, ErrorCodePolicyDenied) {
+				if file != nil {
+					_ = file.Close()
+				}
+				t.Fatalf("Open(%q) = %v, want %s", source, err, ErrorCodePolicyDenied)
+			}
+		})
+	}
+}

@@ -33,7 +33,7 @@ func projectionDescriptor() operation.Descriptor {
 			{Name: "tags", Kind: operation.KindStrings, Summary: "labels", MaxLength: 16},
 			{Name: "payload", Kind: operation.KindJSON, Summary: "extra data", Schema: json.RawMessage(`{"type":"object","additionalProperties":true}`), Surfaces: cli},
 			{Name: "probe", Kind: operation.KindBoolean, Summary: "dry run", Surfaces: cli},
-			{Name: "attachment", Kind: operation.KindPath, Summary: "a file"},
+			{Name: "attachment", Kind: operation.KindPath, Summary: "a file", Surfaces: []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}},
 		},
 		Output: operation.Output{Kind: operation.OutputRecord, Fields: []operation.OutputField{
 			{Name: "id"}, {Name: "status"}, {Name: "trace", Surfaces: cli},

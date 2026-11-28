@@ -325,7 +325,7 @@ func (n *refreshNote) line() string {
 	case noteUnchanged:
 		return fmt.Sprintf("unchanged: %s chunks=%d (a stored attachment never changes)", n.Label, n.Chunks)
 	case noteSkipped:
-		return fmt.Sprintf("skipped: %s (%s): refresh this source from the host", n.Label, n.Code)
+		return fmt.Sprintf("skipped: %s (%s): refresh this source from the CLI", n.Label, n.Code)
 	}
 	return fmt.Sprintf("failed: %s (%s): the stored chunks are kept", n.Label, n.Code)
 }
@@ -402,7 +402,7 @@ func (o *Operations) prepareStored(ctx context.Context, call *operation.Call, co
 		return o.settled(ctx, record, func() (*Prepared, error) { return o.service.PrepareURL(ctx, collection, record.URI) })
 	case strings.HasPrefix(record.URI, artifactScheme):
 		return nil, &refreshNote{Label: record.Label, Status: noteUnchanged, Chunks: record.Chunks}, nil
-	case call.Caller.Surface != operation.SurfaceCLI && filepath.IsAbs(record.URI):
+	case !canOpenStored(call.Caller.Surface, record.URI):
 		return nil, &refreshNote{Label: record.Label, Status: noteSkipped, Code: string(operation.ErrorCodePolicyDenied)}, nil
 	}
 	return o.settled(ctx, record, func() (*Prepared, error) {
@@ -413,6 +413,16 @@ func (o *Operations) prepareStored(ctx context.Context, call *operation.Call, co
 		defer func() { _ = file.Close() }()
 		return o.prepareFrom(ctx, collection, file, io.Discard)
 	})
+}
+
+func canOpenStored(surface operation.Surface, uri string) bool {
+	switch surface {
+	case operation.SurfaceCLI:
+		return true
+	case operation.SurfaceAgent:
+		return !filepath.IsAbs(uri)
+	}
+	return false
 }
 
 func (o *Operations) settled(ctx context.Context, record *SourceRecord, prepare func() (*Prepared, error)) (*Prepared, *refreshNote, error) {

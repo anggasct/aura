@@ -434,8 +434,8 @@ func (v *validation) param(id string, exposure Exposure, chat bool, p *Param) {
 	if p.Secret && exposure != ExposureHost {
 		v.reject(id, "the parameter %q is secret and the operation is not host", name)
 	}
-	if p.Kind == KindPath && p.Required && chat && onSurface(p.Surfaces, SurfaceChat) {
-		v.reject(id, "the required path parameter %q can never be supplied in chat", name)
+	if p.Kind == KindPath && chat && onSurface(p.Surfaces, SurfaceChat) {
+		v.reject(id, "the path parameter %q projects to chat, where no file can be opened", name)
 	}
 	if p.Prompt != "" && !p.Required {
 		v.reject(id, "the optional parameter %q has a prompt", name)
