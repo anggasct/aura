@@ -96,6 +96,7 @@ const (
 	AttrModelNormalizedResult  = "aura.model.normalized_result"
 
 	AttrRecallOutcome        = "aura.recall.outcome"
+	AttrRecallMode           = "aura.recall.mode"
 	AttrRecallSummarized     = "aura.recall.summarized"
 	AttrRecallDocuments      = "aura.recall.documents"
 	AttrRecallScreened       = "aura.recall.screened"
@@ -169,6 +170,7 @@ var toolSpanAttrs = []string{
 
 var memoryRecallSpanAttrs = []string{
 	AttrRecallOutcome,
+	AttrRecallMode,
 	AttrRecallSummarized,
 	AttrRecallDocuments,
 	AttrRecallScreened,
@@ -186,7 +188,7 @@ var metricLabelAttrs = map[string][]string{
 	MetricModelDuration:                    {AttrGenAISystem, AttrGenAIOperationName},
 	MetricToolCallsTotal:                   {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
 	MetricToolCallDuration:                 {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
-	MetricMemoryRecallsTotal:               {AttrRecallOutcome, AttrRecallModelSystem},
+	MetricMemoryRecallsTotal:               {AttrRecallOutcome, AttrRecallMode, AttrRecallModelSystem},
 	MetricMemoryRecallDuration:             {AttrRecallOutcome},
 	MetricMemoryRecallDocuments:            {AttrRecallOutcome},
 	MetricMCPCallsTotal:                    {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},

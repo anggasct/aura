@@ -9,6 +9,7 @@ import (
 
 type Config struct {
 	Enabled                 bool    `json:"enabled"`
+	EmbeddingEnabled        bool    `json:"embedding_enabled"`
 	MaxContextFacts         int     `json:"max_context_facts"`
 	MaxContextTokens        int     `json:"max_context_tokens"`
 	ExtractionQueueCapacity int     `json:"extraction_queue_capacity"`

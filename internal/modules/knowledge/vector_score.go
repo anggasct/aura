@@ -5,6 +5,8 @@ import (
 	"slices"
 
 	"golang.org/x/sync/errgroup"
+
+	"github.com/anggasct/aura/internal/platform/embedding"
 )
 
 type scoredRow struct {
@@ -45,19 +47,7 @@ func (t *topRows) offer(candidate *scoredRow) {
 }
 
 func dot(a, b []float32) float32 {
-	var s0, s1, s2, s3 float32
-	n := len(a)
-	i := 0
-	for ; i+4 <= n; i += 4 {
-		s0 += a[i] * b[i]
-		s1 += a[i+1] * b[i+1]
-		s2 += a[i+2] * b[i+2]
-		s3 += a[i+3] * b[i+3]
-	}
-	for ; i < n; i++ {
-		s0 += a[i] * b[i]
-	}
-	return s0 + s1 + s2 + s3
+	return embedding.Dot(a, b)
 }
 
 type scoreTask struct {
@@ -87,7 +77,7 @@ func scoreEntries(ctx context.Context, entries []*vectorEntry, query []float32, 
 						return err
 					}
 				}
-				candidate := scoredRow{score: dot(query, entry.values[row*dimensions:(row+1)*dimensions]), rowID: entry.rowIDs[row], entry: task.entry, row: row}
+				candidate := scoredRow{score: embedding.Dot(query, entry.values[row*dimensions:(row+1)*dimensions]), rowID: entry.rowIDs[row], entry: task.entry, row: row}
 				top.offer(&candidate)
 			}
 			results[n] = top

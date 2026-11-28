@@ -208,7 +208,7 @@ func TestMetricLabelsBounded(t *testing.T) {
 		{MetricModelDuration, []string{AttrGenAISystem, AttrGenAIOperationName}},
 		{MetricToolCallsTotal, []string{AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket}},
 		{MetricToolCallDuration, []string{AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket}},
-		{MetricMemoryRecallsTotal, []string{AttrRecallOutcome, AttrRecallModelSystem}},
+		{MetricMemoryRecallsTotal, []string{AttrRecallOutcome, AttrRecallMode, AttrRecallModelSystem}},
 		{MetricMemoryRecallDuration, []string{AttrRecallOutcome}},
 		{MetricMemoryRecallDocuments, []string{AttrRecallOutcome}},
 		{MetricMCPCallsTotal, []string{AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode}},

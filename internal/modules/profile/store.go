@@ -6,11 +6,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/textsearch"
@@ -23,14 +25,17 @@ type FactCount struct {
 }
 
 type SQLiteStore struct {
-	db *sql.DB
+	db        *sql.DB
+	embedding *EmbeddingOptions
+	logger    *slog.Logger
+	backfill  embedding.BackfillCursor
 }
 
 func NewSQLiteStore(db *sql.DB) (*SQLiteStore, error) {
 	if db == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
-	return &SQLiteStore{db: db}, nil
+	return &SQLiteStore{db: db, logger: slog.Default()}, nil
 }
 
 var profileCategories = map[string]bool{
@@ -609,7 +614,8 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 	}
 	rankProfileTier(stage1, nowUTC)
 	combined := stage1
-	if len(stage1) < limit && len(meaningful) >= 2 {
+	needStage2 := len(meaningful) >= 2 && (len(stage1) < limit || (s.EmbeddingActive() && len(stage1) < candidateLimit))
+	if needStage2 {
 		stage2Raw, err := s.searchFactTier(ctx, ownerID, category, textsearch.FTSOrQuery(meaningful), verifiedOnly, candidateLimit, nowUTC)
 		if err != nil {
 			return nil, err
@@ -627,6 +633,11 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 		}
 		rankProfileTier(stage2, nowUTC)
 		combined = append(combined, stage2...)
+	}
+	if semantic, ran, err := s.searchFactVectors(ctx, ownerID, category, match, candidateLimit, nowUTC); err != nil {
+		s.logger.WarnContext(ctx, "profile vector search failed", "component", "profile_embedding", "error", err)
+	} else if ran {
+		combined = fuseProfileFacts(combined, semantic, candidateLimit)
 	}
 	if len(combined) > limit {
 		combined = combined[:limit]

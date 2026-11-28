@@ -404,17 +404,17 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 
 	gotTables := listSchemaObjectsByType(t, gotDB, "table")
 	wantTables := listSchemaObjectsByType(t, wantDB, "table")
-	if len(gotTables) != 56 || !slices.Equal(gotTables, wantTables) {
+	if len(gotTables) != 58 || !slices.Equal(gotTables, wantTables) {
 		t.Fatalf("tables (%d vs %d): got=%v want=%v", len(gotTables), len(wantTables), gotTables, wantTables)
 	}
 	gotIndexes := listSchemaObjectsByType(t, gotDB, "index")
 	wantIndexes := listSchemaObjectsByType(t, wantDB, "index")
-	if len(gotIndexes) != 36 || !slices.Equal(gotIndexes, wantIndexes) {
+	if len(gotIndexes) != 38 || !slices.Equal(gotIndexes, wantIndexes) {
 		t.Fatalf("indexes (%d vs %d): got=%v want=%v", len(gotIndexes), len(wantIndexes), gotIndexes, wantIndexes)
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
 	wantTriggers := listSchemaObjectsByType(t, wantDB, "trigger")
-	if len(gotTriggers) != 13 || !slices.Equal(gotTriggers, wantTriggers) {
+	if len(gotTriggers) != 14 || !slices.Equal(gotTriggers, wantTriggers) {
 		t.Fatalf("triggers (%d vs %d): got=%v want=%v", len(gotTriggers), len(wantTriggers), gotTriggers, wantTriggers)
 	}
 
@@ -538,8 +538,8 @@ func TestSchemaOwnersRegisteredAndForeignKeysValid(t *testing.T) {
 			}
 		}
 	}
-	if len(tableOwners) != 56 {
-		t.Fatalf("owned tables = %d, want 56", len(tableOwners))
+	if len(tableOwners) != 58 {
+		t.Fatalf("owned tables = %d, want 58", len(tableOwners))
 	}
 	finalTables := listSchemaObjectsByType(t, db, "table")
 	for _, tbl := range finalTables {

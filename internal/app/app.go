@@ -51,7 +51,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sandbox"
-	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/server"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/storage"
@@ -811,7 +810,11 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		service, err := memory.NewService(memStore, secret.New(), &memory.ServiceOptions{
+		embedClient, embedSettings, err := buildMemoryEmbedding(b.cfg, nil)
+		if err != nil {
+			return err
+		}
+		service, err := memory.NewService(memStore, resolvedAllSecrets(b.cfg), &memory.ServiceOptions{
 			MaxDocuments:         b.cfg.Memory.MaxDocuments,
 			TokenBudget:          b.cfg.Memory.RecallTokenBudget,
 			SummaryPromptVersion: b.cfg.Memory.SummaryPromptVersion,
@@ -819,6 +822,11 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			RangeThreshold:       b.cfg.Memory.RangeThreshold,
 			RangeLiveWindow:      b.cfg.Memory.RangeLiveWindow,
 			TaintMarks:           turnstore.NewTaintReader(b.db),
+			EmbeddingEnabled:     b.cfg.Memory.EmbeddingEnabled,
+			Embedder:             embedClient,
+			Embedding:            embedSettings,
+			SecretSource:         &strictSecretSource{cfg: b.cfg},
+			Vectors:              memStore,
 		})
 		if err != nil {
 			return err
@@ -826,7 +834,23 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 		b.memory = service
 	}
 	if slices.Contains(parts, PartProfile) {
-		store, err := profile.NewSQLiteStore(b.db)
+		scanner := resolvedAllSecrets(b.cfg)
+		var embedOpts *profile.EmbeddingOptions
+		if b.cfg.Profile != nil && b.cfg.Profile.EmbeddingEnabled {
+			embedClient, embedSettings, err := buildProfileEmbedding(b.cfg, nil)
+			if err != nil {
+				return err
+			}
+			embedOpts = &profile.EmbeddingOptions{
+				Enabled:      true,
+				Embedder:     embedClient,
+				Settings:     embedSettings,
+				Scanner:      scanner,
+				SecretSource: &strictSecretSource{cfg: b.cfg},
+				Logger:       b.logger,
+			}
+		}
+		store, err := profile.NewSQLiteStoreWithEmbedding(b.db, embedOpts)
 		if err != nil {
 			return err
 		}
@@ -840,6 +864,7 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 		}
 		service, err := profile.NewService(store, profile.ServiceOptions{
 			MinConfidence: minConfidence,
+			Scanner:       scanner,
 			Actions:       sink,
 		})
 		if err != nil {

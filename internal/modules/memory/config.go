@@ -10,6 +10,7 @@ import (
 
 type Config struct {
 	Enabled              bool               `json:"enabled"`
+	EmbeddingEnabled     bool               `json:"embedding_enabled"`
 	MaxDocuments         int                `json:"max_documents"`
 	RecallTokenBudget    int                `json:"recall_token_budget"`
 	Locale               string             `json:"locale"`

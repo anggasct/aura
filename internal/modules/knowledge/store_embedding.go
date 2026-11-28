@@ -3,18 +3,12 @@ package knowledge
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"errors"
 	"fmt"
-	"math"
 
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
-)
-
-const (
-	kbVectorValueBytes = 4
-	kbUnitTolerance    = 1e-3
 )
 
 type EmbeddingCoverage struct {
@@ -30,26 +24,12 @@ const kbPendingJoin = `FROM kb_chunk c
 	WHERE s.collection = ?`
 
 func encodeVector(vector []float32) []byte {
-	blob := make([]byte, len(vector)*kbVectorValueBytes)
-	for i, value := range vector {
-		binary.LittleEndian.PutUint32(blob[i*kbVectorValueBytes:], math.Float32bits(value))
-	}
-	return blob
+	return embedding.Encode(vector)
 }
 
 func validateVector(vector []float32) error {
-	if len(vector) == 0 {
-		return Errorf(ErrorCodeInvalidArgument, "knowledge vector must not be empty")
-	}
-	var sum float64
-	for _, value := range vector {
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return Errorf(ErrorCodeInvalidArgument, "knowledge vector must be finite")
-		}
-		sum += float64(value) * float64(value)
-	}
-	if math.Abs(math.Sqrt(sum)-1) > kbUnitTolerance {
-		return Errorf(ErrorCodeInvalidArgument, "knowledge vector must have unit length")
+	if err := embedding.ValidateUnit(vector); err != nil {
+		return fault.Wrap(ErrorCodeInvalidArgument, "knowledge vector is not a valid unit vector", err)
 	}
 	return nil
 }

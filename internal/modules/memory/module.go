@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -14,31 +15,39 @@ import (
 )
 
 type Deps struct {
-	Config      Config
-	DB          *sql.DB
-	Sessions    SessionReader
-	TaintMarks  TaintMarksReader
-	Scopes      RecallScopes
-	Secrets     Secrets
-	Models      ModelSource
-	ModelConfig *model.Config
-	ModelRoutes map[string]model.ModelRoute
-	Observer    Observer
-	Logger      *slog.Logger
+	Config       Config
+	DB           *sql.DB
+	Sessions     SessionReader
+	TaintMarks   TaintMarksReader
+	Scopes       RecallScopes
+	Secrets      Secrets
+	SecretSource SecretSource
+	Embedder     Embedder
+	Embedding    *EmbeddingSettings
+	Models       ModelSource
+	ModelConfig  *model.Config
+	ModelRoutes  map[string]model.ModelRoute
+	Observer     Observer
+	CheckTimeout time.Duration
+	Logger       *slog.Logger
 }
 
 var (
 	_ operation.BehaviorProvider = (*Module)(nil)
 	_ operation.Provider         = (*Module)(nil)
+	_ health.HealthProvider      = (*Module)(nil)
 )
 
 type Module struct {
 	cfg          Config
+	store        *SQLiteStore
 	service      *Service
 	provider     *Provider
 	summaryModel *SummaryModel
 	summarizer   Summarizer
 	operations   *Operations
+	embedding    *EmbeddingSettings
+	checkTimeout time.Duration
 	logger       *slog.Logger
 }
 
@@ -75,6 +84,11 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 		RangeLiveWindow:      deps.Config.RangeLiveWindow,
 		TaintMarks:           taintMarks,
 		Observer:             deps.Observer,
+		EmbeddingEnabled:     deps.Config.EmbeddingEnabled,
+		Embedder:             deps.Embedder,
+		Embedding:            deps.Embedding,
+		SecretSource:         deps.SecretSource,
+		Vectors:              store,
 	})
 	if err != nil {
 		return nil, err
@@ -90,11 +104,14 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	}
 	return &Module{
 		cfg:          deps.Config,
+		store:        store,
 		service:      service,
 		provider:     provider,
 		summaryModel: summaryModel,
 		summarizer:   summarizer,
 		operations:   operations,
+		embedding:    deps.Embedding,
+		checkTimeout: deps.CheckTimeout,
 		logger:       deps.Logger,
 	}, nil
 }
@@ -143,5 +160,15 @@ func (m *Module) PurgeLoop() func(context.Context) {
 	service := m.service
 	return func(ctx context.Context) {
 		service.RunPurgeLoop(ctx, interval, limit)
+	}
+}
+
+func (m *Module) EmbedLoop() func(context.Context) {
+	if m == nil || !m.cfg.EmbeddingEnabled || m.service == nil || !m.service.EmbeddingActive() {
+		return nil
+	}
+	service := m.service
+	return func(ctx context.Context) {
+		service.RunEmbeddingBackfill(ctx, defaultBackfillInterval)
 	}
 }

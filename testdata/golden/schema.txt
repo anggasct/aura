@@ -79,6 +79,9 @@ CREATE TABLE memory_document ( id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, sess
 table memory_document_fts on memory_document_fts
 CREATE VIRTUAL TABLE memory_document_fts USING fts5( content, content='memory_document', content_rowid='rowid', tokenize='unicode61' )
 
+table memory_embedding on memory_embedding
+CREATE TABLE memory_embedding ( document_id TEXT PRIMARY KEY REFERENCES memory_document(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, content_sha256 TEXT NOT NULL, vector BLOB NOT NULL, created_at TEXT NOT NULL )
+
 table model_circuit_checkpoint on model_circuit_checkpoint
 CREATE TABLE model_circuit_checkpoint ( circuit_key TEXT PRIMARY KEY, config_digest TEXT NOT NULL, state TEXT NOT NULL CHECK (state IN ('closed','open','half_open')), consecutive_failures INTEGER NOT NULL CHECK (consecutive_failures >= 0), open_until TEXT, updated_at TEXT NOT NULL )
 
@@ -102,6 +105,9 @@ CREATE TABLE plugin_version ( plugin_id TEXT NOT NULL REFERENCES plugin(id) ON D
 
 table principal_grant on principal_grant
 CREATE TABLE principal_grant ( principal_id TEXT NOT NULL, account TEXT NOT NULL, class TEXT NOT NULL CHECK (class IN ('trusted')), granted_at TEXT NOT NULL, granted_by TEXT NOT NULL, revoked_at TEXT, PRIMARY KEY (principal_id, account) )
+
+table profile_embedding on profile_embedding
+CREATE TABLE profile_embedding ( fact_id TEXT PRIMARY KEY REFERENCES profile_fact(id) ON DELETE CASCADE, fingerprint TEXT NOT NULL, content_sha256 TEXT NOT NULL, vector BLOB NOT NULL, created_at TEXT NOT NULL )
 
 table profile_evidence on profile_evidence
 CREATE TABLE profile_evidence ( fact_id TEXT NOT NULL REFERENCES profile_fact(id) ON DELETE CASCADE, source_event_id TEXT NOT NULL REFERENCES runtime_event(id) ON DELETE RESTRICT, source_digest TEXT NOT NULL, extractor_provider TEXT, extractor_model TEXT, extractor_model_version TEXT, prompt_version TEXT, prompt_digest TEXT, observed_at TEXT NOT NULL, PRIMARY KEY (fact_id, source_event_id, source_digest) )
@@ -205,6 +211,9 @@ CREATE INDEX memory_document_owner_agent_idx ON memory_document(owner_id, agent_
 index memory_document_source_idx on memory_document
 CREATE INDEX memory_document_source_idx ON memory_document(session_id, source_from_sequence, source_to_sequence)
 
+index memory_embedding_fp_idx on memory_embedding
+CREATE INDEX memory_embedding_fp_idx ON memory_embedding(fingerprint)
+
 index operation_receipt_created_idx on operation_receipt
 CREATE INDEX operation_receipt_created_idx ON operation_receipt(created_at)
 
@@ -213,6 +222,9 @@ CREATE INDEX pairing_request_account_idx ON pairing_request(account, expires_at)
 
 index persona_eval_result_lookup_idx on persona_eval_result
 CREATE INDEX persona_eval_result_lookup_idx ON persona_eval_result(agent_id, fingerprint, layer, created_at)
+
+index profile_embedding_fp_idx on profile_embedding
+CREATE INDEX profile_embedding_fp_idx ON profile_embedding(fingerprint)
 
 index profile_fact_lookup_idx on profile_fact
 CREATE INDEX profile_fact_lookup_idx ON profile_fact(owner_id, status, category, fact_key, expires_at, confidence DESC, id)
@@ -291,6 +303,9 @@ CREATE TRIGGER memory_document_fts_insert AFTER INSERT ON memory_document BEGIN 
 
 trigger memory_document_fts_update on memory_document
 CREATE TRIGGER memory_document_fts_update AFTER UPDATE OF content ON memory_document BEGIN INSERT INTO memory_document_fts(memory_document_fts, rowid, content) VALUES ('delete', old.rowid, old.content); INSERT INTO memory_document_fts(rowid, content) VALUES (new.rowid, new.content); END
+
+trigger profile_embedding_cleanup_update on profile_fact
+CREATE TRIGGER profile_embedding_cleanup_update AFTER UPDATE OF status, owner_verified, fact_key, fact_value ON profile_fact WHEN new.status != 'active' OR new.owner_verified != 1 OR new.fact_key != old.fact_key OR new.fact_value != old.fact_value BEGIN DELETE FROM profile_embedding WHERE fact_id = new.id; END
 
 trigger profile_fact_fts_delete on profile_fact
 CREATE TRIGGER profile_fact_fts_delete AFTER DELETE ON profile_fact BEGIN INSERT INTO profile_fact_fts(profile_fact_fts, rowid, fact_key, fact_value) VALUES ('delete', old.rowid, old.fact_key, old.fact_value); END

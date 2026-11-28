@@ -12,6 +12,7 @@ import (
 
 type MemoryObservation struct {
 	Outcome     string
+	Mode        string
 	Summarized  bool
 	Documents   int
 	Screened    int
@@ -54,6 +55,7 @@ func (r *MemoryRecorder) Record(ctx context.Context, observation *MemoryObservat
 	outcomeOpt := metric.WithAttributes(attribute.String(AttrRecallOutcome, observation.Outcome))
 	systemOpt := metric.WithAttributes(
 		attribute.String(AttrRecallOutcome, observation.Outcome),
+		attribute.String(AttrRecallMode, observation.Mode),
 		attribute.String(AttrRecallModelSystem, observation.ModelSystem),
 	)
 	r.recalls.Add(ctx, 1, systemOpt)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"log/slog"
+	"sync"
 	"time"
 
 	"go.opentelemetry.io/otel/metric"
@@ -27,6 +28,9 @@ type Deps struct {
 	ModelConfig  model.Config
 	ModelRoutes  model.Routes
 	Scanner      SecretScanner
+	SecretSource SecretSource
+	Embedder     Embedder
+	Embedding    *EmbeddingSettings
 	Owner        *principal.Owner
 	Meters       metric.MeterProvider
 	CheckTimeout time.Duration
@@ -36,10 +40,13 @@ type Deps struct {
 var _ operation.Provider = (*Module)(nil)
 
 type Module struct {
+	cfg          Config
+	store        *SQLiteStore
 	service      *Service
 	operations   *Operations
 	extractor    *Extractor
 	health       *profileHealth
+	embedding    *EmbeddingSettings
 	checkTimeout time.Duration
 	maxFacts     int
 	maxTokens    int
@@ -60,7 +67,18 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	store, err := NewSQLiteStore(deps.DB)
+	var embedOpts *EmbeddingOptions
+	if deps.Config.EmbeddingEnabled {
+		embedOpts = &EmbeddingOptions{
+			Enabled:      true,
+			Embedder:     deps.Embedder,
+			Settings:     deps.Embedding,
+			Scanner:      deps.Scanner,
+			SecretSource: deps.SecretSource,
+			Logger:       logger,
+		}
+	}
+	store, err := NewSQLiteStoreWithEmbedding(deps.DB, embedOpts)
 	if err != nil {
 		return nil, err
 	}
@@ -73,7 +91,10 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 		actions = sink
 	}
 	mod := &Module{
+		cfg:          deps.Config,
+		store:        store,
 		health:       &profileHealth{},
+		embedding:    deps.Embedding,
 		checkTimeout: deps.CheckTimeout,
 		maxFacts:     deps.Config.MaxContextFacts,
 		maxTokens:    deps.Config.MaxContextTokens,
@@ -173,8 +194,28 @@ func (m *Module) Extractor() *Extractor {
 }
 
 func (m *Module) Run(ctx context.Context) {
-	if m != nil && m.extractor != nil {
+	if m == nil {
+		return
+	}
+	runExtractor := m.extractor != nil
+	runBackfill := m.cfg.EmbeddingEnabled && m.store != nil && m.store.EmbeddingActive()
+	switch {
+	case runExtractor && runBackfill:
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			m.extractor.Run(ctx)
+		}()
+		go func() {
+			defer wg.Done()
+			m.store.RunEmbeddingBackfill(ctx, defaultBackfillInterval)
+		}()
+		wg.Wait()
+	case runExtractor:
 		m.extractor.Run(ctx)
+	case runBackfill:
+		m.store.RunEmbeddingBackfill(ctx, defaultBackfillInterval)
 	}
 }
 

@@ -42,36 +42,49 @@ func (s *Service) projectBatch(ctx context.Context, ownerID string, req *turn.Tu
 	if s.documents == nil {
 		return result, fault.New(ErrorCodeInvalidArgument, "document store must not be nil")
 	}
-	s.projectMu.Lock()
-	defer s.projectMu.Unlock()
-	taintCtx := s.buildBatchTaintContext(ctx, req, events)
-	droppedBefore := s.secretDrops.Load()
-	for _, event := range events {
-		if err := ctx.Err(); err != nil {
-			return result, err
-		}
-		_, indexed, err := s.projectEvent(ctx, ownerID, event, taintCtx)
-		if err != nil {
-			if code, ok := fault.CodeOf[ErrorCode](err); ok && code == ErrorCodeInvalidArgument {
-				result.Skipped++
+	var toEmbed []Document
+	err := func() error {
+		s.projectMu.Lock()
+		defer s.projectMu.Unlock()
+		taintCtx := s.buildBatchTaintContext(ctx, req, events)
+		droppedBefore := s.secretDrops.Load()
+		for _, event := range events {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			doc, indexed, inserted, err := s.projectEvent(ctx, ownerID, event, taintCtx)
+			if err != nil {
+				if code, ok := fault.CodeOf[ErrorCode](err); ok && code == ErrorCodeInvalidArgument {
+					result.Skipped++
+					continue
+				}
+				if ctx.Err() != nil {
+					return ctx.Err()
+				}
+				s.projectionFailures.Add(1)
+				return fault.New(ErrorCodeProjectionStale, "projection store unavailable")
+			}
+			if indexed {
+				result.Indexed++
+				if inserted {
+					toEmbed = append(toEmbed, doc)
+				}
 				continue
 			}
-			if ctx.Err() != nil {
-				return result, ctx.Err()
-			}
-			s.projectionFailures.Add(1)
-			return result, fault.New(ErrorCodeProjectionStale, "projection store unavailable")
+			result.Skipped++
 		}
-		if indexed {
-			result.Indexed++
-			continue
+		result.Dropped = int(s.secretDrops.Load() - droppedBefore)
+		result.Skipped -= result.Dropped
+		if result.Skipped < 0 {
+			result.Skipped = 0
 		}
-		result.Skipped++
+		return nil
+	}()
+	if err != nil {
+		return result, err
 	}
-	result.Dropped = int(s.secretDrops.Load() - droppedBefore)
-	result.Skipped -= result.Dropped
-	if result.Skipped < 0 {
-		result.Skipped = 0
+	for i := range toEmbed {
+		s.embedDocumentBestEffort(ctx, toEmbed[i].ID, toEmbed[i].OwnerID, toEmbed[i].Content)
 	}
 	return result, nil
 }

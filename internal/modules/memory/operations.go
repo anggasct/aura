@@ -291,15 +291,20 @@ func (o *Operations) search(ctx context.Context, call *operation.Call) (operatio
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	hits, err := o.service.Search(ctx, &SearchRequest{
-		OwnerID:   principal.OwnerID,
-		AgentIDs:  readable,
-		SessionID: in.Session,
-		Query:     in.Query,
-		After:     after,
-		Before:    before,
-		Now:       o.now().UTC(),
-		Limit:     in.Limit,
+	callerClass := call.Caller.Class
+	if callerClass == "" && call.Caller.Surface == operation.SurfaceCLI {
+		callerClass = principal.ClassOwner
+	}
+	hits, mode, err := o.service.SearchWithMode(ctx, &SearchRequest{
+		OwnerID:        principal.OwnerID,
+		PrincipalClass: callerClass,
+		AgentIDs:       readable,
+		SessionID:      in.Session,
+		Query:          in.Query,
+		After:          after,
+		Before:         before,
+		Now:            o.now().UTC(),
+		Limit:          in.Limit,
 	})
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
@@ -318,7 +323,7 @@ func (o *Operations) search(ctx context.Context, call *operation.Call) (operatio
 			Content:   hit.Content,
 		})
 	}
-	return operation.JSONResult(map[string]any{"rows": rows})
+	return operation.JSONResult(map[string]any{"rows": rows, "mode": mode})
 }
 
 type forgetInput struct {

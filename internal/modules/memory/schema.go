@@ -47,10 +47,27 @@ ALTER TABLE memory_document ADD COLUMN tainted INTEGER CHECK (tainted IN (0,1));
 
 const taintColumnStepVersion = 34
 
+const embeddingTableStepSQL = `
+CREATE TABLE memory_embedding (
+    document_id TEXT PRIMARY KEY REFERENCES memory_document(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX memory_embedding_fp_idx ON memory_embedding(fingerprint);
+`
+
+const embeddingTableStepVersion = 36
+
 func Schema() sqlite.SchemaOwner {
 	return sqlite.StaticSchema{
-		Name:  "memory",
-		SQL:   schemaSQL,
-		Steps: []sqlite.Step{{Version: taintColumnStepVersion, SQL: taintColumnStepSQL}},
+		Name: "memory",
+		SQL:  schemaSQL,
+		Steps: []sqlite.Step{
+			{Version: taintColumnStepVersion, SQL: taintColumnStepSQL},
+			{Version: embeddingTableStepVersion, SQL: embeddingTableStepSQL},
+		},
 	}
 }

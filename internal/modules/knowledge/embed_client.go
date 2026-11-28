@@ -2,7 +2,6 @@ package knowledge
 
 import (
 	"context"
-	"strings"
 
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/embedding"
@@ -18,15 +17,7 @@ func (e *clientEmbedder) Embed(ctx context.Context, role EmbedRole, texts []stri
 }
 
 func ResolveEmbeddingCredential(ref secret.Ref) (string, bool) {
-	if ref.IsZero() {
-		return "", true
-	}
-	value, err := ref.Reference().Resolve()
-	value = strings.TrimSpace(value)
-	if err != nil || value == "" {
-		return "", false
-	}
-	return value, true
+	return embedding.ResolveCredential(ref)
 }
 
 type EmbeddingWiring struct {

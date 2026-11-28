@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/textsearch"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -156,25 +157,27 @@ type StoredHit struct {
 }
 
 type RecallRequest struct {
-	OwnerID      string
-	AgentIDs     []string
-	SessionID    string
-	Query        string
-	MaxDocuments int
-	TokenBudget  int
-	Before       time.Time
-	Now          time.Time
+	OwnerID        string
+	PrincipalClass principal.Class
+	AgentIDs       []string
+	SessionID      string
+	Query          string
+	MaxDocuments   int
+	TokenBudget    int
+	Before         time.Time
+	Now            time.Time
 }
 
 type SearchRequest struct {
-	OwnerID   string
-	AgentIDs  []string
-	SessionID string
-	Query     string
-	After     time.Time
-	Before    time.Time
-	Now       time.Time
-	Limit     int
+	OwnerID        string
+	PrincipalClass principal.Class
+	AgentIDs       []string
+	SessionID      string
+	Query          string
+	After          time.Time
+	Before         time.Time
+	Now            time.Time
+	Limit          int
 }
 
 type TaintMarksReader interface {
@@ -211,6 +214,7 @@ type RecallContext struct {
 	Provenance []ProvenanceRef
 	Trust      approval.TrustLabel
 	Tainted    bool
+	Mode       string
 }
 
 type SummaryModel struct {
@@ -244,13 +248,25 @@ type ServiceOptions struct {
 	RangeLiveWindow      int
 	TaintMarks           TaintMarksReader
 	Observer             Observer
+	EmbeddingEnabled     bool
+	Embedder             Embedder
+	Embedding            *EmbeddingSettings
+	SecretSource         SecretSource
+	Vectors              VectorStore
+	MaxVectorScanRows    int
 }
 
 type Service struct {
 	documents          DocumentStore
 	secrets            Secrets
+	secretSource       SecretSource
 	taintMarks         TaintMarksReader
 	observer           Observer
+	embeddingEnabled   bool
+	embedder           Embedder
+	embedding          *EmbeddingSettings
+	vectors            VectorStore
+	maxVectorScanRows  int
 	maxDocs            int
 	tokens             int
 	maxBytes           int
@@ -263,6 +279,7 @@ type Service struct {
 	secretDrops        atomic.Int64
 	projectionFailures atomic.Int64
 	projectMu          sync.Mutex
+	backfill           embedding.BackfillCursor
 }
 
 func NewService(documents DocumentStore, secrets Secrets, config *ServiceOptions) (*Service, error) {
@@ -314,20 +331,36 @@ func NewService(documents DocumentStore, secrets Secrets, config *ServiceOptions
 	if rangeThreshold <= 0 || rangeThreshold > maxRangeThreshold || rangeLiveWindow <= 0 || rangeLiveWindow > maxRangeLiveWindow {
 		return nil, fault.New(ErrorCodeBudgetInvalid, "range budget is not within bounds")
 	}
+	vectors := config.Vectors
+	if vectors == nil {
+		if vs, ok := documents.(VectorStore); ok {
+			vectors = vs
+		}
+	}
+	maxScan := config.MaxVectorScanRows
+	if maxScan <= 0 {
+		maxScan = maxVectorScanRows
+	}
 	return &Service{
-		documents:       documents,
-		secrets:         secrets,
-		taintMarks:      config.TaintMarks,
-		observer:        config.Observer,
-		maxDocs:         maxDocs,
-		tokens:          tokens,
-		maxBytes:        maxBytes,
-		summaryPrompt:   summaryPrompt,
-		summaryTTL:      summaryTTL,
-		fallbackDocs:    fallbackDocs,
-		fallbackTokens:  fallbackTokens,
-		rangeThreshold:  rangeThreshold,
-		rangeLiveWindow: rangeLiveWindow,
+		documents:         documents,
+		secrets:           secrets,
+		secretSource:      config.SecretSource,
+		taintMarks:        config.TaintMarks,
+		observer:          config.Observer,
+		embeddingEnabled:  config.EmbeddingEnabled,
+		embedder:          config.Embedder,
+		embedding:         config.Embedding,
+		vectors:           vectors,
+		maxVectorScanRows: maxScan,
+		maxDocs:           maxDocs,
+		tokens:            tokens,
+		maxBytes:          maxBytes,
+		summaryPrompt:     summaryPrompt,
+		summaryTTL:        summaryTTL,
+		fallbackDocs:      fallbackDocs,
+		fallbackTokens:    fallbackTokens,
+		rangeThreshold:    rangeThreshold,
+		rangeLiveWindow:   rangeLiveWindow,
 	}, nil
 }
 
@@ -481,35 +514,42 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if event != nil {
 		taintCtx = s.buildBatchTaintContext(ctx, nil, []*Event{event})
 	}
-	return s.projectEvent(ctx, ownerID, event, taintCtx)
+	doc, indexed, inserted, err := s.projectEvent(ctx, ownerID, event, taintCtx)
+	if err != nil {
+		return Document{}, false, err
+	}
+	if inserted {
+		s.embedDocumentBestEffort(ctx, doc.ID, doc.OwnerID, doc.Content)
+	}
+	return doc, indexed, nil
 }
 
-func (s *Service) projectEvent(ctx context.Context, ownerID string, event *Event, taintCtx *batchTaintContext) (Document, bool, error) {
+func (s *Service) projectEvent(ctx context.Context, ownerID string, event *Event, taintCtx *batchTaintContext) (doc Document, indexed, inserted bool, err error) {
 	if ctx == nil {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	if strings.TrimSpace(ownerID) == "" {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if event == nil {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event must not be nil")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "event must not be nil")
 	}
 	if event.SessionID == "" {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event session must not be empty")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "event session must not be empty")
 	}
 	if _, err := sequenceToDB(event.Sequence); err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	trust, indexable := trustFor(ownerID, event.Author, event.Kind)
 	if !indexable {
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	text, ok := extractText(event.Payload)
 	if !ok {
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	tainted := taintCtx.isEventTainted(ownerID, event)
 	return s.writeProjection(ctx, ownerID, &projection{
@@ -527,29 +567,29 @@ type projection struct {
 	createdAt time.Time
 }
 
-func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projection) (Document, bool, error) {
+func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projection) (doc Document, indexed, inserted bool, err error) {
 	from, err := sequenceToDB(p.from)
 	if err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	to, err := sequenceToDB(p.to)
 	if err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	text := p.text
 	if stripped, had := stripRecallEvidence(text); had {
 		if strings.TrimSpace(stripped) == "" {
-			return Document{}, false, nil
+			return Document{}, false, false, nil
 		}
 		text = stripped
 	}
 	content, ok := cleanText(text, s.maxBytes)
 	if !ok {
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	if s.secrets != nil && s.secrets.Contains(content) {
 		s.secretDrops.Add(1)
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	createdAt := p.createdAt.UTC()
 	if createdAt.IsZero() {
@@ -567,7 +607,7 @@ func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projec
 		Tainted:      p.tainted,
 		CreatedAt:    createdAt,
 	}
-	inserted, err := s.documents.UpsertDocument(ctx, &StoredDocument{
+	inserted, err = s.documents.UpsertDocument(ctx, &StoredDocument{
 		ID:           document.ID,
 		OwnerID:      document.OwnerID,
 		SessionID:    document.SessionID,
@@ -580,14 +620,14 @@ func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projec
 		CreatedAt:    document.CreatedAt,
 	})
 	if err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	if inserted && s.eventReopenedSummary(ctx, ownerID, p.sessionID, p.from) {
 		if _, err := s.documents.DeleteSessionSummaries(ctx, ownerID, p.sessionID); err != nil {
-			return Document{}, false, err
+			return Document{}, false, false, err
 		}
 	}
-	return document, true, nil
+	return document, true, inserted, nil
 }
 
 func (s *Service) eventReopenedSummary(ctx context.Context, ownerID, sessionID string, sequence uint64) bool {
@@ -619,23 +659,28 @@ func estimateTokens(content string) int {
 }
 
 func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocument, error) {
+	documents, _, err := s.recallWithMode(ctx, req)
+	return documents, err
+}
+
+func (s *Service) recallWithMode(ctx context.Context, req *RecallRequest) ([]RecallDocument, string, error) {
 	if ctx == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, ModeLexical, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, ModeLexical, err
 	}
 	if req == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "recall request must not be nil")
+		return nil, ModeLexical, fault.New(ErrorCodeInvalidArgument, "recall request must not be nil")
 	}
 	if strings.TrimSpace(req.OwnerID) == "" || strings.TrimSpace(req.SessionID) == "" {
-		return nil, fault.New(ErrorCodeQueryInvalid, "recall owner and session must not be empty")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "recall owner and session must not be empty")
 	}
 	if len(req.AgentIDs) == 0 || slices.Contains(req.AgentIDs, "") {
-		return nil, fault.New(ErrorCodeQueryInvalid, "recall readable personas must not be empty")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "recall readable personas must not be empty")
 	}
 	if len([]rune(req.Query)) == 0 || len([]rune(req.Query)) > maxQueryRunes {
-		return nil, fault.New(ErrorCodeQueryInvalid, "recall query is not within bounds")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "recall query is not within bounds")
 	}
 	maxDocs := req.MaxDocuments
 	if maxDocs == 0 {
@@ -646,9 +691,10 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 		tokens = s.tokens
 	}
 	if maxDocs < 0 || maxDocs > hardMaxDocuments || tokens <= 0 || tokens > hardMaxTokenBudget {
-		return nil, fault.New(ErrorCodeBudgetInvalid, "recall budget is not within bounds")
+		return nil, ModeLexical, fault.New(ErrorCodeBudgetInvalid, "recall budget is not within bounds")
 	}
-	hits, err := s.documents.Search(ctx, &StoredQuery{
+	queryVec, mode := s.prepareQueryVector(ctx, req.OwnerID, req.PrincipalClass, req.AgentIDs, "", time.Time{}, req.Before, req.Now, req.Query)
+	hits, mode, err := s.searchHybrid(ctx, &StoredQuery{
 		OwnerID:   req.OwnerID,
 		AgentIDs:  req.AgentIDs,
 		SessionID: req.SessionID,
@@ -657,15 +703,15 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 		Before:    req.Before,
 		Now:       req.Now,
 		Limit:     maxDocs,
-	})
+	}, queryVec, mode)
 	if err != nil {
-		return nil, err
+		return nil, mode, err
 	}
 	primary := make([]RecallDocument, 0, len(hits))
 	for i := range hits {
 		document, err := recallDocumentFromHit(&hits[i])
 		if err != nil {
-			return nil, err
+			return nil, mode, err
 		}
 		primary = append(primary, document)
 	}
@@ -681,9 +727,13 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 		documents = append(documents, primary[i])
 	}
 	if len(documents) < maxDocs && s.fallbackDocs > 0 && s.fallbackDocs <= hardMaxDocuments && s.fallbackTokens > 0 && s.fallbackTokens <= hardMaxTokenBudget {
-		documents = append(documents, s.recallFallback(ctx, req, maxDocs, documents)...)
+		extra, fallbackMode := s.recallFallback(ctx, req, maxDocs, documents, queryVec, mode)
+		documents = append(documents, extra...)
+		if fallbackMode == ModeLexicalFallback {
+			mode = ModeLexicalFallback
+		}
 	}
-	return documents, nil
+	return documents, mode, nil
 }
 
 func (s *Service) orderPrimary(ctx context.Context, sessionID string, primary []RecallDocument) []RecallDocument {
@@ -774,51 +824,58 @@ func truncateUTF8Bytes(text string, maxBytes int) string {
 }
 
 func (s *Service) Search(ctx context.Context, req *SearchRequest) ([]StoredHit, error) {
+	hits, _, err := s.SearchWithMode(ctx, req)
+	return hits, err
+}
+
+func (s *Service) SearchWithMode(ctx context.Context, req *SearchRequest) ([]StoredHit, string, error) {
 	if ctx == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+		return nil, ModeLexical, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
-		return nil, err
+		return nil, ModeLexical, err
 	}
 	if req == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "search request must not be nil")
+		return nil, ModeLexical, fault.New(ErrorCodeInvalidArgument, "search request must not be nil")
 	}
 	if strings.TrimSpace(req.OwnerID) == "" {
-		return nil, fault.New(ErrorCodeQueryInvalid, "search owner must not be empty")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "search owner must not be empty")
 	}
 	if slices.Contains(req.AgentIDs, "") {
-		return nil, fault.New(ErrorCodeQueryInvalid, "search readable personas must not contain empty ids")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "search readable personas must not contain empty ids")
 	}
 	if utf8.RuneCountInString(req.Query) == 0 || utf8.RuneCountInString(req.Query) > maxQueryRunes {
-		return nil, fault.New(ErrorCodeQueryInvalid, "search query is not within bounds")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "search query is not within bounds")
 	}
 	if len(textsearch.Tokenize(req.Query)) == 0 {
-		return nil, fault.New(ErrorCodeQueryInvalid, "search query carries no searchable terms")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "search query carries no searchable terms")
 	}
 	if !req.After.IsZero() && !req.Before.IsZero() && req.After.After(req.Before) {
-		return nil, fault.New(ErrorCodeQueryInvalid, "search after timestamp must not be after before timestamp")
+		return nil, ModeLexical, fault.New(ErrorCodeQueryInvalid, "search after timestamp must not be after before timestamp")
 	}
 	limit := req.Limit
 	if limit <= 0 || limit > maxSearchLimit {
-		return nil, fault.New(ErrorCodeInvalidArgument, "search limit is out of bounds")
+		return nil, ModeLexical, fault.New(ErrorCodeInvalidArgument, "search limit is out of bounds")
 	}
 	fetchLimit := limit
 	if s.secrets != nil {
 		fetchLimit = min(limit*2, maxSearchLimit*2)
 	}
-	hits, err := s.documents.Search(ctx, &StoredQuery{
+	sessionID := strings.TrimSpace(req.SessionID)
+	queryVec, mode := s.prepareQueryVector(ctx, req.OwnerID, req.PrincipalClass, req.AgentIDs, sessionID, req.After, req.Before, req.Now, req.Query)
+	hits, mode, err := s.searchHybrid(ctx, &StoredQuery{
 		OwnerID:   req.OwnerID,
 		AgentIDs:  req.AgentIDs,
-		SessionID: strings.TrimSpace(req.SessionID),
+		SessionID: sessionID,
 		Terms:     req.Query,
 		Mode:      MatchFallbackOR,
 		After:     req.After,
 		Before:    req.Before,
 		Now:       req.Now,
 		Limit:     fetchLimit,
-	})
+	}, queryVec, mode)
 	if err != nil {
-		return nil, err
+		return nil, mode, err
 	}
 	budget := s.tokens
 	used := 0
@@ -839,15 +896,17 @@ func (s *Service) Search(ctx context.Context, req *SearchRequest) ([]StoredHit, 
 		used += estimate
 		results = append(results, hit)
 	}
-	return results, nil
+	return results, mode, nil
 }
 
-func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDocs int, primary []RecallDocument) []RecallDocument {
+func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDocs int, primary []RecallDocument, queryVec []float32, mode string) (extra []RecallDocument, fallbackMode string) {
 	seen := make(map[string]struct{}, len(primary))
 	for i := range primary {
 		seen[primary[i].ID] = struct{}{}
 	}
-	hits, err := s.documents.Search(ctx, &StoredQuery{
+	var hits []StoredHit
+	var err error
+	hits, fallbackMode, err = s.searchHybrid(ctx, &StoredQuery{
 		OwnerID:  req.OwnerID,
 		AgentIDs: req.AgentIDs,
 		Terms:    req.Query,
@@ -855,11 +914,11 @@ func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDoc
 		Before:   req.Before,
 		Now:      req.Now,
 		Limit:    maxDocs + s.fallbackDocs,
-	})
+	}, queryVec, mode)
 	if err != nil {
-		return nil
+		return nil, fallbackMode
 	}
-	extra := make([]RecallDocument, 0, s.fallbackDocs)
+	extra = make([]RecallDocument, 0, s.fallbackDocs)
 	used := 0
 	for i := range hits {
 		if len(primary)+len(extra) >= hardMaxDocuments {
@@ -886,7 +945,7 @@ func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDoc
 			break
 		}
 	}
-	return extra
+	return extra, fallbackMode
 }
 
 func (s *Service) Watermark(ctx context.Context, sessionID string) (mark uint64, found bool, err error) {
@@ -922,17 +981,24 @@ func (s *Service) RebuildSession(ctx context.Context, ownerID, sessionID string,
 	}
 	taintCtx := s.buildBatchTaintContext(ctx, nil, events)
 	count := 0
+	var insertedDocs []Document
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
 			return count, err
 		}
-		_, indexed, err := s.projectEvent(ctx, ownerID, event, taintCtx)
+		doc, indexed, inserted, err := s.projectEvent(ctx, ownerID, event, taintCtx)
 		if err != nil {
 			return count, err
 		}
 		if indexed {
 			count++
 		}
+		if inserted {
+			insertedDocs = append(insertedDocs, doc)
+		}
+	}
+	for i := range insertedDocs {
+		s.embedDocumentBestEffort(ctx, insertedDocs[i].ID, insertedDocs[i].OwnerID, insertedDocs[i].Content)
 	}
 	return count, nil
 }
@@ -1075,7 +1141,7 @@ func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query strin
 }
 
 func (s *Service) RecallWithSummary(ctx context.Context, req *RecallRequest, model *SummaryModel, summarizer Summarizer) (RecallContext, error) {
-	documents, err := s.Recall(ctx, req)
+	documents, mode, err := s.recallWithMode(ctx, req)
 	if err != nil {
 		return RecallContext{}, err
 	}
@@ -1087,9 +1153,14 @@ func (s *Service) RecallWithSummary(ctx context.Context, req *RecallRequest, mod
 				break
 			}
 		}
-		return RecallContext{Query: req.Query, Documents: documents, Provenance: provenanceFor(documents), Tainted: anyTainted}, nil
+		return RecallContext{Query: req.Query, Documents: documents, Provenance: provenanceFor(documents), Tainted: anyTainted, Mode: mode}, nil
 	}
-	return s.Summarize(ctx, req.OwnerID, req.SessionID, req.Query, documents, model, summarizer)
+	res, err := s.Summarize(ctx, req.OwnerID, req.SessionID, req.Query, documents, model, summarizer)
+	if err != nil {
+		return RecallContext{}, err
+	}
+	res.Mode = mode
+	return res, nil
 }
 
 func (c *RecallContext) Evidence() *turn.UntrustedRecall {

@@ -58,6 +58,7 @@ func TestMemorySpanAllowedAttrs(t *testing.T) {
 	allowed := AllowedSpanAttrs(SpanMemoryRecall)
 	want := []string{
 		AttrRecallOutcome,
+		AttrRecallMode,
 		AttrRecallSummarized,
 		AttrRecallDocuments,
 		AttrRecallScreened,

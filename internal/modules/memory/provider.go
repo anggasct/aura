@@ -1,8 +1,8 @@
 package memory
 
 import (
+	"cmp"
 	"context"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
 	"time"
 
@@ -11,14 +11,16 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/ingress"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
 const SpanMemoryRecall = "memory_recall"
 
 const (
 	AttrRecallOutcome        = "aura.recall.outcome"
+	AttrRecallMode           = "aura.recall.mode"
 	AttrRecallSummarized     = "aura.recall.summarized"
 	AttrRecallDocuments      = "aura.recall.documents"
 	AttrRecallScreened       = "aura.recall.screened"
@@ -139,12 +141,13 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 	}
 	now := p.now().UTC()
 	result, err := p.service.RecallWithSummary(ctx, &RecallRequest{
-		OwnerID:   req.PrincipalID,
-		AgentIDs:  readable,
-		SessionID: req.SessionID,
-		Query:     query,
-		Before:    now,
-		Now:       now,
+		OwnerID:        req.PrincipalID,
+		PrincipalClass: req.PrincipalClass,
+		AgentIDs:       readable,
+		SessionID:      req.SessionID,
+		Query:          query,
+		Before:         now,
+		Now:            now,
 	}, p.model, p.summarizer)
 	if err != nil {
 		observation.Outcome = string(ErrorCodeUnavailable)
@@ -153,6 +156,7 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 		}
 		return nil, observation, err
 	}
+	observation.Mode = cmp.Or(result.Mode, ModeLexical)
 	summaryTainted := result.Tainted
 	screened := p.screen(&result)
 	observation.Screened = screened
@@ -226,6 +230,9 @@ func (p *Provider) emitSpan(ctx context.Context, observation *Observation) {
 		attribute.Int(AttrRecallDocuments, observation.Documents),
 		attribute.Int(AttrRecallScreened, observation.Screened),
 	)
+	if observation.Mode != "" {
+		span.SetAttributes(attribute.String(AttrRecallMode, observation.Mode))
+	}
 	if len(observation.Scores) > 0 {
 		span.SetAttributes(attribute.Float64Slice(AttrRecallScores, observation.Scores))
 	}

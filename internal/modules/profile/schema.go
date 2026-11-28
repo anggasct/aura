@@ -151,6 +151,26 @@ ALTER TABLE profile_fact ADD COLUMN taint_source TEXT;
 
 const taintSourceStepVersion = 35
 
+const embeddingTableStepSQL = `
+CREATE TABLE profile_embedding (
+    fact_id TEXT PRIMARY KEY REFERENCES profile_fact(id) ON DELETE CASCADE,
+    fingerprint TEXT NOT NULL,
+    content_sha256 TEXT NOT NULL,
+    vector BLOB NOT NULL,
+    created_at TEXT NOT NULL
+);
+
+CREATE INDEX profile_embedding_fp_idx ON profile_embedding(fingerprint);
+
+CREATE TRIGGER profile_embedding_cleanup_update AFTER UPDATE OF status, owner_verified, fact_key, fact_value ON profile_fact
+WHEN new.status != 'active' OR new.owner_verified != 1 OR new.fact_key != old.fact_key OR new.fact_value != old.fact_value
+BEGIN
+    DELETE FROM profile_embedding WHERE fact_id = new.id;
+END;
+`
+
+const embeddingTableStepVersion = 37
+
 func Schema() sqlite.SchemaOwner {
 	return sqlite.StaticSchema{
 		Name: "profile",
@@ -158,6 +178,7 @@ func Schema() sqlite.SchemaOwner {
 		Steps: []sqlite.Step{
 			{Version: agentOriginStepVersion, SQL: agentOriginStepSQL},
 			{Version: taintSourceStepVersion, SQL: taintSourceStepSQL},
+			{Version: embeddingTableStepVersion, SQL: embeddingTableStepSQL},
 		},
 	}
 }
