@@ -57,12 +57,77 @@ func TestScheduledWorkflowRefusesASinkAfterAWebStep(t *testing.T) {
 	}
 	for name, steps := range cases {
 		t.Run(name, func(t *testing.T) {
-			err := CheckUnattendedSinks(agentSpec("job", steps...), sinkDeps())
+			err := CheckUnattendedSinks(agentSpec("job", steps...), sinkDeps(), nil)
 			if !hasCode(err, ErrorCodeUnattendedSink) {
 				t.Errorf("CheckUnattendedSinks = %v, want %s", err, ErrorCodeUnattendedSink)
 			}
 		})
 	}
+}
+
+func catalogOf(specs ...*Spec) ChildLookup {
+	byID := map[string]*Spec{}
+	for _, spec := range specs {
+		byID[spec.ID] = spec
+	}
+	return func(id string) (*Spec, error) {
+		if spec, ok := byID[id]; ok {
+			return spec, nil
+		}
+		return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+id+" is not loaded")
+	}
+}
+
+func childStep(id, child string, dependsOn ...string) StepSpec {
+	step := sinkKindStep(id, KindWorkflow, dependsOn...)
+	step.Executor.WorkflowID = ptr(child)
+	return step
+}
+
+func namedSpec(id string, steps ...StepSpec) *Spec {
+	spec := agentSpec(id, steps...)
+	spec.ID = id
+	return spec
+}
+
+func TestScheduledWorkflowCheckSeesThroughChildWorkflows(t *testing.T) {
+	webChild := namedSpec("web-child", sinkWebAgent("research", "web_search"))
+	leakyChild := namedSpec("leaky-child", sinkWebAgent("research", "web_fetch"), after(sinkToolStep("send", "email_send"), "research"))
+	cleanChild := namedSpec("clean-child", sinkPlainAgent("write"))
+	cases := []struct {
+		name    string
+		root    *Spec
+		others  []*Spec
+		refused bool
+	}{
+		{"a sink after a child that holds a web step", namedSpec("p", childStep("child", "web-child"), after(sinkToolStep("send", "email_send"), "child")), []*Spec{webChild}, true},
+		{"a child whose own steps send after a web step", namedSpec("p", childStep("child", "leaky-child")), []*Spec{leakyChild}, true},
+		{"a child two levels down that sends after a web step", namedSpec("p", childStep("child", "mid")), []*Spec{namedSpec("mid", childStep("inner", "leaky-child")), leakyChild}, true},
+		{"a web step followed by a child", namedSpec("p", sinkWebAgent("research", "web_search"), childStep("child", "clean-child", "research")), []*Spec{cleanChild}, true},
+		{"a web child followed by a plain agent step", namedSpec("p", childStep("child", "web-child"), after(sinkPlainAgent("write"), "child")), []*Spec{webChild}, false},
+		{"a clean child followed by a sink", namedSpec("p", childStep("child", "clean-child"), after(sinkToolStep("send", "email_send"), "child")), []*Spec{cleanChild}, false},
+		{"a missing child", namedSpec("p", childStep("child", "ghost")), nil, true},
+		{"a workflow that starts itself", namedSpec("p", childStep("child", "p")), nil, true},
+		{"two workflows that start each other", namedSpec("p", childStep("child", "q")), []*Spec{namedSpec("q", childStep("back", "p"))}, true},
+		{"a deep chain that ends in a missing child", namedSpec("p", childStep("child", "mid")), []*Spec{namedSpec("mid", childStep("inner", "ghost"))}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := CheckUnattendedSinks(tc.root, sinkDeps(), catalogOf(append([]*Spec{tc.root}, tc.others...)...))
+			if tc.refused && !hasCode(err, ErrorCodeUnattendedSink) {
+				t.Errorf("CheckUnattendedSinks = %v, want an unattended sink refusal", err)
+			}
+			if !tc.refused && err != nil {
+				t.Errorf("CheckUnattendedSinks = %v, want accepted", err)
+			}
+		})
+	}
+	t.Run("a child that cannot be looked up at all", func(t *testing.T) {
+		root := namedSpec("p", childStep("child", "clean-child"))
+		if err := CheckUnattendedSinks(root, sinkDeps(), nil); !hasCode(err, ErrorCodeUnattendedSink) {
+			t.Errorf("CheckUnattendedSinks = %v, want an unattended sink refusal", err)
+		}
+	})
 }
 
 func TestTwoStepJobUsesPrivateContextWithoutSinks(t *testing.T) {
@@ -76,16 +141,16 @@ func TestTwoStepJobUsesPrivateContextWithoutSinks(t *testing.T) {
 	}
 	for name, steps := range cases {
 		t.Run(name, func(t *testing.T) {
-			if err := CheckUnattendedSinks(agentSpec("job", steps...), sinkDeps()); err != nil {
+			if err := CheckUnattendedSinks(agentSpec("job", steps...), sinkDeps(), nil); err != nil {
 				t.Errorf("CheckUnattendedSinks = %v, want the workflow allowed", err)
 			}
 		})
 	}
 	t.Run("the check needs a spec and the tool sets", func(t *testing.T) {
-		if err := CheckUnattendedSinks(nil, sinkDeps()); !hasCode(err, ErrorCodeInvalidArgument) {
+		if err := CheckUnattendedSinks(nil, sinkDeps(), nil); !hasCode(err, ErrorCodeInvalidArgument) {
 			t.Errorf("nil spec = %v", err)
 		}
-		if err := CheckUnattendedSinks(agentSpec("job"), nil); !hasCode(err, ErrorCodeInvalidArgument) {
+		if err := CheckUnattendedSinks(agentSpec("job"), nil, nil); !hasCode(err, ErrorCodeInvalidArgument) {
 			t.Errorf("nil deps = %v", err)
 		}
 	})
@@ -133,5 +198,98 @@ func TestScheduledWorkflowOfATaintedJobRunsTainted(t *testing.T) {
 				t.Errorf("run = %+v, %v, want tainted=%t", summary, err, tainted)
 			}
 		})
+	}
+}
+
+func TestScheduledStartChecksComposedChildren(t *testing.T) {
+	changed := testValidationDeps()
+	changed.SinkTools = []string{"read_file"}
+	cases := map[string]*Spec{
+		"a parent whose only step is the child":   composingSpec("top", "leaf"),
+		"a parent that sends after the child":     composedThenWrite("top", "leaf"),
+		"a parent that holds the child in a pair": composingSpec("top", "leaf", "leaf"),
+	}
+	for name, parent := range cases {
+		t.Run(name, func(t *testing.T) {
+			interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
+			if err := interpreter.Install(t.Context(), []*Spec{twoStepCeilingSpec("leaf")}, testValidationDeps()); err != nil {
+				t.Fatalf("Install the child: %v", err)
+			}
+			if err := interpreter.Install(t.Context(), []*Spec{parent}, testValidationDeps()); err != nil {
+				t.Fatalf("Install the parent: %v", err)
+			}
+			start := &ConfiguredStart{DefinitionID: "top", PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Scheduled: true}
+			if _, err := interpreter.StartConfigured(t.Context(), start); err != nil {
+				t.Fatalf("a scheduled start while the child has no web step: %v", err)
+			}
+			interpreter.setDeps(changed)
+			before := countRuns(t, disk)
+			if _, err := interpreter.StartConfigured(t.Context(), start); !hasCode(err, ErrorCodeUnattendedSink) {
+				t.Fatalf("a scheduled start once the child has a web step = %v, want %s", err, ErrorCodeUnattendedSink)
+			}
+			if countRuns(t, disk) != before {
+				t.Error("a refused scheduled start created a run")
+			}
+			unscheduled := *start
+			unscheduled.Scheduled = false
+			if _, err := interpreter.StartConfigured(t.Context(), &unscheduled); err != nil {
+				t.Errorf("an unscheduled start is refused for a rule that only binds scheduled runs: %v", err)
+			}
+		})
+	}
+}
+
+func composedThenWrite(id, child string) *Spec {
+	spec := composingSpec(id, child)
+	write := "write_file"
+	spec.Steps = append(spec.Steps, StepSpec{ID: "gate", DependsOn: []string{"childa"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
+	spec.Steps = append(spec.Steps, StepSpec{ID: "after", DependsOn: []string{"gate"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: &write, ToolArgs: json.RawMessage(`{"path":"a","content":"b"}`)}, Timeout: 5 * time.Second})
+	return spec
+}
+
+func TestChildOfAScheduledRunIsCheckedWhenItIsCreated(t *testing.T) {
+	interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
+	installAll(t, interpreter, toolSpec("leaf"), composingSpec("top", "leaf"))
+	start := func(scheduled bool) *RunSummary {
+		t.Helper()
+		summary, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "top", PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Scheduled: scheduled})
+		if err != nil {
+			t.Fatalf("StartConfigured: %v", err)
+		}
+		return summary
+	}
+	scheduled, plain := start(true), start(false)
+
+	changed := testValidationDeps()
+	changed.SinkTools = []string{"read_file"}
+	if err := interpreter.Install(t.Context(), []*Spec{twoStepCeilingSpec("leaf2")}, changed); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+	if _, err := interpreter.createChildRun(t.Context(), "leaf2", nil, scheduled.ID, &scheduled.Origin); !hasCode(err, ErrorCodeUnattendedSink) {
+		t.Errorf("a child of a scheduled run that reads then sends = %v, want %s", err, ErrorCodeUnattendedSink)
+	}
+	if _, err := interpreter.createChildRun(t.Context(), "leaf2", nil, plain.ID, &plain.Origin); err != nil {
+		t.Errorf("a child of an unscheduled run = %v, want it started", err)
+	}
+	if got := countLeafTwoRuns(t, disk, scheduled.ID); got != 0 {
+		t.Errorf("the refused child left %d runs", got)
+	}
+}
+
+func countLeafTwoRuns(t *testing.T, disk *Store, parentID string) int {
+	t.Helper()
+	var count int
+	if err := disk.db.QueryRowContext(t.Context(), `SELECT COUNT(*) FROM workflow_run WHERE parent_run_id = ? AND definition_id = 'leaf2'`, parentID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func TestDurableKeyPrefixOfScheduledRunsIsReserved(t *testing.T) {
+	interpreter, _, _ := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
+	installAll(t, interpreter, toolSpec("plain"))
+	_, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "plain", PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ScheduledKeyPrefix + "forged"})
+	if !hasCode(err, ErrorCodeInvalidArgument) {
+		t.Errorf("an unscheduled start under the scheduled prefix = %v, want %s", err, ErrorCodeInvalidArgument)
 	}
 }

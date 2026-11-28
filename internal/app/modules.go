@@ -2549,7 +2549,7 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 		Input:        &workflow.RunInput{Objective: input.Objective},
 		PrincipalID:  req.PrincipalID,
 		Class:        principal.ClassForPrincipal(req.PrincipalID),
-		DurableKey:   "sched-" + req.IdempotencyKey,
+		DurableKey:   req.IdempotencyKey,
 		Scheduled:    true,
 		Tainted:      req.TaintSource != "",
 	})
@@ -2685,7 +2685,8 @@ func notifyContentJSON(text string) string {
 }
 
 func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.DB, id string) error {
-	spec, err := scheduledWorkflowSpec(ctx, cfg, db, id)
+	source := &definitionSource{cfg: cfg, db: db}
+	spec, err := source.spec(ctx, id)
 	if err != nil {
 		return err
 	}
@@ -2693,11 +2694,17 @@ func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.
 	if err != nil {
 		return err
 	}
-	return operation.ModuleFailure[workflow.ErrorCode](workflow.CheckUnattendedSinks(spec, deps))
+	lookup := func(child string) (*workflow.Spec, error) { return source.spec(ctx, child) }
+	return operation.ModuleFailure[workflow.ErrorCode](workflow.CheckUnattendedSinks(spec, deps, lookup))
 }
 
-func scheduledWorkflowSpec(ctx context.Context, cfg *appconfig.Config, db *sql.DB, id string) (*workflow.Spec, error) {
-	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
+type definitionSource struct {
+	cfg *appconfig.Config
+	db  *sql.DB
+}
+
+func (s *definitionSource) spec(ctx context.Context, id string) (*workflow.Spec, error) {
+	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(s.cfg))
 	if err != nil {
 		return nil, err
 	}
@@ -2706,7 +2713,7 @@ func scheduledWorkflowSpec(ctx context.Context, cfg *appconfig.Config, db *sql.D
 			return specs[i], nil
 		}
 	}
-	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	runs, err := workflow.NewStore(s.db, turnstore.NewTurnStore(s.db))
 	if err != nil {
 		return nil, err
 	}

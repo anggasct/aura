@@ -5,22 +5,115 @@ import (
 	"slices"
 )
 
-func CheckUnattendedSinks(spec *Spec, deps *ValidationDeps) error {
+type ChildLookup func(id string) (*Spec, error)
+
+type sinkCheck struct {
+	deps     *ValidationDeps
+	lookup   ChildLookup
+	checking map[string]bool
+	walking  map[string]bool
+	hasWeb   map[string]bool
+}
+
+func CheckUnattendedSinks(spec *Spec, deps *ValidationDeps, lookup ChildLookup) error {
 	if spec == nil || deps == nil {
 		return codedError(ErrorCodeInvalidArgument, "the unattended sink check needs a spec and its tool sets")
 	}
+	check := &sinkCheck{deps: deps, lookup: lookup, checking: map[string]bool{}, walking: map[string]bool{}, hasWeb: map[string]bool{}}
+	return check.check(spec.ID, spec)
+}
+
+func (c *sinkCheck) refuse(format string, args ...any) error {
+	return codedError(ErrorCodeUnattendedSink, fmt.Sprintf(format, args...))
+}
+
+func (c *sinkCheck) child(step *StepSpec) (id string, spec *Spec, err error) {
+	id = deref(step.Executor.WorkflowID)
+	if c.lookup == nil {
+		return id, nil, c.refuse("step %q starts workflow %q, which cannot be read to check it", step.ID, id)
+	}
+	spec, err = c.lookup(id)
+	if err != nil || spec == nil {
+		return id, nil, c.refuse("step %q starts workflow %q, which cannot be read to check it", step.ID, id)
+	}
+	return id, spec, nil
+}
+
+func (c *sinkCheck) check(id string, spec *Spec) error {
+	if c.checking[id] {
+		return c.refuse("workflow %q starts itself, directly or through another workflow", id)
+	}
+	c.checking[id] = true
+	defer delete(c.checking, id)
 	conditions, err := parsedConditions(spec)
 	if err != nil {
 		return err
 	}
-	downstream := downstreamOfWebSteps(spec, deps, conditions)
+	web := make(map[string]bool, len(spec.Steps))
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
-		if downstream[step.ID] && !sinkFree(step, deps) {
-			return codedError(ErrorCodeUnattendedSink, fmt.Sprintf("step %q follows a web step and could send out; a scheduled workflow keeps only agent steps without web tools, tool steps that are neither sinks nor effectful, wait steps and approval steps after one", step.ID))
+		if step.Executor.Kind == KindWorkflow {
+			childID, childSpec, err := c.child(step)
+			if err != nil {
+				return err
+			}
+			if err := c.check(childID, childSpec); err != nil {
+				return err
+			}
+		}
+		isWeb, err := c.webStep(step)
+		if err != nil {
+			return err
+		}
+		web[step.ID] = isWeb
+	}
+	downstream := downstreamOfWebSteps(spec, web, conditions)
+	for index := range spec.Steps {
+		step := &spec.Steps[index]
+		if downstream[step.ID] && !sinkFree(step, c.deps) {
+			return c.refuse("step %q follows a web step and could send out; a scheduled workflow keeps only agent steps without web tools, tool steps that are neither sinks nor effectful, wait steps and approval steps after one", step.ID)
 		}
 	}
 	return nil
+}
+
+func (c *sinkCheck) webStep(step *StepSpec) (bool, error) {
+	switch step.Executor.Kind {
+	case KindAgent:
+		return hasWebTool(step), nil
+	case KindTool:
+		return slices.Contains(c.deps.SinkTools, deref(step.Executor.ToolID)), nil
+	case KindWorkflow:
+		id, spec, err := c.child(step)
+		if err != nil {
+			return false, err
+		}
+		return c.containsWeb(id, spec)
+	case KindWait, KindApproval:
+		return false, nil
+	}
+	return false, nil
+}
+
+func (c *sinkCheck) containsWeb(id string, spec *Spec) (bool, error) {
+	if known, done := c.hasWeb[id]; done {
+		return known, nil
+	}
+	if c.walking[id] {
+		return false, c.refuse("workflow %q starts itself, directly or through another workflow", id)
+	}
+	c.walking[id] = true
+	defer delete(c.walking, id)
+	found := false
+	for index := range spec.Steps {
+		isWeb, err := c.webStep(&spec.Steps[index])
+		if err != nil {
+			return false, err
+		}
+		found = found || isWeb
+	}
+	c.hasWeb[id] = found
+	return found, nil
 }
 
 func parsedConditions(spec *Spec) (map[string]*condition, error) {
@@ -39,25 +132,7 @@ func parsedConditions(spec *Spec) (map[string]*condition, error) {
 	return conditions, nil
 }
 
-func isWebStep(step *StepSpec, deps *ValidationDeps) bool {
-	switch step.Executor.Kind {
-	case KindAgent:
-		return hasWebTool(step)
-	case KindTool:
-		return slices.Contains(deps.SinkTools, deref(step.Executor.ToolID))
-	case KindWait, KindApproval, KindWorkflow:
-		return false
-	}
-	return false
-}
-
-func downstreamOfWebSteps(spec *Spec, deps *ValidationDeps, conditions map[string]*condition) map[string]bool {
-	web := make(map[string]bool, len(spec.Steps))
-	for index := range spec.Steps {
-		if isWebStep(&spec.Steps[index], deps) {
-			web[spec.Steps[index].ID] = true
-		}
-	}
+func downstreamOfWebSteps(spec *Spec, web map[string]bool, conditions map[string]*condition) map[string]bool {
 	downstream := make(map[string]bool, len(spec.Steps))
 	for changed := true; changed; {
 		changed = false

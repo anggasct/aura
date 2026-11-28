@@ -45,11 +45,89 @@ steps:
     executor: { kind: tool, tool: read_file, args: { path: notes.txt } }
 `
 
+const webOnlyWorkflowYAML = `id: webonly
+version: 1
+goal: Search the web
+source: defined
+steps:
+  - id: search
+    timeout: 1m
+    executor: { kind: tool, tool: web_search, args: { query: releases } }
+`
+
+const wrapperWorkflowYAML = `id: wrapper
+version: 1
+goal: Only run a child
+source: composed
+steps:
+  - id: inner
+    timeout: 1m
+    executor: { kind: workflow, workflow: leaky }
+`
+
+const sendAfterChildWorkflowYAML = `id: sendafter
+version: 1
+goal: Run a child that reads the web, then write a file
+source: composed
+steps:
+  - id: inner
+    timeout: 1m
+    executor: { kind: workflow, workflow: webonly }
+  - id: gate
+    timeout: 1m
+    depends_on: [inner]
+    executor: { kind: approval }
+  - id: save
+    timeout: 1m
+    depends_on: [gate]
+    executor: { kind: tool, tool: write_file, args: { path: notes.txt, content: x } }
+`
+
+const loopingWorkflowYAML = `id: looping
+version: 1
+goal: Run itself
+source: composed
+steps:
+  - id: inner
+    timeout: 1m
+    executor: { kind: workflow, workflow: looping }
+`
+
+const orphanWorkflowYAML = `id: orphan
+version: 1
+goal: Run a child that does not exist
+source: composed
+steps:
+  - id: inner
+    timeout: 1m
+    executor: { kind: workflow, workflow: ghost }
+`
+
+const cleanParentWorkflowYAML = `id: cleanparent
+version: 1
+goal: Run a child that only reads
+source: composed
+steps:
+  - id: inner
+    timeout: 1m
+    executor: { kind: workflow, workflow: later }
+`
+
+const laterWorkflowYAML = `id: later
+version: 1
+goal: Only read a file
+source: defined
+steps:
+  - id: read
+    timeout: 1m
+    executor: { kind: tool, tool: read_file, args: { path: notes.txt } }
+`
+
 func scheduledWorkflowFixture(t *testing.T) *GlobalFlags {
 	t.Helper()
 	gf := writeWorkflowFixtures(t, "")
 	definitions := filepath.Join(filepath.Dir(gf.ConfigPath), "workflows")
-	for name, content := range map[string]string{"leaky.yaml": unsafeWorkflowYAML, "tidy.yaml": safeWorkflowYAML} {
+	for name, content := range map[string]string{"leaky.yaml": unsafeWorkflowYAML, "tidy.yaml": safeWorkflowYAML, "webonly.yaml": webOnlyWorkflowYAML, "wrapper.yaml": wrapperWorkflowYAML, "sendafter.yaml": sendAfterChildWorkflowYAML, "looping.yaml": loopingWorkflowYAML, "orphan.yaml": orphanWorkflowYAML, "cleanparent.yaml": cleanParentWorkflowYAML, "later.yaml": laterWorkflowYAML} {
 		if err := os.WriteFile(filepath.Join(definitions, name), []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
@@ -69,6 +147,51 @@ func TestCronAddRefusesAScheduledWorkflowWithASinkAfterAWebStep(t *testing.T) {
 	}
 	if out, err := cronAddWorkflow(t, gf, "tidy"); err != nil || !strings.Contains(out, "id: ") {
 		t.Fatalf("cron add of a sink-free workflow = %q, %v, want it scheduled", out, err)
+	}
+}
+
+func TestCronAddSeesThroughChildWorkflows(t *testing.T) {
+	gf := scheduledWorkflowFixture(t)
+	for name, target := range map[string]string{
+		"a parent whose only step is a child that sends after the web": "wrapper",
+		"a sink after a child that reads the web":                      "sendafter",
+		"a workflow that starts itself":                                "looping",
+		"a child that does not exist":                                  "orphan",
+	} {
+		if _, err := cronAddWorkflow(t, gf, target); err == nil || !strings.Contains(err.Error(), string(workflow.ErrorCodeUnattendedSink)) {
+			t.Errorf("cron add of %s = %v, want %s", name, err, workflow.ErrorCodeUnattendedSink)
+		}
+	}
+	if out, err := cronAddWorkflow(t, gf, "cleanparent"); err != nil || !strings.Contains(out, "id: ") {
+		t.Fatalf("cron add of a parent with a clean child = %q, %v, want it scheduled", out, err)
+	}
+}
+
+func TestCronConfirmCatchesAChildChangedAfterTheJobWasAdded(t *testing.T) {
+	gf := scheduledWorkflowFixture(t)
+	db := openAccessDB(t, gf.ConfigPath)
+	jobs, err := schedule.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := jobs.InsertJob(t.Context(), &schedule.Job{
+		ID: "job_000000000000000b", Name: "legacy", CronExpression: "0 3 * * 1", Timezone: "UTC", WorkflowID: "cleanparent",
+		OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: schedule.OverlapSkip,
+		State: schedule.JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
+		Tainted: true, TaintSource: "a webhook", Context: schedule.ContextFull,
+	}); err != nil {
+		t.Fatalf("InsertJob: %v", err)
+	}
+	if out, err := runScheduleCommand(t, gf, "confirm", "job_000000000000000b"); err != nil || !strings.Contains(out, "confirm with:") {
+		t.Fatalf("cron confirm while the child only reads = %q, %v, want a preview", out, err)
+	}
+	changed := strings.NewReplacer("id: leaky", "id: later").Replace(unsafeWorkflowYAML)
+	if err := os.WriteFile(filepath.Join(filepath.Dir(gf.ConfigPath), "workflows", "later.yaml"), []byte(changed), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := runScheduleCommand(t, gf, "confirm", "job_000000000000000b"); err == nil || !strings.Contains(err.Error(), string(workflow.ErrorCodeUnattendedSink)) {
+		t.Fatalf("cron confirm after the child changed = %v, want %s", err, workflow.ErrorCodeUnattendedSink)
 	}
 }
 

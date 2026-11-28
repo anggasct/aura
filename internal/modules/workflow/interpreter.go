@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -299,6 +300,8 @@ func (i *Interpreter) StartApproved(ctx context.Context, proposalID string, inpu
 	return i.start(ctx, &startRequest{definitionID: approval.DefinitionID, input: input, origin: origin, durableKey: newID("dur"), claimProposalID: proposalID})
 }
 
+const ScheduledKeyPrefix = "scheduled/"
+
 type ConfiguredStart struct {
 	DefinitionID string
 	Input        *RunInput
@@ -314,6 +317,11 @@ func (i *Interpreter) StartConfigured(ctx context.Context, start *ConfiguredStar
 		return nil, codedError(ErrorCodeInvalidArgument, "configured start must not be nil")
 	}
 	durableKey := start.DurableKey
+	if start.Scheduled {
+		durableKey = ScheduledKeyPrefix + cmp.Or(durableKey, newID("dur"))
+	} else if strings.HasPrefix(durableKey, ScheduledKeyPrefix) {
+		return nil, codedError(ErrorCodeInvalidArgument, "the durable key prefix "+ScheduledKeyPrefix+" is reserved for scheduled runs")
+	}
 	if durableKey == "" {
 		durableKey = newID("dur")
 	} else {
@@ -360,7 +368,7 @@ func (i *Interpreter) start(ctx context.Context, req *startRequest) (*RunSummary
 		runOrigin.AgentID = configuredAgent(compiled.spec, approval)
 	}
 	if req.scheduled {
-		if err := CheckUnattendedSinks(compiled.spec, i.ValidationDeps()); err != nil {
+		if err := CheckUnattendedSinks(compiled.spec, i.ValidationDeps(), i.childLookup()); err != nil {
 			return nil, err
 		}
 	}
