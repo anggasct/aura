@@ -74,7 +74,7 @@ func Catalog() operation.Catalog {
 				Risk: operation.RiskDestructive, Commit: operation.CommitTransactional, Preview: true, Needs: needs,
 				Description: "Deletes recall documents of one session, one document by id, or the ones a query finds, across every persona; exactly one of session, id and query is required. The preview lists the documents that would be deleted and the delete removes exactly those. Conversation history is not touched.",
 				Texts: []operation.SurfaceText{
-					{Surface: operation.SurfaceAgent, Text: "Deletes recall documents of your own persona: of one session, one document by id, or the ones a query finds; exactly one of session, id and query is required. The owner sees the documents that would be deleted on a card and the delete removes exactly those. Memory of another persona is out of reach and conversation history is not touched."},
+					{Surface: operation.SurfaceAgent, Text: "Deletes recall documents of your own persona: of one session, one document by id, or the ones a query finds; exactly one of session, id and query is required. The owner sees the documents that would be deleted on a card and the delete removes exactly those. The card lists up to 20 documents with their session and persona, and a card that cannot list every document is refused instead of shortened: set limit to a smaller number and delete in batches. Memory of another persona is out of reach and conversation history is not touched."},
 				},
 				Params: []operation.Param{
 					sessionParam("forget every document of this session id"),

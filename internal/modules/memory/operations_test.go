@@ -620,3 +620,32 @@ func TestUntrustedMemoryContentIsEscapedOnTheCLIForInspectAndThePreview(t *testi
 		t.Errorf("inspect did not show the escaped direction control:\n%s", out)
 	}
 }
+
+func TestAnOversizedForgetCardIsAvoidedByDeletingInBatchesWithLimit(t *testing.T) {
+	rig := newOpsRig(t)
+	addBulk(t, rig, 30)
+	before := len(rig.documentIDs(t))
+
+	outcome := rig.tool("memory.forget", `{"session":"`+memorytest.FirstSession+`","limit":10}`)
+
+	requireOK(t, outcome)
+	if after := len(rig.documentIDs(t)); after != before-10 {
+		t.Errorf("documents = %d, want a batch of 10 removed from %d", after, before)
+	}
+}
+
+func TestTheAgentDescriptionOfForgetTellsHowToAvoidARefusedCard(t *testing.T) {
+	rig := newOpsRig(t)
+	for _, registration := range rig.Registry.Tools() {
+		if registration.Definition.Name != operation.ToolName("memory.forget") {
+			continue
+		}
+		for _, want := range []string{"refused", "limit", "batches"} {
+			if !strings.Contains(registration.Definition.Description, want) {
+				t.Errorf("the description lacks %q: %s", want, registration.Definition.Description)
+			}
+		}
+		return
+	}
+	t.Fatal("the memory.forget tool is not registered")
+}
