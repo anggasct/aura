@@ -69,8 +69,26 @@ type surfaceFiles struct {
 	sessionID string
 }
 
-func (r *Registry) filesFor(caller *Caller) FileAuthority {
+func (r *Registry) filesFor(caller *Caller) *surfaceFiles {
 	return &surfaceFiles{deps: r.files, ownerOnly: caller.Surface == SurfaceAgent, hostPaths: caller.Surface == SurfaceCLI, noFiles: caller.Surface == SurfaceChat, sessionID: caller.SessionID}
+}
+
+// refuseUnresolvedPaths fails a call closed before its handler runs when this
+// platform cannot resolve a workspace source at all, so the handler never
+// receives a file the kernel could not open.
+func (f *surfaceFiles) refuseUnresolvedPaths(paths map[string]string) error {
+	if f.deps == nil || workspace.Supported() {
+		return nil
+	}
+	for _, source := range paths {
+		switch {
+		case strings.Contains(source, "://"), strings.HasPrefix(source, artifactPrefix):
+			continue
+		case strings.HasPrefix(source, workspacePrefix), !f.hostPaths:
+			return wrapError(ErrorCodeSourceUnavailable, "the file cannot be opened", workspace.ErrUnsupported())
+		}
+	}
+	return nil
 }
 
 func (f *surfaceFiles) Open(ctx context.Context, source string) (File, error) {
