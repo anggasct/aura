@@ -53,7 +53,7 @@ func engineCommandDispatcher(t *testing.T, engine *Engine) *command.Dispatcher {
 	if err != nil {
 		t.Fatalf("command.New: %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{
 		Sessions: noopCommandSessions{},
 		Turns:    engineCancelTurns{engine: engine},
 	}, nil)

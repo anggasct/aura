@@ -25,7 +25,7 @@ func (c *Console) buildCommands() error {
 	if err != nil {
 		return err
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{
 		Sessions: consoleSessions{console: c},
 		Turns:    idleTurns{},
 		Skills:   c.skills,

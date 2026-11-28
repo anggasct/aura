@@ -6,6 +6,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -46,6 +47,9 @@ func (d *Dispatcher) planOperation(call *operationCall) (plan OperationPlan, tok
 		return OperationPlan{Refusal: &refusal}, nil
 	}
 	if !permits(def.Audience, caller.Class) {
+		if call.binding.Style == StyleMessenger {
+			return refuse(ErrorCodeDenied, d.message(caller.AgentID, agent.MessageCommandDenied))
+		}
 		return refuse(ErrorCodeDenied, ReplyDenied)
 	}
 	if !caller.Direct {
@@ -131,6 +135,9 @@ func (d *Dispatcher) Resume(ctx context.Context, req *ResumeRequest) (result Res
 	}
 	call, ok := d.operationCallFor(req.Caller, req.Invocation)
 	if !ok {
+		if b, bound := d.registry.binding(req.Caller.Channel); bound {
+			return d.unknownReply(req.Caller, req.Invocation, b.binding.Style), false
+		}
 		return unknown(req.Invocation), false
 	}
 	ctx, finish := d.start(ctx, call.def.Name, req.Caller)

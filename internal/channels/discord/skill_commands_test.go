@@ -93,7 +93,7 @@ func TestDiscordSkillFailuresReplyWithoutATurn(t *testing.T) {
 	want := []sentReply{
 		{channel: "555", content: "Skill missing is not available."},
 		{channel: "555", content: command.ReplyDenied},
-		{channel: "555", content: "usage: /skill <name> [request…]"},
+		{channel: "555", content: "Usage: /skill <name> [request…]"},
 	}
 	if got := f.replies(t); !slices.Equal(got, want) {
 		t.Fatalf("replies =\n%+v\nwant\n%+v", got, want)
@@ -114,7 +114,7 @@ func TestDiscordSkillCreateStagesADraft(t *testing.T) {
 	f.admit(t, dmMessage("8831", "111", "/skill-create notes"))
 	want := []sentReply{
 		{channel: "555", content: "draft local/notes@0123456789ab\ndigest 0123456789abcdef\nreview with: aura skills review local/notes@0123456789ab"},
-		{channel: "555", content: "usage: /skill-create <name> <description…>"},
+		{channel: "555", content: "Usage: /skill-create <name> <description…>"},
 	}
 	if got := f.replies(t); !slices.Equal(got, want) {
 		t.Fatalf("replies =\n%+v\nwant\n%+v", got, want)

@@ -46,7 +46,7 @@ func operationDispatcher(t *testing.T, ops *fakeOperations, interactive bool) *D
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	ports := &spyPorts{}
-	dispatcher, err := NewDispatcher(registry, Ports{Sessions: ports, Turns: ports, Skills: ports, Operations: ops}, nil)
+	dispatcher, err := NewDispatcher(registry, &Ports{Sessions: ports, Turns: ports, Skills: ports, Operations: ops}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

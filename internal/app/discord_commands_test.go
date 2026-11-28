@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/access"
 	"github.com/anggasct/aura/internal/channels/terminal"
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -58,7 +59,7 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 		t.Fatalf("command.New: %v", err)
 	}
 	ports := parityPorts{}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: ports, Turns: ports, Skills: ports}, nil)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: ports, Turns: ports, Skills: ports}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -87,7 +88,10 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 		if text == "/help" {
 			continue
 		}
-		if !slices.Equal(results["terminal"], results["discord dm"]) || !slices.Equal(results["terminal"], results["discord thread"]) {
+		if !slices.Equal(results["discord dm"], results["discord thread"]) {
+			t.Errorf("%s discord results diverge: %q", text, results)
+		}
+		if strings.HasPrefix(text, "/skill") && !slices.Equal(results["terminal"], results["discord dm"]) {
 			t.Errorf("%s results diverge: %q", text, results)
 		}
 		if len(turns) != 0 && len(turns) != len(callers) {
@@ -293,6 +297,66 @@ func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	}
 	if draft, err := skills.StageDraft(t.Context(), "notes", "body"); err != nil || draft.ID != "local/notes@0123456789ab" {
 		t.Errorf("bound StageDraft = %+v, %v", draft, err)
+	}
+}
+
+func TestChatCommandDispatcherLocalizesRepliesFromRegistry(t *testing.T) {
+	registry, err := auraagent.Build([]auraagent.Persona{{
+		ID:           "kuma",
+		Name:         "Kuma",
+		Description:  "Helper",
+		Instructions: "Help.",
+		Messages:     map[string]string{auraagent.MessageCommandNew: "Siap, obrolan baru."},
+	}}, nil, nil, nil, auraagent.MessageLanguageID)
+	if err != nil {
+		t.Fatalf("agent.Build: %v", err)
+	}
+	sessions, events, pointers, _ := newCommandStore(t)
+	key := "main/telegram:owner/chat:1"
+	seedCommandSession(t, sessions, key, principal.OwnerID, "main")
+	kumaKey := "kuma/telegram:owner/chat:1"
+	seedCommandSession(t, sessions, kumaKey, principal.OwnerID, "kuma")
+
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{
+		sessions: sessions,
+		events:   events,
+		pointers: pointers,
+		turns:    &deferredCommandTurns{},
+		skills:   &deferredCommandSkills{},
+		texts:    commandTexts{registry: registry},
+		recorder: wireRecorder{},
+	})
+	if err != nil {
+		t.Fatalf("newChatCommandDispatcher: %v", err)
+	}
+
+	exec := func(agentID, sessionID, text string) []string {
+		inv, ok := command.Parse(text)
+		if !ok {
+			t.Fatalf("Parse(%q)", text)
+		}
+		return dispatcher.Execute(t.Context(), &command.Caller{
+			Channel:         principal.ChannelTelegram,
+			PrincipalID:     principal.OwnerID,
+			Class:           principal.ClassOwner,
+			ConversationKey: sessionID,
+			SessionID:       sessionID,
+			AgentID:         agentID,
+			Direct:          true,
+		}, &inv).Lines
+	}
+
+	if got := exec("main", key, "/status"); !slices.Equal(got, []string{"Persona: Aura", "Tidak ada yang sedang berjalan."}) {
+		t.Errorf("main /status = %q", got)
+	}
+	if got := exec("main", key, "/new"); !slices.Equal(got, []string{"Percakapan baru dimulai."}) {
+		t.Errorf("main /new = %q", got)
+	}
+	if got := exec("kuma", kumaKey, "/new"); !slices.Equal(got, []string{"Siap, obrolan baru."}) {
+		t.Errorf("kuma /new = %q", got)
+	}
+	if got := exec("ghost", key, "/status"); !slices.Equal(got, []string{"Persona: ghost", "Nothing is running."}) {
+		t.Errorf("ghost /status = %q", got)
 	}
 }
 

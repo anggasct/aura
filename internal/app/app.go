@@ -1221,6 +1221,7 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 		turns:      s.commandTurns,
 		skills:     s.commandSkills,
 		operations: s.commandOperations,
+		texts:      commandTexts{registry: b.registry},
 		recorder:   commandRecorder,
 		catalogs:   enabledOperationCatalogs(cfg),
 	})

@@ -21,9 +21,13 @@ import (
 type commandSessions struct {
 	mu      sync.Mutex
 	created []string
+	queried []string
 }
 
-func (s *commandSessions) EventCount(context.Context, string) (int, error) {
+func (s *commandSessions) EventCount(_ context.Context, sessionID string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.queried = append(s.queried, sessionID)
 	return 3, nil
 }
 
@@ -43,6 +47,12 @@ func (s *commandSessions) createdSessions() []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.created)
+}
+
+func (s *commandSessions) queriedSessions() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.queried)
 }
 
 type pinningSkills struct{}
@@ -67,7 +77,7 @@ func newCommandRig(t *testing.T, opts accessOpts) *commandRig {
 		t.Fatalf("command.New: %v", err)
 	}
 	sessions := &commandSessions{}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: sessions, Skills: pinningSkills{}}, nil)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: sessions, Skills: pinningSkills{}}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -95,14 +105,15 @@ func commandEntity(item update, token string) update {
 
 func TestCommandsRunInAPrivateChat(t *testing.T) {
 	rig := newCommandRig(t, accessOpts{})
+	sessionID := "main/telegram:pocket/chat:" + strconv.Itoa(ownerUserID)
 	cases := []struct {
 		name string
 		text string
 		want string
 	}{
 		{"help lists the command set", "/help", "commands:"},
-		{"status shows the session", "/status", "session main/telegram:pocket/chat:" + strconv.Itoa(ownerUserID)},
-		{"new starts a session", "/new", "new session main/telegram:pocket/chat:" + strconv.Itoa(ownerUserID) + "~fresh"},
+		{"status shows the persona and state without raw ids", "/status", "Persona: main\nNothing is running."},
+		{"new starts a fresh conversation without raw ids", "/new", "Started a new conversation."},
 		{"command word is case insensitive", "/Help", "commands:"},
 	}
 	for i, tc := range cases {
@@ -113,6 +124,9 @@ func TestCommandsRunInAPrivateChat(t *testing.T) {
 			replies := sentTo(rig.h.api, ownerUserID)
 			if len(replies) != before+1 || !strings.Contains(replies[before], tc.want) {
 				t.Fatalf("replies = %q, want one more containing %q", replies, tc.want)
+			}
+			if strings.Contains(replies[before], sessionID) {
+				t.Errorf("reply %q leaked session id %q", replies[before], sessionID)
 			}
 		})
 	}
@@ -141,6 +155,9 @@ func TestNewCommandCreatesASessionPerConversation(t *testing.T) {
 	want := "main/telegram:pocket/chat:" + strconv.Itoa(ownerUserID) + "~fresh"
 	if got := rig.sessions.createdSessions(); !slices.Equal(got, []string{want}) {
 		t.Errorf("created sessions = %v, want %v", got, want)
+	}
+	if replies := sentTo(rig.h.api, ownerUserID); !slices.Equal(replies, []string{"Started a new conversation."}) {
+		t.Errorf("replies = %q, want localized new-conversation reply", replies)
 	}
 }
 
@@ -217,6 +234,18 @@ func TestStartStaysThePairingEntryAndIsNotACommand(t *testing.T) {
 }
 
 func TestForgetMeBehavesTheSameThroughTheDispatcher(t *testing.T) {
+	t.Run("bare command asks for confirmation", func(t *testing.T) {
+		eraser := &fakeEraser{}
+		rig := newCommandRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
+		rig.handle(t, privateText(10, allowedUserID, "/forgetme"))
+		rig.assertQuiet(t)
+		if len(eraser.erased()) != 0 {
+			t.Errorf("erased before confirmation: %v", eraser.erased())
+		}
+		if got := sentTo(rig.h.api, allowedUserID); !slices.Equal(got, []string{personaMessage(auraagent.MessageForgetmeConfirm)}) {
+			t.Errorf("reply = %q, want forgetme_confirm", got)
+		}
+	})
 	t.Run("confirmation erases the sender", func(t *testing.T) {
 		eraser := &fakeEraser{}
 		rig := newCommandRig(t, accessOpts{allowed: []string{strconv.Itoa(allowedUserID)}, settings: access.Settings{Erasure: eraser}})
@@ -300,8 +329,12 @@ func TestGroupCommandsNeedTheBotSuffix(t *testing.T) {
 		if len(sends) != 1 || sends[0]["message_thread_id"] != float64(forumTopic) || sends[0]["chat_id"] != float64(groupChatID) {
 			t.Fatalf("sends = %v, want one reply inside the topic", sends)
 		}
-		if text, _ := sends[0]["text"].(string); !strings.Contains(text, "chat:"+strconv.Itoa(groupChatID)+"/topic:"+strconv.Itoa(forumTopic)) {
-			t.Errorf("reply = %q, want the topic conversation", text)
+		if text, _ := sends[0]["text"].(string); text != "Persona: main\nNothing is running." {
+			t.Errorf("reply = %q, want localized status", text)
+		}
+		wantTopic := "chat:" + strconv.Itoa(groupChatID) + "/topic:" + strconv.Itoa(forumTopic)
+		if queried := rig.sessions.queriedSessions(); len(queried) != 1 || !strings.Contains(queried[0], wantTopic) {
+			t.Errorf("queried sessions = %v, want topic %q", queried, wantTopic)
 		}
 	})
 	t.Run("a command for another bot is not addressed to this one", func(t *testing.T) {
