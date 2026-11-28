@@ -678,6 +678,7 @@ type build struct {
 	broker     *toolbroker.Broker
 	clock      durable.Clock
 	bindings   []operation.Binding
+	behaviors  []operation.Behavior
 	artifacts  storage.ArtifactStore
 	builtin    *runtimeadk.BrokerExecutor
 	routeModel func(route string) (string, error)
@@ -1347,6 +1348,9 @@ func (b *build) buildTurnRuntime() error {
 			execOpts = append(execOpts, runtimeadk.WithBuiltinToolExecutor(b.builtin))
 		}
 	}
+	if !b.onServer() && b.chat != nil && b.chat.approvals == nil {
+		execOpts = append(execOpts, runtimeadk.WithUnattendedTerminal())
+	}
 	executor, err := runtimeadk.NewADKExecutor(
 		"aura", b.primaryModel(), b.models, b.sessions, broker, nil, b.logger, execOpts...,
 	)
@@ -1572,7 +1576,18 @@ func (b *build) buildOperations() error {
 	if err := b.broker.RegisterProvider(registry); err != nil {
 		return err
 	}
-	return nil
+	discovery, err := operation.NewDiscovery(&operation.DiscoveryDeps{
+		Registry:     registry,
+		Behaviors:    b.behaviors,
+		Capabilities: b.result.CapabilityReport.Active(),
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.broker.RegisterProvider(discovery); err != nil {
+		return err
+	}
+	return b.executor.BindOperations(discovery)
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {
