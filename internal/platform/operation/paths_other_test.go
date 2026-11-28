@@ -29,7 +29,7 @@ func TestTheKernelRefusesWorkspacePathsWithoutLinux(t *testing.T) {
 	if !fault.HasCode(err, operation.ErrorCodeSourceUnavailable) || !fault.HasCode(err, workspace.ErrorCodeUnsupported) {
 		t.Fatalf("Invoke = %v, want %s wrapping %s", err, operation.ErrorCodeSourceUnavailable, workspace.ErrorCodeUnsupported)
 	}
-	if seen.HasFile {
-		t.Error("the handler received a file although workspace access is unsupported")
+	if seen.file != nil || seen.Body != "" {
+		t.Error("the handler opened a file although workspace access is unsupported")
 	}
 }
