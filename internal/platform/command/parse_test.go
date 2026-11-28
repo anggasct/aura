@@ -1,10 +1,11 @@
 package command
 
 import (
-	"errors"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func TestParseRecognizesOnlyLeadingCommandTokens(t *testing.T) {
@@ -88,19 +89,19 @@ func TestTokenizeRefusesWhatItCannotReadWithinItsBounds(t *testing.T) {
 	tests := []struct {
 		name string
 		text string
-		want error
+		want ErrorCode
 	}{
-		{"open double quote", `a "b`, errTokenizeOpenQuote},
-		{"open single quote", `a 'b`, errTokenizeOpenQuote},
-		{"dangling backslash", `a b\`, errTokenizeDanglingEscape},
-		{"too long", strings.Repeat("a", MaxCommandBytes+1), errTokenizeTooLong},
-		{"too many tokens", strings.Repeat("a ", MaxTokens+1), errTokenizeTooMany},
+		{"open double quote", `a "b`, ErrorCodeOpenQuote},
+		{"open single quote", `a 'b`, ErrorCodeOpenQuote},
+		{"dangling backslash", `a b\`, ErrorCodeDanglingEscape},
+		{"too long", strings.Repeat("a", MaxCommandBytes+1), ErrorCodeTooLong},
+		{"too many tokens", strings.Repeat("a ", MaxTokens+1), ErrorCodeTooManyArguments},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := Tokenize(tt.text)
-			if got != nil || !errors.Is(err, tt.want) || !IsUsageError(err) {
-				t.Fatalf("Tokenize() = %q, %v; want a usage error wrapping %v", got, err, tt.want)
+			if got != nil || !fault.HasCode(err, tt.want) {
+				t.Fatalf("Tokenize() = %q, %v; want %s", got, err, tt.want)
 			}
 		})
 	}

@@ -1,7 +1,6 @@
 package command
 
 import (
-	"errors"
 	"regexp"
 	"strings"
 	"unicode"
@@ -27,17 +26,9 @@ const (
 	MaxTokens       = 64
 )
 
-var (
-	errTokenizeTooLong        = errors.New("the command is too long")
-	errTokenizeTooMany        = errors.New("the command has too many arguments")
-	errTokenizeOpenQuote      = errors.New("a quote is not closed")
-	errTokenizeDanglingEscape = errors.New("the command ends with a backslash")
-	errTokenizeMissingToken   = errors.New("the command token is missing")
-)
-
 func Tokenize(text string) ([]string, error) {
 	if len(text) > MaxCommandBytes {
-		return nil, NewUsageError(errTokenizeTooLong)
+		return nil, Errorf(ErrorCodeTooLong, "the command is too long")
 	}
 	var (
 		tokens  []string
@@ -51,7 +42,7 @@ func Tokenize(text string) ([]string, error) {
 			return nil
 		}
 		if len(tokens) == MaxTokens {
-			return NewUsageError(errTokenizeTooMany)
+			return Errorf(ErrorCodeTooManyArguments, "the command has too many arguments")
 		}
 		tokens = append(tokens, current.String())
 		current.Reset()
@@ -82,9 +73,9 @@ func Tokenize(text string) ([]string, error) {
 	}
 	switch {
 	case escaped:
-		return nil, NewUsageError(errTokenizeDanglingEscape)
+		return nil, Errorf(ErrorCodeDanglingEscape, "the command ends with a backslash")
 	case quote != 0:
-		return nil, NewUsageError(errTokenizeOpenQuote)
+		return nil, Errorf(ErrorCodeOpenQuote, "a quote is not closed")
 	}
 	if err := flush(); err != nil {
 		return nil, err

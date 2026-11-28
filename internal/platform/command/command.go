@@ -92,6 +92,12 @@ const (
 	ErrorCodeFailed           ErrorCode = "command_failed"
 	ErrorCodeConflict         ErrorCode = "command_conflict"
 	ErrorCodeInvalidArgument  ErrorCode = "invalid_argument"
+
+	ErrorCodeTooLong          ErrorCode = "command_too_long"
+	ErrorCodeTooManyArguments ErrorCode = "command_too_many_arguments"
+	ErrorCodeOpenQuote        ErrorCode = "command_open_quote"
+	ErrorCodeDanglingEscape   ErrorCode = "command_dangling_escape"
+	ErrorCodeMissingToken     ErrorCode = "command_missing_token"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {

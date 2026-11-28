@@ -2,10 +2,11 @@ package command
 
 import (
 	"context"
-	"errors"
 	"slices"
 	"strings"
 	"unicode"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -66,20 +67,20 @@ func operationTokens(inv *Invocation) ([]string, error) {
 	}
 	rest, found := strings.CutPrefix(strings.TrimLeftFunc(inv.Text, unicode.IsSpace), inv.Token)
 	if !found {
-		return nil, NewUsageError(errTokenizeMissingToken)
+		return nil, Errorf(ErrorCodeMissingToken, "the command token is missing")
 	}
 	return Tokenize(rest)
 }
 
 func tokenizeReply(err error) string {
 	switch {
-	case errors.Is(err, errTokenizeTooLong):
+	case fault.HasCode(err, ErrorCodeTooLong):
 		return ReplyCommandTooLong
-	case errors.Is(err, errTokenizeTooMany):
+	case fault.HasCode(err, ErrorCodeTooManyArguments):
 		return ReplyTooManyArguments
-	case errors.Is(err, errTokenizeOpenQuote):
+	case fault.HasCode(err, ErrorCodeOpenQuote):
 		return ReplyOpenQuote
-	case errors.Is(err, errTokenizeDanglingEscape):
+	case fault.HasCode(err, ErrorCodeDanglingEscape):
 		return ReplyDanglingEscape
 	}
 	return "That command could not be read."

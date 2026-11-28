@@ -152,6 +152,9 @@ func TestChatOperationCommandsAreAnsweredOnceWhenAMessageIsRedelivered(t *testin
 	if !slices.Equal(first, second) || rig.jobs(t) != id+":paused" {
 		t.Fatalf("first %q second %q jobs %q, want the same journaled reply for the redelivered message", first, second, rig.jobs(t))
 	}
+	if runs := rig.handlers.handled("cron.pause"); runs != 1 {
+		t.Errorf("the pause handler ran %d times for one message, want once", runs)
+	}
 }
 
 func TestDeferredCommandOperationsFailClosedUntilBoundAndBindOnce(t *testing.T) {
