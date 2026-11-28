@@ -40,14 +40,10 @@ func validateWorkspaceNesting(cfg *Config) error {
 		return nil
 	}
 	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
-	if err != nil {
-		return nil
+	if err == nil && (ContainsPath(cfg.Tools.Workspace, dataRoot) || ContainsPath(dataRoot, cfg.Tools.Workspace)) {
+		return configkit.Invalid("tools.workspace", fmt.Sprintf(
+			"the workspace %s and the data directory %s are the same directory or one holds the other; set tools.workspace to a directory outside the data directory, or set storage.path to one outside the workspace",
+			resolvedPath(cfg.Tools.Workspace), resolvedPath(dataRoot)))
 	}
-	workspace, data := resolvedPath(cfg.Tools.Workspace), resolvedPath(dataRoot)
-	if !ContainsPath(workspace, data) && !ContainsPath(data, workspace) {
-		return nil
-	}
-	return configkit.Invalid("tools.workspace", fmt.Sprintf(
-		"the workspace %s and the data directory %s are the same directory or one holds the other; set tools.workspace to a directory outside the data directory, or set storage.path to one outside the workspace",
-		workspace, data))
+	return nil
 }

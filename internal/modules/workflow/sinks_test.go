@@ -243,8 +243,9 @@ func TestScheduledStartChecksComposedChildren(t *testing.T) {
 func composedThenWrite(id, child string) *Spec {
 	spec := composingSpec(id, child)
 	write := "write_file"
-	spec.Steps = append(spec.Steps, StepSpec{ID: "gate", DependsOn: []string{"childa"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second})
-	spec.Steps = append(spec.Steps, StepSpec{ID: "after", DependsOn: []string{"gate"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: &write, ToolArgs: json.RawMessage(`{"path":"a","content":"b"}`)}, Timeout: 5 * time.Second})
+	spec.Steps = append(spec.Steps,
+		StepSpec{ID: "gate", DependsOn: []string{"childa"}, Executor: ExecutorSpec{Kind: KindApproval}, Timeout: 5 * time.Second},
+		StepSpec{ID: "after", DependsOn: []string{"gate"}, Executor: ExecutorSpec{Kind: KindTool, ToolID: &write, ToolArgs: json.RawMessage(`{"path":"a","content":"b"}`)}, Timeout: 5 * time.Second})
 	return spec
 }
 

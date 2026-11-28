@@ -12,47 +12,39 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-func columnsHolding(t *testing.T, db *sql.DB, needle string) []string {
+func stringColumn(t *testing.T, db *sql.DB, query string) []string {
 	t.Helper()
-	tables, err := db.QueryContext(t.Context(), `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
+	rows, err := db.QueryContext(t.Context(), query)
 	if err != nil {
-		t.Fatalf("list tables: %v", err)
+		t.Fatalf("%s: %v", query, err)
 	}
-	var names []string
-	for tables.Next() {
-		var name string
-		if err := tables.Scan(&name); err != nil {
+	defer func() { _ = rows.Close() }()
+	var values []string
+	for rows.Next() {
+		var value string
+		if err := rows.Scan(&value); err != nil {
 			t.Fatal(err)
 		}
-		names = append(names, name)
+		values = append(values, value)
 	}
-	if err := tables.Err(); err != nil {
-		t.Fatal(err)
+	if err := rows.Err(); err != nil {
+		t.Fatalf("%s: %v", query, err)
 	}
-	_ = tables.Close()
+	return values
+}
+
+func columnsHolding(t *testing.T, db *sql.DB, needle string) []string {
+	t.Helper()
 	var found []string
-	for _, table := range names {
-		columns, err := db.QueryContext(t.Context(), fmt.Sprintf(`SELECT name FROM pragma_table_info('%s')`, table))
-		if err != nil {
-			t.Fatalf("columns of %s: %v", table, err)
-		}
-		var cols []string
-		for columns.Next() {
-			var col string
-			if err := columns.Scan(&col); err != nil {
-				t.Fatal(err)
-			}
-			cols = append(cols, col)
-		}
-		_ = columns.Close()
-		for _, col := range cols {
-			var hit int
-			query := fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM "%s" WHERE instr(CAST("%s" AS TEXT), ?) > 0)`, table, col)
+	for _, table := range stringColumn(t, db, `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`) {
+		for _, column := range stringColumn(t, db, fmt.Sprintf(`SELECT name FROM pragma_table_info(%q)`, table)) {
+			var hit bool
+			query := fmt.Sprintf(`SELECT EXISTS (SELECT 1 FROM %q WHERE instr(CAST(%q AS TEXT), ?) > 0)`, table, column)
 			if err := db.QueryRowContext(t.Context(), query, needle).Scan(&hit); err != nil {
-				t.Fatalf("search %s.%s: %v", table, col, err)
+				t.Fatalf("search %s.%s: %v", table, column, err)
 			}
-			if hit == 1 {
-				found = append(found, table+"."+col)
+			if hit {
+				found = append(found, table+"."+column)
 			}
 		}
 	}
@@ -68,7 +60,11 @@ func TestConfirmCodeFromChatReachesOnlyTheReplyJournal(t *testing.T) {
 	if applied := rig.say(t, owner, invocation+" --apply "+code); !strings.Contains(strings.Join(applied, "\n"), "tainted: false") {
 		t.Fatalf("apply replied %q, want the confirmed job", applied)
 	}
-	held := slices.DeleteFunc(columnsHolding(t, rig.DB, code), func(column string) bool { return strings.HasPrefix(column, "effect_intent.") })
+	all := columnsHolding(t, rig.DB, code)
+	if !slices.Contains(all, "effect_intent.result_json") {
+		t.Fatalf("the search found the code in %v, want it to see the reply journal", all)
+	}
+	held := slices.DeleteFunc(all, func(column string) bool { return strings.HasPrefix(column, "effect_intent.") })
 	if len(held) != 0 {
 		t.Errorf("the confirmation code is stored in %v, want only the journal of replies to the owner", held)
 	}
