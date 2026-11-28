@@ -81,11 +81,21 @@ func (p *Provider) Sent() int {
 type Ledger struct {
 	mu      sync.Mutex
 	actions []knowledge.OwnerAction
+	failure error
+}
+
+func (l *Ledger) FailWith(err error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.failure = err
 }
 
 func (l *Ledger) RecordOwnerAction(_ context.Context, action *knowledge.OwnerAction) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.failure != nil {
+		return l.failure
+	}
 	l.actions = append(l.actions, *action)
 	return nil
 }

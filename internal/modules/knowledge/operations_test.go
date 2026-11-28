@@ -3,6 +3,7 @@ package knowledge_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -381,6 +382,37 @@ func TestKnowledgeOperationsWriteOnlyInsideCommit(t *testing.T) {
 				Registry: rig.Registry, DB: rig.DB, ID: tc.id, Input: json.RawMessage(tc.input),
 				Outside: func() string { return strconv.Itoa(rig.kb.Provider.Sent()) },
 			})
+		})
+	}
+}
+
+func TestKnowledgeWritesRollBackWhenTheOwnerActionCannotBeRecorded(t *testing.T) {
+	cases := []struct {
+		name  string
+		id    string
+		input string
+		seed  bool
+	}{
+		{name: "add", id: "kb.add", input: `{"collection":"support","url":"` + knowledgetest.PageURL + `"}`},
+		{name: "remove", id: "kb.remove", input: `{"collection":"support","source":"` + knowledgetest.PageURL + `"}`, seed: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newOpsRig(t)
+			if tc.seed {
+				seedSource(t, rig)
+			}
+			before := len(rig.sources(t))
+			rig.kb.Ledger.FailWith(errors.New("event store unavailable"))
+
+			_, err := rig.invoke(t, operation.SurfaceChat, tc.id, tc.input)
+
+			if err == nil {
+				t.Fatal("the call succeeded although its owner action could not be recorded")
+			}
+			if after := len(rig.sources(t)); after != before {
+				t.Errorf("sources went from %d to %d, want the write rolled back", before, after)
+			}
 		})
 	}
 }

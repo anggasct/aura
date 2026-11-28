@@ -76,6 +76,7 @@ func (c *handlerCounts) handled(id string) int {
 type registryRig struct {
 	*operationtest.Rig
 	access   *ceilingAccess
+	kb       *knowledgetest.Rig
 	starts   *recordedStarts
 	handlers *handlerCounts
 	calls    int
@@ -156,7 +157,7 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 	for i := range registrations {
 		access.tools = append(access.tools, registrations[i].Definition.Name)
 	}
-	return &registryRig{Rig: rig, access: access, starts: starts, handlers: handlers}
+	return &registryRig{Rig: rig, access: access, kb: kb, starts: starts, handlers: handlers}
 }
 
 func (r *registryRig) request(name string, input json.RawMessage) *toolbroker.ToolRequest {
