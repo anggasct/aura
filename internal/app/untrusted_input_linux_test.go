@@ -69,7 +69,7 @@ func writeUntrustedInputConfig(t *testing.T, principalTools, searchEndpoint stri
 storage:
   path: ` + root + `
 tools:
-  workspace: ` + root + webSearch + `
+  workspace: ` + t.TempDir() + webSearch + `
 agents:
   definitions:
     - id: main

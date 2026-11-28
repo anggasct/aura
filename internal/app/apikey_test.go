@@ -282,7 +282,7 @@ func writeHTTPChatConfig(t *testing.T, enabled bool, listen string) string {
 	t.Helper()
 	dataRoot := t.TempDir()
 	path := filepath.Join(dataRoot, "config.yaml")
-	content := "version: 1\nstorage:\n  path: " + dataRoot + "\ntools:\n  workspace: " + dataRoot +
+	content := "version: 1\nstorage:\n  path: " + dataRoot + "\ntools:\n  workspace: " + t.TempDir() +
 		"\nchannels:\n  http:\n    enabled: " + strconv.FormatBool(enabled) + "\n    listen_address: " + listen + "\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatal(err)

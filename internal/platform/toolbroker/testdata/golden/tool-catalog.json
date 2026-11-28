@@ -7,7 +7,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Create a scheduled job and start its run\n\nStores a prompt or workflow start that later runs unattended with the owner's authority. The owner picks the destination of its output; a call from the agent always uses the owner destination.",
+      "description": "Create a scheduled job and start its run\n\nStores a prompt or workflow start that later runs unattended with the owner's authority. A prompt job states its context. The owner picks the destination of its output; a call from the agent always uses the owner destination.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/cron.add/v1",
@@ -35,6 +35,14 @@
             "minLength": 1,
             "maxLength": 65536,
             "description": "turn prompt"
+          },
+          "context": {
+            "type": "string",
+            "enum": [
+              "full",
+              "web_only"
+            ],
+            "description": "what each run holds, required with a prompt: full keeps the persona's memory, profile, knowledge and skills and its tools; web_only holds none of them and only web_search and web_fetch. Choose web_only when the prompt needs only the web, and never put private details in a web_only prompt"
           },
           "workflow": {
             "type": "string",
@@ -86,6 +94,7 @@
         "schedule",
         "timezone",
         "prompt",
+        "context",
         "workflow",
         "input",
         "overlap",

@@ -20,7 +20,7 @@ func writeTelegramAccessConfig(t *testing.T) string {
 storage:
   path: ` + dataRoot + `
 tools:
-  workspace: ` + dataRoot + `
+  workspace: ` + t.TempDir() + `
 owner:
   identities: ["telegram:777"]
 channels:

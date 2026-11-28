@@ -361,7 +361,7 @@ const gitHubHTTPChatConfig = `version: 1
 storage:
   path: %[1]s
 tools:
-  workspace: %[1]s
+  workspace: %[3]s
   github:
     credentials:
       - name: ci
@@ -379,7 +379,7 @@ func newGitHubHTTPChatHarness(t *testing.T, personas string, llm adkmodel.LLM) *
 	t.Helper()
 	root := t.TempDir()
 	path := filepath.Join(root, "config.yaml")
-	if err := os.WriteFile(path, []byte(fmt.Sprintf(gitHubHTTPChatConfig, root, personas)), 0o600); err != nil {
+	if err := os.WriteFile(path, []byte(fmt.Sprintf(gitHubHTTPChatConfig, root, personas, t.TempDir())), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	build, err := capability.ParseBuild("core", "provider-github", runtime.GOOS)

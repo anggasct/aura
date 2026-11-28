@@ -251,7 +251,7 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 	model := &operationtest.ScriptedModel{}
 	session := &surfaceSession{t: t, rig: rig, executor: operationSurfaceExecutor(t, rig, model), model: model, events: turnstore.NewEventStore(rig.DB)}
 	cron := len(groupTools(t, rig, "cron"))
-	add := operationtest.CallOf("aura_cron_add", map[string]any{"name": "nightly", "schedule": "0 21 * * *", "timezone": "UTC", "prompt": "summarize"})
+	add := operationtest.CallOf("aura_cron_add", map[string]any{"name": "nightly", "schedule": "0 21 * * *", "timezone": "UTC", "prompt": "summarize", "context": "full"})
 	list := operationtest.CallOf("aura_cron_list", map[string]any{})
 	var jobID string
 	cards := func() []toolbroker.ApprovalPrompt { return rig.Prompts() }

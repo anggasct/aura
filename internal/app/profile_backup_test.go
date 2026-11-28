@@ -301,7 +301,7 @@ model_routes:
 storage:
   path: ` + routedDir + `
 tools:
-  workspace: ` + routedDir + `
+  workspace: ` + t.TempDir() + `
 skills:
   roots: [` + routedDir + `]
 context:
@@ -418,7 +418,7 @@ model_routes:
 storage:
   path: ` + routedDir + `
 tools:
-  workspace: ` + routedDir + `
+  workspace: ` + t.TempDir() + `
 skills:
   roots: [` + routedDir + `]
 context:

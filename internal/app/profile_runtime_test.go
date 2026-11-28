@@ -45,7 +45,7 @@ model_routes:
 storage:
   path: ` + dir + `
 tools:
-  workspace: ` + dir + `
+  workspace: ` + t.TempDir() + `
 skills:
   roots: [` + dir + `]
 context:
@@ -298,7 +298,7 @@ func writeProfileConfigForDB(t *testing.T, db *sql.DB) string {
 	}
 	dir := path[:strings.LastIndex(path, "/")]
 	cfg := dir + "/cli.yaml"
-	content := "version: 1\nstorage:\n  path: " + dir + "\ntools:\n  workspace: " + dir + "\nskills:\n  roots: [" + dir + "]\ncontext:\n  recent_complete_turns: 5\nchildren:\n  recovery: interrupt\nprofile:\n  prompt_version: v1\n"
+	content := "version: 1\nstorage:\n  path: " + dir + "\ntools:\n  workspace: " + t.TempDir() + "\nskills:\n  roots: [" + dir + "]\ncontext:\n  recent_complete_turns: 5\nchildren:\n  recovery: interrupt\nprofile:\n  prompt_version: v1\n"
 	if err := os.WriteFile(cfg, []byte(content), 0o600); err != nil {
 		t.Fatal(err)
 	}

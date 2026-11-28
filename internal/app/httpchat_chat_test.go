@@ -64,7 +64,7 @@ func writeHTTPChatRuntimeConfig(t *testing.T, budgets string) string {
 storage:
   path: ` + root + `
 tools:
-  workspace: ` + root + `
+  workspace: ` + t.TempDir() + `
 channels:
   http:
     enabled: true

@@ -1308,6 +1308,9 @@ func (b *build) startMCPServers(ctx context.Context, plugins *plugin.Module) err
 	if len(configuredMCPServers(cfg)) == 0 && len(mcpPlugins) == 0 {
 		return nil
 	}
+	if err := checkMCPWorkingDir(cfg, mcpPlugins); err != nil {
+		return err
+	}
 	trustPath, err := mcpTrustRegistryPath(cfg)
 	if err != nil {
 		return err

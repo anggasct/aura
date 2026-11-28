@@ -91,7 +91,7 @@ func TestOperationChatCommandsOnlyInDirectChats(t *testing.T) {
 		t.Run(channel+" owner in a direct chat", func(t *testing.T) {
 			rig := newChatRigE2E(t)
 
-			added := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --channel telegram --destination me`)
+			added := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --context full --channel telegram --destination me`)
 			id, found := strings.CutPrefix(added[0], "id: ")
 			if !found || len(added) != 1 {
 				t.Fatalf("add replied %q, want the new job id", added)
@@ -107,7 +107,7 @@ func TestOperationChatCommandsOnlyInDirectChats(t *testing.T) {
 		})
 		t.Run(channel+" refuses a group or guild channel", func(t *testing.T) {
 			rig := newChatRigE2E(t)
-			direct := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --channel telegram --destination me`)
+			direct := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --context full --channel telegram --destination me`)
 			id := strings.TrimPrefix(direct[0], "id: ")
 			before := rig.jobs(t)
 
@@ -123,7 +123,7 @@ func TestOperationChatCommandsOnlyInDirectChats(t *testing.T) {
 		})
 		t.Run(channel+" refuses other principals in a direct chat", func(t *testing.T) {
 			rig := newChatRigE2E(t)
-			direct := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --channel telegram --destination me`)
+			direct := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --context full --channel telegram --destination me`)
 			id := strings.TrimPrefix(direct[0], "id: ")
 			before := rig.jobs(t)
 
@@ -145,7 +145,7 @@ func TestOperationChatCommandsOnlyInDirectChats(t *testing.T) {
 func TestChatOperationCommandsAreAnsweredOnceWhenAMessageIsRedelivered(t *testing.T) {
 	rig := newChatRigE2E(t)
 	owner := chatSender{channel: principal.ChannelTelegram, class: principal.ClassOwner, direct: true}
-	added := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --channel telegram --destination me`)
+	added := rig.say(t, owner, `/cron add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt "summarize the day" --context full --channel telegram --destination me`)
 	id := strings.TrimPrefix(added[0], "id: ")
 	rig.messages = 40
 

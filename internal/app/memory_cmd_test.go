@@ -23,7 +23,7 @@ func writeMemoryCLIConfig(t *testing.T) string {
 storage:
   path: ` + dataRoot + `
 tools:
-  workspace: ` + dataRoot + `
+  workspace: ` + t.TempDir() + `
 skills:
   roots: [` + dataRoot + `]
 context:

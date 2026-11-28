@@ -47,7 +47,7 @@ func writeEmailRuntimeConfig(t *testing.T) string {
 storage:
   path: ` + root + `
 tools:
-  workspace: ` + root + `
+  workspace: ` + t.TempDir() + `
 owner:
   identities:
     - email:` + emailOwnerSender + `

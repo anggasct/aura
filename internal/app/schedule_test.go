@@ -217,7 +217,7 @@ func TestScheduleStoreAdapterRoundTrip(t *testing.T) {
 	now := time.Now().UTC()
 	if err := jobs.InsertJob(t.Context(), &schedule.Job{
 		ID: "job-1", Name: "n", CronExpression: "* * * * *", Timezone: "UTC",
-		Prompt: "p", OriginChannel: "discord", OriginDestination: "default",
+		Prompt: "p", Context: schedule.ContextFull, OriginChannel: "discord", OriginDestination: "default",
 		OverlapPolicy: "skip", State: "active", Version: 1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatalf("InsertJob(): %v", err)
@@ -343,7 +343,7 @@ func seedScheduleJobs(t *testing.T, db *sql.DB, seeds []scheduleSeed) {
 	for _, seed := range seeds {
 		if err := jobs.InsertJob(t.Context(), &schedule.Job{
 			ID: seed.id, Name: seed.id, CronExpression: dailySchedule, Timezone: "UTC",
-			Prompt: "p", OriginChannel: "discord", OriginDestination: "default",
+			Prompt: "p", Context: schedule.ContextFull, OriginChannel: "discord", OriginDestination: "default",
 			OverlapPolicy: "skip", CatchUpGraceSeconds: 900, State: schedule.JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatalf("seed %s: %v", seed.id, err)

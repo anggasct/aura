@@ -53,7 +53,7 @@ func addScheduleJob(t *testing.T, gf *GlobalFlags, extra ...string) string {
 	t.Helper()
 	args := []string{"add",
 		"--name", "nightly", "--schedule", "0 21 * * *", "--timezone", "UTC",
-		"--channel", "discord", "--destination", "default", "--prompt", "summarize",
+		"--channel", "discord", "--destination", "default", "--prompt", "summarize", "--context", "full",
 	}
 	args = append(args, extra...)
 	out, err := runScheduleCommand(t, gf, args...)
@@ -102,7 +102,7 @@ func TestScheduleAddRejectsInvalid(t *testing.T) {
 	}
 	if _, err := runScheduleCommand(t, gf, "add",
 		"--name", "x", "--schedule", "nope", "--timezone", "UTC",
-		"--channel", "discord", "--destination", "default", "--prompt", "p"); err == nil {
+		"--channel", "discord", "--destination", "default", "--prompt", "p", "--context", "full"); err == nil {
 		t.Error("bad expression accepted")
 	}
 }
@@ -178,7 +178,7 @@ func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 		gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
 		out, err := runScheduleCommand(t, gf, "add",
 			"--name", "nightly", "--schedule", dailySchedule, "--timezone", "UTC",
-			"--channel", "discord", "--destination", "default", "--prompt", "summarize")
+			"--channel", "discord", "--destination", "default", "--prompt", "summarize", "--context", "full")
 		if err != nil {
 			t.Fatalf("cron add: %v\n%s", err, out)
 		}
@@ -205,7 +205,7 @@ func TestScheduleCommandsStartRunsForTheServer(t *testing.T) {
 			t.Fatalf("NewService: %v", err)
 		}
 		job, err := service.Create(t.Context(), &schedule.JobSpec{
-			Name: "nightly", CronExpression: dailySchedule, Timezone: "UTC", Prompt: "summarize",
+			Name: "nightly", CronExpression: dailySchedule, Timezone: "UTC", Prompt: "summarize", Context: schedule.ContextFull,
 			OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: schedule.OverlapSkip,
 		})
 		if err != nil {
@@ -305,8 +305,8 @@ func TestOperationCommandOutputCronListGolden(t *testing.T) {
 	}
 	created := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	for _, job := range []*schedule.Job{
-		{ID: "job_0000000000000001", Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "summarize"},
-		{ID: "job_0000000000000002", Name: "weekly report", CronExpression: "30 8 * * 1", Timezone: "Asia/Jakarta", Prompt: "report"},
+		{ID: "job_0000000000000001", Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "summarize", Context: schedule.ContextFull},
+		{ID: "job_0000000000000002", Name: "weekly report", CronExpression: "30 8 * * 1", Timezone: "Asia/Jakarta", Prompt: "report", Context: schedule.ContextFull},
 	} {
 		job.OriginChannel, job.OriginDestination = "discord", "default"
 		job.OverlapPolicy, job.State, job.Version = schedule.OverlapSkip, schedule.JobPaused, 1
@@ -358,7 +358,7 @@ func TestScheduleAddGraceRefusesWhatIsNotAPositiveDuration(t *testing.T) {
 		t.Run(grace, func(t *testing.T) {
 			_, err := runScheduleCommand(t, gf, "add",
 				"--name", "x", "--schedule", "0 21 * * *", "--timezone", "UTC",
-				"--channel", "discord", "--destination", "default", "--prompt", "p", "--grace", grace)
+				"--channel", "discord", "--destination", "default", "--prompt", "p", "--context", "full", "--grace", grace)
 
 			if code := ExitCode(nil, nil, err); code != 2 {
 				t.Fatalf("exit code = %d (%v), want 2", code, err)
