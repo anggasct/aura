@@ -113,13 +113,13 @@ func (a *Adapter) replyCommand(ctx context.Context, msg *message, intentID, sess
 	if err != nil {
 		return fault.New(ErrorCodeProtocolInvalid, "reply reference is not serializable")
 	}
-	_, err = a.Deliver(ctx, &runtimechannelhost.DeliveryRequest{
+	_, err = a.deliver(ctx, &runtimechannelhost.DeliveryRequest{
 		Channel:        a.source(),
 		ConversationID: sessionID,
 		EffectID:       intentID,
 		ReplyContext:   reference,
 		Parts:          []runtimechannelhost.OutputPart{{Text: strings.Join(lines, "\n")}},
-	})
+	}, false)
 	if err != nil {
 		return fmt.Errorf("command reply: %w", err)
 	}

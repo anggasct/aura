@@ -407,3 +407,29 @@ func TestDeliverDisablesLinkPreviewsWhenTaintedOnOptedInAccount(t *testing.T) {
 		})
 	}
 }
+
+func TestPresenceStatusDisablesLinkPreviewsOnOptedInAccount(t *testing.T) {
+	h := newHarness(t)
+	adapter := h.adapterWith(t, nil, func(_ *Config, account *Account) {
+		account.LinkPreviews = true
+	})
+	req := deliveryRequest(t, h, "turn-status", "status")
+	session := &presenceSession{request: req, chatID: ownerUserID}
+	msgID, err := adapter.postStatusMessage(t.Context(), session, 1, "Checking https://evil.example/?d=x", nil)
+	if err != nil {
+		t.Fatalf("postStatusMessage: %v", err)
+	}
+	if err := adapter.editStatusMessage(t.Context(), session, msgID, 2, "Still checking https://evil.example/?d=y", nil); err != nil {
+		t.Fatalf("editStatusMessage: %v", err)
+	}
+	sends := h.api.sends()
+	edits := h.api.bodies("editMessageText")
+	if len(sends) != 1 || len(edits) != 1 {
+		t.Fatalf("sends=%d edits=%d, want 1 and 1", len(sends), len(edits))
+	}
+	for name, body := range map[string]map[string]any{"status post": sends[0], "status edit": edits[0]} {
+		if !previewsDisabledIn(t, body) {
+			t.Errorf("%s link_preview_options = %v, want is_disabled true", name, body["link_preview_options"])
+		}
+	}
+}

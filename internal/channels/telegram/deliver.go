@@ -60,6 +60,13 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	if req == nil {
 		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
 	}
+	return a.deliver(ctx, req, !req.Tainted)
+}
+
+func (a *Adapter) deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest, previews bool) (runtimechannelhost.ProviderReceipt, error) {
+	if req == nil {
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
+	}
 	if req.Channel == "" || req.ConversationID == "" {
 		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request is missing channel or conversation")
 	}
@@ -89,7 +96,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	var receipt runtimechannelhost.ProviderReceipt
 	quote := a.shouldQuote(&target)
 	for index, chunk := range splitMessage(strings.Join(texts, "\n")) {
-		operation := sendOperation{ChatID: target.ChatID, ThreadID: target.ThreadID, Text: chunk, HTML: renderHTML(chunk), Previews: !req.Tainted}
+		operation := sendOperation{ChatID: target.ChatID, ThreadID: target.ThreadID, Text: chunk, HTML: renderHTML(chunk), Previews: previews}
 		if index == 0 && quote {
 			operation.ReplyTo = target.MessageID
 		}

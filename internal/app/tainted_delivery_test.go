@@ -356,7 +356,7 @@ func TestTaintedDeliveryNeverShowsLinkPreviews(t *testing.T) {
 	}
 }
 
-func newBroadcastPreviewRegistry(t *testing.T, withKnowledge bool) *auraagent.Registry {
+func newBroadcastPreviewRegistry(t *testing.T, withKnowledge, withCapabilitiesAndHelper bool) *auraagent.Registry {
 	t.Helper()
 	cfg := appconfig.Default()
 	persona := auraagent.Persona{
@@ -369,7 +369,20 @@ func newBroadcastPreviewRegistry(t *testing.T, withKnowledge bool) *auraagent.Re
 	if withKnowledge {
 		persona.Knowledge = []string{"notes"}
 	}
-	cfg.Agents.Definitions = []auraagent.Persona{persona}
+	if withCapabilitiesAndHelper {
+		persona.Capabilities = []string{auraagent.CapabilityWebSearch}
+		cfg.Agents.Definitions = []auraagent.Persona{
+			persona,
+			{
+				ID:           "helper",
+				Name:         "Helper",
+				Description:  "helper",
+				Instructions: "help",
+			},
+		}
+	} else {
+		cfg.Agents.Definitions = []auraagent.Persona{persona}
+	}
 	registry, err := buildAgentRegistry(&cfg)
 	if err != nil {
 		t.Fatalf("buildAgentRegistry: %v", err)
@@ -550,16 +563,18 @@ func TestTaintedBroadcastNeverShowsLinkPreviews(t *testing.T) {
 			t.Fatalf("schedule.NewService: %v", err)
 		}
 		cases := []struct {
-			name          string
-			jobContext    string
-			jobTaint      string
-			withKnowledge bool
-			wantTainted   bool
+			name                      string
+			jobContext                string
+			jobTaint                  string
+			withKnowledge             bool
+			withCapabilitiesAndHelper bool
+			wantTainted               bool
 		}{
 			{name: "clean full job on clean persona", jobContext: schedule.ContextFull, wantTainted: false},
 			{name: "tainted full job", jobContext: schedule.ContextFull, jobTaint: "a webhook", wantTainted: true},
 			{name: "clean web-only job", jobContext: schedule.ContextWebOnly, wantTainted: true},
 			{name: "full job on knowledge persona", jobContext: schedule.ContextFull, withKnowledge: true, wantTainted: true},
+			{name: "full job on main with capabilities and knowledge alongside clean helper", jobContext: schedule.ContextFull, withKnowledge: true, withCapabilitiesAndHelper: true, wantTainted: true},
 		}
 		for i, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -585,7 +600,7 @@ func TestTaintedBroadcastNeverShowsLinkPreviews(t *testing.T) {
 				turnRunner := &engineTurnRunner{
 					engine:   fakeEngine,
 					sessions: sessions,
-					personas: newBroadcastPreviewRegistry(t, tc.withKnowledge),
+					personas: newBroadcastPreviewRegistry(t, tc.withKnowledge, tc.withCapabilitiesAndHelper),
 				}
 				schedRuntime := durabletest.NewFake()
 				t.Cleanup(schedRuntime.Close)

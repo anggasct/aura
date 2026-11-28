@@ -665,3 +665,30 @@ func TestSendTextStopsAtTheFirstFailedSend(t *testing.T) {
 		t.Fatalf("sends = %d, want 2: a failed send must not be followed by the next chunk", sends)
 	}
 }
+
+func TestPresenceStatusSuppressesEmbedsOnOptedInAccount(t *testing.T) {
+	stub := newRestStub(t, func(_ int, w http.ResponseWriter, _ *http.Request) {
+		writeMessage(t, w, "m-status")
+	})
+	adapter, _ := newSendTestAdapter(t, stub, func(cfg *Config) {
+		cfg.Accounts[0].LinkPreviews = true
+	})
+	req := deliverTestRequest("turn-status", "discord", "status")
+	msgID, err := adapter.postPresenceMessage(t.Context(), req, "333", "Checking https://evil.example/?d=x", nil)
+	if err != nil {
+		t.Fatalf("postPresenceMessage: %v", err)
+	}
+	if err := adapter.patchPresenceMessage(t.Context(), req, "333", msgID, "Still checking https://evil.example/?d=y", true); err != nil {
+		t.Fatalf("patchPresenceMessage: %v", err)
+	}
+	stub.mu.Lock()
+	defer stub.mu.Unlock()
+	if len(stub.calls) != 2 {
+		t.Fatalf("rest calls = %d, want post and patch", len(stub.calls))
+	}
+	for i, call := range stub.calls {
+		if flags, present := embedFlags(t, call.body); !present || flags != suppressEmbedsFlags {
+			t.Errorf("presence call %d (%s) flags = %v (present %t), want %d", i, call.method, flags, present, suppressEmbedsFlags)
+		}
+	}
+}

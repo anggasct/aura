@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -2614,11 +2615,11 @@ func (r *engineTurnRunner) isTainted(turnReq *turn.TurnRequest) bool {
 	if turnReq.Tainted() {
 		return true
 	}
-	if turnReq.WebOnly || r.personas == nil {
+	if r.personas == nil {
 		return false
 	}
-	def, err := r.personas.Resolve(nil, nil)
-	if err != nil {
+	def, ok := r.personas.Lookup(cmp.Or(turnReq.AgentID, auraagent.DefaultID))
+	if !ok {
 		return true
 	}
 	return len(def.KnowledgeFor(turnReq.PrincipalClass)) > 0

@@ -413,3 +413,22 @@ func TestCommandsSwallowChatCommandValidationErrors(t *testing.T) {
 		}
 	})
 }
+
+func TestTelegramCommandReplyDisablesLinkPreviewsOnOptedInAccount(t *testing.T) {
+	rig := newCommandRig(t, accessOpts{})
+	rig.adapter.account.LinkPreviews = true
+	rig.handle(t, privateText(50, ownerUserID, "/help"))
+	msg := privateText(51, ownerUserID, "/status").Message
+	if err := rig.adapter.replyCommand(t.Context(), msg, "cmd-preview-url", "main/telegram:pocket/chat:"+strconv.Itoa(ownerUserID), []string{"see https://evil.example/?d=x"}); err != nil {
+		t.Fatalf("replyCommand: %v", err)
+	}
+	sends := rig.h.api.sends()
+	if len(sends) != 2 {
+		t.Fatalf("sendMessage calls = %d, want 2", len(sends))
+	}
+	for i, body := range sends {
+		if !previewsDisabledIn(t, body) {
+			t.Errorf("command reply %d link_preview_options = %v, want is_disabled true", i, body["link_preview_options"])
+		}
+	}
+}

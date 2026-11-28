@@ -136,6 +136,13 @@ func TestBroadcastStore_MismatchedReuseConflicts(t *testing.T) {
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Errorf("mismatch code = %v, %v; want conflict", code, ok)
 	}
+	tainted := testBroadcastItem("bcst-3", "cron", "key-1")
+	tainted.Tainted = true
+	if _, _, err := s.Insert(ctx, tainted); err == nil {
+		t.Fatal("mismatched taint reuse accepted")
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
+		t.Errorf("taint mismatch code = %v, %v; want conflict", code, ok)
+	}
 }
 
 func TestBroadcastStore_RejectsInvalidRows(t *testing.T) {
