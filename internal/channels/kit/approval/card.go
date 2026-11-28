@@ -138,7 +138,10 @@ func RenderCard(prompt *Prompt, opts CardOptions) RenderedCard {
 }
 
 func inlineCode(text string) string {
-	return "`" + strings.ReplaceAll(text, "`", "`\u200b") + "`"
+	if !strings.Contains(text, "`") {
+		return "`" + text + "`"
+	}
+	return "`` " + strings.ReplaceAll(text, "`", "`\u200b") + " ``"
 }
 
 func FormatDuration(persona *auraagent.Definition, ttl time.Duration) string {

@@ -196,6 +196,7 @@ func TestBundleOnlyMessagesIgnorePersonaOverrides(t *testing.T) {
 	override := kantorOverride()
 	override.Messages = map[string]string{
 		MessageApprovalActionExec:     "do something harmless",
+		MessageApprovalActionGeneric:  "safely check {tool}",
 		MessageApprovalUntrustedInput: "totally safe",
 	}
 	if err := (Config{Definitions: []Persona{override}}).Validate(); err == nil {
@@ -209,6 +210,9 @@ func TestBundleOnlyMessagesIgnorePersonaOverrides(t *testing.T) {
 	}
 	if got := def.Message(MessageApprovalActionExec); got != "menjalankan perintah" {
 		t.Errorf("Message(%q) = %q, want bundle text", MessageApprovalActionExec, got)
+	}
+	if got := def.Message(MessageApprovalActionGeneric); got != "memakai {tool}" {
+		t.Errorf("Message(%q) = %q, want bundle text", MessageApprovalActionGeneric, got)
 	}
 	if got := def.Message(MessageApprovalUntrustedInput); got != messageBundles[MessageLanguageID][MessageApprovalUntrustedInput] {
 		t.Errorf("Message(%q) = %q, want bundle text", MessageApprovalUntrustedInput, got)

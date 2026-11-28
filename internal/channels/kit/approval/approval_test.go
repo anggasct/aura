@@ -743,7 +743,11 @@ func TestCardOverridesKeepPlaceholdersAndBundleOnlyKeys(t *testing.T) {
 		}
 	})
 	t.Run("bundle-only keys fail persona_invalid", func(t *testing.T) {
-		for _, key := range []string{auraagent.MessageApprovalActionExec, auraagent.MessageApprovalUntrustedInput} {
+		for _, key := range []string{
+			auraagent.MessageApprovalActionExec,
+			auraagent.MessageApprovalActionGeneric,
+			auraagent.MessageApprovalUntrustedInput,
+		} {
 			cfg := auraagent.Config{
 				Definitions: []auraagent.Persona{{
 					ID:           "kantor",
@@ -774,6 +778,63 @@ func TestCardOverridesKeepPlaceholdersAndBundleOnlyKeys(t *testing.T) {
 			t.Fatalf("Header kept raw invisible rune: %q", card.Header)
 		}
 	})
+}
+
+func TestCardInlineCodeToolPreventsBacktickBreakout(t *testing.T) {
+	en := builtPersona(t, "en", "Aura", nil)
+	cases := []struct {
+		name       string
+		tool       string
+		wantHeader string
+	}{
+		{
+			name:       "plain tool uses single backticks",
+			tool:       "mcp_srv_ping",
+			wantHeader: "Aura wants to use `mcp_srv_ping`:",
+		},
+		{
+			name:       "single backticks wrapped in double backticks",
+			tool:       "a`[click](https://evil)`b",
+			wantHeader: "Aura wants to use `` a`\u200b[click](https://evil)`\u200bb ``:",
+		},
+		{
+			name:       "double backticks broken with zwsp",
+			tool:       "a``b",
+			wantHeader: "Aura wants to use `` a`\u200b`\u200bb ``:",
+		},
+		{
+			name:       "triple backticks broken with zwsp",
+			tool:       "a```b",
+			wantHeader: "Aura wants to use `` a`\u200b`\u200b`\u200bb ``:",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			card := RenderCard(&Prompt{
+				ToolName:    tc.tool,
+				ToolVersion: "v1",
+				SessionID:   "s",
+				PrincipalID: principal.OwnerID,
+				Arguments:   "{}",
+			}, CardOptions{Persona: &en, InlineCodeTool: true})
+			if card.Header != tc.wantHeader {
+				t.Errorf("Header = %q, want %q", card.Header, tc.wantHeader)
+			}
+			if strings.Contains(tc.tool, "`") {
+				inner, ok := strings.CutPrefix(card.Header, "Aura wants to use `` ")
+				if !ok {
+					t.Fatalf("Header missing double-backtick opener: %q", card.Header)
+				}
+				inner, ok = strings.CutSuffix(inner, " ``:")
+				if !ok {
+					t.Fatalf("Header missing double-backtick closer: %q", card.Header)
+				}
+				if strings.Contains(inner, "``") {
+					t.Errorf("double-backtick span contains unescaped double backticks: %q", inner)
+				}
+			}
+		})
+	}
 }
 
 func TestCardSubstitutesInOnePassWithoutDoubleExpanding(t *testing.T) {

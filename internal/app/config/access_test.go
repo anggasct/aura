@@ -136,10 +136,10 @@ func TestCardOverridesKeepPlaceholdersAndBundleOnlyKeys(t *testing.T) {
 			value:  "{persona} asks to {action}:",
 			wantOK: true,
 		},
-		"approval_action_generic without tool": {
+		"bundle-only approval_action_generic rejected": {
 			key:    auraagent.MessageApprovalActionGeneric,
-			value:  "run a tool",
-			detail: "{tool}",
+			value:  "run {tool}",
+			detail: "cannot be overridden",
 		},
 		"approval_requested_by without requester": {
 			key:    auraagent.MessageApprovalRequestedBy,

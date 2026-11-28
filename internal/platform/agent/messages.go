@@ -114,6 +114,7 @@ var bundleOnlyMessages = map[string]bool{
 	MessageApprovalActionGitHubMerge:   true,
 	MessageApprovalActionGitHubComment: true,
 	MessageApprovalActionEmailSend:     true,
+	MessageApprovalActionGeneric:       true,
 	MessageApprovalUntrustedInput:      true,
 }
 

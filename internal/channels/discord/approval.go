@@ -194,7 +194,10 @@ func (a *Adapter) clockNow() time.Time {
 }
 
 func (a *Adapter) cardPersona(personaID string) auraagent.Definition {
-	definition, _ := a.personaDefinition(personaID)
+	definition, ok := a.personaDefinition(personaID)
+	if !ok && personaID == "" && a.account != nil {
+		definition, _ = a.personaDefinition(a.account.Persona)
+	}
 	if definition.ID == "" {
 		definition.ID = personaID
 	}
