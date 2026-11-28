@@ -7,6 +7,8 @@ import (
 
 	"google.golang.org/adk/v2/tool"
 
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -22,12 +24,12 @@ func webOnlyInstruction(now time.Time, timezone string) string {
 	return fmt.Sprintf("%s\nCurrent date and time: %s (time zone %s).", webOnlyPreamble, now.In(location).Format("Monday, 2 January 2006 15:04"), location)
 }
 
-func (x *ADKExecutor) webOnlyTools(restriction *turn.ToolRestriction) []tool.Tool {
+func (x *ADKExecutor) webOnlyTools(definition *auraagent.Definition, class principal.Class, restriction *turn.ToolRestriction) []tool.Tool {
 	var offered []tool.Tool
 	for _, t := range x.tools {
 		_, plugin := x.pluginTools[t.Name()]
 		_, external := x.externalServers[t.Name()]
-		if slices.Contains(restriction.Allowed, t.Name()) && !plugin && !external {
+		if slices.Contains(restriction.Allowed, t.Name()) && !plugin && !external && definition.OffersPlainTool(class, t.Name()) {
 			offered = append(offered, t)
 		}
 	}

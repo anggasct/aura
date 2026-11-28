@@ -2569,6 +2569,42 @@ type engineTurnRunner struct {
 	engine    cronTurnEngine
 	sessions  turnstore.SessionService
 	workflows *scheduleWorkflows
+	webTools  schedule.WebToolsOffered
+}
+
+const webOnlyUnavailableCode = string(turn.ErrorCodeWebOnlyUnavailable)
+
+func webToolsOfPersona(load func() (*auraagent.Registry, error)) schedule.WebToolsOffered {
+	return func(context.Context) (bool, error) {
+		registry, err := load()
+		if err != nil {
+			return false, err
+		}
+		definition, err := registry.Resolve(nil, nil)
+		if err != nil {
+			return false, err
+		}
+		for _, name := range turn.WebOnlyRestriction().Allowed {
+			if definition.OffersPlainTool(principal.ClassOwner, name) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+}
+
+func (r *engineTurnRunner) webOnlyRefusal(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, bool) {
+	if req.Context != schedule.ContextWebOnly || r.webTools == nil {
+		return schedule.TurnResult{}, false
+	}
+	offered, err := r.webTools(ctx)
+	if err == nil && offered {
+		return schedule.TurnResult{}, false
+	}
+	return schedule.TurnResult{
+		SafeErrorCode: webOnlyUnavailableCode,
+		Text:          "Scheduled web-only job did not run: the persona that runs scheduled jobs offers neither web_search nor web_fetch. Add one to its tools or change the job to the full context.",
+	}, true
 }
 
 func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, error) {
@@ -2580,6 +2616,9 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 	}
 	if r.engine == nil {
 		return schedule.TurnResult{}, errors.New("turn engine is not wired")
+	}
+	if refused, found := r.webOnlyRefusal(ctx, req); found {
+		return refused, nil
 	}
 	if r.sessions != nil {
 		if err := ensureCronSession(ctx, r.sessions, req.SessionID); err != nil {

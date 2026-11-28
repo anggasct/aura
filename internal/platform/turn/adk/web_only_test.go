@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -18,7 +20,7 @@ type webOnlyRig struct {
 	provider *stubContextProvider
 }
 
-func newWebOnlyRig(t *testing.T, call string) (*webOnlyRig, *ADKExecutor) {
+func newWebOnlyRig(t *testing.T, call string, options ...ExecutorOption) (*webOnlyRig, *ADKExecutor) {
 	t.Helper()
 	rig := &webOnlyRig{model: &declarationModel{call: call}, builtin: accessBuiltins(), provider: &stubContextProvider{
 		blocks: []turn.ContextBlock{{Order: 150, Content: "PRIVATE-PROFILE-BLOCK", Caveat: "PRIVATE-CAVEAT"}},
@@ -26,7 +28,7 @@ func newWebOnlyRig(t *testing.T, call string) (*webOnlyRig, *ADKExecutor) {
 	schema := json.RawMessage(`{"type":"object","properties":{},"additionalProperties":false}`)
 	rig.builtin.definitions = append(rig.builtin.definitions, BuiltinToolDefinition{Name: "web_fetch", Version: "v1", Description: "fetch", Schema: schema})
 	clock := func() time.Time { return time.Date(2026, 9, 12, 14, 30, 0, 0, time.UTC) }
-	return rig, newAccessExecutor(t, rig.model, rig.builtin, WithOwnerContext("PRIVATE-OWNER-CONTEXT"), WithContextProvider(rig.provider), WithClock(clock))
+	return rig, newAccessExecutor(t, rig.model, rig.builtin, append([]ExecutorOption{WithOwnerContext("PRIVATE-OWNER-CONTEXT"), WithContextProvider(rig.provider), WithClock(clock)}, options...)...)
 }
 
 func webOnlyTurn() *turn.TurnRequest {
@@ -38,12 +40,58 @@ func webOnlyTurn() *turn.TurnRequest {
 	return req
 }
 
+func webPersona(tools ...string) ExecutorOption {
+	definition := teamDefinition()
+	definition.Tools = tools
+	return WithAgentResolver(&stubResolver{definition: definition}, nil)
+}
+
+func TestWebOnlyRunOffersOnlyTheWebToolsThePersonaLists(t *testing.T) {
+	cases := map[string]struct {
+		persona ExecutorOption
+		class   principal.Class
+		want    []string
+	}{
+		"a persona that lists one web tool":      {persona: webPersona("read_file", "web_fetch"), want: []string{"web_fetch"}},
+		"a persona that lists both web tools":    {persona: webPersona("web_search", "web_fetch", "exec"), want: []string{"web_fetch", "web_search"}},
+		"a persona with no tool list":            {persona: webPersona(), want: []string{"web_fetch", "web_search"}},
+		"a persona that lists no web tool":       {persona: webPersona("read_file", "exec")},
+		"a class whose ceiling lists a web tool": {persona: WithAgentResolver(&stubResolver{definition: auraagent.Definition{ID: "team", Instructions: "SOUL", PrincipalTools: []string{"web_fetch"}}}, nil), class: principal.ClassTrusted, want: []string{"web_fetch"}},
+		"a class whose ceiling lists none":       {persona: WithAgentResolver(&stubResolver{definition: auraagent.Definition{ID: "team", Instructions: "SOUL", PrincipalTools: []string{"read_file"}}}, nil), class: principal.ClassTrusted},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rig, executor := newWebOnlyRig(t, "", tc.persona)
+			req := webOnlyTurn()
+			if tc.class != "" {
+				req.PrincipalClass = tc.class
+			}
+			var failure error
+			for _, err := range executor.Execute(t.Context(), req) {
+				if err != nil {
+					failure = err
+					break
+				}
+			}
+			if len(tc.want) == 0 {
+				if !fault.HasCode(failure, turn.ErrorCodeWebOnlyUnavailable) || len(rig.model.declarations) != 0 {
+					t.Errorf("run = %v with %d model calls, want %s before any model call", failure, len(rig.model.declarations), turn.ErrorCodeWebOnlyUnavailable)
+				}
+				return
+			}
+			if failure != nil || len(rig.model.declarations) == 0 || !slices.Equal(rig.model.declarations[0], tc.want) {
+				t.Errorf("tools offered = %v, error %v, want %v", rig.model.declarations, failure, tc.want)
+			}
+		})
+	}
+}
+
 func TestWebOnlyRunHasNoPrivateContextOrTools(t *testing.T) {
-	rig, executor := newWebOnlyRig(t, "")
+	rig, executor := newWebOnlyRig(t, "", webPersona("read_file", "exec", "web_search", "web_fetch"))
 	drainTurn(t, executor, webOnlyTurn())
 
 	if len(rig.model.declarations) == 0 || !slices.Equal(rig.model.declarations[0], []string{"web_fetch", "web_search"}) {
-		t.Fatalf("tools offered = %v, want only web_fetch and web_search whatever the persona lists", rig.model.declarations)
+		t.Fatalf("tools offered = %v, want only web_fetch and web_search", rig.model.declarations)
 	}
 	system := strings.Join(rig.model.systems, "\n")
 	for _, private := range []string{"SOUL", "PRIVATE-OWNER-CONTEXT", "PRIVATE-PROFILE-BLOCK", "PRIVATE-CAVEAT"} {
@@ -96,7 +144,7 @@ func TestWebOnlyRunIsTaintedFromAdmission(t *testing.T) {
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			rig, executor := newWebOnlyRig(t, "web_fetch")
+			rig, executor := newWebOnlyRig(t, "web_fetch", webPersona("web_fetch"))
 			req := webOnlyTurn()
 			req.JobTaint = tc.jobTaint
 			drainTurn(t, executor, req)

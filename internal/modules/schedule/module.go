@@ -24,6 +24,7 @@ type ModuleDeps struct {
 	Observer     Observer
 
 	WorkflowChecker WorkflowChecker
+	WebTools        WebToolsOffered
 	Owner           OwnerDestination
 }
 
@@ -79,7 +80,7 @@ func New(deps *ModuleDeps) (*Module, error) {
 	}
 	operations, err := NewOperations(&OperationDeps{
 		Config: deps.Config, Store: store, Service: service, Starter: deps.Starter,
-		WorkflowChecker: deps.WorkflowChecker, Owner: deps.Owner,
+		WorkflowChecker: deps.WorkflowChecker, WebTools: deps.WebTools, Owner: deps.Owner,
 	})
 	if err != nil {
 		return nil, err

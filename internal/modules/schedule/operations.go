@@ -21,12 +21,15 @@ type OwnerDestination interface {
 
 type WorkflowChecker func(ctx context.Context, id string) error
 
+type WebToolsOffered func(ctx context.Context) (offered bool, err error)
+
 type OperationDeps struct {
 	Config          Config
 	Store           *SQLiteStore
 	Service         *Service
 	Starter         Starter
 	WorkflowChecker WorkflowChecker
+	WebTools        WebToolsOffered
 	Owner           OwnerDestination
 	Now             func() time.Time
 }
@@ -37,6 +40,7 @@ type Operations struct {
 	service  *Service
 	starter  Starter
 	workflow WorkflowChecker
+	webTools WebToolsOffered
 	owner    OwnerDestination
 	now      func() time.Time
 }
@@ -54,7 +58,7 @@ func NewOperations(deps *OperationDeps) (*Operations, error) {
 	}
 	return &Operations{
 		config: deps.Config, store: deps.Store, service: deps.Service, starter: deps.Starter,
-		workflow: deps.WorkflowChecker, owner: deps.Owner, now: now,
+		workflow: deps.WorkflowChecker, webTools: deps.WebTools, owner: deps.Owner, now: now,
 	}, nil
 }
 
@@ -194,12 +198,28 @@ func (o *Operations) checkWorkflow(ctx context.Context, spec *JobSpec) error {
 	return o.workflow(ctx, spec.WorkflowID)
 }
 
+const noWebToolsDetail = "a web-only job needs web_search or web_fetch, and the persona that runs scheduled jobs lists neither for the owner; add one to its tools or use the full context"
+
+func (o *Operations) checkRun(ctx context.Context, spec *JobSpec) error {
+	if err := o.checkWorkflow(ctx, spec); err != nil {
+		return err
+	}
+	if spec.WorkflowID != "" || spec.Context != ContextWebOnly || o.webTools == nil {
+		return nil
+	}
+	offered, err := o.webTools(ctx)
+	if err == nil && !offered {
+		return operation.NewError(operation.ErrorCodeInputInvalid, noWebToolsDetail)
+	}
+	return nil
+}
+
 func (o *Operations) previewAdd(ctx context.Context, call *operation.Call) (operation.Preview, error) {
 	spec, err := o.spec(call)
 	if err != nil {
 		return operation.Preview{}, err
 	}
-	if err := o.checkWorkflow(ctx, spec); err != nil {
+	if err := o.checkRun(ctx, spec); err != nil {
 		return operation.Preview{}, err
 	}
 	return previewOf(spec, o.routeOf(spec.OriginDestination)), nil
@@ -267,7 +287,7 @@ func (o *Operations) add(ctx context.Context, call *operation.Call) (operation.R
 		return operation.Result{}, operation.NotPerformed(operation.ErrorCodePreviewStale,
 			operation.NewError(operation.ErrorCodePreviewStale, "the owner destination changed after the preview"))
 	}
-	if err := o.checkWorkflow(ctx, spec); err != nil {
+	if err := o.checkRun(ctx, spec); err != nil {
 		return operation.Result{}, err
 	}
 	return call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {

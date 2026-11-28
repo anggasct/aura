@@ -1,6 +1,7 @@
 package schedule
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -39,6 +40,10 @@ func (o *Operations) confirmation(ctx context.Context, call *operation.Call) (*c
 		in.Context = ""
 	}
 	return &confirmation{job: job, context: in.Context}, nil
+}
+
+func (c *confirmation) runSpec() *JobSpec {
+	return &JobSpec{WorkflowID: c.job.WorkflowID, Context: cmp.Or(c.context, c.job.Context)}
 }
 
 func (c *confirmation) nothingToDo() bool {
@@ -92,7 +97,7 @@ func (o *Operations) previewConfirm(ctx context.Context, call *operation.Call) (
 	if err != nil {
 		return operation.Preview{}, err
 	}
-	if err := o.checkWorkflow(ctx, &JobSpec{WorkflowID: pending.job.WorkflowID}); err != nil {
+	if err := o.checkRun(ctx, pending.runSpec()); err != nil {
 		return operation.Preview{}, err
 	}
 	lines := pending.lines(o.routeOf(pending.job.OriginDestination))
@@ -107,7 +112,7 @@ func (o *Operations) confirm(ctx context.Context, call *operation.Call) (operati
 	if err != nil {
 		return operation.Result{}, err
 	}
-	if err := o.checkWorkflow(ctx, &JobSpec{WorkflowID: pending.job.WorkflowID}); err != nil {
+	if err := o.checkRun(ctx, pending.runSpec()); err != nil {
 		return operation.Result{}, err
 	}
 	return call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {

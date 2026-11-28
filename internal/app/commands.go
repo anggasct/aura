@@ -618,7 +618,8 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 		WorkflowChecker: func(ctx context.Context, id string) error {
 			return checkScheduledWorkflow(ctx, cfg, a.db, id)
 		},
-		Owner: &cfg.Broadcast,
+		WebTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return buildAgentRegistry(cfg) }),
+		Owner:    &cfg.Broadcast,
 	})
 	if err != nil {
 		return nil, err

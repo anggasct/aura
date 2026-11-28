@@ -258,6 +258,10 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			extra.knowledgeScope = nil
 			extra.restriction = turn.WebOnlyRestriction()
 			extra.webOnly = webOnlyInstruction(x.now(), req.Timezone)
+			if len(x.webOnlyTools(&definition, req.PrincipalClass, extra.restriction)) == 0 {
+				yield(turn.Event{}, codedError(turn.ErrorCodeWebOnlyUnavailable, "the persona offers neither web_search nor web_fetch to a web-only run", nil))
+				return
+			}
 		}
 		extra.plan = x.planOperations(runCtx, &planInput{definition: &definition, req: req, extra: &extra})
 		runCtx = withOperationPlan(runCtx, extra.plan)
@@ -625,9 +629,9 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 
 func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra *turnContext) []tool.Tool {
 	if extra.webOnly != "" {
-		return x.webOnlyTools(extra.restriction)
+		return x.webOnlyTools(definition, class, extra.restriction)
 	}
-	allowed, ok := x.allowedTools(definition, class)
+	allowed, ok := definition.ListedTools(class)
 	if !ok {
 		return nil
 	}

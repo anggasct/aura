@@ -1507,7 +1507,7 @@ func (b *build) buildSchedule() error {
 	s.scheduleMod, err = schedule.New(&schedule.ModuleDeps{
 		Config:   cfg.Scheduler,
 		DB:       db,
-		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows},
+		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows, webTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil })},
 		Notify:   &cronNotifier{broadcaster: s.broadcastMod.Broadcaster()},
 		Starter:  s.broadcastRuntime,
 		Logger:   logger,
@@ -1516,7 +1516,8 @@ func (b *build) buildSchedule() error {
 		WorkflowChecker: func(ctx context.Context, id string) error {
 			return checkScheduledWorkflow(ctx, cfg, db, id)
 		},
-		Owner: &cfg.Broadcast,
+		WebTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil }),
+		Owner:    &cfg.Broadcast,
 	})
 	if err != nil {
 		return err

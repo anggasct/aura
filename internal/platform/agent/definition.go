@@ -93,6 +93,25 @@ func (d *Definition) ToolCeiling(class principal.Class) (ceiling []string, restr
 	}
 }
 
+func (d *Definition) ListedTools(class principal.Class) (allowed []string, ok bool) {
+	allowed = d.Tools
+	if class != "" {
+		ceiling, restricted := d.ToolCeiling(class)
+		if restricted {
+			allowed = ceiling
+			if len(allowed) == 0 {
+				return nil, false
+			}
+		}
+	}
+	return allowed, true
+}
+
+func (d *Definition) OffersPlainTool(class principal.Class, name string) bool {
+	allowed, ok := d.ListedTools(class)
+	return ok && (len(allowed) == 0 || slices.Contains(allowed, name))
+}
+
 func (d *Definition) StepToolAllowed(class principal.Class, tool *tools.Definition) bool {
 	if tool.Name == tools.KBSearchToolName {
 		if len(d.KnowledgeFor(class)) == 0 {

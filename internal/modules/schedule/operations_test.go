@@ -83,9 +83,10 @@ func newWrappedScheduleRig(t *testing.T, owner OwnerDestination, wrap func(*sche
 }
 
 type rigOptions struct {
-	owner   OwnerDestination
-	wrap    func(*scheduleRig, []operation.Binding)
-	durable bool
+	owner    OwnerDestination
+	wrap     func(*scheduleRig, []operation.Binding)
+	durable  bool
+	webTools WebToolsOffered
 }
 
 func newConfiguredScheduleRig(t *testing.T, options *rigOptions) *scheduleRig {
@@ -112,7 +113,7 @@ func newConfiguredScheduleRig(t *testing.T, options *rigOptions) *scheduleRig {
 	}
 	operations, err := NewOperations(&OperationDeps{
 		Config: Default(), Store: store, Service: service, Starter: starter, Owner: owner,
-		WorkflowChecker: checker.check,
+		WorkflowChecker: checker.check, WebTools: options.webTools,
 	})
 	if err != nil {
 		t.Fatalf("NewOperations: %v", err)
