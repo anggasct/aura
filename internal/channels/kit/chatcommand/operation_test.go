@@ -122,7 +122,7 @@ func intentOf(t *testing.T, db *sql.DB, key string) journaledIntent {
 	return row
 }
 
-func TestChatOperationCommandIsJournaledWithItsOperationAndCanonicalInput(t *testing.T) {
+func TestChatOperationCommands(t *testing.T) {
 	rig := newOperationRig(t)
 
 	outcome := rig.run(t, `/stub change "two words"`, "testchat:1")

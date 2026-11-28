@@ -150,3 +150,54 @@ func TestChatOperationCommandsAreAnsweredOnceWhenAMessageIsRedelivered(t *testin
 		t.Fatalf("first %q second %q jobs %q, want the same journaled reply for the redelivered message", first, second, rig.jobs(t))
 	}
 }
+
+func TestDeferredCommandOperationsFailClosedUntilBoundAndBindOnce(t *testing.T) {
+	deferred := &deferredCommandOperations{}
+	plan := deferred.Plan("cron", []string{"list"})
+	if plan.Refusal == nil || plan.Refusal.Code != command.ErrorCodeUnavailable || plan.Operation != "" {
+		t.Fatalf("unbound Plan = %+v, want an unavailable refusal", plan)
+	}
+	reply := deferred.Run(t.Context(), &command.OperationRun{})
+	if reply.Code != command.ErrorCodeUnavailable || !slices.Equal(reply.Lines, []string{command.ReplyOperationsUnavailable}) {
+		t.Fatalf("unbound Run = %+v, want unavailable", reply)
+	}
+	rig := newRegistryRig(t, nil)
+	chat, err := operation.NewChat(&operation.ChatDeps{Registry: rig.Registry})
+	if err != nil {
+		t.Fatalf("NewChat: %v", err)
+	}
+	if err := deferred.bind(chat); err != nil {
+		t.Fatalf("bind: %v", err)
+	}
+	if err := deferred.bind(chat); err == nil {
+		t.Error("a second bind was accepted")
+	}
+	if err := deferred.bind(nil); err == nil {
+		t.Error("binding nothing was accepted")
+	}
+	if plan := deferred.Plan("cron", []string{"list"}); plan.Refusal != nil || plan.Operation != "cron.list" {
+		t.Errorf("bound Plan = %+v, want the list operation", plan)
+	}
+}
+
+func TestChatCommandRegistryListsEveryOperationGroupOnBothMessengers(t *testing.T) {
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{turns: &deferredCommandTurns{}, skills: &deferredCommandSkills{}, operations: &deferredCommandOperations{}, recorder: wireRecorder{}})
+	if err != nil {
+		t.Fatalf("newChatCommandDispatcher: %v", err)
+	}
+	groups := operation.ChatGroups(operationCatalogs())
+	if len(groups) == 0 {
+		t.Fatal("the shipped catalogs project no chat group")
+	}
+	for _, channel := range []string{principal.ChannelTelegram, principal.ChannelDiscord} {
+		bound := dispatcher.Registry().Definitions(channel)
+		for i := range groups {
+			if !slices.ContainsFunc(bound, func(d command.Definition) bool { return d.Name == groups[i].Name && d.Kind == command.KindOperation }) {
+				t.Errorf("%s does not bind the %s group", channel, groups[i].Name)
+			}
+		}
+	}
+	if _, err := newChatCommandDispatcher(nil); err == nil {
+		t.Error("a dispatcher was built without its ports")
+	}
+}

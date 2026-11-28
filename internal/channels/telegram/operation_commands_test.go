@@ -117,7 +117,7 @@ func TestOperationCommandsAreListedInHelpOnlyForTheOwnerInAPrivateChat(t *testin
 	}
 }
 
-func TestStartRegistersOperationGroupsInTheOwnerMenuOnly(t *testing.T) {
+func TestTelegramMenuListsOperationGroups(t *testing.T) {
 	rig := newOperationCommandRig(t, accessOpts{}, &operationSpy{})
 	startAndAwaitPoll(t, rig)
 
