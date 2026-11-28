@@ -267,6 +267,13 @@ func (o *Operations) expiry(in *setInput) (*time.Time, error) {
 	return &parsed, nil
 }
 
+type setRequest struct {
+	category string
+	key      string
+	value    string
+	expires  *time.Time
+}
+
 func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.Result, error) {
 	var in setInput
 	if err := o.ready(call, &in); err != nil {
@@ -276,37 +283,36 @@ func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.R
 	if err != nil {
 		return operation.Result{}, err
 	}
+	request := &setRequest{category: in.Category, key: in.Key, value: in.Value, expires: expires}
+	var apply func(ctx context.Context) (operation.Result, error)
 	switch call.Caller.Surface {
 	case operation.SurfaceCLI, operation.SurfaceChat:
-		return o.setVerified(ctx, call, &in, expires)
+		apply = func(ctx context.Context) (operation.Result, error) { return o.setVerified(ctx, request) }
 	case operation.SurfaceAgent:
-		return o.proposeUnverified(ctx, call, &in, expires)
+		apply = func(ctx context.Context) (operation.Result, error) { return o.proposeUnverified(ctx, request) }
+	default:
+		return operation.Result{}, operation.NewError(operation.ErrorCodeNotExposed, "operation: this surface cannot set a fact")
 	}
-	return operation.Result{}, operation.NewError(operation.ErrorCodeNotExposed, "operation: this surface cannot set a fact")
-}
-
-func (o *Operations) setVerified(ctx context.Context, call *operation.Call, in *setInput, expires *time.Time) (operation.Result, error) {
-	result, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
-		fact, err := o.service.SetFact(ctx, principal.OwnerID, in.Category, in.Key, in.Value, expires, o.now().UTC())
-		if err != nil {
-			return operation.Result{}, err
-		}
-		return textResult("set: " + fact.ID)
-	})
+	result, err := call.Commit(ctx, apply)
 	return result, moduleFailure(err)
 }
 
-func (o *Operations) proposeUnverified(ctx context.Context, call *operation.Call, in *setInput, expires *time.Time) (operation.Result, error) {
-	result, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
-		fact, err := o.service.ProposeAgentFact(ctx, &AgentProposal{
-			OwnerID: principal.OwnerID, Category: in.Category, Key: in.Key, Value: in.Value, ExpiresAt: expires,
-		}, o.now().UTC())
-		if err != nil {
-			return operation.Result{}, err
-		}
-		return textResult("proposed: " + fact.ID + " (unverified, waits for the owner's review)")
-	})
-	return result, moduleFailure(err)
+func (o *Operations) setVerified(ctx context.Context, request *setRequest) (operation.Result, error) {
+	fact, err := o.service.SetFact(ctx, principal.OwnerID, request.category, request.key, request.value, request.expires, o.now().UTC())
+	if err != nil {
+		return operation.Result{}, err
+	}
+	return textResult("set: " + fact.ID)
+}
+
+func (o *Operations) proposeUnverified(ctx context.Context, request *setRequest) (operation.Result, error) {
+	fact, err := o.service.ProposeAgentFact(ctx, &AgentProposal{
+		OwnerID: principal.OwnerID, Category: request.category, Key: request.key, Value: request.value, ExpiresAt: request.expires,
+	}, o.now().UTC())
+	if err != nil {
+		return operation.Result{}, err
+	}
+	return textResult("proposed: " + fact.ID + " (unverified, waits for the owner's review)")
 }
 
 func cardLines(fact *Fact) []string {

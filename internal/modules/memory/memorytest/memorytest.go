@@ -73,20 +73,27 @@ func (r *Rig) Seed(ctx context.Context) error {
 	return nil
 }
 
-func (r *Rig) Add(ctx context.Context, id, session, content string, sequence int64) error {
+type Document struct {
+	ID       string
+	Session  string
+	Content  string
+	Sequence int64
+}
+
+func (r *Rig) Add(ctx context.Context, document *Document) error {
 	_, err := r.Store.UpsertDocument(ctx, &memory.StoredDocument{
-		ID: id, OwnerID: principal.OwnerID, SessionID: session, Kind: memory.KindEventText,
-		FromSequence: sequence, ToSequence: sequence, Content: content,
+		ID: document.ID, OwnerID: principal.OwnerID, SessionID: document.Session, Kind: memory.KindEventText,
+		FromSequence: document.Sequence, ToSequence: document.Sequence, Content: document.Content,
 		TrustLabel: "owner_input", CreatedAt: seededAt,
 	})
 	return err
 }
 
-func (r *Rig) AddExpiredSummary(ctx context.Context, id, session string, sequence int64) error {
+func (r *Rig) AddExpiredSummary(ctx context.Context, document *Document) error {
 	expired := seededAt.Add(-time.Minute)
 	_, err := r.Store.UpsertDocument(ctx, &memory.StoredDocument{
-		ID: id, OwnerID: principal.OwnerID, SessionID: session, Kind: memory.KindSummary,
-		FromSequence: sequence, ToSequence: sequence, Content: "another old summary",
+		ID: document.ID, OwnerID: principal.OwnerID, SessionID: document.Session, Kind: memory.KindSummary,
+		FromSequence: document.Sequence, ToSequence: document.Sequence, Content: document.Content,
 		TrustLabel: "owner_input", CreatedAt: seededAt, ExpiresAt: &expired,
 	})
 	return err

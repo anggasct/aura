@@ -76,7 +76,7 @@ func (r *opsRig) invoke(t *testing.T, surface operation.Surface, id, input strin
 
 func (r *opsRig) apply(t *testing.T, surface operation.Surface, id, input string) (operation.Result, error) {
 	t.Helper()
-	return operationtest.InvokePreviewed(t, r.Registry, id, r.call(surface, id, input))
+	return r.InvokePreviewed(t, id, r.call(surface, id, input))
 }
 
 func (r *opsRig) preview(t *testing.T, surface operation.Surface, id, input string) operation.Preview {
@@ -176,7 +176,7 @@ func TestMemoryForgetBindsItsPreview(t *testing.T) {
 			t.Run(string(surface), func(t *testing.T) {
 				rig := newOpsRig(t)
 				preview := rig.preview(t, surface, "memory.forget", input)
-				if err := rig.mem.Add(t.Context(), "mem-a3", memorytest.FirstSession, "alpha recording three", 3); err != nil {
+				if err := rig.mem.Add(t.Context(), &memorytest.Document{ID: "mem-a3", Session: memorytest.FirstSession, Content: "alpha recording three", Sequence: 3}); err != nil {
 					t.Fatalf("add a document: %v", err)
 				}
 				call := rig.call(surface, "memory.forget", input)
@@ -196,7 +196,7 @@ func TestMemoryForgetBindsItsPreview(t *testing.T) {
 	t.Run("through the agent", func(t *testing.T) {
 		var rig *opsRig
 		rig = newOpsRigAnswering(t, func(ctx context.Context, _ *toolbroker.ApprovalPrompt) (bool, error) {
-			return true, rig.mem.Add(ctx, "mem-a3", memorytest.FirstSession, "alpha recording three", 3)
+			return true, rig.mem.Add(ctx, &memorytest.Document{ID: "mem-a3", Session: memorytest.FirstSession, Content: "alpha recording three", Sequence: 3})
 		})
 
 		outcome := rig.tool("memory.forget", input)
@@ -213,7 +213,7 @@ func TestMemoryForgetBindsItsPreview(t *testing.T) {
 func TestMemoryPurgeBindsItsPreview(t *testing.T) {
 	rig := newOpsRig(t)
 	preview := rig.preview(t, operation.SurfaceChat, "memory.purge", `{}`)
-	if err := rig.mem.AddExpiredSummary(t.Context(), "mem-s2", memorytest.SecondSession, 3); err != nil {
+	if err := rig.mem.AddExpiredSummary(t.Context(), &memorytest.Document{ID: "mem-s2", Session: memorytest.SecondSession, Content: "another old summary", Sequence: 3}); err != nil {
 		t.Fatalf("add an expired summary: %v", err)
 	}
 	call := rig.call(operation.SurfaceChat, "memory.purge", `{}`)
@@ -274,7 +274,7 @@ func TestMemoryForgetNeedsExactlyOneScope(t *testing.T) {
 func TestTheForgetPreviewListsTheWholeSetForTheOwnerAndABoundedCardForTheAgent(t *testing.T) {
 	rig := newOpsRig(t)
 	for sequence := int64(10); sequence < 22; sequence++ {
-		if err := rig.mem.Add(t.Context(), "mem-bulk-"+strconv.FormatInt(sequence, 10), memorytest.FirstSession, "bulk recording", sequence); err != nil {
+		if err := rig.mem.Add(t.Context(), &memorytest.Document{ID: "mem-bulk-" + strconv.FormatInt(sequence, 10), Session: memorytest.FirstSession, Content: "bulk recording", Sequence: sequence}); err != nil {
 			t.Fatalf("add a document: %v", err)
 		}
 	}

@@ -90,7 +90,7 @@ func (r *opsRig) invoke(t *testing.T, surface operation.Surface, id, input strin
 
 func (r *opsRig) apply(t *testing.T, surface operation.Surface, id, input string) (operation.Result, error) {
 	t.Helper()
-	return operationtest.InvokePreviewed(t, r.Registry, id, r.call(surface, id, input))
+	return r.InvokePreviewed(t, id, r.call(surface, id, input))
 }
 
 func (r *opsRig) fact(t *testing.T, id string) profile.Fact {
