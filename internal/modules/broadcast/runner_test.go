@@ -39,7 +39,7 @@ func (s *fakeRunStore) Insert(_ context.Context, record *ItemRecord) (ItemRecord
 	key := record.Producer + "|" + record.IdempotencyKey
 	if id, ok := s.byKey[key]; ok {
 		existing := s.records[id]
-		if existing.ContentDigest != record.ContentDigest {
+		if existing.ContentDigest != record.ContentDigest || existing.Tainted != record.Tainted {
 			return ItemRecord{}, false, Errorf(ErrorCodeConflict, "idempotency key is already claimed with different content")
 		}
 		return existing, true, nil
@@ -75,12 +75,7 @@ func (s *fakeRunStore) CreateDigest(_ context.Context, parent *ItemRecord, child
 
 func toFull(record *ItemRecord) FullItem {
 	return FullItem{
-		Item: Item{
-			ID: record.ID, Producer: record.Producer, IdempotencyKey: record.IdempotencyKey,
-			ContentDigest: record.ContentDigest, Priority: record.Priority,
-			DestinationAlias: record.DestinationAlias, ContentJSON: record.ContentJSON,
-			State: record.State, NotBefore: record.NotBefore, CreatedAt: record.CreatedAt,
-		},
+		Item:           recordToItem(record),
 		AttemptCount:   record.AttemptCount,
 		EffectID:       record.EffectID,
 		DigestParentID: record.DigestParentID,
@@ -723,4 +718,67 @@ type fakeResumeStore struct {
 
 func (s *fakeResumeStore) ListActive(context.Context, int) ([]FullItem, error) {
 	return s.items, nil
+}
+
+func TestRunner_CarriesTaintThroughDirectDigestAndFallback(t *testing.T) {
+	t.Run("direct tainted item sets SendRequest.Tainted", func(t *testing.T) {
+		fixture := newRunnerFixture([]sendScript{successOutcome("intent-1")})
+		now := freshFixtureTime()
+		fixture.store.seed(&ItemRecord{
+			ID: "bcst-t", Producer: "cron", IdempotencyKey: "key-t", ContentDigest: "d-t",
+			Priority: PriorityWarning, DestinationAlias: "default", ContentJSON: `{"text":"https://evil.example/t"}`,
+			State: StateScheduled, NotBefore: now, CreatedAt: now, UpdatedAt: now, Tainted: true,
+		})
+		startBroadcastRun(t, fixture, "bcst-t")
+		waitBroadcastState(t, fixture, "bcst-t", StateSucceeded)
+		if fixture.sender.callCount() != 1 || !fixture.sender.calls[0].Tainted {
+			t.Fatalf("calls = %+v, want one tainted send", fixture.sender.calls)
+		}
+	})
+
+	t.Run("digest with one tainted child sets SendRequest.Tainted", func(t *testing.T) {
+		fixture := newRunnerFixture([]sendScript{successOutcome("intent-dg")})
+		release := time.Now().UTC().Truncate(time.Second).Add(-time.Hour)
+		fixture.store.seed(&ItemRecord{
+			ID: "bcst-clean", Producer: "cron", IdempotencyKey: "key-clean", ContentDigest: "d-clean",
+			Priority: PriorityInfo, DestinationAlias: "default", ContentJSON: `{"text":"clean"}`,
+			State: StateHeld, NotBefore: release, CreatedAt: release.Add(-time.Hour), UpdatedAt: release.Add(-time.Hour),
+		})
+		fixture.store.seed(&ItemRecord{
+			ID: "bcst-dirty", Producer: "cron", IdempotencyKey: "key-dirty", ContentDigest: "d-dirty",
+			Priority: PriorityInfo, DestinationAlias: "default", ContentJSON: `{"text":"https://evil.example/dg"}`,
+			State: StateHeld, NotBefore: release, CreatedAt: release.Add(-30 * time.Minute), UpdatedAt: release.Add(-30 * time.Minute),
+			Tainted: true,
+		})
+		startBroadcastRun(t, fixture, "bcst-clean")
+		waitBroadcastState(t, fixture, "bcst-clean", StateCancelled)
+		waitBroadcastState(t, fixture, "bcst-dirty", StateCancelled)
+		deadline := time.Now().Add(10 * time.Second)
+		for time.Now().Before(deadline) && fixture.sender.callCount() == 0 {
+			fixture.clock.Advance(time.Second)
+			time.Sleep(time.Millisecond)
+		}
+		if fixture.sender.callCount() != 1 || !fixture.sender.calls[0].Tainted {
+			t.Fatalf("digest calls = %+v, want one tainted send", fixture.sender.calls)
+		}
+	})
+
+	t.Run("fallback preserves Tainted", func(t *testing.T) {
+		policy := testRunPolicy()
+		policy.Fallback = map[string]string{"default": "discord:fallback-channel"}
+		fixture := newRunnerFixtureWithPolicy(policy, []sendScript{{outcome: SendOutcome{IntentID: "intent-bad"}}})
+		fallbackSender := &fakeSender{scripts: []sendScript{successOutcome("intent-fb")}}
+		fixture.runner.senders["discord"] = &routeSwitchSender{primary: fixture.sender, fallback: fallbackSender}
+		now := freshFixtureTime()
+		fixture.store.seed(&ItemRecord{
+			ID: "bcst-fb", Producer: "cron", IdempotencyKey: "key-fb", ContentDigest: "d-fb",
+			Priority: PriorityWarning, DestinationAlias: "default", ContentJSON: `{"text":"https://evil.example/fb"}`,
+			State: StateScheduled, NotBefore: now, CreatedAt: now, UpdatedAt: now, Tainted: true,
+		})
+		startBroadcastRun(t, fixture, "bcst-fb")
+		waitBroadcastState(t, fixture, "bcst-fb", StateSucceeded)
+		if fallbackSender.callCount() != 1 || !fallbackSender.calls[0].Tainted {
+			t.Fatalf("fallback calls = %+v, want one tainted send", fallbackSender.calls)
+		}
+	})
 }

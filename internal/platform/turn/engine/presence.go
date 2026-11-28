@@ -28,6 +28,7 @@ func presenceDeliveryRequest(req *turn.TurnRequest, deadline time.Time) *runtime
 		ReplyContext:   req.ReplyContext,
 		IdempotencyKey: req.TurnID,
 		Deadline:       deadline,
+		Tainted:        req.Tainted(),
 	}
 }
 

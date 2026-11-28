@@ -90,6 +90,7 @@ type Deps struct {
 	SecretVault       *secret.Vault
 	Vision            *vision.Service
 	Access            *access.Settings
+	Transport         http.RoundTripper
 	OnAdmitted        func(context.Context, principal.Class)
 	OnDropped         func(context.Context, string)
 }
@@ -266,7 +267,7 @@ func New(deps *Deps) (*Adapter, error) {
 		dropped:        deps.OnDropped,
 		gatewayURL:     gatewayURL,
 		restBase:       discordRestBase,
-		httpClient:     &http.Client{Timeout: mediaTimeout},
+		httpClient:     &http.Client{Timeout: mediaTimeout, Transport: deps.Transport},
 		gate:           newEditGate(time.Duration(deps.Config.MinEditInterval)),
 		posted:         map[string][]string{},
 		holds:          map[string]time.Time{},

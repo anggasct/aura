@@ -123,12 +123,12 @@ func (a *Adapter) replyCommand(ctx context.Context, replyContext []byte, intentI
 	if strings.TrimSpace(text) == "" {
 		return nil
 	}
-	_, err := a.Deliver(ctx, &runtimechannelhost.DeliveryRequest{
+	_, err := a.deliver(ctx, &runtimechannelhost.DeliveryRequest{
 		Channel:        a.source(),
 		ConversationID: sessionID,
 		EffectID:       intentID,
 		ReplyContext:   replyContext,
 		Parts:          []runtimechannelhost.OutputPart{{Text: text}},
-	})
+	}, false)
 	return err
 }

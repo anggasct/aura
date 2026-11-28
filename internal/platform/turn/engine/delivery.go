@@ -195,6 +195,7 @@ func (e *Engine) planDelivery(req *turn.TurnRequest, final *finalMessage) (plann
 		Parts:          parts,
 		IdempotencyKey: req.TurnID,
 		Deadline:       req.Deadline,
+		Tainted:        req.Tainted(),
 	}}, nil
 }
 

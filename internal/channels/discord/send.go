@@ -47,6 +47,7 @@ type SendOperation struct {
 	FileName   string             `json:"file_name,omitempty"`
 	FileBody   []byte             `json:"file_body,omitempty"`
 	Components []componentPayload `json:"components,omitempty"`
+	Previews   bool               `json:"previews,omitempty"`
 }
 
 type editOperation struct {
@@ -54,6 +55,7 @@ type editOperation struct {
 	MessageID       string `json:"message_id"`
 	Text            string `json:"text"`
 	ClearComponents bool   `json:"clear_components,omitempty"`
+	Previews        bool   `json:"previews,omitempty"`
 }
 
 type deleteOperation struct {
@@ -299,7 +301,7 @@ func (a *Adapter) invokeCreateThread(ctx context.Context, invocation *effect.Inv
 }
 
 func (a *Adapter) postMessage(ctx context.Context, token string, operation *SendOperation) (string, effect.Outcome, error) {
-	body, contentType, err := sendBody(operation, a.account.LinkPreviews)
+	body, contentType, err := sendBody(operation, a.account.LinkPreviews && operation.Previews)
 	if err != nil {
 		return "", effect.Outcome{}, err
 	}
@@ -326,7 +328,7 @@ func (a *Adapter) patchMessage(ctx context.Context, token string, operation *edi
 	if operation.ClearComponents {
 		edit["components"] = []componentPayload{}
 	}
-	suppressEmbedsUnlessOptedIn(edit, a.account.LinkPreviews)
+	suppressEmbedsUnlessOptedIn(edit, a.account.LinkPreviews && operation.Previews)
 	payload, err := json.Marshal(edit)
 	if err != nil {
 		return effect.Outcome{}, fault.New(ErrorCodeProtocolInvalid, "edit payload is not serializable")

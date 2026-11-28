@@ -26,7 +26,7 @@ func (s *fakeItemStore) Insert(_ context.Context, record *ItemRecord) (ItemRecor
 	key := record.Producer + "|" + record.IdempotencyKey
 	if id, ok := s.byKey[key]; ok {
 		existing := s.records[id]
-		if existing.ContentDigest != record.ContentDigest {
+		if existing.ContentDigest != record.ContentDigest || existing.Tainted != record.Tainted {
 			return ItemRecord{}, false, Errorf(ErrorCodeConflict, "idempotency key is already claimed with different content")
 		}
 		return existing, true, nil
@@ -156,6 +156,13 @@ func TestSubmit_MismatchedReuseConflicts(t *testing.T) {
 		t.Fatal("mismatched reuse accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
 		t.Errorf("mismatch code = %v, %v; want conflict", code, ok)
+	}
+	tainted := testNotification()
+	tainted.Tainted = true
+	if _, _, err := broadcaster.Submit(t.Context(), tainted); err == nil {
+		t.Fatal("mismatched taint reuse accepted")
+	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeConflict {
+		t.Errorf("taint mismatch code = %v, %v; want conflict", code, ok)
 	}
 }
 

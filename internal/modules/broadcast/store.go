@@ -73,18 +73,7 @@ func nullableText(value string) any {
 
 func toFullItem(record *ItemRecord) FullItem {
 	return FullItem{
-		Item: Item{
-			ID:               record.ID,
-			Producer:         record.Producer,
-			IdempotencyKey:   record.IdempotencyKey,
-			ContentDigest:    record.ContentDigest,
-			Priority:         record.Priority,
-			DestinationAlias: record.DestinationAlias,
-			ContentJSON:      record.ContentJSON,
-			State:            record.State,
-			NotBefore:        record.NotBefore,
-			CreatedAt:        record.CreatedAt,
-		},
+		Item:           recordToItem(record),
 		AttemptCount:   record.AttemptCount,
 		EffectID:       record.EffectID,
 		DigestParentID: record.DigestParentID,
@@ -94,7 +83,7 @@ func toFullItem(record *ItemRecord) FullItem {
 const selectBroadcastItemColumns = `
 	id, producer, idempotency_key, content_digest, priority, destination_alias,
 	content_json, state, not_before, attempt_count, effect_id, digest_parent_id,
-	created_at, updated_at
+	created_at, updated_at, tainted
 `
 
 func (s *SQLiteStore) Insert(ctx context.Context, record *ItemRecord) (ItemRecord, bool, error) {
@@ -127,8 +116,8 @@ func (s *SQLiteStore) Insert(ctx context.Context, record *ItemRecord) (ItemRecor
 		`INSERT INTO broadcast_item (
 			id, producer, idempotency_key, content_digest, priority, destination_alias,
 			content_json, state, not_before, attempt_count, effect_id, digest_parent_id,
-			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_at, updated_at, tainted
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		record.ID,
 		record.Producer,
 		record.IdempotencyKey,
@@ -143,6 +132,7 @@ func (s *SQLiteStore) Insert(ctx context.Context, record *ItemRecord) (ItemRecor
 		nullableText(record.DigestParentID),
 		sqlite.FormatTime(record.CreatedAt.UTC()),
 		sqlite.FormatTime(record.UpdatedAt.UTC()),
+		record.Tainted,
 	)
 	if err == nil {
 		return *record, false, nil
@@ -158,7 +148,7 @@ func (s *SQLiteStore) Insert(ctx context.Context, record *ItemRecord) (ItemRecor
 	if !found {
 		return ItemRecord{}, false, fault.Wrap(ErrorCodeUnavailable, "insert broadcast item", classified)
 	}
-	if existing.ContentDigest != record.ContentDigest {
+	if existing.ContentDigest != record.ContentDigest || existing.Tainted != record.Tainted {
 		return ItemRecord{}, false, fault.New(
 			ErrorCodeConflict,
 			fmt.Sprintf("idempotency key %q is already claimed with different content", record.IdempotencyKey),
@@ -224,8 +214,8 @@ func (s *SQLiteStore) CreateDigest(ctx context.Context, parent *ItemRecord, chil
 			`INSERT INTO broadcast_item (
 				id, producer, idempotency_key, content_digest, priority, destination_alias,
 				content_json, state, not_before, attempt_count, effect_id, digest_parent_id,
-				created_at, updated_at
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				created_at, updated_at, tainted
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			parent.ID,
 			parent.Producer,
 			parent.IdempotencyKey,
@@ -240,6 +230,7 @@ func (s *SQLiteStore) CreateDigest(ctx context.Context, parent *ItemRecord, chil
 			nullableText(parent.DigestParentID),
 			sqlite.FormatTime(parent.CreatedAt.UTC()),
 			sqlite.FormatTime(parent.UpdatedAt.UTC()),
+			parent.Tainted,
 		)
 		if err != nil {
 			classified := sqlite.Classify(err)
@@ -321,6 +312,7 @@ func scanOneBroadcastItem(row rowScanner) (ItemRecord, bool, error) {
 		&digestParentID,
 		&createdAtRaw,
 		&updatedAtRaw,
+		&item.Tainted,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ItemRecord{}, false, nil
@@ -350,6 +342,7 @@ func scanBroadcastItem(rows *sql.Rows) (ItemRecord, error) {
 		&digestParentID,
 		&createdAtRaw,
 		&updatedAtRaw,
+		&item.Tainted,
 	); err != nil {
 		return ItemRecord{}, fault.Wrap(ErrorCodeUnavailable, "scan broadcast item", sqlite.Classify(err))
 	}

@@ -96,7 +96,19 @@ func (g *editGate) record(key string, receipt runtimechannelhost.ProviderReceipt
 	entry.receipt = receipt
 }
 
+type deliveryCall struct {
+	req      *runtimechannelhost.DeliveryRequest
+	previews bool
+}
+
 func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest) (runtimechannelhost.ProviderReceipt, error) {
+	if req == nil {
+		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
+	}
+	return a.deliver(ctx, req, !req.Tainted)
+}
+
+func (a *Adapter) deliver(ctx context.Context, req *runtimechannelhost.DeliveryRequest, previews bool) (runtimechannelhost.ProviderReceipt, error) {
 	if req == nil {
 		return runtimechannelhost.ProviderReceipt{}, fault.New(ErrorCodeInvalidArgument, "delivery request must not be nil")
 	}
@@ -133,11 +145,12 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 		a.stopPresence(req.EffectID)
 		a.clearPresenceStop(ctx, req.EffectID)
 	}
+	call := deliveryCall{req: req, previews: previews}
 	posted, ok := a.postedMessages(key)
 	if tracked && ok {
-		return a.deliverEdit(ctx, req, key, dest.target, posted, chunks)
+		return a.deliverEdit(ctx, call, key, dest.target, posted, chunks)
 	}
-	receipt, err := a.deliverPost(ctx, req, key, tracked, dest.target, req.ReplyContext, chunks)
+	receipt, err := a.deliverPost(ctx, call, key, tracked, dest.target, req.ReplyContext, chunks)
 	if err == nil {
 		if tracked {
 			a.deleteStatus(ctx, req)
@@ -151,7 +164,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
 	a.logger.WarnContext(ctx, "thread delivery fallback", "component", "discord", "error", err)
-	fallback, fallbackErr := a.deliverPost(ctx, req, key, tracked, dest.parent, req.ReplyContext, chunks)
+	fallback, fallbackErr := a.deliverPost(ctx, call, key, tracked, dest.parent, req.ReplyContext, chunks)
 	if fallbackErr != nil {
 		return runtimechannelhost.ProviderReceipt{}, fallbackErr
 	}
@@ -168,12 +181,12 @@ func keyBase(req *runtimechannelhost.DeliveryRequest) string {
 	return "anon:" + req.IdempotencyKey
 }
 
-func (a *Adapter) deliverPost(ctx context.Context, req *runtimechannelhost.DeliveryRequest, key string, tracked bool, channelID string, replyContext []byte, chunks []string) (runtimechannelhost.ProviderReceipt, error) {
+func (a *Adapter) deliverPost(ctx context.Context, call deliveryCall, key string, tracked bool, channelID string, replyContext []byte, chunks []string) (runtimechannelhost.ProviderReceipt, error) {
 	texts, uploads, err := splitUploads(chunks, a.cfg.MaxAttachmentBytes)
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
-	posted, err := a.postChunks(ctx, req, channelID, replyContext, texts, uploads)
+	posted, err := a.postChunks(ctx, call, channelID, replyContext, texts, uploads)
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
@@ -185,7 +198,7 @@ func (a *Adapter) deliverPost(ctx context.Context, req *runtimechannelhost.Deliv
 	return receipt, nil
 }
 
-func (a *Adapter) deliverEdit(ctx context.Context, req *runtimechannelhost.DeliveryRequest, key, channelID string, posted, chunks []string) (runtimechannelhost.ProviderReceipt, error) {
+func (a *Adapter) deliverEdit(ctx context.Context, call deliveryCall, key, channelID string, posted, chunks []string) (runtimechannelhost.ProviderReceipt, error) {
 	claimed := a.gate.claim(key)
 	receipt, superseded, err := a.gate.awaitTurn(ctx, key, claimed)
 	if err != nil {
@@ -198,7 +211,7 @@ func (a *Adapter) deliverEdit(ctx context.Context, req *runtimechannelhost.Deliv
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
-	edited, err := a.reconcileMessages(ctx, req, channelID, posted, texts, uploads)
+	edited, err := a.reconcileMessages(ctx, call, channelID, posted, texts, uploads)
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
@@ -207,24 +220,24 @@ func (a *Adapter) deliverEdit(ctx context.Context, req *runtimechannelhost.Deliv
 	return lastReceipt(edited), nil
 }
 
-func (a *Adapter) reconcileMessages(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, posted, texts []string, uploads []uploadChunk) ([]string, error) {
+func (a *Adapter) reconcileMessages(ctx context.Context, call deliveryCall, channelID string, posted, texts []string, uploads []uploadChunk) ([]string, error) {
 	var ids []string
 	for index, text := range texts {
 		if index < len(posted) {
-			if err := a.executeEdit(ctx, req, channelID, posted[index], index, text); err != nil {
+			if err := a.executeEdit(ctx, call, channelID, posted[index], index, text); err != nil {
 				return nil, err
 			}
 			ids = append(ids, posted[index])
 			continue
 		}
-		id, err := a.executePost(ctx, req, channelID, nil, index, text, nil)
+		id, err := a.executePost(ctx, call, channelID, nil, index, text, nil)
 		if err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	if len(uploads) > 0 {
-		id, err := a.executePost(ctx, req, channelID, nil, len(texts), uploads[0].text, &uploads[0])
+		id, err := a.executePost(ctx, call, channelID, nil, len(texts), uploads[0].text, &uploads[0])
 		if err != nil {
 			return nil, err
 		}
@@ -233,7 +246,7 @@ func (a *Adapter) reconcileMessages(ctx context.Context, req *runtimechannelhost
 	return ids, nil
 }
 
-func (a *Adapter) postChunks(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyContext []byte, texts []string, uploads []uploadChunk) ([]string, error) {
+func (a *Adapter) postChunks(ctx context.Context, call deliveryCall, channelID string, replyContext []byte, texts []string, uploads []uploadChunk) ([]string, error) {
 	var ids []string
 	dest, err := parseDeliveryContext(replyContext, channelID)
 	if err != nil {
@@ -248,14 +261,14 @@ func (a *Adapter) postChunks(ctx context.Context, req *runtimechannelhost.Delive
 		if index == 0 && inboundMessage != "" {
 			replyTo = &inboundMessage
 		}
-		id, err := a.executePost(ctx, req, channelID, replyTo, index, text, nil)
+		id, err := a.executePost(ctx, call, channelID, replyTo, index, text, nil)
 		if err != nil {
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	for _, upload := range uploads {
-		id, err := a.executePost(ctx, req, channelID, nil, len(ids), upload.text, &upload)
+		id, err := a.executePost(ctx, call, channelID, nil, len(ids), upload.text, &upload)
 		if err != nil {
 			return nil, err
 		}
@@ -302,8 +315,8 @@ func (a *Adapter) deleteStatus(ctx context.Context, req *runtimechannelhost.Deli
 	}
 }
 
-func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID string, replyTo *string, index int, text string, upload *uploadChunk) (string, error) {
-	operation := SendOperation{ChannelID: channelID, Text: text}
+func (a *Adapter) executePost(ctx context.Context, call deliveryCall, channelID string, replyTo *string, index int, text string, upload *uploadChunk) (string, error) {
+	operation := SendOperation{ChannelID: channelID, Text: text, Previews: call.previews}
 	if replyTo != nil {
 		operation.ReplyTo = *replyTo
 	}
@@ -318,8 +331,8 @@ func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.Deliv
 		return "", err
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
-		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(keyBase(req), channelID, label, text),
+		SessionID:      call.req.ConversationID,
+		IdempotencyKey: idempotencyKey(keyBase(call.req), channelID, label, text),
 		Provider:       "discord",
 		Operation:      OpSendMessage,
 		Classification: effect.ClassificationEffectful,
@@ -332,14 +345,14 @@ func (a *Adapter) executePost(ctx context.Context, req *runtimechannelhost.Deliv
 	return receiptMessageID(intent)
 }
 
-func (a *Adapter) executeEdit(ctx context.Context, req *runtimechannelhost.DeliveryRequest, channelID, messageID string, index int, text string) error {
-	request, err := marshalOperation(editOperation{ChannelID: channelID, MessageID: messageID, Text: text})
+func (a *Adapter) executeEdit(ctx context.Context, call deliveryCall, channelID, messageID string, index int, text string) error {
+	request, err := marshalOperation(editOperation{ChannelID: channelID, MessageID: messageID, Text: text, Previews: call.previews})
 	if err != nil {
 		return err
 	}
 	intent, err := a.effects.Execute(ctx, &effect.PrepareRequest{
-		SessionID:      req.ConversationID,
-		IdempotencyKey: idempotencyKey(keyBase(req), channelID, "e"+strconv.Itoa(index), text),
+		SessionID:      call.req.ConversationID,
+		IdempotencyKey: idempotencyKey(keyBase(call.req), channelID, "e"+strconv.Itoa(index), text),
 		Provider:       "discord",
 		Operation:      opEditMessage,
 		Classification: effect.ClassificationEffectful,

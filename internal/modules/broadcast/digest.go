@@ -165,6 +165,7 @@ func recordToItem(record *ItemRecord) Item {
 		State:            record.State,
 		NotBefore:        record.NotBefore,
 		CreatedAt:        record.CreatedAt,
+		Tainted:          record.Tainted,
 	}
 }
 
@@ -177,6 +178,7 @@ func buildDigestParent(group []Item, index int, maxBytes int64) (*ItemRecord, er
 	if int64(len(content)) > maxBytes {
 		return nil, Errorf(ErrorCodeInvalidArgument, "digest content exceeds the byte bound")
 	}
+	tainted := slices.ContainsFunc(group, func(item Item) bool { return item.Tainted })
 	now := time.Now().UTC()
 	key := digestParentKey(first.NotBefore, first.DestinationAlias, first.Priority, index)
 	return &ItemRecord{
@@ -191,5 +193,6 @@ func buildDigestParent(group []Item, index int, maxBytes int64) (*ItemRecord, er
 		NotBefore:        first.NotBefore,
 		CreatedAt:        now,
 		UpdatedAt:        now,
+		Tainted:          tainted,
 	}, nil
 }

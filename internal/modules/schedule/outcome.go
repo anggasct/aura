@@ -16,6 +16,7 @@ type turnOutcome struct {
 	Succeeded     bool      `json:"succeeded,omitempty"`
 	SafeErrorCode string    `json:"safe_error_code,omitempty"`
 	Destination   string    `json:"destination,omitempty"`
+	Tainted       bool      `json:"tainted,omitempty"`
 	First         time.Time `json:"first,omitzero"`
 	Deadline      time.Time `json:"deadline,omitzero"`
 }
@@ -23,7 +24,7 @@ type turnOutcome struct {
 func resultOutcome(result *TurnResult, destination string) turnOutcome {
 	return turnOutcome{
 		Kind: outcomeResult, TurnID: result.TurnID, Text: result.Text, Succeeded: result.Succeeded,
-		SafeErrorCode: result.SafeErrorCode, Destination: destination,
+		SafeErrorCode: result.SafeErrorCode, Destination: destination, Tainted: result.Tainted,
 	}
 }
 

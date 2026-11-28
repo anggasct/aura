@@ -1,6 +1,7 @@
 package app
 
 import (
+	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -1595,7 +1596,7 @@ func (s *discordBroadcastSender) Send(ctx context.Context, req *broadcast.SendRe
 			return broadcast.SendOutcome{}, err
 		}
 	}
-	payload, err := json.Marshal(discord.SendOperation{ChannelID: req.Route.Instance, Text: req.Text})
+	payload, err := json.Marshal(discord.SendOperation{ChannelID: req.Route.Instance, Text: req.Text, Previews: !req.Tainted})
 	if err != nil {
 		return broadcast.SendOutcome{}, err
 	}
@@ -2581,12 +2582,13 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 		return schedule.TurnResult{
 			SafeErrorCode: string(workflow.ErrorCodeUnattendedSink),
 			Text:          fmt.Sprintf("Scheduled workflow %s did not start: a step after a web step could send data out. Remove that step or move it before the web step.", req.WorkflowID),
+			Tainted:       req.TaintSource != "",
 		}, nil
 	}
 	if err != nil {
 		return schedule.TurnResult{}, err
 	}
-	return schedule.TurnResult{TurnID: run.ID, Text: fmt.Sprintf("started workflow %s (run %s)", req.WorkflowID, run.ID), Succeeded: true}, nil
+	return schedule.TurnResult{TurnID: run.ID, Text: fmt.Sprintf("started workflow %s (run %s)", req.WorkflowID, run.ID), Succeeded: true, Tainted: req.TaintSource != ""}, nil
 }
 
 type engineTurnRunner struct {
@@ -2594,6 +2596,7 @@ type engineTurnRunner struct {
 	sessions  turnstore.SessionService
 	workflows *scheduleWorkflows
 	webTools  schedule.WebToolsOffered
+	personas  *auraagent.Registry
 }
 
 const webOnlyUnavailableCode = string(turn.ErrorCodeWebOnlyUnavailable)
@@ -2628,7 +2631,22 @@ func (r *engineTurnRunner) webOnlyRefusal(ctx context.Context, req *schedule.Tur
 	return schedule.TurnResult{
 		SafeErrorCode: webOnlyUnavailableCode,
 		Text:          "Scheduled web-only job did not run: the persona that runs scheduled jobs offers neither web_search nor web_fetch. Add one to its tools or change the job to the full context.",
+		Tainted:       req.TaintSource != "" || req.Context == schedule.ContextWebOnly,
 	}, true
+}
+
+func (r *engineTurnRunner) isTainted(turnReq *turn.TurnRequest) bool {
+	if turnReq.Tainted() {
+		return true
+	}
+	if r.personas == nil {
+		return false
+	}
+	def, ok := r.personas.Lookup(cmp.Or(turnReq.AgentID, auraagent.DefaultID))
+	if !ok {
+		return true
+	}
+	return len(def.KnowledgeFor(turnReq.PrincipalClass)) > 0
 }
 
 func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, error) {
@@ -2649,9 +2667,10 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 			return schedule.TurnResult{}, err
 		}
 	}
+	turnReq := scheduledTurn(req)
 	var stream []terminal.Event
 	var turnID string
-	for event, err := range r.engine.Run(ctx, scheduledTurn(req)) {
+	for event, err := range r.engine.Run(ctx, turnReq) {
 		if err != nil {
 			if fault.HasCode(err, turn.ErrorCodeRuntimeOverloaded) {
 				return schedule.TurnResult{}, schedule.Errorf(schedule.ErrorCodeRuntimeOverloaded, "runtime is overloaded")
@@ -2673,7 +2692,7 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 			completed = true
 		}
 	}
-	result := schedule.TurnResult{TurnID: turnID, Text: text, Succeeded: completed}
+	result := schedule.TurnResult{TurnID: turnID, Text: text, Succeeded: completed, Tainted: r.isTainted(turnReq)}
 	if !completed {
 		result.SafeErrorCode = "turn_failed"
 	}
@@ -2735,6 +2754,7 @@ func (n *cronNotifier) Notify(ctx context.Context, req *schedule.NotifyRequest) 
 		DestinationAlias: req.DestinationAlias,
 		ContentJSON:      notifyContentJSON(req.Text),
 		CreatedAt:        time.Now().UTC(),
+		Tainted:          req.Tainted,
 	})
 	return err
 }

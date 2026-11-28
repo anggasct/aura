@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -108,6 +109,7 @@ type Deps struct {
 	Vision            *vision.Service
 	UpdateLedger      UpdateLedger
 	Access            *access.Settings
+	Transport         http.RoundTripper
 	OnAdmitted        func(ctx context.Context, class principal.Class)
 	OnDropped         func(ctx context.Context, reason string)
 }
@@ -229,6 +231,10 @@ func New(deps *Deps) (*Adapter, error) {
 	if deps.Access != nil {
 		settings = *deps.Access
 	}
+	bot := newBotClient()
+	if deps.Transport != nil {
+		bot.http.Transport = deps.Transport
+	}
 	adapter := &Adapter{
 		cfg:        deps.Config,
 		account:    deps.Account,
@@ -243,7 +249,7 @@ func New(deps *Deps) (*Adapter, error) {
 		dropped:    deps.OnDropped,
 		access:     settings,
 		logger:     logger,
-		bot:        newBotClient(),
+		bot:        bot,
 		retryBase:  backoffBase,
 		rateCap:    rateLimitCap,
 		deliverSem: make(chan struct{}, maxDeliverInflight),

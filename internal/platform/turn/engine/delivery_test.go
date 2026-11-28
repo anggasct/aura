@@ -499,3 +499,29 @@ func completedMessage(engine *Engine, req *turn.TurnRequest, events []turn.Event
 	final := engine.planFinalMessage(req, events, turnEnd{})
 	return &final
 }
+
+func TestPlanDeliveryCarriesAdmissionTaint(t *testing.T) {
+	executor := turntest.NewFakeExecutor(nil)
+	capture := &capturingAdapter{}
+	engine, _, _ := newTestRuntime(t, Deps{Config: testLimits(2, 4), Channels: []runtimechannelhost.ChannelPort{capture}}, executor)
+	events := []turn.Event{{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"hello"}`)}}
+
+	clean := channelTurnRequest("channel:333", "turn-clean")
+	plannedClean, err := engine.planDelivery(clean, completedMessage(engine, clean, events))
+	if err != nil {
+		t.Fatalf("planDelivery clean: %v", err)
+	}
+	if plannedClean.request.Tainted {
+		t.Error("clean turn planned a tainted delivery")
+	}
+
+	tainted := channelTurnRequest("channel:333", "turn-tainted")
+	tainted.Knowledge = []string{"notes"}
+	plannedTainted, err := engine.planDelivery(tainted, completedMessage(engine, tainted, events))
+	if err != nil {
+		t.Fatalf("planDelivery tainted: %v", err)
+	}
+	if !plannedTainted.request.Tainted {
+		t.Error("tainted turn planned a clean delivery")
+	}
+}

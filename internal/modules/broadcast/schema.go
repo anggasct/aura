@@ -32,6 +32,16 @@ CREATE TABLE broadcast_item (
 CREATE INDEX broadcast_due_idx ON broadcast_item(state, not_before, priority, created_at, id);
 `
 
+const taintStepVersion = 30
+
+const taintStepSQL = `
+ALTER TABLE broadcast_item ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1));
+`
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "broadcast", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "broadcast",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: taintStepVersion, SQL: taintStepSQL}},
+	}
 }

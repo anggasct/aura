@@ -617,3 +617,21 @@ func TestDiscordSessionSwitchStaysInsideTheConversation(t *testing.T) {
 		t.Errorf("turn after switching back ran in %s, want %s", got, key)
 	}
 }
+
+func TestDiscordCommandReplySuppressesEmbedsOnOptedInAccount(t *testing.T) {
+	f := newCommandFixture(t)
+	f.adapter.account.LinkPreviews = true
+	f.admit(t, dmMessage("8970", "111", "/help"))
+	if err := f.adapter.replyCommand(t.Context(), json.RawMessage(`{"channel_id":"111","message_id":"8971"}`), "cmd-preview-url", testSessionKey("dm:111"), []string{"see https://evil.example/?d=x"}); err != nil {
+		t.Fatalf("replyCommand: %v", err)
+	}
+	sends := f.stub.messageSends(0)
+	if len(sends) != 2 {
+		t.Fatalf("message sends = %d, want 2", len(sends))
+	}
+	for i, send := range sends {
+		if flags, present := embedFlags(t, send.body); !present || flags != suppressEmbedsFlags {
+			t.Errorf("command reply %d flags = %v (present %t), want %d", i, flags, present, suppressEmbedsFlags)
+		}
+	}
+}

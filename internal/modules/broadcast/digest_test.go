@@ -189,3 +189,45 @@ func TestCreateDigest_RejectsOversizeGroup(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateDigest_PropagatesTaintFromAnyMember(t *testing.T) {
+	base := time.Date(2026, 9, 12, 23, 30, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name        string
+		tainted     []bool
+		wantTainted bool
+	}{
+		{name: "all clean", tainted: []bool{false, false}, wantTainted: false},
+		{name: "one tainted", tainted: []bool{false, true}, wantTainted: true},
+		{name: "all tainted", tainted: []bool{true, true}, wantTainted: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			broadcaster := testBroadcaster()
+			store := newFakeItemStore()
+			broadcaster.items = store
+			group := make([]Item, 0, len(tc.tainted))
+			for i, tainted := range tc.tainted {
+				item := digestItem("c"+strconv.Itoa(i), "default", PriorityInfo, base.Add(time.Duration(i)*time.Minute), 10)
+				item.Tainted = tainted
+				group = append(group, item)
+				record := ItemRecord{
+					ID: item.ID, Producer: item.Producer, IdempotencyKey: item.IdempotencyKey,
+					ContentDigest: digestContent(item.ContentJSON), Priority: item.Priority,
+					DestinationAlias: item.DestinationAlias, ContentJSON: item.ContentJSON,
+					State: StateHeld, NotBefore: item.NotBefore, CreatedAt: base, UpdatedAt: base,
+					Tainted: item.Tainted,
+				}
+				if _, _, err := store.Insert(t.Context(), &record); err != nil {
+					t.Fatalf("seed: %v", err)
+				}
+			}
+			parent, _, err := broadcaster.CreateDigest(t.Context(), group, 0)
+			if err != nil {
+				t.Fatalf("CreateDigest(): %v", err)
+			}
+			if parent.Tainted != tc.wantTainted {
+				t.Errorf("parent.Tainted = %t, want %t", parent.Tainted, tc.wantTainted)
+			}
+		})
+	}
+}

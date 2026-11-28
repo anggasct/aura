@@ -53,11 +53,12 @@ func pathRig(t *testing.T, workspace string, seen *pathObservation) *operationte
 		Files:    &operation.FileDeps{Workspace: workspace},
 		Bindings: func(*operationtest.Stubs) []operation.Binding {
 			return []operation.Binding{{ID: filesRead, Handle: func(ctx context.Context, call *operation.Call) (operation.Result, error) {
-				*seen = pathObservation{HasFile: call.HasFile("source")}
+				referenced := call.HasFile("source")
+				*seen = pathObservation{}
 				if err := json.Unmarshal(call.Input, &seen.Input); err != nil {
 					return operation.Result{}, err
 				}
-				if seen.HasFile {
+				if referenced {
 					file, err := call.File(ctx, "source")
 					if err != nil {
 						return operation.Result{}, err
@@ -66,6 +67,7 @@ func pathRig(t *testing.T, workspace string, seen *pathObservation) *operationte
 					if err != nil {
 						return operation.Result{}, err
 					}
+					seen.HasFile = true
 					seen.Name, seen.Reference, seen.Body, seen.file = file.Name(), file.Reference(), string(body), file
 				}
 				return operation.JSONResult(map[string]any{"ok": true})
