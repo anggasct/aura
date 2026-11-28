@@ -61,7 +61,7 @@ func TestTerminalHelpMatchesTheRegistryGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := strings.Join(registry.Help(command.ChannelTerminal, principal.ClassOwner), "\n") + "\n"; got != out {
+	if got := strings.Join(registry.Help(command.ChannelTerminal, principal.ClassOwner, true), "\n") + "\n"; got != out {
 		t.Errorf("terminal help is not the registry help:\n%s", got)
 	}
 }

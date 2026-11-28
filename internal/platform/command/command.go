@@ -2,8 +2,10 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -29,6 +31,7 @@ const (
 	KindLocal        Kind = "local"
 	KindTurn         Kind = "turn"
 	KindTerminalOnly Kind = "terminal_only"
+	KindOperation    Kind = "operation"
 )
 
 type Control string
@@ -101,13 +104,15 @@ type Caller struct {
 	ConversationKey string
 	SessionID       string
 	AgentID         string
+	Direct          bool
 }
 
 type Invocation struct {
-	Name  string
-	Token string
-	Args  []string
-	Text  string
+	Name           string
+	Token          string
+	Args           []string
+	Text           string
+	IdempotencyKey string
 }
 
 type Session struct {
@@ -124,6 +129,7 @@ type Result struct {
 	Session    *Session
 	Pending    *Invocation
 	Turn       *TurnStart
+	Record     json.RawMessage
 }
 
 type SkillPin = runtimeingress.SkillPin
@@ -155,10 +161,55 @@ type Skills interface {
 	StageDraft(ctx context.Context, name, description string) (Draft, error)
 }
 
+type OperationPrompt struct {
+	Text  string
+	Flag  string
+	Usage string
+}
+
+type OperationPlan struct {
+	Operation string
+	Input     json.RawMessage
+	Apply     bool
+	Missing   *OperationPrompt
+	Refusal   *Result
+}
+
+type OperationRef struct {
+	ID    string
+	Input json.RawMessage
+}
+
+type OperationRecovery struct {
+	Provider effect.TakeoverProvider
+	Settle   func(lines []string, record json.RawMessage) (effect.Outcome, error)
+}
+
+type OperationRun struct {
+	Caller         *Caller
+	Plan           *OperationPlan
+	IdempotencyKey string
+	Intent         *effect.Intent
+	Recovery       *OperationRecovery
+}
+
+type OperationReply struct {
+	Lines      []string
+	Code       ErrorCode
+	Record     json.RawMessage
+	InProgress bool
+}
+
+type Operations interface {
+	Plan(group string, tokens []string) OperationPlan
+	Run(ctx context.Context, run *OperationRun) OperationReply
+}
+
 type Ports struct {
-	Sessions Sessions
-	Turns    Turns
-	Skills   Skills
+	Sessions   Sessions
+	Turns      Turns
+	Skills     Skills
+	Operations Operations
 }
 
 type Recorder interface {

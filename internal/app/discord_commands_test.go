@@ -102,7 +102,7 @@ func TestCommandParityAcrossTerminalAndDiscord(t *testing.T) {
 	}
 	rows := func(channel string) map[string]string {
 		out := map[string]string{}
-		for _, line := range registry.Help(channel, principal.ClassOwner)[1:] {
+		for _, line := range registry.Help(channel, principal.ClassOwner, true)[1:] {
 			fields := strings.Fields(line)
 			out[fields[0]] = strings.Join(fields, " ")
 		}

@@ -151,7 +151,7 @@ func TestHelpGoldenPerChannelAndClass(t *testing.T) {
 	outputs := map[string]bool{}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := strings.Join(registry.Help(tt.channel, tt.class), "\n")
+			got := strings.Join(registry.Help(tt.channel, tt.class, true), "\n")
 			if got != tt.want {
 				t.Errorf("Help() =\n%s\nwant\n%s", got, tt.want)
 			}
