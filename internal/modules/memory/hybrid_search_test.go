@@ -5,7 +5,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -36,6 +35,7 @@ type deterministicEmbedder struct {
 	calls   []embedCall
 	err     error
 	delay   time.Duration
+	onEmbed func(role embedding.Role, texts []string)
 }
 
 func (e *deterministicEmbedder) Embed(ctx context.Context, role embedding.Role, texts []string) ([][]float32, error) {
@@ -44,7 +44,11 @@ func (e *deterministicEmbedder) Embed(ctx context.Context, role embedding.Role, 
 	err := e.err
 	delay := e.delay
 	vecs := e.vectors
+	onEmbed := e.onEmbed
 	e.mu.Unlock()
+	if onEmbed != nil {
+		onEmbed(role, texts)
+	}
 	if delay > 0 {
 		timer := time.NewTimer(delay)
 		defer timer.Stop()
@@ -145,6 +149,22 @@ func seedHybridDoc(t *testing.T, store *SQLiteStore, id, ownerID, sessionID, con
 	if _, err := store.UpsertDocument(t.Context(), doc); err != nil {
 		t.Fatalf("UpsertDocument(%s): %v", id, err)
 	}
+}
+
+type signalingVectorStore struct {
+	*SQLiteStore
+	upserted chan struct{}
+}
+
+func (s *signalingVectorStore) UpsertEmbeddings(ctx context.Context, fingerprint string, writes []EmbeddingWrite) error {
+	err := s.SQLiteStore.UpsertEmbeddings(ctx, fingerprint, writes)
+	if err == nil {
+		select {
+		case s.upserted <- struct{}{}:
+		default:
+		}
+	}
+	return err
 }
 
 func countMemoryEmbeddings(t *testing.T, db *sql.DB) int {
@@ -626,6 +646,71 @@ func TestMemoryEmbeddingRespectsOptInSecretsPublicQueriesFingerprintAndFallback(
 			t.Fatalf("ClassPublic with public_queries=false got mode=%q calls=%d, want lexical/0", mode, embedder.queryCallCount())
 		}
 
+		for _, emptyOrUnknown := range []principal.Class{"", principal.Class("unknown")} {
+			_, mode, err := svcClosed.SearchWithMode(t.Context(), &SearchRequest{
+				OwnerID:        principal.OwnerID,
+				PrincipalClass: emptyOrUnknown,
+				Query:          "guest query",
+				Now:            now,
+				Limit:          5,
+			})
+			if err != nil {
+				t.Fatalf("SearchWithMode(%q): %v", emptyOrUnknown, err)
+			}
+			if mode != ModeLexical || embedder.queryCallCount() != 0 {
+				t.Fatalf("PrincipalClass=%q with public_queries=false got mode=%q calls=%d, want lexical/0", emptyOrUnknown, mode, embedder.queryCallCount())
+			}
+		}
+
+		ops, err := NewOperations(&OperationDeps{
+			Service: svcClosed,
+			Scopes:  staticScopes{"main": {"main"}},
+			Now:     func() time.Time { return now },
+		})
+		if err != nil {
+			t.Fatalf("NewOperations: %v", err)
+		}
+		var searchHandle operation.Handler
+		for _, b := range ops.Bindings() {
+			if b.ID == operationSearch {
+				searchHandle = b.Handle
+			}
+		}
+		chatRes, err := searchHandle(t.Context(), &operation.Call{
+			Caller: operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID},
+			Input:  json.RawMessage(`{"query":"guest query","limit":5}`),
+		})
+		if err != nil {
+			t.Fatalf("memory.search(chat empty class): %v", err)
+		}
+		var chatPayload struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.Unmarshal(chatRes.Data, &chatPayload); err != nil {
+			t.Fatalf("unmarshal chat search: %v", err)
+		}
+		if chatPayload.Mode != ModeLexical || embedder.queryCallCount() != 0 {
+			t.Fatalf("SurfaceChat with empty Caller.Class got mode=%q calls=%d, want lexical/0", chatPayload.Mode, embedder.queryCallCount())
+		}
+
+		cliRes, err := searchHandle(t.Context(), &operation.Call{
+			Caller: operation.Caller{Surface: operation.SurfaceCLI, PrincipalID: principal.OwnerID},
+			Input:  json.RawMessage(`{"query":"guest query","limit":5}`),
+		})
+		if err != nil {
+			t.Fatalf("memory.search(cli empty class): %v", err)
+		}
+		var cliPayload struct {
+			Mode string `json:"mode"`
+		}
+		if err := json.Unmarshal(cliRes.Data, &cliPayload); err != nil {
+			t.Fatalf("unmarshal cli search: %v", err)
+		}
+		if cliPayload.Mode != ModeHybrid || embedder.queryCallCount() != 1 {
+			t.Fatalf("SurfaceCLI with empty Caller.Class got mode=%q calls=%d, want hybrid/1", cliPayload.Mode, embedder.queryCallCount())
+		}
+		embedder.resetCalls()
+
 		svcOpen, err := NewService(store, nil, &ServiceOptions{
 			EmbeddingEnabled: true,
 			Embedder:         embedder,
@@ -744,11 +829,15 @@ func TestMemoryEmbeddingRespectsOptInSecretsPublicQueriesFingerprintAndFallback(
 				"terbang ke Jepang 2": {1, 0, 0, 0},
 			},
 		}
+		sigStore := &signalingVectorStore{
+			SQLiteStore: store,
+			upserted:    make(chan struct{}, 4),
+		}
 		service, err := NewService(store, nil, &ServiceOptions{
 			EmbeddingEnabled: true,
 			Embedder:         embedder,
 			Embedding:        &EmbeddingSettings{Fingerprint: "fp-new", Dimensions: 4, BatchSize: 16},
-			Vectors:          store,
+			Vectors:          sigStore,
 		})
 		if err != nil {
 			t.Fatalf("NewService: %v", err)
@@ -788,18 +877,22 @@ func TestMemoryEmbeddingRespectsOptInSecretsPublicQueriesFingerprintAndFallback(
 		done := make(chan struct{})
 		go func() {
 			defer close(done)
-			service.RunEmbeddingBackfill(runCtx, 10*time.Millisecond)
+			service.RunEmbeddingBackfill(runCtx, time.Hour)
 		}()
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) {
-			cov, err := store.EmbeddingCoverage(t.Context(), "fp-new", false, now)
-			if err == nil && cov.Stale == 0 && cov.Embedded == 3 {
-				break
-			}
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-sigStore.upserted:
+		case <-time.After(2 * time.Second):
+			cancel()
+			<-done
+			t.Fatal("timed out waiting for memory embedding backfill upsert")
 		}
 		cancel()
 		<-done
+
+		cov, err := store.EmbeddingCoverage(t.Context(), "fp-new", false, now)
+		if err != nil || cov.Stale != 0 || cov.Embedded != 3 {
+			t.Fatalf("coverage after backfill = (%+v, %v), want embedded=3 stale=0", cov, err)
+		}
 
 		findings = hc.Check(t.Context())
 		if len(findings) != 1 || findings[0].Code != "ok" || findings[0].Status != health.StatusUp {
@@ -882,6 +975,52 @@ func TestMemoryEmbeddingRespectsOptInSecretsPublicQueriesFingerprintAndFallback(
 		if got := countMemoryEmbeddings(t, db); got != 1 {
 			t.Fatalf("memory_embedding rows after session delete = %d, want 1", got)
 		}
-		_ = fmt.Sprintf("verified %d remaining row", countMemoryEmbeddings(t, db))
+	})
+
+	t.Run("ProjectBatch releases projectMu before calling Embed", func(t *testing.T) {
+		db, store := newTestSQLiteStore(t)
+		seedMemorySessionWithAgent(t, db, "sess-mu", principal.OwnerID, "main")
+
+		var service *Service
+		lockFree := false
+		embedder := &deterministicEmbedder{
+			vectors: map[string][]float32{
+				"post lock document": {1, 0, 0, 0},
+			},
+			onEmbed: func(role embedding.Role, _ []string) {
+				if role == embedding.RoleDocument && service.projectMu.TryLock() {
+					lockFree = true
+					service.projectMu.Unlock()
+				}
+			},
+		}
+		var err error
+		service, err = NewService(store, nil, &ServiceOptions{
+			EmbeddingEnabled: true,
+			Embedder:         embedder,
+			Embedding:        &EmbeddingSettings{Fingerprint: "fp-mu", Dimensions: 4},
+			Vectors:          store,
+		})
+		if err != nil {
+			t.Fatalf("NewService: %v", err)
+		}
+		res, err := service.ProjectBatch(t.Context(), principal.OwnerID, []*Event{{
+			ID:        "evt-mu-1",
+			SessionID: "sess-mu",
+			Sequence:  1,
+			Author:    "user",
+			Kind:      "adk_event",
+			Payload:   json.RawMessage(`{"text":"post lock document"}`),
+			CreatedAt: now,
+		}})
+		if err != nil || res.Indexed != 1 {
+			t.Fatalf("ProjectBatch = (%+v, %v), want indexed=1", res, err)
+		}
+		if !lockFree {
+			t.Fatal("ProjectBatch held projectMu while invoking Embed")
+		}
+		if got := countMemoryEmbeddings(t, db); got != 1 {
+			t.Fatalf("memory_embedding count = %d, want 1", got)
+		}
 	})
 }

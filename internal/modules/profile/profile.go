@@ -109,6 +109,10 @@ func NewService(registry Registry, options ServiceOptions) (*Service, error) {
 	return &Service{registry: registry, embedder: embedder, minConfidence: options.MinConfidence, scanner: scanner, actions: options.Actions, observer: options.Observer}, nil
 }
 
+func (s *Service) EmbedFactBestEffort(ctx stdcontext.Context, fact *Fact) {
+	s.embedFactBestEffort(ctx, fact)
+}
+
 func (s *Service) embedFactBestEffort(ctx stdcontext.Context, fact *Fact) {
 	if s == nil || s.embedder == nil || fact == nil {
 		return

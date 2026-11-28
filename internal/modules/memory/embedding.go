@@ -122,15 +122,11 @@ func (s *Service) EmbeddingActive() bool {
 	return s != nil && s.embeddingEnabled && s.embedder != nil && s.embedding.valid() && s.vectors != nil
 }
 
-func (s *Service) allowsQueryEmbed(ownerID string, class principal.Class) bool {
+func (s *Service) allowsQueryEmbed(class principal.Class) bool {
 	if s.embedding == nil {
 		return false
 	}
-	effective := class
-	if effective == "" {
-		effective = principal.ClassForPrincipal(ownerID)
-	}
-	switch effective {
+	switch class {
 	case principal.ClassOwner, principal.ClassTrusted:
 		return true
 	case principal.ClassPublic:
@@ -179,7 +175,7 @@ func (s *Service) prepareQueryVector(
 	if !s.EmbeddingActive() {
 		return nil, ModeLexical
 	}
-	if !s.allowsQueryEmbed(ownerID, class) {
+	if !s.allowsQueryEmbed(class) {
 		return nil, ModeLexical
 	}
 	trimmed := strings.TrimSpace(query)

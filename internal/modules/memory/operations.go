@@ -292,7 +292,7 @@ func (o *Operations) search(ctx context.Context, call *operation.Call) (operatio
 		return operation.Result{}, moduleFailure(err)
 	}
 	callerClass := call.Caller.Class
-	if callerClass == "" && (call.Caller.Surface == operation.SurfaceCLI || call.Caller.Surface == operation.SurfaceChat) {
+	if callerClass == "" && call.Caller.Surface == operation.SurfaceCLI {
 		callerClass = principal.ClassOwner
 	}
 	hits, mode, err := o.service.SearchWithMode(ctx, &SearchRequest{

@@ -268,6 +268,8 @@ func (o *Operations) accept(ctx context.Context, call *operation.Call) (operatio
 	if err := o.ready(call, &in); err != nil {
 		return operation.Result{}, err
 	}
+	var committedFact Fact
+	var hasCommitted bool
 	result, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
 		current, err := o.service.GetFact(ctx, principal.OwnerID, in.ID)
 		if err != nil {
@@ -285,11 +287,19 @@ func (o *Operations) accept(ctx context.Context, call *operation.Call) (operatio
 		if err != nil {
 			return operation.Result{}, err
 		}
+		committedFact = fact
+		hasCommitted = true
 		return operation.JSONResult(map[string]any{
 			"accepted": fact.ID, "category": fact.Category, "key": fact.Key, "value": fact.Value, "origin": fact.Origin,
 		})
 	})
-	return result, moduleFailure(err)
+	if err != nil {
+		return result, moduleFailure(err)
+	}
+	if hasCommitted {
+		o.service.EmbedFactBestEffort(ctx, &committedFact)
+	}
+	return result, nil
 }
 
 func (o *Operations) reject(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -365,10 +375,20 @@ func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.R
 		}
 		request.expires = &expires
 	}
+	var committedFact Fact
+	var hasCommitted bool
 	var apply func(ctx context.Context) (operation.Result, error)
 	switch call.Caller.Surface {
 	case operation.SurfaceCLI, operation.SurfaceChat:
-		apply = func(ctx context.Context) (operation.Result, error) { return o.setVerified(ctx, request) }
+		apply = func(ctx context.Context) (operation.Result, error) {
+			fact, err := o.service.SetFact(ctx, principal.OwnerID, request.category, request.key, request.value, request.expires, o.now().UTC())
+			if err != nil {
+				return operation.Result{}, err
+			}
+			committedFact = fact
+			hasCommitted = true
+			return textResult("set: " + fact.ID)
+		}
 	case operation.SurfaceAgent:
 		request.taintSource = callerTaintSource(&call.Caller)
 		apply = func(ctx context.Context) (operation.Result, error) { return o.proposeUnverified(ctx, request) }
@@ -376,15 +396,13 @@ func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.R
 		return operation.Result{}, operation.NewError(operation.ErrorCodeNotExposed, "operation: this surface cannot set a fact")
 	}
 	result, err := call.Commit(ctx, apply)
-	return result, moduleFailure(err)
-}
-
-func (o *Operations) setVerified(ctx context.Context, request *setRequest) (operation.Result, error) {
-	fact, err := o.service.SetFact(ctx, principal.OwnerID, request.category, request.key, request.value, request.expires, o.now().UTC())
 	if err != nil {
-		return operation.Result{}, err
+		return result, moduleFailure(err)
 	}
-	return textResult("set: " + fact.ID)
+	if hasCommitted {
+		o.service.EmbedFactBestEffort(ctx, &committedFact)
+	}
+	return result, nil
 }
 
 func (o *Operations) proposeUnverified(ctx context.Context, request *setRequest) (operation.Result, error) {

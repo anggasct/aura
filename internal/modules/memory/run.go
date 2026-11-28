@@ -44,22 +44,37 @@ func (s *Service) projectRunOutput(ctx context.Context, ownerID string, req *tur
 	}
 	taintCtx := s.buildBatchTaintContext(ctx, req, events)
 	output.tainted = taintCtx.isOtherEventTainted(ownerID, output.sessionID, output.to)
-	s.projectMu.Lock()
-	defer s.projectMu.Unlock()
-	droppedBefore := s.secretDrops.Load()
-	_, indexed, err := s.writeProjection(ctx, ownerID, output)
-	if err != nil {
-		if ctx.Err() != nil {
-			return result, ctx.Err()
+	var embeddedDoc Document
+	var shouldEmbed bool
+	err := func() error {
+		s.projectMu.Lock()
+		defer s.projectMu.Unlock()
+		droppedBefore := s.secretDrops.Load()
+		doc, indexed, inserted, err := s.writeProjection(ctx, ownerID, output)
+		if err != nil {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			s.projectionFailures.Add(1)
+			return fault.New(ErrorCodeProjectionStale, "projection store unavailable")
 		}
-		s.projectionFailures.Add(1)
-		return result, fault.New(ErrorCodeProjectionStale, "projection store unavailable")
+		result.Dropped = int(s.secretDrops.Load() - droppedBefore)
+		if indexed {
+			result.Indexed = 1
+		}
+		if inserted {
+			embeddedDoc = doc
+			shouldEmbed = true
+		}
+		result.Skipped = max(len(events)-result.Indexed-result.Dropped, 0)
+		return nil
+	}()
+	if err != nil {
+		return result, err
 	}
-	result.Dropped = int(s.secretDrops.Load() - droppedBefore)
-	if indexed {
-		result.Indexed = 1
+	if shouldEmbed {
+		s.embedDocumentBestEffort(ctx, embeddedDoc.ID, embeddedDoc.OwnerID, embeddedDoc.Content)
 	}
-	result.Skipped = max(len(events)-result.Indexed-result.Dropped, 0)
 	return result, nil
 }
 

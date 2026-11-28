@@ -512,35 +512,42 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if event != nil {
 		taintCtx = s.buildBatchTaintContext(ctx, nil, []*Event{event})
 	}
-	return s.projectEvent(ctx, ownerID, event, taintCtx)
+	doc, indexed, inserted, err := s.projectEvent(ctx, ownerID, event, taintCtx)
+	if err != nil {
+		return Document{}, false, err
+	}
+	if inserted {
+		s.embedDocumentBestEffort(ctx, doc.ID, doc.OwnerID, doc.Content)
+	}
+	return doc, indexed, nil
 }
 
-func (s *Service) projectEvent(ctx context.Context, ownerID string, event *Event, taintCtx *batchTaintContext) (Document, bool, error) {
+func (s *Service) projectEvent(ctx context.Context, ownerID string, event *Event, taintCtx *batchTaintContext) (doc Document, indexed, inserted bool, err error) {
 	if ctx == nil {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
 	if err := ctx.Err(); err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	if strings.TrimSpace(ownerID) == "" {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "owner must not be empty")
 	}
 	if event == nil {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event must not be nil")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "event must not be nil")
 	}
 	if event.SessionID == "" {
-		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "event session must not be empty")
+		return Document{}, false, false, fault.New(ErrorCodeInvalidArgument, "event session must not be empty")
 	}
 	if _, err := sequenceToDB(event.Sequence); err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	trust, indexable := trustFor(ownerID, event.Author, event.Kind)
 	if !indexable {
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	text, ok := extractText(event.Payload)
 	if !ok {
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	tainted := taintCtx.isEventTainted(ownerID, event)
 	return s.writeProjection(ctx, ownerID, &projection{
@@ -558,29 +565,29 @@ type projection struct {
 	createdAt time.Time
 }
 
-func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projection) (Document, bool, error) {
+func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projection) (doc Document, indexed, inserted bool, err error) {
 	from, err := sequenceToDB(p.from)
 	if err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	to, err := sequenceToDB(p.to)
 	if err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	text := p.text
 	if stripped, had := stripRecallEvidence(text); had {
 		if strings.TrimSpace(stripped) == "" {
-			return Document{}, false, nil
+			return Document{}, false, false, nil
 		}
 		text = stripped
 	}
 	content, ok := cleanText(text, s.maxBytes)
 	if !ok {
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	if s.secrets != nil && s.secrets.Contains(content) {
 		s.secretDrops.Add(1)
-		return Document{}, false, nil
+		return Document{}, false, false, nil
 	}
 	createdAt := p.createdAt.UTC()
 	if createdAt.IsZero() {
@@ -598,7 +605,7 @@ func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projec
 		Tainted:      p.tainted,
 		CreatedAt:    createdAt,
 	}
-	inserted, err := s.documents.UpsertDocument(ctx, &StoredDocument{
+	inserted, err = s.documents.UpsertDocument(ctx, &StoredDocument{
 		ID:           document.ID,
 		OwnerID:      document.OwnerID,
 		SessionID:    document.SessionID,
@@ -611,17 +618,14 @@ func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projec
 		CreatedAt:    document.CreatedAt,
 	})
 	if err != nil {
-		return Document{}, false, err
+		return Document{}, false, false, err
 	}
 	if inserted && s.eventReopenedSummary(ctx, ownerID, p.sessionID, p.from) {
 		if _, err := s.documents.DeleteSessionSummaries(ctx, ownerID, p.sessionID); err != nil {
-			return Document{}, false, err
+			return Document{}, false, false, err
 		}
 	}
-	if inserted {
-		s.embedDocumentBestEffort(ctx, document.ID, document.OwnerID, document.Content)
-	}
-	return document, true, nil
+	return document, true, inserted, nil
 }
 
 func (s *Service) eventReopenedSummary(ctx context.Context, ownerID, sessionID string, sequence uint64) bool {
@@ -975,17 +979,24 @@ func (s *Service) RebuildSession(ctx context.Context, ownerID, sessionID string,
 	}
 	taintCtx := s.buildBatchTaintContext(ctx, nil, events)
 	count := 0
+	var insertedDocs []Document
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
 			return count, err
 		}
-		_, indexed, err := s.projectEvent(ctx, ownerID, event, taintCtx)
+		doc, indexed, inserted, err := s.projectEvent(ctx, ownerID, event, taintCtx)
 		if err != nil {
 			return count, err
 		}
 		if indexed {
 			count++
 		}
+		if inserted {
+			insertedDocs = append(insertedDocs, doc)
+		}
+	}
+	for i := range insertedDocs {
+		s.embedDocumentBestEffort(ctx, insertedDocs[i].ID, insertedDocs[i].OwnerID, insertedDocs[i].Content)
 	}
 	return count, nil
 }

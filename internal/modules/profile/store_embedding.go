@@ -20,7 +20,7 @@ import (
 const upsertProfileEmbeddingSQL = `INSERT INTO profile_embedding (fact_id, fingerprint, content_sha256, vector, created_at)
 	SELECT f.id, ?, ?, ?, ?
 	FROM profile_fact f
-	WHERE f.id = ? AND f.status = 'active' AND f.owner_verified = 1
+	WHERE f.id = ? AND f.status = 'active' AND f.owner_verified = 1 AND f.fact_key = ? AND f.fact_value = ?
 	ON CONFLICT(fact_id) DO UPDATE SET
 		fingerprint = excluded.fingerprint,
 		content_sha256 = excluded.content_sha256,
@@ -35,8 +35,10 @@ type pendingProfileFact struct {
 	UpdatedAt string
 }
 
-type profileEmbeddingWrite struct {
+type profileVectorWrite struct {
 	FactID        string
+	FactKey       string
+	FactValue     string
 	ContentSHA256 string
 	Vector        []float32
 	CreatedAt     time.Time
@@ -92,7 +94,7 @@ func (s *SQLiteStore) factBlockedForEmbed(category, key, value string, screen se
 	return false
 }
 
-func (s *SQLiteStore) upsertFactEmbeddings(ctx stdcontext.Context, fingerprint string, writes []profileEmbeddingWrite) error {
+func (s *SQLiteStore) upsertFactEmbeddings(ctx stdcontext.Context, fingerprint string, writes []profileVectorWrite) error {
 	if s == nil || s.db == nil {
 		return fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
@@ -100,8 +102,8 @@ func (s *SQLiteStore) upsertFactEmbeddings(ctx stdcontext.Context, fingerprint s
 		return fault.New(ErrorCodeInvalidArgument, "embedding fingerprint and writes are required")
 	}
 	for i := range writes {
-		if writes[i].FactID == "" || len(writes[i].ContentSHA256) != 64 {
-			return fault.New(ErrorCodeInvalidArgument, "profile embedding requires a fact id and sha256 digest")
+		if writes[i].FactID == "" || writes[i].FactKey == "" || writes[i].FactValue == "" || len(writes[i].ContentSHA256) != 64 {
+			return fault.New(ErrorCodeInvalidArgument, "profile embedding requires a fact id, key, value and sha256 digest")
 		}
 		if err := embedding.ValidateUnit(writes[i].Vector); err != nil {
 			return fault.Wrap(ErrorCodeInvalidArgument, "profile embedding vector is not a valid unit vector", err)
@@ -122,6 +124,8 @@ func (s *SQLiteStore) upsertFactEmbeddings(ctx stdcontext.Context, fingerprint s
 				embedding.Encode(writes[i].Vector),
 				sqlite.FormatTime(createdAt),
 				writes[i].FactID,
+				writes[i].FactKey,
+				writes[i].FactValue,
 			); err != nil {
 				return sqlite.Classify(fmt.Errorf("upsert profile embedding: %w", err))
 			}
@@ -131,7 +135,7 @@ func (s *SQLiteStore) upsertFactEmbeddings(ctx stdcontext.Context, fingerprint s
 }
 
 func (s *SQLiteStore) EmbedFactBestEffort(ctx stdcontext.Context, fact *Fact) {
-	if !s.EmbeddingActive() || fact == nil || fact.Status != StatusActive || !fact.OwnerVerified {
+	if !s.EmbeddingActive() || fact == nil || fact.Status != StatusActive || !fact.OwnerVerified || sqlite.InTx(ctx, s.db) {
 		return
 	}
 	screen, err := s.embedScreenSnapshot(ctx)
@@ -149,8 +153,10 @@ func (s *SQLiteStore) EmbedFactBestEffort(ctx stdcontext.Context, fact *Fact) {
 	if !ok {
 		return
 	}
-	_ = s.upsertFactEmbeddings(ctx, s.embedding.Settings.Fingerprint, []profileEmbeddingWrite{{
+	_ = s.upsertFactEmbeddings(ctx, s.embedding.Settings.Fingerprint, []profileVectorWrite{{
 		FactID:        fact.ID,
+		FactKey:       fact.Key,
+		FactValue:     fact.Value,
 		ContentSHA256: factContentSHA256(text),
 		Vector:        unit,
 		CreatedAt:     time.Now().UTC(),
@@ -242,15 +248,17 @@ func (s *SQLiteStore) BackfillEmbeddingsOnce(ctx stdcontext.Context, maxRows int
 		if len(vectors) != len(eligible) {
 			return embedded, nil
 		}
-		writes := make([]profileEmbeddingWrite, 0, len(eligible))
+		writes := make([]profileVectorWrite, 0, len(eligible))
 		writeAt := time.Now().UTC()
 		for i := range eligible {
 			unit, ok := embedding.Normalize(vectors[i], s.embedding.Settings.Dimensions)
 			if !ok {
 				continue
 			}
-			writes = append(writes, profileEmbeddingWrite{
+			writes = append(writes, profileVectorWrite{
 				FactID:        eligible[i].ID,
+				FactKey:       eligible[i].Key,
+				FactValue:     eligible[i].Value,
 				ContentSHA256: factContentSHA256(texts[i]),
 				Vector:        unit,
 				CreatedAt:     writeAt,
