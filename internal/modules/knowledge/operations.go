@@ -151,7 +151,7 @@ func (o *Operations) show(ctx context.Context, call *operation.Call) (operation.
 			Ingested: source.IngestedAt.UTC().Format(time.RFC3339),
 		})
 	}
-	return operation.JSONResult(map[string]any{"collection": detail.ID, "chunks": detail.Chunks, "rows": sources})
+	return operation.JSONResult(map[string]any{"collection": detail.ID, "sources": len(sources), "chunks": detail.Chunks, "rows": sources})
 }
 
 func (o *Operations) check(ctx context.Context, call *operation.Call) (operation.Result, error) {

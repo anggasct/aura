@@ -74,9 +74,13 @@ func Catalog() operation.Catalog {
 				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
 				Description: "Source labels and addresses come from documents and pages, not from the owner.",
 				Params:      []operation.Param{collectionParam()},
-				Output: operation.Output{Kind: operation.OutputTable, Fields: []operation.OutputField{
-					{Name: "uri"}, {Name: "label"}, {Name: "kind"}, {Name: "chunks"}, {Name: "digest"}, {Name: "ingested"},
-				}},
+				Output: operation.Output{
+					Kind:   operation.OutputTable,
+					Header: []operation.OutputField{{Name: "collection"}, {Name: "sources"}, {Name: "chunks"}},
+					Fields: []operation.OutputField{
+						{Name: "uri"}, {Name: "label"}, {Name: "kind"}, {Name: "chunks"}, {Name: "digest"}, {Name: "ingested"},
+					},
+				},
 			},
 			{
 				ID: operationCheck, Summary: "Verify the knowledge index against its content", Exposure: operation.ExposureAgent,
