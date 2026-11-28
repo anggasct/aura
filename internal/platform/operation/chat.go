@@ -311,7 +311,9 @@ func (c *Chat) invoke(ctx context.Context, pending *chatCall) command.OperationR
 	}
 	lines, err := descriptor.renderedLines(SurfaceChat, result.Data)
 	if err != nil {
-		return failedReply(err)
+		reply := failedReply(err)
+		reply.Fate = command.FatePerformed
+		return reply
 	}
 	return recordedReply(descriptor.ID, lines)
 }
