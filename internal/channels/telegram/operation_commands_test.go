@@ -150,3 +150,56 @@ func TestMenuStaysWithinTheCommandLimit(t *testing.T) {
 		t.Errorf("an empty binding menu = %v", got)
 	}
 }
+
+func TestRelayedMessagesAreNeverRunAsCommands(t *testing.T) {
+	forwarded := json.RawMessage(`{"type":"user","date":1700000000,"sender_user":{"id":777,"is_bot":false,"first_name":"x"}}`)
+	tests := []struct {
+		name string
+		text string
+		edit func(*message)
+	}{
+		{"a forwarded operation command", `/cron add --name x --schedule "*/5 * * * *" --channel telegram --destination me --prompt "do it"`, func(m *message) { m.ForwardOrigin = forwarded }},
+		{"a forwarded delete", "/cron delete job1", func(m *message) { m.ForwardOrigin = forwarded }},
+		{"a forwarded new session command", "/new", func(m *message) { m.ForwardOrigin = forwarded }},
+		{"a forwarded skill command", "/skill review the diff", func(m *message) { m.ForwardOrigin = forwarded }},
+		{"a forwarded forget command", "/forgetme confirm", func(m *message) { m.ForwardOrigin = forwarded }},
+		{"a legacy forwarded command", "/new", func(m *message) { m.ForwardDate = 1700000000 }},
+		{"a command sent through an inline bot", "/cron list", func(m *message) { m.ViaBot = &user{ID: 888, IsBot: true} }},
+		{"an automatic forward", "/new", func(m *message) { m.AutomaticForward = true }},
+		{"a forwarded caption", "/cron list", func(m *message) {
+			m.ForwardOrigin = forwarded
+			m.Caption, m.Text = m.Text, ""
+		}},
+	}
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spy := &operationSpy{}
+			rig := newOperationCommandRig(t, accessOpts{}, spy)
+			item := privateText(int64(100+i), ownerUserID, tt.text)
+			tt.edit(item.Message)
+
+			rig.handle(t, item)
+
+			if planned, ran := spy.counts(); planned != 0 || ran != 0 {
+				t.Errorf("planned %d ran %d for a relayed command", planned, ran)
+			}
+			if created := rig.sessions.createdSessions(); len(created) != 0 {
+				t.Errorf("created sessions %v for a relayed command", created)
+			}
+			if replies := sentTo(rig.h.api, ownerUserID); len(replies) != 0 {
+				t.Errorf("replies = %q, want none", replies)
+			}
+			if accepted := rig.sink.accepted(); len(accepted) != 1 || accepted[0].Parts[0].Text != tt.text || accepted[0].Skill != nil {
+				t.Errorf("accepted = %+v, want the text handed to the model unchanged and unpinned", accepted)
+			}
+		})
+	}
+	t.Run("a typed command still runs", func(t *testing.T) {
+		spy := &operationSpy{}
+		rig := newOperationCommandRig(t, accessOpts{}, spy)
+		rig.handle(t, privateText(200, ownerUserID, "/cron list"))
+		if _, ran := spy.counts(); ran != 1 {
+			t.Errorf("ran %d, want the typed command to run once", ran)
+		}
+	})
+}

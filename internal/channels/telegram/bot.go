@@ -182,6 +182,14 @@ type message struct {
 	ThreadID          int64               `json:"message_thread_id,omitempty"`
 	IsTopicMessage    bool                `json:"is_topic_message,omitempty"`
 	ForumTopicCreated *forumTopicCreation `json:"forum_topic_created,omitempty"`
+	ForwardOrigin     json.RawMessage     `json:"forward_origin,omitempty"`
+	ForwardDate       int64               `json:"forward_date,omitempty"`
+	ViaBot            *user               `json:"via_bot,omitempty"`
+	AutomaticForward  bool                `json:"is_automatic_forward,omitempty"`
+}
+
+func (m *message) relayed() bool {
+	return len(m.ForwardOrigin) > 0 || m.ForwardDate != 0 || m.ViaBot != nil || m.AutomaticForward
 }
 
 type forumTopicCreation struct{}

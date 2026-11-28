@@ -28,7 +28,7 @@ type commandScope struct {
 }
 
 func (a *Adapter) commandInvocation(msg *messagePayload) (command.Invocation, bool) {
-	if a.commands == nil || msg == nil {
+	if a.commands == nil || msg == nil || (msg.MessageReference != nil && msg.MessageReference.Type == referenceTypeForward) {
 		return command.Invocation{}, false
 	}
 	inv, ok := command.Parse(stripLeadingMentions(msg.Content, a.selfID))

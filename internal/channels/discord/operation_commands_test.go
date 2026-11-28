@@ -115,3 +115,71 @@ func TestOperationCommandsAreListedInHelpOnlyForTheOwnerInADirectMessage(t *test
 		}
 	}
 }
+
+func TestRelayedAndApplicationMessagesAreNeverRunAsCommands(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*messagePayload)
+	}{
+		{"a forward with its content empty", func(m *messagePayload) {
+			m.Content = ""
+			m.MessageReference = &messageReferencePayload{Type: referenceTypeForward, MessageID: "7", ChannelID: "9"}
+		}},
+		{"a forward that carries command text", func(m *messagePayload) {
+			m.MessageReference = &messageReferencePayload{Type: referenceTypeForward, MessageID: "7", ChannelID: "9"}
+		}},
+		{"an application command message", func(m *messagePayload) { m.Type = 20 }},
+		{"a context menu command message", func(m *messagePayload) { m.Type = 23 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			spy := &operationSpy{}
+			f := newCommandFixture(t)
+			f.withOperations(t, spy)
+			msg := dmMessage("8101", "111", "/cron list")
+			tt.edit(msg)
+
+			if _, err := f.adapter.admit(t.Context(), msg); err != nil {
+				t.Fatalf("admit: %v", err)
+			}
+
+			if planned, ran := spy.counts(); planned != 0 || ran != 0 {
+				t.Errorf("planned %d ran %d for a relayed message", planned, ran)
+			}
+			if replies := f.replies(t); len(replies) != 0 {
+				t.Errorf("replies = %+v, want none", replies)
+			}
+		})
+	}
+	t.Run("a reply with ordinary text goes to the model and runs nothing", func(t *testing.T) {
+		spy := &operationSpy{}
+		f := newCommandFixture(t)
+		f.withOperations(t, spy)
+		msg := dmMessage("8102", "111", "what does that do?")
+		msg.Type = 19
+		msg.MessageReference = &messageReferencePayload{MessageID: "7", ChannelID: "555"}
+
+		f.admit(t, msg)
+
+		if planned, ran := spy.counts(); planned != 0 || ran != 0 {
+			t.Errorf("planned %d ran %d for a reply", planned, ran)
+		}
+		if calls, _ := f.sink.stats("message:8102"); calls != 1 {
+			t.Errorf("the reply reached the model %d times, want once", calls)
+		}
+	})
+	t.Run("a typed reply that is a command still runs", func(t *testing.T) {
+		spy := &operationSpy{}
+		f := newCommandFixture(t)
+		f.withOperations(t, spy)
+		msg := dmMessage("8103", "111", "/cron list")
+		msg.Type = 19
+		msg.MessageReference = &messageReferencePayload{MessageID: "7", ChannelID: "555"}
+
+		f.admit(t, msg)
+
+		if _, ran := spy.counts(); ran != 1 {
+			t.Errorf("ran %d, want the typed command to run once", ran)
+		}
+	})
+}

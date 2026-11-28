@@ -60,7 +60,10 @@ type memberPayload struct {
 	Nick string `json:"nick,omitempty"`
 }
 
+const referenceTypeForward = 1
+
 type messageReferencePayload struct {
+	Type      int    `json:"type,omitempty"`
 	MessageID string `json:"message_id"`
 	ChannelID string `json:"channel_id,omitempty"`
 	GuildID   string `json:"guild_id,omitempty"`
