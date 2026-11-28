@@ -85,15 +85,21 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
 	defaults := auraagent.PersonaMessageDefaults()
 	keys := slices.Sorted(maps.Keys(defaults))
-	if len(keys) != 42 {
-		t.Fatalf("message keys = %v, want the 42 fixed replies", keys)
+	if len(keys) != 65 {
+		t.Fatalf("message keys = %d (%v), want the 65 fixed replies", len(keys), keys)
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
 			parts := append([]string{"custom " + key}, auraagent.MessagePlaceholders(key)...)
 			value := strings.Join(parts, " ")
-			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": " + value + "\n"
+			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + key + ": " + strconv.Quote(value) + "\n"
 			res, err := Load(writePersonaConfig(t, "", "", definition))
+			if auraagent.IsBundleOnlyMessage(key) {
+				if code, ok := codeOf(err); !ok || code != personaInvalidCode {
+					t.Fatalf("bundle-only key %s: code = %q, %v (err %v), want %s", key, code, ok, err, personaInvalidCode)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Load: %v", err)
 			}
@@ -102,6 +108,105 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 			}
 			if strings.TrimSpace(defaults[key]) == "" {
 				t.Fatalf("default for %s is empty", key)
+			}
+		})
+	}
+}
+
+func TestCardOverridesKeepPlaceholdersAndBundleOnlyKeys(t *testing.T) {
+	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
+	cases := map[string]struct {
+		key    string
+		value  string
+		wantOK bool
+		detail string
+	}{
+		"approval_summary without persona": {
+			key:    auraagent.MessageApprovalSummary,
+			value:  "Wants to {action}:",
+			detail: "{persona}",
+		},
+		"approval_summary without action": {
+			key:    auraagent.MessageApprovalSummary,
+			value:  "{persona} wants to act:",
+			detail: "{action}",
+		},
+		"approval_summary valid": {
+			key:    auraagent.MessageApprovalSummary,
+			value:  "{persona} asks to {action}:",
+			wantOK: true,
+		},
+		"approval_action_generic without tool": {
+			key:    auraagent.MessageApprovalActionGeneric,
+			value:  "run a tool",
+			detail: "{tool}",
+		},
+		"approval_requested_by without requester": {
+			key:    auraagent.MessageApprovalRequestedBy,
+			value:  "Asked by someone",
+			detail: "{requester}",
+		},
+		"approval_workflow_run without run": {
+			key:    auraagent.MessageApprovalWorkflowRun,
+			value:  "Workflow run",
+			detail: "{run}",
+		},
+		"button_allow_for without duration": {
+			key:    auraagent.MessageButtonAllowFor,
+			value:  "Allow always",
+			detail: "{duration}",
+		},
+		"duration_days without n": {
+			key:    auraagent.MessageDurationDays,
+			value:  "some days",
+			detail: "{n}",
+		},
+		"duration_hours without n": {
+			key:    auraagent.MessageDurationHours,
+			value:  "some hours",
+			detail: "{n}",
+		},
+		"card_approved without time": {
+			key:    auraagent.MessageCardApproved,
+			value:  "✅ Approved",
+			detail: "{time}",
+		},
+		"card_allowed_for without duration": {
+			key:    auraagent.MessageCardAllowedFor,
+			value:  "✅ Allowed · {time}",
+			detail: "{duration}",
+		},
+		"card_allowed_for without time": {
+			key:    auraagent.MessageCardAllowedFor,
+			value:  "✅ Allowed for {duration}",
+			detail: "{time}",
+		},
+		"bundle-only approval_action_exec rejected": {
+			key:    auraagent.MessageApprovalActionExec,
+			value:  "do something safe",
+			detail: "cannot be overridden",
+		},
+		"bundle-only approval_untrusted_input rejected": {
+			key:    auraagent.MessageApprovalUntrustedInput,
+			value:  "safe input",
+			detail: "cannot be overridden",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			definition := "    - id: kantor\n      description: d\n      instructions: i\n      messages:\n        " + tc.key + ": " + strconv.Quote(tc.value) + "\n"
+			_, err := Load(writePersonaConfig(t, "", "", definition))
+			if tc.wantOK {
+				if err != nil {
+					t.Fatalf("Load: %v", err)
+				}
+				return
+			}
+			if code, ok := codeOf(err); !ok || code != personaInvalidCode {
+				t.Fatalf("code = %q, %v (err %v), want %s", code, ok, err, personaInvalidCode)
+			}
+			if !strings.Contains(err.Error(), tc.detail) {
+				t.Fatalf("err = %q, want %q", err, tc.detail)
 			}
 		})
 	}

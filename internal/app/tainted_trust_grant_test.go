@@ -186,7 +186,7 @@ func TestTaintedCronAddCardShowsTheWholePrompt(t *testing.T) {
 		Arguments:   prompts[0].Arguments,
 		ReasonCode:  prompts[0].ReasonCode,
 		TaintSource: prompts[0].TaintSource,
-	}, "Main (main)", nil)
+	}, kitapproval.CardOptions{FallbackName: "Main"}).Text
 	for _, want := range []string{
 		approval.UntrustedTrustGrantNotice,
 		"came in through: a forwarded or quoted message",

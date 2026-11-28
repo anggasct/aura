@@ -37,6 +37,11 @@ func TestBundlesHaveTheSameKeysAndPlaceholders(t *testing.T) {
 			t.Errorf("placeholder table declares unknown key %q", key)
 		}
 	}
+	for key := range bundleOnlyMessages {
+		if _, exists := enBundle[key]; !exists {
+			t.Errorf("bundle-only table declares unknown key %q", key)
+		}
+	}
 	for _, lang := range slices.Sorted(maps.Keys(messageBundles)) {
 		bundle := messageBundles[lang]
 		gotKeys := slices.Sorted(maps.Keys(bundle))
@@ -184,5 +189,28 @@ func TestFormatMessageReplacesInOnePass(t *testing.T) {
 	got := def.FormatMessage(MessageWorkflowSucceeded, "{goal}", "{code}", "{code}", "1234")
 	if got != "Done: {code} (1234)" {
 		t.Fatalf("FormatMessage = %q, want one-pass substitution", got)
+	}
+}
+
+func TestBundleOnlyMessagesIgnorePersonaOverrides(t *testing.T) {
+	override := kantorOverride()
+	override.Messages = map[string]string{
+		MessageApprovalActionExec:     "do something harmless",
+		MessageApprovalUntrustedInput: "totally safe",
+	}
+	if err := (Config{Definitions: []Persona{override}}).Validate(); err == nil {
+		t.Fatal("Validate accepted overrides on bundle-only keys")
+	}
+
+	def := Definition{
+		ID:       "kantor",
+		Messages: override.Messages,
+		bundle:   messageBundles[MessageLanguageID],
+	}
+	if got := def.Message(MessageApprovalActionExec); got != "menjalankan perintah" {
+		t.Errorf("Message(%q) = %q, want bundle text", MessageApprovalActionExec, got)
+	}
+	if got := def.Message(MessageApprovalUntrustedInput); got != messageBundles[MessageLanguageID][MessageApprovalUntrustedInput] {
+		t.Errorf("Message(%q) = %q, want bundle text", MessageApprovalUntrustedInput, got)
 	}
 }

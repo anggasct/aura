@@ -49,17 +49,24 @@ func (a *Adapter) OfferProposal(ctx context.Context, card approval.ProposalCard,
 	if err != nil {
 		return approvalUnavailable("approval token mint failed")
 	}
-	cardID, err := a.postApprovalCard(ctx, token, dmChannel, content, tokenID, pending)
+	cardID, err := a.postApprovalCard(ctx, &cardPostRequest{
+		token:     token,
+		channelID: dmChannel,
+		content:   content,
+		tokenID:   tokenID,
+		pending:   pending,
+		buttons:   approval.RenderButtons(nil, 0),
+	})
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)
 		return approvalUnavailable("proposal card delivery failed")
 	}
-	go a.awaitProposal(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID}, card.ID, decide)
+	go a.awaitProposal(ctx, &openedCard{token: token, tokenID: tokenID, pending: pending, ref: cardRef{channel: dmChannel, message: cardID}}, card.ID, decide)
 	return nil
 }
 
-func (a *Adapter) awaitProposal(ctx context.Context, token, tokenID string, pending *approval.Pending, card cardRef, proposalID string, decide approval.ProposalDecider) {
-	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, card)
+func (a *Adapter) awaitProposal(ctx context.Context, card *openedCard, proposalID string, decide approval.ProposalDecider) {
+	outcome, timedOut, err := a.awaitApproval(ctx, card)
 	if timedOut || err != nil {
 		return
 	}
@@ -67,5 +74,5 @@ func (a *Adapter) awaitProposal(ctx context.Context, token, tokenID string, pend
 	if decideErr != nil {
 		result = "proposal " + proposalID + " could not be decided: " + decideErr.Error()
 	}
-	a.postNotice(ctx, token, card.channel, result)
+	a.postNotice(ctx, card.token, card.ref.channel, result)
 }

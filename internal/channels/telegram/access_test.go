@@ -183,6 +183,7 @@ type accessOpts struct {
 	withoutMedia  bool
 	vision        *vision.Service
 	ledger        func(*memorySink) UpdateLedger
+	ownerLocation *time.Location
 }
 
 type accessRig struct {
@@ -258,6 +259,7 @@ func assembleRig(t *testing.T, h *harness, opts accessOpts, cursors CursorStore,
 		Media:             opts.media,
 		Vision:            opts.vision,
 		UpdateLedger:      ledger,
+		OwnerLocation:     opts.ownerLocation,
 		Access:            &settings,
 		OnDropped: func(_ context.Context, reason string) {
 			rig.mu.Lock()

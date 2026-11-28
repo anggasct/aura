@@ -62,11 +62,11 @@ func TestDecideForOwnerOpensTheOwnerDMCardWithoutRequesterNotices(t *testing.T) 
 			result := decideForOwnerAsync(t.Context(), adapter, httpPrompt(time.Now().Add(time.Minute)), httpRequester(principal.ClassTrusted))
 			card := stub.waitPostTo(t, "555", 1)[0]
 			content, _ := card.body["content"].(string)
-			if !strings.Contains(content, "persona: Team (team)") || !strings.Contains(content, "write_file") {
+			if !strings.Contains(content, "Team wants to write a file:") || !strings.Contains(content, "write_file@1") {
 				t.Fatalf("owner card content = %q", content)
 			}
 			labels, ids := cardButtons(t, card)
-			if strings.Join(labels, "|") != "Approve|Allow 7 days|Reject" {
+			if strings.Join(labels, "|") != "Approve|Allow for 7 days|Reject" {
 				t.Fatalf("owner card buttons = %v", labels)
 			}
 			adapter.resolveComponentClick(t.Context(), clickPayload("ix-requester", "111", "", "555", ids[0]))
@@ -140,7 +140,7 @@ func TestDecideForOwnerOffersNoStandingGrantForUntrustedInput(t *testing.T) {
 		reason string
 		want   string
 	}{
-		{"approval_required", "Approve|Allow 7 days|Reject"},
+		{"approval_required", "Approve|Allow for 7 days|Reject"},
 		{policy.ReasonUntrustedInput, "Approve|Reject"},
 	}
 	for _, tc := range cases {
@@ -168,7 +168,7 @@ func TestDecideForOwnerOffersNoStandingGrantForPerCallOnlyTools(t *testing.T) {
 		allowed bool
 		want    string
 	}{
-		{"standing allowed", true, "Approve|Allow 7 days|Reject"},
+		{"standing allowed", true, "Approve|Allow for 7 days|Reject"},
 		{"per call only", false, "Approve|Reject"},
 	}
 	for _, tc := range cases {
@@ -318,9 +318,9 @@ func TestApprovalCardPayloadSuppressesEmbedsAndFencesTheArguments(t *testing.T) 
 		arguments string
 		want      string
 	}{
-		{"an inline run of backticks", "body: x" + fence + "[ok](https://evil)", "arguments:\n" + fence + "\nbody: x``\u200b`[ok](https://evil)\n" + fence},
-		{"a line of three backticks", "body: a\n" + fence + "\nb", "arguments:\n" + fence + "\nbody: a\n``\u200b`\nb\n" + fence},
-		{"empty arguments", "", "arguments:\n" + fence + "\n{}\n" + fence},
+		{"an inline run of backticks", "body: x" + fence + "[ok](https://evil)", fence + "\nwrite_file@1\nbody: x``\u200b`[ok](https://evil)\n" + fence},
+		{"a line of three backticks", "body: a\n" + fence + "\nb", fence + "\nwrite_file@1\nbody: a\n``\u200b`\nb\n" + fence},
+		{"empty arguments", "", fence + "\nwrite_file@1\n{}\n" + fence},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

@@ -49,6 +49,8 @@ type postedCard struct {
 	chatID    int64
 	threadID  int64
 	text      string
+	parseMode string
+	entities  []messageEntity
 	buttons   []postedButton
 	messageID int64
 }
@@ -125,7 +127,9 @@ func newApprovalRig(t *testing.T, opts accessOpts) *approvalRig {
 	grants := &standingRecorder{}
 	opts.settings.ApprovalRouted = routed.observe
 	opts.settings.Grants = grants
-	opts.settings.StandingGrantTTL = 7 * 24 * time.Hour
+	if opts.settings.StandingGrantTTL == 0 {
+		opts.settings.StandingGrantTTL = 7 * 24 * time.Hour
+	}
 	rig := assembleRig(t, newBareHarness(t), opts, idleStore{}, idleStore{}, idleStore{})
 	rig.adapter.bot.http = &http.Client{Transport: inProcessTransport{handler: http.HandlerFunc(rig.h.api.serve)}}
 	return &approvalRig{accessRig: rig, routed: routed, grants: grants}
@@ -194,6 +198,16 @@ func (r *approvalRig) cards() []postedCard {
 		threadID, _ := call.body["message_thread_id"].(float64)
 		card.chatID, card.threadID = int64(chatID), int64(threadID)
 		card.text, _ = call.body["text"].(string)
+		card.parseMode, _ = call.body["parse_mode"].(string)
+		if rawEntities, _ := call.body["entities"].([]any); len(rawEntities) > 0 {
+			for _, rawEntity := range rawEntities {
+				ent, _ := rawEntity.(map[string]any)
+				kind, _ := ent["type"].(string)
+				offset, _ := ent["offset"].(float64)
+				length, _ := ent["length"].(float64)
+				card.entities = append(card.entities, messageEntity{Type: kind, Offset: int(offset), Length: int(length)})
+			}
+		}
 		rows, _ := markup["inline_keyboard"].([]any)
 		for _, row := range rows {
 			buttons, _ := row.([]any)
@@ -295,7 +309,7 @@ func TestOwnerCardResolvesInTheSameChatAndTopic(t *testing.T) {
 				if card.chatID != tc.dest.chatID || card.threadID != tc.dest.threadID {
 					t.Fatalf("card posted to %d/%d, want %d/%d", card.chatID, card.threadID, tc.dest.chatID, tc.dest.threadID)
 				}
-				if !strings.Contains(card.text, "shell.exec") || !strings.Contains(card.text, "session-1") {
+				if !strings.Contains(card.text, "shell.exec@1") || !strings.Contains(card.text, `{"command":"ls"}`) || strings.Contains(card.text, "session-1") {
 					t.Errorf("card text = %q", card.text)
 				}
 				if labels := []string{card.buttons[0].text, card.buttons[1].text}; len(card.buttons) != 2 || labels[0] != "Approve" || labels[1] != "Reject" {
@@ -314,7 +328,7 @@ func TestOwnerCardResolvesInTheSameChatAndTopic(t *testing.T) {
 				if !done || outcome.err != nil || outcome.accepted != tc.accept {
 					t.Fatalf("decision = %+v (settled %v), want accepted=%v", outcome, done, tc.accept)
 				}
-				assertKeyboardRemoved(t, rig, card)
+				assertOutcomeEdited(t, rig, card)
 				assertAnswered(t, rig, 1)
 				if got := rig.dropped(); len(got) != 0 {
 					t.Errorf("resolving press produced drop records %v", got)
@@ -362,6 +376,29 @@ func assertKeyboardRemoved(t *testing.T, rig *approvalRig, card postedCard) {
 	rows, present := markup["inline_keyboard"].([]any)
 	if int64(chatID) != card.chatID || int64(messageID) != card.messageID || !present || len(rows) != 0 {
 		t.Errorf("keyboard removal = %v, want an empty keyboard on card %d/%d", edits[0], card.chatID, card.messageID)
+	}
+}
+
+func assertOutcomeEdited(t *testing.T, rig *approvalRig, card postedCard) {
+	t.Helper()
+	edits := rig.h.api.bodies("editMessageText")
+	if len(edits) != 1 {
+		t.Fatalf("outcome edits = %d, want 1", len(edits))
+	}
+	chatID, _ := edits[0]["chat_id"].(float64)
+	messageID, _ := edits[0]["message_id"].(float64)
+	text, _ := edits[0]["text"].(string)
+	markup, _ := edits[0]["reply_markup"].(map[string]any)
+	rows, present := markup["inline_keyboard"].([]any)
+	previews, _ := edits[0]["link_preview_options"].(map[string]any)
+	if int64(chatID) != card.chatID || int64(messageID) != card.messageID || !present || len(rows) != 0 {
+		t.Errorf("outcome edit = %v, want an empty keyboard on card %d/%d", edits[0], card.chatID, card.messageID)
+	}
+	if !strings.HasPrefix(text, card.text+"\n") {
+		t.Errorf("outcome edit text = %q, want original card preserved as prefix", text)
+	}
+	if previews["is_disabled"] != true {
+		t.Errorf("outcome edit link_preview_options = %v, want is_disabled true", edits[0]["link_preview_options"])
 	}
 }
 
@@ -516,8 +553,8 @@ func TestReplayedAndDuplicateCallbacksAreDropped(t *testing.T) {
 		if got := rig.dropped(); !slices.Equal(got, []string{string(dropCallbackRejected), string(dropCallbackRejected)}) {
 			t.Errorf("drop records = %v, want one per replayed press", got)
 		}
-		if got := len(rig.h.api.bodies("editMessageReplyMarkup")); got != 1 {
-			t.Errorf("keyboard removals = %d, want 1", got)
+		if got := len(rig.h.api.bodies("editMessageText")); got != 1 {
+			t.Errorf("outcome edits = %d, want 1", got)
 		}
 	})
 }
@@ -554,7 +591,7 @@ func TestCardExpiryRemovesTheKeyboardAndRejectsLatePresses(t *testing.T) {
 		if !done || outcome.accepted || outcome.err != nil {
 			t.Fatalf("expired decision = %+v (settled %v), want a plain denial", outcome, done)
 		}
-		assertKeyboardRemoved(t, rig, card)
+		assertOutcomeEdited(t, rig, card)
 		rig.press(t, "cb-late", ownerUserID, card, card.data(t, "Approve"))
 		assertAnswered(t, rig, 1)
 		if got := rig.dropped(); !slices.Equal(got, []string{string(dropCallbackRejected)}) {
@@ -576,7 +613,7 @@ func TestCancelledDecisionRemovesTheKeyboard(t *testing.T) {
 		if !done || outcome.accepted || !errors.Is(outcome.err, context.Canceled) {
 			t.Fatalf("cancelled decision = %+v (settled %v), want a denial carrying context.Canceled", outcome, done)
 		}
-		assertKeyboardRemoved(t, rig, card)
+		assertOutcomeEdited(t, rig, card)
 		rig.press(t, "cb-late", ownerUserID, card, card.data(t, "Approve"))
 		if got := rig.dropped(); !slices.Equal(got, []string{string(dropCallbackRejected)}) {
 			t.Errorf("drop records = %v, want the late press dropped", got)
@@ -714,8 +751,8 @@ func TestNonOwnerRequestsRouteTheCardToTheOwnerPrivateChat(t *testing.T) {
 				if card.chatID != ownerUserID || card.threadID != 0 {
 					t.Fatalf("card posted to %d/%d, want the owner's private chat", card.chatID, card.threadID)
 				}
-				if !strings.Contains(card.text, "persona: Main (main)") {
-					t.Errorf("card text = %q, want the persona label", card.text)
+				if !strings.Contains(card.text, "Main wants to use shell.exec:") || !strings.Contains(card.text, "Asked by "+target.binding.Principal) {
+					t.Errorf("card text = %q, want persona summary and requester", card.text)
 				}
 				rig.press(t, "cb-requester", requesterID, card, card.data(t, "Approve"))
 				if _, done := settled(result); done {
@@ -732,7 +769,7 @@ func TestNonOwnerRequestsRouteTheCardToTheOwnerPrivateChat(t *testing.T) {
 				if got := rig.routed.recorded(); !slices.Equal(got, tc.wantRouted) {
 					t.Errorf("routed observations = %v, want %v", got, tc.wantRouted)
 				}
-				assertKeyboardRemoved(t, rig, card)
+				assertOutcomeEdited(t, rig, card)
 				if len(rig.grants.recorded()) != 0 {
 					t.Error("a one-off approval recorded a standing grant")
 				}
@@ -766,7 +803,7 @@ func TestNonOwnerRequestTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 		if got := rig.routed.recorded(); !slices.Equal(got, []string{approval.RoutedTimeout}) {
 			t.Errorf("routed observations = %v", got)
 		}
-		assertKeyboardRemoved(t, rig, card)
+		assertOutcomeEdited(t, rig, card)
 	})
 }
 
@@ -793,10 +830,10 @@ func TestTrustedRequestOffersAndRecordsAStandingGrant(t *testing.T) {
 		rig.adapter.rememberTarget("session-9", target)
 		result := rig.decide(t.Context(), approvalPrompt("session-9", target.binding.Principal))
 		card := rig.mustCard(t, 1)
-		if len(card.buttons) != 3 || card.buttons[0].text != "Approve" || card.buttons[1].text != "Allow 7 days" || card.buttons[2].text != "Reject" {
+		if len(card.buttons) != 3 || card.buttons[0].text != "Approve" || card.buttons[1].text != "Allow for 7 days" || card.buttons[2].text != "Reject" {
 			t.Fatalf("card buttons = %+v, want approve, standing grant and reject", card.buttons)
 		}
-		rig.press(t, "cb-owner", ownerUserID, card, card.data(t, "Allow 7 days"))
+		rig.press(t, "cb-owner", ownerUserID, card, card.data(t, "Allow for 7 days"))
 		outcome, done := settled(result)
 		if !done || outcome.err != nil || !outcome.accepted {
 			t.Fatalf("decision = %+v (settled %v), want accepted", outcome, done)
@@ -862,7 +899,7 @@ func TestStandingGrantRecordFailureStillApproves(t *testing.T) {
 		rig.adapter.rememberTarget("session-9", target)
 		result := rig.decide(t.Context(), approvalPrompt("session-9", target.binding.Principal))
 		card := rig.mustCard(t, 1)
-		rig.press(t, "cb-owner", ownerUserID, card, card.data(t, "Allow 7 days"))
+		rig.press(t, "cb-owner", ownerUserID, card, card.data(t, "Allow for 7 days"))
 		if outcome, done := settled(result); !done || !outcome.accepted || outcome.err != nil {
 			t.Fatalf("decision = %+v (settled %v), want accepted", outcome, done)
 		}

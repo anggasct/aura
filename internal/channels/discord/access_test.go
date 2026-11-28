@@ -268,11 +268,11 @@ func TestTrustedApprovalIsRoutedToTheOwnerDM(t *testing.T) {
 	result := decideAsync(t.Context(), adapter, trustedPrompt(time.Now().Add(time.Minute)))
 	card := stub.waitPostTo(t, "555", 1)[0]
 	content, _ := card.body["content"].(string)
-	if !strings.Contains(content, "persona: Team (team)") || !strings.Contains(content, "principal: discord:111") || !strings.Contains(content, "write_file") {
+	if !strings.Contains(content, "Team wants to write a file:") || !strings.Contains(content, "Asked by discord:111") || !strings.Contains(content, "write_file@1") {
 		t.Fatalf("owner card content = %q", content)
 	}
 	labels, ids := cardButtons(t, card)
-	if strings.Join(labels, "|") != "Approve|Allow 7 days|Reject" {
+	if strings.Join(labels, "|") != "Approve|Allow for 7 days|Reject" {
 		t.Fatalf("owner card buttons = %v", labels)
 	}
 	notices := stub.waitPostTo(t, "333", 1)
