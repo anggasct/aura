@@ -1943,8 +1943,31 @@ type chatCommandDeps struct {
 	turns      command.Turns
 	skills     command.Skills
 	operations command.Operations
+	texts      command.Texts
 	recorder   command.Recorder
 	catalogs   []operation.Catalog
+}
+
+type commandTexts struct {
+	registry *auraagent.Registry
+}
+
+func (t commandTexts) Message(agentID, key string) string {
+	if t.registry != nil && agentID != "" {
+		if definition, ok := t.registry.Lookup(agentID); ok {
+			return definition.Message(key)
+		}
+	}
+	return auraagent.DefaultMessage(key)
+}
+
+func (t commandTexts) Persona(agentID string) string {
+	if t.registry != nil && agentID != "" {
+		if definition, ok := t.registry.Lookup(agentID); ok && definition.Name != "" {
+			return definition.Name
+		}
+	}
+	return agentID
 }
 
 func addOperationGroups(binding *command.Binding, groups []command.Definition) {
@@ -1965,11 +1988,12 @@ func newChatCommandDispatcher(deps *chatCommandDeps) (*command.Dispatcher, error
 	if err != nil {
 		return nil, err
 	}
-	return command.NewDispatcher(registry, command.Ports{
+	return command.NewDispatcher(registry, &command.Ports{
 		Sessions:   &discordCommandSessions{sessions: deps.sessions, events: deps.events, pointers: deps.pointers},
 		Turns:      deps.turns,
 		Skills:     deps.skills,
 		Operations: deps.operations,
+		Texts:      deps.texts,
 	}, deps.recorder)
 }
 

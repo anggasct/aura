@@ -85,7 +85,7 @@ func newDiscordStopDispatcher(t *testing.T, turns command.Turns) *command.Dispat
 	if err != nil {
 		t.Fatalf("command.New: %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{
 		Sessions: noopDiscordSessions{},
 		Turns:    turns,
 	}, nil)

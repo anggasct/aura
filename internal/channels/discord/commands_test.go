@@ -206,7 +206,7 @@ func (f *commandFixture) newAdapter(t *testing.T) *Adapter {
 	if err != nil {
 		t.Fatalf("command.New: %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: f.ports, Turns: f.ports, Skills: f.ports}, f.recorder)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: f.ports, Turns: f.ports, Skills: f.ports}, f.recorder)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -277,9 +277,9 @@ func TestDiscordCommandsInDMReplyWithoutATurn(t *testing.T) {
 	f.admit(t, dmMessage("8003", "111", "/cancel"))
 	key := testSessionKey("dm:111")
 	want := []sentReply{
-		{channel: "555", content: "session " + key + "\npersona main\nevents 4\nturn running turn-9 queued 2"},
-		{channel: "555", content: "session " + key},
-		{channel: "555", content: "cancelled turn turn-9"},
+		{channel: "555", content: "Persona: main\nWorking on a request; 2 more waiting."},
+		{channel: "555", content: "This is the current conversation. Send /new to start a fresh one."},
+		{channel: "555", content: "Stopped the current request."},
 	}
 	if got := f.replies(t); !slices.Equal(got, want) {
 		t.Fatalf("replies =\n%+v\nwant\n%+v", got, want)
@@ -345,8 +345,14 @@ func TestDiscordCommandsInBotThreadUseTheThreadSession(t *testing.T) {
 	f.admit(t, threadFollowUp("9202", "777", "<@999> /status"))
 	commandReplies := f.replies(t)
 	key := testSessionKey("thread:777")
-	if len(commandReplies) != 2 || commandReplies[0].content != "session "+key || !strings.HasPrefix(commandReplies[1].content, "session "+key+"\npersona main") {
-		t.Fatalf("thread replies = %+v", commandReplies)
+	want := []string{"This is the current conversation. Send /new to start a fresh one.", "Persona: main\nNothing is running."}
+	if len(commandReplies) != 2 || commandReplies[0].content != want[0] || commandReplies[1].content != want[1] {
+		t.Fatalf("thread replies = %+v, want %q", commandReplies, want)
+	}
+	for _, req := range f.effects.requests {
+		if req.Provider == chatcommand.Provider && req.SessionID != key {
+			t.Errorf("command intent session = %q, want thread session %q", req.SessionID, key)
+		}
 	}
 	if commandReplies[0].replyTo != "" || commandReplies[1].replyTo != "" {
 		t.Errorf("thread command replies unexpectedly quoted: %+v", commandReplies)
@@ -438,7 +444,7 @@ func TestDiscordCommandRedeliveryRepliesOnce(t *testing.T) {
 	msg := dmMessage("8601", "111", "/cancel")
 	f.admit(t, msg)
 	f.admit(t, msg)
-	if replies := f.replies(t); len(replies) != 1 || replies[0].content != "cancelled turn turn-1" {
+	if replies := f.replies(t); len(replies) != 1 || replies[0].content != "Stopped the current request." {
 		t.Fatalf("replies = %+v, want one", replies)
 	}
 	if len(f.ports.cancelled) != 1 {
@@ -540,7 +546,7 @@ func TestDiscordNewStartsAFreshSessionInADM(t *testing.T) {
 	for _, reply := range f.replies(t) {
 		contents = append(contents, reply.content)
 	}
-	if !slices.Equal(contents, []string{"new session " + key + "~1", "session " + key + "~1"}) {
+	if !slices.Equal(contents, []string{"Started a new conversation.", "This is the current conversation. Send /new to start a fresh one."}) {
 		t.Errorf("replies = %q", contents)
 	}
 	if owner, ok := ensuredOwner(f.sessions, key); !ok || owner != "local-owner" {
@@ -598,11 +604,11 @@ func TestDiscordSessionSwitchStaysInsideTheConversation(t *testing.T) {
 		contents = append(contents, reply.content)
 	}
 	want := []string{
-		"new session " + key + "~1",
-		"new session " + key + "~2",
-		"switched to session " + key + "~1",
-		command.ReplyNotSwitchable,
-		"switched to session " + key,
+		"Started a new conversation.",
+		"Started a new conversation.",
+		"Switched to that conversation.",
+		"That conversation can't be used here.",
+		"Switched to that conversation.",
 	}
 	if !slices.Equal(contents, want) {
 		t.Fatalf("replies =\n%q\nwant\n%q", contents, want)

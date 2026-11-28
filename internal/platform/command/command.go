@@ -230,11 +230,17 @@ type Operations interface {
 	Run(ctx context.Context, run *OperationRun) OperationReply
 }
 
+type Texts interface {
+	Message(agentID, key string) string
+	Persona(agentID string) string
+}
+
 type Ports struct {
 	Sessions   Sessions
 	Turns      Turns
 	Skills     Skills
 	Operations Operations
+	Texts      Texts
 }
 
 type Recorder interface {

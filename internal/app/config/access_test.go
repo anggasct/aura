@@ -85,8 +85,8 @@ func TestLoad_PersonaMessagesOverrideEveryKey(t *testing.T) {
 	t.Setenv("TEST_PERSONA_SECRET", soulSecretFixture)
 	defaults := auraagent.PersonaMessageDefaults()
 	keys := slices.Sorted(maps.Keys(defaults))
-	if len(keys) != 25 {
-		t.Fatalf("message keys = %v, want the 25 fixed replies", keys)
+	if len(keys) != 42 {
+		t.Fatalf("message keys = %v, want the 42 fixed replies", keys)
 	}
 	for _, key := range keys {
 		t.Run(key, func(t *testing.T) {
@@ -163,6 +163,36 @@ func TestPersonaOverrideMustKeepItsPlaceholders(t *testing.T) {
 		"button_stop accepted": {
 			key:    auraagent.MessageButtonStop,
 			value:  "Berhenti",
+			wantOK: true,
+		},
+		"command_status_persona without persona": {
+			key:    auraagent.MessageCommandStatusPersona,
+			value:  "Persona:",
+			detail: "{persona}",
+		},
+		"command_status_running_queued without count": {
+			key:    auraagent.MessageCommandStatusRunningQueued,
+			value:  "Working on a request; more waiting.",
+			detail: "{count}",
+		},
+		"command_unavailable without command": {
+			key:    auraagent.MessageCommandUnavailable,
+			value:  "Only works in the terminal.",
+			detail: "{command}",
+		},
+		"skill_unavailable without skill": {
+			key:    auraagent.MessageSkillUnavailable,
+			value:  "Skill is not available.",
+			detail: "{skill}",
+		},
+		"command_usage without usage": {
+			key:    auraagent.MessageCommandUsage,
+			value:  "Usage: /{command}",
+			detail: "{usage}",
+		},
+		"command_usage with command and usage": {
+			key:    auraagent.MessageCommandUsage,
+			value:  "Cara pakai: /{command} {usage}",
 			wantOK: true,
 		},
 	} {

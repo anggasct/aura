@@ -48,7 +48,7 @@ func (f *commandFixture) withOperations(t *testing.T, spy *operationSpy) {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: f.ports, Turns: f.ports, Skills: f.ports, Operations: spy}, f.recorder)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: f.ports, Turns: f.ports, Skills: f.ports, Operations: spy}, f.recorder)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

@@ -60,7 +60,7 @@ func newRun(t *testing.T, effects Effects, line string) *Run {
 	if err != nil {
 		t.Fatalf("command.New(): %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: noSessions{}}, nil)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: noSessions{}}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher(): %v", err)
 	}

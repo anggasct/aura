@@ -92,7 +92,7 @@ func TestSkillCreateUnderscoreNameIsAcceptedOnTelegram(t *testing.T) {
 			if err != nil {
 				t.Fatalf("command.New: %v", err)
 			}
-			dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: &commandSessions{}, Skills: skills}, nil)
+			dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: &commandSessions{}, Skills: skills}, nil)
 			if err != nil {
 				t.Fatalf("NewDispatcher: %v", err)
 			}

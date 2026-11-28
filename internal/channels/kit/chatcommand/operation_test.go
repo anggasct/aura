@@ -90,7 +90,7 @@ func newOperationRig(t *testing.T) *operationRig {
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	recorder := &startCounter{}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: noSessions{}, Operations: chat}, recorder)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: noSessions{}, Operations: chat}, recorder)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}

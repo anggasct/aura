@@ -100,7 +100,7 @@ func newTestDispatcher(t *testing.T, ports *spyPorts, recorder Recorder) *Dispat
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	dispatcher, err := NewDispatcher(registry, Ports{Sessions: ports, Turns: ports, Skills: ports}, recorder)
+	dispatcher, err := NewDispatcher(registry, &Ports{Sessions: ports, Turns: ports, Skills: ports}, recorder)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
@@ -125,10 +125,13 @@ func TestNewDispatcherRequiresRegistryAndSessions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if _, err := NewDispatcher(nil, Ports{Sessions: &spyPorts{}}, nil); err == nil {
+	if _, err := NewDispatcher(nil, &Ports{Sessions: &spyPorts{}}, nil); err == nil {
 		t.Error("nil registry accepted")
 	}
-	if _, err := NewDispatcher(registry, Ports{}, nil); err == nil {
+	if _, err := NewDispatcher(registry, nil, nil); err == nil {
+		t.Error("nil ports accepted")
+	}
+	if _, err := NewDispatcher(registry, &Ports{}, nil); err == nil {
 		t.Error("nil sessions accepted")
 	}
 }
@@ -227,23 +230,29 @@ func TestUnknownAndUnboundNames(t *testing.T) {
 
 func TestStrictArity(t *testing.T) {
 	tests := []struct {
-		text string
-		want string
+		text     string
+		terminal string
+		discord  string
 	}{
-		{"/help me", "usage: /help"},
-		{"/status now", "usage: /status"},
-		{"/new session", "usage: /new"},
-		{"/cancel all", "usage: /cancel"},
-		{"/session a b", "usage: /session [id]"},
-		{"/skill", "usage: /skill <name> [request…]"},
-		{"/skill-create", "usage: /skill-create <name> <description…>"},
+		{"/help me", "usage: /help", "Usage: /help"},
+		{"/status now", "usage: /status", "Usage: /status"},
+		{"/new session", "usage: /new", "Usage: /new"},
+		{"/cancel all", "usage: /cancel", "Usage: /cancel"},
+		{"/session a b", "usage: /session [id]", "Usage: /session [id]"},
+		{"/skill", "usage: /skill <name> [request…]", "Usage: /skill <name> [request…]"},
+		{"/skill-create", "usage: /skill-create <name> <description…>", "Usage: /skill-create <name> <description…>"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.text, func(t *testing.T) {
 			ports := &spyPorts{}
-			got := run(t, newTestDispatcher(t, ports, nil), caller("discord", principal.ClassOwner), tt.text)
-			if got.Code != ErrorCodeUsage || !slices.Equal(got.Lines, []string{tt.want}) || !got.Diagnostic {
-				t.Errorf("result = %+v, want %q", got, tt.want)
+			d := newTestDispatcher(t, ports, nil)
+			term := run(t, d, caller(ChannelTerminal, principal.ClassOwner), tt.text)
+			if term.Code != ErrorCodeUsage || !slices.Equal(term.Lines, []string{tt.terminal}) || !term.Diagnostic {
+				t.Errorf("terminal result = %+v, want %q", term, tt.terminal)
+			}
+			disc := run(t, d, caller("discord", principal.ClassOwner), tt.text)
+			if disc.Code != ErrorCodeUsage || !slices.Equal(disc.Lines, []string{tt.discord}) || !disc.Diagnostic {
+				t.Errorf("discord result = %+v, want %q", disc, tt.discord)
 			}
 			if len(ports.calls) != 0 {
 				t.Errorf("usage error reached ports: %v", ports.calls)
@@ -296,29 +305,29 @@ func TestCanonicalOutcomes(t *testing.T) {
 	ports := &spyPorts{events: 7, active: "turn_1", queued: 2, cancelID: "turn_1", cancelled: true}
 	d := newTestDispatcher(t, ports, nil)
 	owner := caller("discord", principal.ClassOwner)
-	if got := run(t, d, owner, "/status"); !slices.Equal(got.Lines, []string{"session sess_k", "persona aura", "events 7", "turn running turn_1 queued 2"}) {
+	if got := run(t, d, owner, "/status"); !slices.Equal(got.Lines, []string{"Persona: aura", "Working on a request; 2 more waiting."}) {
 		t.Errorf("/status = %q", got.Lines)
 	}
-	if got := run(t, d, owner, "/session"); !slices.Equal(got.Lines, []string{"session sess_k"}) || got.Diagnostic {
+	if got := run(t, d, owner, "/session"); !slices.Equal(got.Lines, []string{"This is the current conversation. Send /new to start a fresh one."}) || got.Diagnostic {
 		t.Errorf("/session = %+v", got)
 	}
 	got := run(t, d, owner, "/session sess_k~x")
-	if !slices.Equal(got.Lines, []string{"switched to session sess_k~x"}) || got.Session == nil || got.Session.AgentID != "engineer" {
+	if !slices.Equal(got.Lines, []string{"Switched to that conversation."}) || got.Session == nil || got.Session.AgentID != "engineer" {
 		t.Errorf("/session id = %+v", got)
 	}
 	got = run(t, d, owner, "/new")
-	if !slices.Equal(got.Lines, []string{"new session sess_new"}) || got.Session == nil || got.Session.ID != "sess_new" {
+	if !slices.Equal(got.Lines, []string{"Started a new conversation."}) || got.Session == nil || got.Session.ID != "sess_new" {
 		t.Errorf("/new = %+v", got)
 	}
-	if got := run(t, d, owner, "/cancel"); !slices.Equal(got.Lines, []string{"cancelled turn turn_1"}) {
+	if got := run(t, d, owner, "/cancel"); !slices.Equal(got.Lines, []string{"Stopped the current request."}) {
 		t.Errorf("/cancel = %q", got.Lines)
 	}
 	idle := &spyPorts{}
 	d = newTestDispatcher(t, idle, nil)
-	if got := run(t, d, owner, "/status"); got.Lines[3] != "turn idle" {
+	if got := run(t, d, owner, "/status"); !slices.Equal(got.Lines, []string{"Persona: aura", "Nothing is running."}) {
 		t.Errorf("idle /status = %q", got.Lines)
 	}
-	if got := run(t, d, owner, "/cancel"); !slices.Equal(got.Lines, []string{"no active turn"}) {
+	if got := run(t, d, owner, "/cancel"); !slices.Equal(got.Lines, []string{"Nothing is running."}) {
 		t.Errorf("idle /cancel = %q", got.Lines)
 	}
 	want := SkillPin{SkillID: "local/pdf@0123456789ab", Digest: "0123456789abcdef", InvocationID: "inv_1", PolicyVersion: "1"}
@@ -370,12 +379,12 @@ func TestMissingOptionalPorts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	d, err := NewDispatcher(registry, Ports{Sessions: &spyPorts{}}, nil)
+	d, err := NewDispatcher(registry, &Ports{Sessions: &spyPorts{}}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
 	owner := caller("discord", principal.ClassOwner)
-	if got := run(t, d, owner, "/cancel"); got.Lines[0] != "no active turn" {
+	if got := run(t, d, owner, "/cancel"); got.Lines[0] != "Nothing is running." {
 		t.Errorf("/cancel = %+v", got)
 	}
 	if got := run(t, d, owner, "/skill pdf"); got.Code != ErrorCodeSkillUnavailable {

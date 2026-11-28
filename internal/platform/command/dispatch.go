@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -25,7 +27,7 @@ const NameTerminalOnly = "terminal_only"
 
 const (
 	ReplyDenied        = "That command is only available to the owner."
-	ReplyNotSwitchable = "That session can't be used in this conversation."
+	ReplyNotSwitchable = "That conversation can't be used here."
 	ReplyGuestsOnly    = "That command is not available to the owner."
 	ReplyForgetMe      = "Send /forgetme confirm to erase everything you shared with this bot."
 	ReplyConflict      = "An earlier message with this id was already handled differently, so nothing was run."
@@ -37,14 +39,17 @@ type Dispatcher struct {
 	recorder Recorder
 }
 
-func NewDispatcher(registry *Registry, ports Ports, recorder Recorder) (*Dispatcher, error) {
+func NewDispatcher(registry *Registry, ports *Ports, recorder Recorder) (*Dispatcher, error) {
 	if registry == nil {
-		return nil, errors.New("command: registry must not be nil")
+		return nil, Errorf(ErrorCodeInvalidArgument, "command: registry must not be nil")
+	}
+	if ports == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "command: ports must not be nil")
 	}
 	if ports.Sessions == nil {
-		return nil, errors.New("command: sessions port must not be nil")
+		return nil, Errorf(ErrorCodeInvalidArgument, "command: sessions port must not be nil")
 	}
-	return &Dispatcher{registry: registry, ports: ports, recorder: recorder}, nil
+	return &Dispatcher{registry: registry, ports: *ports, recorder: recorder}, nil
 }
 
 func (d *Dispatcher) Registry() *Registry { return d.registry }
@@ -67,18 +72,18 @@ func (d *Dispatcher) Execute(ctx context.Context, caller *Caller, inv *Invocatio
 	if !ok {
 		return unknown(inv)
 	}
+	style := b.binding.Style
 	def, ok := d.registry.Lookup(inv.Name)
 	if !ok {
-		return unknown(inv)
+		return d.unknownReply(caller, inv, style)
 	}
-	style := b.binding.Style
 	if def.Kind == KindTerminalOnly && style != StyleTerminal {
 		_, finish := d.start(ctx, NameTerminalOnly, caller)
 		finish(ResultUnavailable)
-		return failure(ErrorCodeUnavailable, "/"+inv.Name+" only works in the terminal.")
+		return failure(ErrorCodeUnavailable, d.formatMessage(caller.AgentID, agent.MessageCommandUnavailable, agent.CommandPlaceholder, inv.Name))
 	}
 	if !b.names[def.Name] {
-		return unknown(inv)
+		return d.unknownReply(caller, inv, style)
 	}
 	ctx, finish := d.start(ctx, def.Name, caller)
 	result := d.execute(ctx, caller, inv, &def, &b.binding)
@@ -101,10 +106,60 @@ func (d *Dispatcher) start(ctx context.Context, name string, caller *Caller) (sp
 	return d.recorder.Start(ctx, name, caller.Channel, string(caller.Class))
 }
 
+func (d *Dispatcher) message(agentID, key string) string {
+	if d.ports.Texts != nil && agentID != "" {
+		if text := d.ports.Texts.Message(agentID, key); text != "" {
+			return text
+		}
+	}
+	return agent.DefaultMessage(key)
+}
+
+func (d *Dispatcher) formatMessage(agentID, key string, pairs ...string) string {
+	text := d.message(agentID, key)
+	if len(pairs) == 0 {
+		return text
+	}
+	return strings.NewReplacer(pairs...).Replace(text)
+}
+
+func (d *Dispatcher) personaName(agentID string) string {
+	if d.ports.Texts != nil && agentID != "" {
+		if name := d.ports.Texts.Persona(agentID); name != "" {
+			return name
+		}
+	}
+	return agentID
+}
+
+func (d *Dispatcher) unknownReply(caller *Caller, inv *Invocation, style Style) Result {
+	if style == StyleMessenger {
+		return failure(ErrorCodeUnknown, d.message(caller.AgentID, agent.MessageCommandUnknown))
+	}
+	return unknown(inv)
+}
+
+func (d *Dispatcher) usageReply(caller *Caller, def *Definition, style Style) Result {
+	if style == StyleMessenger {
+		line := d.formatMessage(caller.AgentID, agent.MessageCommandUsage,
+			agent.CommandPlaceholder, def.Name,
+			agent.UsagePlaceholder, def.Usage,
+		)
+		return failure(ErrorCodeUsage, strings.TrimSpace(line))
+	}
+	return usage(def)
+}
+
 func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocation, def *Definition, b *Binding) Result {
 	if !permits(def.Audience, caller.Class) {
 		if def.Audience == AudienceGuests {
+			if b.Style == StyleMessenger {
+				return failure(ErrorCodeDenied, d.message(caller.AgentID, agent.MessageCommandGuestsOnly))
+			}
 			return failure(ErrorCodeDenied, ReplyGuestsOnly)
+		}
+		if b.Style == StyleMessenger {
+			return failure(ErrorCodeDenied, d.message(caller.AgentID, agent.MessageCommandDenied))
 		}
 		return failure(ErrorCodeDenied, ReplyDenied)
 	}
@@ -112,6 +167,9 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 		return d.runOperation(ctx, &operationCall{caller: caller, inv: inv, def: def, binding: b})
 	}
 	if def.Session && def.Kind == KindLocal && caller.SessionID == "" {
+		if b.Style == StyleMessenger {
+			return failure(ErrorCodeScope, d.formatMessage(caller.AgentID, agent.MessageCommandScope, agent.CommandPlaceholder, def.Name))
+		}
 		return failure(ErrorCodeScope, "Use /"+def.Name+" inside an Aura thread or a DM.")
 	}
 	if len(inv.Args) < def.MinArgs {
@@ -119,15 +177,15 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 			pending := Invocation{Name: def.Name, Token: inv.Token, Args: append([]string(nil), inv.Args...)}
 			return Result{Lines: []string{def.Prompt}, Pending: &pending}
 		}
-		return usage(def)
+		return d.usageReply(caller, def, b.Style)
 	}
 	if def.MaxArgs != Variadic && len(inv.Args) > def.MaxArgs {
-		return usage(def)
+		return d.usageReply(caller, def, b.Style)
 	}
 	if def.Control != ControlNone {
 		return Result{Control: def.Control}
 	}
-	h := handler{ports: d.ports, caller: caller, style: b.Style, args: inv.Args, text: inv.Text}
+	h := handler{dispatcher: d, ports: d.ports, caller: caller, style: b.Style, args: inv.Args, text: inv.Text}
 	switch def.Name {
 	case "help":
 		return Result{Lines: d.registry.Help(caller.Channel, caller.Class, caller.Direct)}
@@ -144,6 +202,9 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 	case "skill-create":
 		return h.skillCreate(ctx)
 	case NameForgetMe:
+		if b.Style == StyleMessenger {
+			return Result{Lines: []string{h.message(agent.MessageForgetmeConfirm)}}
+		}
 		return Result{Lines: []string{ReplyForgetMe}}
 	default:
 		return h.failed(def.Name, errors.New("command has no handler"))
@@ -151,17 +212,33 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 }
 
 type handler struct {
-	ports  Ports
-	caller *Caller
-	style  Style
-	args   []string
-	text   string
+	dispatcher *Dispatcher
+	ports      Ports
+	caller     *Caller
+	style      Style
+	args       []string
+	text       string
+}
+
+func (h *handler) message(key string) string {
+	return h.dispatcher.message(h.caller.AgentID, key)
+}
+
+func (h *handler) format(key string, pairs ...string) string {
+	return h.dispatcher.formatMessage(h.caller.AgentID, key, pairs...)
+}
+
+func (h *handler) personaName() string {
+	return h.dispatcher.personaName(h.caller.AgentID)
 }
 
 func (h *handler) status(ctx context.Context) Result {
 	events, err := h.ports.Sessions.EventCount(ctx, h.caller.SessionID)
 	if err != nil {
 		return h.failed("status", err)
+	}
+	if h.style == StyleMessenger {
+		return h.messengerStatus()
 	}
 	turn := "turn idle"
 	if h.ports.Turns != nil {
@@ -180,8 +257,26 @@ func (h *handler) status(ctx context.Context) Result {
 	}}
 }
 
+func (h *handler) messengerStatus() Result {
+	personaLine := h.format(agent.MessageCommandStatusPersona, agent.PersonaPlaceholder, h.personaName())
+	activityLine := h.message(agent.MessageCommandIdle)
+	if h.ports.Turns != nil {
+		if active, queued := h.ports.Turns.Activity(h.caller.SessionID); active != "" {
+			if queued > 0 {
+				activityLine = h.format(agent.MessageCommandStatusRunningQueued, agent.CountPlaceholder, strconv.Itoa(queued))
+			} else {
+				activityLine = h.message(agent.MessageCommandStatusRunning)
+			}
+		}
+	}
+	return Result{Lines: []string{personaLine, activityLine}}
+}
+
 func (h *handler) session(ctx context.Context) Result {
 	if len(h.args) == 0 {
+		if h.style == StyleMessenger {
+			return Result{Lines: []string{h.message(agent.MessageCommandSessionCurrent)}}
+		}
 		return Result{Lines: []string{"session " + h.caller.SessionID}}
 	}
 	id := h.args[0]
@@ -193,10 +288,14 @@ func (h *handler) session(ctx context.Context) Result {
 				if errors.As(err, &cerr) {
 					return failure(ErrorCodeNotSwitchable, "aura: session "+id+": "+cerr.Detail)
 				}
+				return failure(ErrorCodeNotSwitchable, ReplyNotSwitchable)
 			}
-			return failure(ErrorCodeNotSwitchable, ReplyNotSwitchable)
+			return failure(ErrorCodeNotSwitchable, h.message(agent.MessageSessionNotSwitchable))
 		}
 		return h.failed("session", err)
+	}
+	if h.style == StyleMessenger {
+		return Result{Lines: []string{h.message(agent.MessageCommandSessionSwitched)}, Diagnostic: true, Session: &sess}
 	}
 	return Result{Lines: []string{"switched to session " + sess.ID}, Diagnostic: true, Session: &sess}
 }
@@ -206,11 +305,17 @@ func (h *handler) newSession(ctx context.Context) Result {
 	if err != nil {
 		return h.failed("new", err)
 	}
+	if h.style == StyleMessenger {
+		return Result{Lines: []string{h.message(agent.MessageCommandNew)}, Diagnostic: true, Session: &sess}
+	}
 	return Result{Lines: []string{"new session " + sess.ID}, Diagnostic: true, Session: &sess}
 }
 
 func (h *handler) cancel(ctx context.Context) Result {
 	if h.ports.Turns == nil {
+		if h.style == StyleMessenger {
+			return Result{Lines: []string{h.message(agent.MessageCommandIdle)}}
+		}
 		return Result{Lines: []string{"no active turn"}}
 	}
 	turnID, cancelled, err := h.ports.Turns.CancelActive(ctx, h.caller.SessionID)
@@ -218,7 +323,13 @@ func (h *handler) cancel(ctx context.Context) Result {
 		return h.failed("cancel", err)
 	}
 	if !cancelled {
+		if h.style == StyleMessenger {
+			return Result{Lines: []string{h.message(agent.MessageCommandIdle)}}
+		}
 		return Result{Lines: []string{"no active turn"}}
+	}
+	if h.style == StyleMessenger {
+		return Result{Lines: []string{h.message(agent.MessageCommandCancelled)}}
 	}
 	return Result{Lines: []string{"cancelled turn " + turnID}}
 }
@@ -239,7 +350,7 @@ func (h *handler) skillUnavailable(name, detail string) Result {
 	if h.style == StyleTerminal {
 		return failure(ErrorCodeSkillUnavailable, "aura: skill "+name+": "+detail)
 	}
-	return failure(ErrorCodeSkillUnavailable, "Skill "+name+" is not available.")
+	return failure(ErrorCodeSkillUnavailable, h.format(agent.MessageSkillUnavailable, agent.SkillPlaceholder, name))
 }
 
 func (h *handler) skillCreate(ctx context.Context) Result {
@@ -261,7 +372,7 @@ func (h *handler) failed(name string, err error) Result {
 	if h.style == StyleTerminal {
 		return failure(ErrorCodeFailed, "aura: /"+name+": "+err.Error())
 	}
-	return failure(ErrorCodeFailed, "/"+name+" failed; check aura status.")
+	return failure(ErrorCodeFailed, h.format(agent.MessageCommandFailed, agent.CommandPlaceholder, name))
 }
 
 func usage(def *Definition) Result {

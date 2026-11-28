@@ -52,7 +52,7 @@ func newOperationCommandRig(t *testing.T, opts accessOpts, spy *operationSpy) *c
 		t.Fatalf("NewRegistry: %v", err)
 	}
 	sessions := &commandSessions{}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: sessions, Skills: pinningSkills{}, Operations: spy}, nil)
+	dispatcher, err := command.NewDispatcher(registry, &command.Ports{Sessions: sessions, Skills: pinningSkills{}, Operations: spy}, nil)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
