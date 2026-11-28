@@ -37,6 +37,13 @@ func (e *BrokerExecutor) Broker() *toolbroker.Broker {
 	return e.broker
 }
 
+func (e *BrokerExecutor) ReliefLimits() (toolbroker.WebOnlyLimits, toolbroker.TaintedLimits) {
+	if e == nil || e.broker == nil {
+		return toolbroker.WebOnlyLimits{}, toolbroker.TaintedLimits{}
+	}
+	return e.broker.ReliefLimits()
+}
+
 func (e *BrokerExecutor) Definitions() []BuiltinToolDefinition {
 	if e == nil || e.broker == nil {
 		return nil
@@ -57,6 +64,17 @@ func (e *BrokerExecutor) Definitions() []BuiltinToolDefinition {
 			plugin = definition.Plugin.ID
 			description = definition.Plugin.Description
 		}
+		var linkArg, queryArg string
+		var queryMaxBytes int
+		if definition.SinkRelief != nil {
+			switch definition.SinkRelief.Kind {
+			case auratools.SinkReliefLinkProvenance:
+				linkArg = definition.SinkRelief.Argument
+			case auratools.SinkReliefBoundedQuery:
+				queryArg = definition.SinkRelief.Argument
+				queryMaxBytes = definition.SinkRelief.MaxBytes
+			}
+		}
 		result = append(result, BuiltinToolDefinition{
 			Name:                 definition.Name,
 			Version:              definition.Version,
@@ -69,6 +87,11 @@ func (e *BrokerExecutor) Definitions() []BuiltinToolDefinition {
 			OptIn:                definition.OptIn,
 			OwnerOptIn:           definition.OwnerOptIn,
 			Operation:            definition.Operation,
+			Risk:                 definition.Risk,
+			OutputCanTaint:       definition.UntrustedOutput || definition.Server != "" || definition.Plugin != nil,
+			LinkArgument:         linkArg,
+			QueryArgument:        queryArg,
+			QueryMaxBytes:        queryMaxBytes,
 		})
 	}
 	return result
@@ -113,7 +136,11 @@ func (e *BrokerExecutor) Execute(ctx context.Context, request *BuiltinToolReques
 		Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
 		AllocateEventSequence: true, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
-		Knowledge: slices.Clone(request.Knowledge), Tainted: request.Tainted, TaintSource: request.TaintSource, Unattended: request.Unattended, WebOnlyRelief: request.WebOnlyRelief, Origin: request.Origin, ContentTaintTracked: request.ContentTaintTracked,
+		Knowledge: slices.Clone(request.Knowledge), Tainted: request.Tainted, TaintSource: request.TaintSource,
+		TaintMark: request.TaintMark, LinkProvenance: request.LinkProvenance, ResultBatch: request.ResultBatch,
+		FetchCount: request.FetchCount, QueryCount: request.QueryCount, TrustGrantOrdinal: request.TrustGrantOrdinal,
+		SessionRecord: slices.Clone(request.SessionRecord), Unattended: request.Unattended, WebOnlyRelief: request.WebOnlyRelief,
+		Origin: request.Origin, ContentTaintTracked: request.ContentTaintTracked,
 	})
 	if err != nil {
 		return nil, err

@@ -29,30 +29,37 @@ import (
 )
 
 type ToolRequest struct {
-	RequestID       string
-	TurnID          string
-	SessionID       string
-	PrincipalID     string
-	PrincipalClass  principal.Class
-	AgentID         string
-	ToolName        string
-	ToolVersion     string
-	Arguments       json.RawMessage
-	RequestDigest   string
-	Capabilities    []string
-	Trust           approval.TrustLabel
-	Deadline        time.Time
-	IdempotencyKey  string
-	Approval        *approval.ApprovalGrant
-	EventSequence   uint64
-	EventInvocation string
-	EventBranch     string
-	EventAuthor     string
-	Knowledge       []string
-	Tainted         bool
-	TaintSource     string
-	Unattended      bool
-	WebOnlyRelief   bool
+	RequestID         string
+	TurnID            string
+	SessionID         string
+	PrincipalID       string
+	PrincipalClass    principal.Class
+	AgentID           string
+	ToolName          string
+	ToolVersion       string
+	Arguments         json.RawMessage
+	RequestDigest     string
+	Capabilities      []string
+	Trust             approval.TrustLabel
+	Deadline          time.Time
+	IdempotencyKey    string
+	Approval          *approval.ApprovalGrant
+	EventSequence     uint64
+	EventInvocation   string
+	EventBranch       string
+	EventAuthor       string
+	Knowledge         []string
+	Tainted           bool
+	TaintSource       string
+	TaintMark         turn.TaintMark
+	LinkProvenance    tools.LinkProvenance
+	ResultBatch       *tools.ResultBatch
+	FetchCount        int
+	QueryCount        int
+	TrustGrantOrdinal int
+	SessionRecord     json.RawMessage
+	Unattended        bool
+	WebOnlyRelief     bool
 
 	Origin              turn.Origin
 	ContentTaintTracked bool
@@ -117,6 +124,7 @@ type ApprovalPrompt struct {
 	MaxOutputBytes int64
 	PolicyVersion  string
 	ReasonCode     string
+	TaintSource    string
 	ExpiresAt      time.Time
 
 	StandingGrantAllowed bool
@@ -132,46 +140,52 @@ type AccessPolicy interface {
 type ApprovalGuard func(ctx context.Context, request *ToolRequest) (required bool, err error)
 
 type Options struct {
-	Policy               approval.Policy
-	Adapters             map[string]Adapter
-	Secrets              []string
-	MaxInlineResultBytes int64
-	Artifacts            storage.ArtifactStore
-	Effects              *effect.Executor
-	Observer             Observer
-	ApprovalDecider      ApprovalDecider
-	Access               AccessPolicy
-	ApprovalGuards       map[string]ApprovalGuard
-	ApprovalReachable    func(sessionID string) bool
-	HostCapabilities     []string
-	ArgumentChecks       map[string]ArgumentCheck
-	Clock                durable.Clock
-	WebOnly              WebOnlyLimits
+	Policy                   approval.Policy
+	Adapters                 map[string]Adapter
+	Secrets                  []string
+	MaxInlineResultBytes     int64
+	Artifacts                storage.ArtifactStore
+	Effects                  *effect.Executor
+	Observer                 Observer
+	ApprovalDecider          ApprovalDecider
+	Access                   AccessPolicy
+	ApprovalGuards           map[string]ApprovalGuard
+	ApprovalReachable        func(sessionID string) bool
+	HostCapabilities         []string
+	ArgumentChecks           map[string]ArgumentCheck
+	Clock                    durable.Clock
+	WebOnly                  WebOnlyLimits
+	Tainted                  TaintedLimits
+	ObserveTaintRelief       func(ctx context.Context, toolName, relief, outcome string)
+	ObserveTaintedTrustGrant func(ctx context.Context, outcome string)
 }
 
 type ArgumentCheck func(arguments json.RawMessage) error
 
 type Broker struct {
-	mu                   sync.RWMutex
-	definitions          map[string]*tools.Definition
-	engine               *approval.Engine
-	adapters             map[string]Adapter
-	secretMu             sync.RWMutex
-	secrets              []string
-	maxInlineResultBytes int64
-	artifacts            storage.ArtifactStore
-	effects              *effect.Executor
-	observer             Observer
-	decider              ApprovalDecider
-	access               AccessPolicy
-	guards               map[string]ApprovalGuard
-	approvalReachable    func(sessionID string) bool
-	argumentChecks       map[string]ArgumentCheck
-	previewers           map[string]Previewer
-	recoveries           map[string]Recovery
-	clock                durable.Clock
-	webOnly              WebOnlyLimits
-	webOnlyUse           webOnlyRuns
+	mu                       sync.RWMutex
+	definitions              map[string]*tools.Definition
+	engine                   *approval.Engine
+	adapters                 map[string]Adapter
+	secretMu                 sync.RWMutex
+	secrets                  []string
+	maxInlineResultBytes     int64
+	artifacts                storage.ArtifactStore
+	effects                  *effect.Executor
+	observer                 Observer
+	decider                  ApprovalDecider
+	access                   AccessPolicy
+	guards                   map[string]ApprovalGuard
+	approvalReachable        func(sessionID string) bool
+	argumentChecks           map[string]ArgumentCheck
+	previewers               map[string]Previewer
+	recoveries               map[string]Recovery
+	clock                    durable.Clock
+	webOnly                  WebOnlyLimits
+	tainted                  TaintedLimits
+	observeTaintRelief       func(ctx context.Context, toolName, relief, outcome string)
+	observeTaintedTrustGrant func(ctx context.Context, outcome string)
+	batchGrants              batchGrantStore
 }
 
 func New(options *Options) (*Broker, error) {
@@ -204,24 +218,31 @@ func New(options *Options) (*Broker, error) {
 	argumentChecks := make(map[string]ArgumentCheck, len(options.ArgumentChecks))
 	maps.Copy(argumentChecks, options.ArgumentChecks)
 	return &Broker{
-		definitions:          definitions,
-		engine:               engine,
-		adapters:             cloneAdapters(options.Adapters),
-		secrets:              slices.Clone(options.Secrets),
-		maxInlineResultBytes: options.MaxInlineResultBytes,
-		artifacts:            options.Artifacts,
-		effects:              options.Effects,
-		observer:             options.Observer,
-		decider:              options.ApprovalDecider,
-		access:               options.Access,
-		guards:               guards,
-		approvalReachable:    options.ApprovalReachable,
-		argumentChecks:       argumentChecks,
-		previewers:           map[string]Previewer{},
-		recoveries:           map[string]Recovery{},
-		clock:                clock,
-		webOnly:              options.WebOnly,
+		definitions:              definitions,
+		engine:                   engine,
+		adapters:                 cloneAdapters(options.Adapters),
+		secrets:                  slices.Clone(options.Secrets),
+		maxInlineResultBytes:     options.MaxInlineResultBytes,
+		artifacts:                options.Artifacts,
+		effects:                  options.Effects,
+		observer:                 options.Observer,
+		decider:                  options.ApprovalDecider,
+		access:                   options.Access,
+		guards:                   guards,
+		approvalReachable:        options.ApprovalReachable,
+		argumentChecks:           argumentChecks,
+		previewers:               map[string]Previewer{},
+		recoveries:               map[string]Recovery{},
+		clock:                    clock,
+		webOnly:                  options.WebOnly,
+		tainted:                  options.Tainted,
+		observeTaintRelief:       options.ObserveTaintRelief,
+		observeTaintedTrustGrant: options.ObserveTaintedTrustGrant,
 	}, nil
+}
+
+func (b *Broker) ReliefLimits() (WebOnlyLimits, TaintedLimits) {
+	return b.webOnly, b.tainted
 }
 
 func DefaultRule(definition *tools.Definition) approval.Rule {
@@ -270,6 +291,10 @@ func cloneDefinition(definition *tools.Definition) tools.Definition {
 	if definition.Plugin != nil {
 		pluginCopy := *definition.Plugin
 		definitionCopy.Plugin = &pluginCopy
+	}
+	if definition.SinkRelief != nil {
+		reliefCopy := *definition.SinkRelief
+		definitionCopy.SinkRelief = &reliefCopy
 	}
 	return definitionCopy
 }
@@ -517,7 +542,10 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		return ToolResult{}, err
 	}
 	if definition.Operation != "" {
-		if err := operationRefusal(&canonical, definition); err != nil {
+		if grantOutcome, err := operationRefusalReason(&canonical, definition); err != nil {
+			if grantOutcome != "" {
+				b.recordTaintedTrustGrant(ctx, grantOutcome)
+			}
 			policyOutcome = PolicyOutcomeDeny
 			return ToolResult{}, err
 		}
@@ -537,7 +565,27 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		return ToolResult{}, err
 	}
 	settled := false
-	tainted := canonical.Tainted && definition.IsExternalSink() && !b.webOnlyRelieved(&canonical, definition)
+	relief, err := b.evaluateRelief(ctx, &canonical, definition, decision)
+	if err != nil {
+		approvalState = relief.approvalState
+		if fault.HasCode(err, ResultUntrustedInputNoApprover) || fault.HasCode(err, ResultPolicyDenied) {
+			policyOutcome = PolicyOutcomeDeny
+		}
+		return ToolResult{}, err
+	}
+	if relief.fromSessionRecord {
+		output, recErr := sessionRecordOutput(canonical.SessionRecord)
+		if recErr != nil {
+			return ToolResult{}, recErr
+		}
+		approvalState = ApprovalAuto
+		executorClass = ExecutorDirect
+		return b.finalize(ctx, &canonical, &pendingResult{
+			result: ToolResult{Class: ResultOK, Output: output},
+			limit:  b.outputLimit(decision.Constraints),
+		})
+	}
+	tainted := canonical.Tainted && definition.IsExternalSink() && !relief.relieved
 	if (guarded || tainted || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
 		decision.Outcome = approval.OutcomeRequireApproval
 		policyOutcome = decision.Outcome
@@ -550,7 +598,11 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		policyOutcome = decision.Outcome
 	}
 	if canonical.Tainted && decision.Outcome == approval.OutcomeRequireApproval {
-		decision.ReasonCode = approval.ReasonUntrustedInput
+		if definition.Operation != "" && definition.Risk == tools.RiskTrustGrant {
+			decision.ReasonCode = approval.ReasonUntrustedTrustGrant
+		} else {
+			decision.ReasonCode = approval.ReasonUntrustedInput
+		}
 	}
 	if definition.Effectful {
 		if b.effects == nil {
@@ -1090,6 +1142,7 @@ func (b *Broker) buildApprovalPrompt(call *authorization) (*ApprovalPrompt, erro
 		MaxOutputBytes: decision.Constraints.MaxOutputBytes,
 		PolicyVersion:  decision.PolicyVersion,
 		ReasonCode:     decision.ReasonCode,
+		TaintSource:    taintSourceOf(request),
 		ExpiresAt:      call.expiry,
 
 		StandingGrantAllowed: call.standingAllowed,

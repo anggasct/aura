@@ -115,6 +115,34 @@ func TestApprovalAcceptedExecutesTool(t *testing.T) {
 	}
 }
 
+func TestTerminalCardNamesTheTaintSource(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason string
+		notice string
+	}{
+		{"untrusted input", approval.ReasonUntrustedInput, approval.UntrustedInputNotice},
+		{"untrusted trust grant", approval.ReasonUntrustedTrustGrant, approval.UntrustedTrustGrantNotice},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			card := testCard()
+			card.ReasonCode = tc.reason
+			card.TaintSource = "a forwarded or quoted message"
+			rendered := renderApprovalCard(card, 0)
+			lines := strings.Split(rendered, "\n")
+			if len(lines) < 3 {
+				t.Fatalf("rendered = %q", rendered)
+			}
+			if lines[1] != tc.notice {
+				t.Errorf("line 1 = %q, want %q", lines[1], tc.notice)
+			}
+			if lines[2] != "came in through: a forwarded or quoted message" {
+				t.Errorf("line 2 = %q, want came in through line", lines[2])
+			}
+		})
+	}
+}
+
 func TestApprovalCardDisplaysCanonicalScope(t *testing.T) {
 	runner := &approvalRunner{bridge: NewApprovalBridge(), card: testCard()}
 	console, bridge, out := newApprovalConsole(t, runner, newFakeSessions(), strings.NewReader("hi\nyes\n"))

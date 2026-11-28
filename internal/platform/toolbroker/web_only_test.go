@@ -16,10 +16,13 @@ import (
 const secretToken = "sk-live-0123456789abcdef"
 
 type webOnlyRun struct {
-	harness *taintHarness
-	turnID  string
-	relief  bool
-	next    int
+	harness    *taintHarness
+	turnID     string
+	relief     bool
+	next       int
+	fetches    int
+	queries    int
+	countByKey map[string]int
 }
 
 func newWebOnlyBroker(t *testing.T, limits WebOnlyLimits) *taintHarness {
@@ -45,6 +48,27 @@ func (r *webOnlyRun) call(name, arguments, key string) error {
 	request.RequestID = fmt.Sprintf("request-%d", r.harness.seq)
 	request.IdempotencyKey = key
 	request.EventSequence = uint64(r.harness.seq)
+	if r.countByKey == nil {
+		r.countByKey = map[string]int{}
+	}
+	switch name {
+	case "web_fetch":
+		if count, seen := r.countByKey[key]; seen {
+			request.FetchCount = count
+		} else {
+			request.FetchCount = r.fetches
+			r.countByKey[key] = r.fetches
+			r.fetches++
+		}
+	case "web_search":
+		if count, seen := r.countByKey[key]; seen {
+			request.QueryCount = count
+		} else {
+			request.QueryCount = r.queries
+			r.countByKey[key] = r.queries
+			r.queries++
+		}
+	}
 	_, err := r.harness.broker.Execute(context.Background(), request)
 	return err
 }

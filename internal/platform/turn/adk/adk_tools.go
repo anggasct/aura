@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
+	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
 
 	"google.golang.org/adk/v2/agent"
@@ -31,31 +32,43 @@ type BuiltinToolDefinition struct {
 	OptIn                bool
 	OwnerOptIn           bool
 	Operation            string
+	Risk                 auratools.Risk
+	OutputCanTaint       bool
+	LinkArgument         string
+	QueryArgument        string
+	QueryMaxBytes        int
 }
 
 type BuiltinToolRequest struct {
-	RequestID       string
-	TurnID          string
-	SessionID       string
-	PrincipalID     string
-	PrincipalClass  principal.Class
-	AgentID         string
-	ToolName        string
-	ToolVersion     string
-	Arguments       json.RawMessage
-	Capabilities    []string
-	Trust           string
-	Deadline        time.Time
-	IdempotencyKey  string
-	EventInvocation string
-	EventBranch     string
-	EventAuthor     string
-	Knowledge       []string
-	Tainted         bool
-	TaintSource     string
-	Unattended      bool
-	WebOnlyRelief   bool
-	Origin          turn.Origin
+	RequestID         string
+	TurnID            string
+	SessionID         string
+	PrincipalID       string
+	PrincipalClass    principal.Class
+	AgentID           string
+	ToolName          string
+	ToolVersion       string
+	Arguments         json.RawMessage
+	Capabilities      []string
+	Trust             string
+	Deadline          time.Time
+	IdempotencyKey    string
+	EventInvocation   string
+	EventBranch       string
+	EventAuthor       string
+	Knowledge         []string
+	Tainted           bool
+	TaintSource       string
+	TaintMark         turn.TaintMark
+	LinkProvenance    auratools.LinkProvenance
+	ResultBatch       *auratools.ResultBatch
+	FetchCount        int
+	QueryCount        int
+	TrustGrantOrdinal int
+	SessionRecord     json.RawMessage
+	Unattended        bool
+	WebOnlyRelief     bool
+	Origin            turn.Origin
 
 	ContentTaintTracked bool
 }
@@ -84,6 +97,7 @@ type turnAccess struct {
 	agentID     string
 	knowledge   []string
 	tainted     bool
+	taintMark   turn.TaintMark
 	taintSource string
 	origin      turn.Origin
 
@@ -99,7 +113,7 @@ func (x *ADKExecutor) withTurnAccess(ctx context.Context, req *turn.TurnRequest,
 		knowledge = nil
 	}
 	access := turnAccess{
-		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: knowledge, tainted: tainted, origin: req.Origin,
+		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: knowledge, tainted: tainted, taintMark: mark, origin: req.Origin,
 		unattended:    x.turnKind(req.Origin) == operation.TurnUnattended,
 		webOnlyRelief: req.WebOnly && req.JobTaint == "",
 	}

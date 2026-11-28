@@ -350,6 +350,7 @@ func TestOffersStandingGrant(t *testing.T) {
 		{"no store", &Prompt{StandingGrantAllowed: true}, principal.ClassTrusted, nil, time.Hour, false},
 		{"no ttl", &Prompt{StandingGrantAllowed: true}, principal.ClassTrusted, recorder{}, 0, false},
 		{"untrusted input", &Prompt{ReasonCode: policy.ReasonUntrustedInput, StandingGrantAllowed: true}, principal.ClassTrusted, recorder{}, time.Hour, false},
+		{"untrusted trust grant", &Prompt{ReasonCode: policy.ReasonUntrustedTrustGrant, StandingGrantAllowed: true}, principal.ClassTrusted, recorder{}, time.Hour, false},
 		{"per call only", &Prompt{}, principal.ClassTrusted, recorder{}, time.Hour, false},
 		{"nil prompt", nil, principal.ClassTrusted, recorder{}, time.Hour, false},
 	}
@@ -514,4 +515,52 @@ func TestResolveActionHandlesStopTokensAndKeepsResolveScopedToApprovals(t *testi
 			t.Fatal("ResolveAction resolved a stop token twice")
 		}
 	})
+}
+
+func TestCardStatesTheUntrustedTrustGrantWarningFirst(t *testing.T) {
+	card := RenderCard(&Prompt{
+		ToolName:    "aura_cron_add",
+		ToolVersion: "v1",
+		SessionID:   "s",
+		PrincipalID: "owner",
+		Arguments:   "name: nightly",
+		ReasonCode:  policy.ReasonUntrustedTrustGrant,
+		TaintSource: "a web_fetch result from example.com",
+	}, "Main (main)", nil)
+	lines := strings.Split(card, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("card has too few lines: %q", card)
+	}
+	if !strings.HasPrefix(lines[0], "approval required: aura_cron_add@v1") {
+		t.Errorf("line 0 = %q", lines[0])
+	}
+	if lines[1] != policy.UntrustedTrustGrantNotice {
+		t.Errorf("line 1 = %q, want %q", lines[1], policy.UntrustedTrustGrantNotice)
+	}
+	if lines[2] != "came in through: a web_fetch result from example.com" {
+		t.Errorf("line 2 = %q, want came in through line", lines[2])
+	}
+	if strings.Contains(card, policy.UntrustedInputNotice) {
+		t.Errorf("card also includes the plain untrusted_input notice: %q", card)
+	}
+}
+
+func TestCardNamesTheTaintSource(t *testing.T) {
+	for _, reason := range []string{policy.ReasonUntrustedInput, policy.ReasonUntrustedTrustGrant} {
+		t.Run(reason, func(t *testing.T) {
+			card := RenderCard(&Prompt{
+				ToolName:    "web_fetch",
+				ToolVersion: "v1",
+				SessionID:   "s",
+				PrincipalID: "owner",
+				Arguments:   `{"url":"https://example.com"}`,
+				ReasonCode:  reason,
+				TaintSource: "a web_fetch result from xn--bcher-kva.example",
+			}, "Main", nil)
+			lines := strings.Split(card, "\n")
+			if len(lines) < 3 || lines[2] != "came in through: a web_fetch result from xn--bcher-kva.example" {
+				t.Errorf("lines = %q, want came in through line right after notice", lines[:min(len(lines), 4)])
+			}
+		})
+	}
 }

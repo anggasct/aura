@@ -363,27 +363,27 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("a tainted attended turn refuses a trust grant without a card and still asks for a change", func(t *testing.T) {
+	t.Run("a tainted attended turn asks a warning card once for a declared trust grant, refuses a second, and still asks for a change", func(t *testing.T) {
 		before := len(cards())
 		calls := session.turn(turn.OriginTerminal, func(req *turn.TurnRequest) {
 			req.UntrustedContext = &turn.UntrustedRecall{Query: "notes", Summary: "remembered"}
-		}, add, operationtest.CallOf("aura_cron_resume", map[string]any{"id": jobID}))
+		}, add, add, operationtest.CallOf("aura_cron_resume", map[string]any{"id": jobID}))
 		last := calls[len(calls)-1]
 		if answersMentioning(last, string(toolbroker.ResultUntrustedInputTrustGrant)) == 0 {
-			t.Errorf("the model saw %q, want the add refused as %s", last.Answers, toolbroker.ResultUntrustedInputTrustGrant)
+			t.Errorf("the model saw %q, want the second add refused as %s", last.Answers, toolbroker.ResultUntrustedInputTrustGrant)
 		}
 		prompts := cards()[before:]
-		if len(prompts) != 1 || prompts[0].ToolName != "aura_cron_resume" {
-			t.Fatalf("approval cards = %+v, want exactly one, for aura_cron_resume", prompts)
+		if len(prompts) != 2 || prompts[0].ToolName != "aura_cron_add" || prompts[0].ReasonCode != approval.ReasonUntrustedTrustGrant || prompts[1].ToolName != "aura_cron_resume" {
+			t.Fatalf("approval cards = %+v, want one warning card for aura_cron_add and one for aura_cron_resume", prompts)
 		}
-		if states := jobStates(t, rig); len(states) != 1 || states[jobID] != "active" {
-			t.Errorf("jobs = %v, want the one job resumed and no new one", states)
+		if states := jobStates(t, rig); len(states) != 2 || states[jobID] != "active" {
+			t.Errorf("jobs = %v, want the first add applied and the earlier job resumed", states)
 		}
 	})
 }
 
 func TestOperationDescriptionNeverClaimsLessFrictionThanTheBrokerOnTaintedTurns(t *testing.T) {
-	const clause = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
+	const clause = "A verb marked ^ that grants trust asks with a warning card, or is refused, when this conversation carries untrusted input, at most one card per owner message"
 	for _, group := range describedGroups() {
 		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
 			for _, tracked := range []bool{false, true} {
@@ -448,7 +448,30 @@ func TestSearchStatesWhatAppliesOnATaintedTurn(t *testing.T) {
 			t.Errorf("%s: chat %q, command %q, want the terminal form only while chat commands do not exist", entry.ID, entry.Chat, entry.Command)
 		}
 	}
-	if approvals["cron.add"] != "refused_here" {
-		t.Errorf("cron.add approval on a tainted turn = %q, want refused_here", approvals["cron.add"])
+	if approvals["cron.add"] != "always" {
+		t.Errorf("cron.add approval on a tainted attended turn = %q, want always", approvals["cron.add"])
+	}
+	unattendedCtx := operation.WithSearchScope(t.Context(), &operation.SearchScope{Kind: operation.TurnUnattended})
+	unattendedReq := operationtest.RequestFor(tools.OperationSearchToolName, json.RawMessage(`{"group":"cron"}`), "search-tainted-unattended")
+	unattendedReq.Tainted = true
+	unattendedOut := rig.Execute(unattendedCtx, unattendedReq)
+	if unattendedOut.Class != toolbroker.ResultOK {
+		t.Fatalf("unattended search = %+v, want ok", unattendedOut)
+	}
+	var unattendedResp struct {
+		Operations []struct {
+			ID       string `json:"id"`
+			Approval string `json:"approval"`
+		} `json:"operations"`
+	}
+	if err := json.Unmarshal([]byte(unattendedOut.Output), &unattendedResp); err != nil {
+		t.Fatalf("decode unattended search result: %v", err)
+	}
+	unattendedApprovals := map[string]string{}
+	for _, entry := range unattendedResp.Operations {
+		unattendedApprovals[entry.ID] = entry.Approval
+	}
+	if unattendedApprovals["cron.add"] != "refused_here" {
+		t.Errorf("cron.add approval on a tainted unattended turn = %q, want refused_here", unattendedApprovals["cron.add"])
 	}
 }

@@ -57,6 +57,7 @@ type Prompt struct {
 	MaxOutputBytes int64
 	PolicyVersion  string
 	ReasonCode     string
+	TaintSource    string
 	ExpiresAt      time.Time
 
 	StandingGrantAllowed bool
@@ -321,7 +322,13 @@ type StandingOffer struct {
 }
 
 func OffersStandingGrant(prompt *Prompt, class principal.Class, offer StandingOffer) bool {
-	return prompt != nil && prompt.ReasonCode != policy.ReasonUntrustedInput && class == principal.ClassTrusted && offer.Grants != nil && offer.TTL > 0 && prompt.StandingGrantAllowed
+	return prompt != nil &&
+		prompt.ReasonCode != policy.ReasonUntrustedInput &&
+		prompt.ReasonCode != policy.ReasonUntrustedTrustGrant &&
+		class == principal.ClassTrusted &&
+		offer.Grants != nil &&
+		offer.TTL > 0 &&
+		prompt.StandingGrantAllowed
 }
 
 func StandingGrantLabel(ttl time.Duration) string {
@@ -366,10 +373,15 @@ func RenderCard(prompt *Prompt, persona string, clean func(string) string) strin
 		card.WriteString("@" + header(prompt.ToolVersion))
 	}
 	switch prompt.ReasonCode {
+	case policy.ReasonUntrustedTrustGrant:
+		card.WriteString("\n" + policy.UntrustedTrustGrantNotice)
 	case policy.ReasonUntrustedInput:
 		card.WriteString("\n" + policy.UntrustedInputNotice)
 	case policy.ReasonContentUnverified:
 		card.WriteString("\n" + policy.ContentUnverifiedNotice)
+	}
+	if prompt.TaintSource != "" {
+		card.WriteString("\ncame in through: " + header(prompt.TaintSource))
 	}
 	if persona != "" {
 		card.WriteString("\npersona: " + header(persona))

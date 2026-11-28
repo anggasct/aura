@@ -46,7 +46,7 @@ func (r Risk) previewHeading() string {
 }
 
 func (d *Definition) Privileged() bool {
-	return d.Risk == RiskTrustGrant || d.Risk == RiskDestructive || d.FreshApproval
+	return d.Risk == RiskTrustGrant || d.Risk == RiskDestructive || d.FreshApproval || (d.Risk == RiskChange && d.PreviewUntilApply)
 }
 
 func (d *Definition) ApplyOperationFlags() error {
@@ -101,6 +101,13 @@ func (d *Definition) ValidateOperation() error {
 	if d.OwnerNotice && (d.Risk != RiskChange || d.FreshApproval || d.ExternalSink) {
 		reject("tool %q is an owner notice but is not a plain change that stays off the sinks")
 	}
+	if d.TaintedGrant != "" {
+		if d.Risk != RiskTrustGrant {
+			reject("tool %q declares a tainted grant but is not a trust grant")
+		} else if d.TaintedGrant != TaintedGrantLabels && d.TaintedGrant != TaintedGrantInert {
+			reject("tool %q declares an unknown tainted grant mode")
+		}
+	}
 	return errors.Join(defects...)
 }
 
@@ -111,6 +118,12 @@ func (d *Definition) validateWithoutOperation() error {
 	}
 	if d.FreshApproval {
 		defects = append(defects, errorf(ErrorCodeDefinitionInvalid, "tool %q sets fresh approval without an operation", d.Name))
+	}
+	if d.PreviewUntilApply {
+		defects = append(defects, errorf(ErrorCodeDefinitionInvalid, "tool %q sets preview until apply without an operation", d.Name))
+	}
+	if d.TaintedGrant != "" {
+		defects = append(defects, errorf(ErrorCodeDefinitionInvalid, "tool %q declares a tainted grant without an operation", d.Name))
 	}
 	if d.OwnerNotice {
 		defects = append(defects, errorf(ErrorCodeDefinitionInvalid, "tool %q is an owner notice without an operation", d.Name))
