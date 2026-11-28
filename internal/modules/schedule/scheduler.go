@@ -100,6 +100,12 @@ type JobConfirmation struct {
 	Context         string
 }
 
+type JobConfirmRequest struct {
+	JobConfirmation
+	ID string
+	At time.Time
+}
+
 type Occurrence struct {
 	ID              string
 	JobID           string
@@ -117,7 +123,7 @@ type JobStore interface {
 	InsertJob(ctx context.Context, job *Job) error
 	Job(ctx context.Context, id string) (Job, bool, error)
 	EditJob(ctx context.Context, id string, edit *JobEdit, expectedVersion int64, now time.Time) (Job, error)
-	ConfirmJob(ctx context.Context, id string, confirm *JobConfirmation, now time.Time) (Job, error)
+	ConfirmJob(ctx context.Context, req *JobConfirmRequest) (Job, error)
 	SetJobState(ctx context.Context, id, state string, now time.Time) error
 	RecordFire(ctx context.Context, occurrence *Occurrence) error
 	OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (Occurrence, bool, error)
@@ -298,7 +304,7 @@ func (s *Service) Confirm(ctx context.Context, id string, confirm *JobConfirmati
 	if confirm.Context != "" && current.WorkflowID != "" {
 		return Job{}, Errorf(ErrorCodeInvalidArgument, "a workflow job has no context")
 	}
-	return s.jobs.ConfirmJob(ctx, id, confirm, time.Now().UTC())
+	return s.jobs.ConfirmJob(ctx, &JobConfirmRequest{JobConfirmation: *confirm, ID: id, At: time.Now().UTC()})
 }
 
 func (s *Service) SetState(ctx context.Context, id, state string) error {

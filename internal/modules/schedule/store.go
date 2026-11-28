@@ -186,17 +186,17 @@ func (s *SQLiteStore) EditJob(ctx context.Context, id string, edit *JobEdit, exp
 	return updated, nil
 }
 
-func (s *SQLiteStore) ConfirmJob(ctx context.Context, id string, confirm *JobConfirmation, now time.Time) (Job, error) {
+func (s *SQLiteStore) ConfirmJob(ctx context.Context, req *JobConfirmRequest) (Job, error) {
 	if s == nil || s.db == nil {
 		return Job{}, fault.New(ErrorCodeInvalidArgument, "schedule store must not be nil")
 	}
-	if confirm == nil || confirm.ExpectedVersion <= 0 {
+	if req == nil || req.ExpectedVersion <= 0 {
 		return Job{}, fault.New(ErrorCodeInvalidArgument, "job confirmation needs the version it was previewed at")
 	}
 	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`UPDATE scheduled_job SET tainted = 0, taint_source = NULL, context = COALESCE(NULLIF(?, ''), context),
 		version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND state != ?`,
-		confirm.Context, sqlite.FormatTime(now.UTC()), id, confirm.ExpectedVersion, JobDeleted)
+		req.Context, sqlite.FormatTime(req.At.UTC()), req.ID, req.ExpectedVersion, JobDeleted)
 	if err != nil {
 		return Job{}, fault.Wrap(ErrorCodeUnavailable, "confirm schedule job", sqlite.Classify(err))
 	}
@@ -205,9 +205,9 @@ func (s *SQLiteStore) ConfirmJob(ctx context.Context, id string, confirm *JobCon
 		return Job{}, fault.Wrap(ErrorCodeUnavailable, "confirm schedule job", sqlite.Classify(err))
 	}
 	if affected == 0 {
-		return Job{}, s.confirmRefusal(ctx, id)
+		return Job{}, s.confirmRefusal(ctx, req.ID)
 	}
-	confirmed, found, err := s.Job(ctx, id)
+	confirmed, found, err := s.Job(ctx, req.ID)
 	if err != nil {
 		return Job{}, err
 	}

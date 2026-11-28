@@ -65,23 +65,23 @@ func (s *fakeJobStore) EditJob(_ context.Context, id string, edit *JobEdit, expe
 	return current, nil
 }
 
-func (s *fakeJobStore) ConfirmJob(_ context.Context, id string, confirm *JobConfirmation, now time.Time) (Job, error) {
+func (s *fakeJobStore) ConfirmJob(_ context.Context, req *JobConfirmRequest) (Job, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	current, ok := s.jobs[id]
+	current, ok := s.jobs[req.ID]
 	if !ok {
 		return Job{}, Errorf(ErrorCodeJobNotFound, "schedule job not found")
 	}
-	if current.Version != confirm.ExpectedVersion || current.State == JobDeleted {
+	if current.Version != req.ExpectedVersion || current.State == JobDeleted {
 		return Job{}, Errorf(ErrorCodeOccurrenceConflict, "schedule job changed after the preview")
 	}
 	current.Tainted, current.TaintSource = false, ""
-	if confirm.Context != "" {
-		current.Context = confirm.Context
+	if req.Context != "" {
+		current.Context = req.Context
 	}
 	current.Version++
-	current.UpdatedAt = now
-	s.jobs[id] = current
+	current.UpdatedAt = req.At
+	s.jobs[req.ID] = current
 	return current, nil
 }
 

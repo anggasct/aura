@@ -32,34 +32,41 @@ type webOnlyCount struct {
 	admitted map[string]struct{}
 }
 
-func (r *webOnlyRuns) admit(turnID, callKey string, kind tools.SinkReliefKind, limit int) bool {
+type webOnlyAdmission struct {
+	turnID  string
+	callKey string
+	kind    tools.SinkReliefKind
+	limit   int
+}
+
+func (r *webOnlyRuns) admit(call *webOnlyAdmission) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.runs == nil {
 		r.runs = make(map[string]*webOnlyCount, trackedWebOnlyRuns)
 	}
-	count, found := r.runs[turnID]
+	count, found := r.runs[call.turnID]
 	if !found {
 		count = &webOnlyCount{admitted: map[string]struct{}{}}
-		r.runs[turnID] = count
-		r.order = append(r.order, turnID)
+		r.runs[call.turnID] = count
+		r.order = append(r.order, call.turnID)
 		if len(r.order) > trackedWebOnlyRuns {
 			delete(r.runs, r.order[0])
 			r.order = r.order[1:]
 		}
 	}
-	if _, again := count.admitted[callKey]; again {
+	if _, again := count.admitted[call.callKey]; again {
 		return true
 	}
 	used := &count.fetches
-	if kind == tools.SinkReliefBoundedQuery {
+	if call.kind == tools.SinkReliefBoundedQuery {
 		used = &count.queries
 	}
-	if *used >= limit {
+	if *used >= call.limit {
 		return false
 	}
 	*used++
-	count.admitted[callKey] = struct{}{}
+	count.admitted[call.callKey] = struct{}{}
 	return true
 }
 
@@ -86,7 +93,7 @@ func (b *Broker) webOnlyRelieved(request *ToolRequest, definition *tools.Definit
 	default:
 		return false
 	}
-	return b.webOnlyUse.admit(request.TurnID, request.IdempotencyKey, relief.Kind, limit)
+	return b.webOnlyUse.admit(&webOnlyAdmission{turnID: request.TurnID, callKey: request.IdempotencyKey, kind: relief.Kind, limit: limit})
 }
 
 func reliefArgument(arguments json.RawMessage, name string) (string, bool) {

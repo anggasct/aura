@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -101,4 +102,35 @@ func (r *scheduleRig) jobCount(t *testing.T) int {
 		t.Fatalf("count jobs: %v", err)
 	}
 	return count
+}
+
+func TestListShowsADashAsTheContextOfAWorkflowJob(t *testing.T) {
+	rig := webToolsRig(t, nil)
+	prompt, workflow := defaultRunSpec(), defaultRunSpec()
+	workflow.Prompt, workflow.Context, workflow.WorkflowID = "", "", "wf1"
+	for _, spec := range []*JobSpec{prompt, workflow} {
+		if _, err := rig.service.Create(t.Context(), spec); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+	}
+	result, err := rig.Registry.Invoke(t.Context(), "cron.list", &operation.Call{Caller: ownerCaller(operation.SurfaceCLI), Input: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatalf("cron.list: %v", err)
+	}
+	var listed struct {
+		Rows []struct {
+			Context string `json:"context"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(result.Data, &listed); err != nil {
+		t.Fatalf("result %s: %v", result.Data, err)
+	}
+	var contexts []string
+	for _, row := range listed.Rows {
+		contexts = append(contexts, row.Context)
+	}
+	slices.Sort(contexts)
+	if !slices.Equal(contexts, []string{"-", ContextFull}) {
+		t.Errorf("contexts = %q, want the prompt job's context and a dash for the workflow job (result %s)", contexts, result.Data)
+	}
 }

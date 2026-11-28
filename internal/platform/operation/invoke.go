@@ -403,8 +403,11 @@ func (r *Registry) winner(ctx context.Context, call *Call) (Result, error) {
 }
 
 func (r *Registry) confirmed(descriptor *Descriptor, call *Call) error {
-	if !descriptor.confirmsWithCode() || call.Caller.Surface == SurfaceAgent {
+	if !descriptor.confirmsWithCode() {
 		return nil
+	}
+	if call.Caller.Surface == SurfaceAgent {
+		return NewError(ErrorCodeConfirmation, "an operation that confirms with a code cannot be applied from the agent surface")
 	}
 	if call.PreviewDigest == "" || call.Confirmation == "" || !r.confirmer.Matches(call.PreviewDigest, call.Confirmation) {
 		return NewError(ErrorCodeConfirmation, "the code does not match the current preview")

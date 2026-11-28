@@ -169,7 +169,7 @@ func TestConfirmedJobRunsClean(t *testing.T) {
 	}
 	inBubble(t, func(spec *JobSpec) { spec.TaintSource = hostileSource }, func(t *testing.T, f *runFixture) {
 		f.succeed(t, f.scheduled(t, f.nextFire(t)))
-		if _, err := f.store.ConfirmJob(t.Context(), f.job.ID, &JobConfirmation{ExpectedVersion: f.job.Version}, time.Now()); err != nil {
+		if _, err := f.store.ConfirmJob(t.Context(), &JobConfirmRequest{JobConfirmation: JobConfirmation{ExpectedVersion: f.job.Version}, ID: f.job.ID, At: time.Now()}); err != nil {
 			t.Fatalf("ConfirmJob: %v", err)
 		}
 		next := f.nextFire(t).Add(time.Minute)

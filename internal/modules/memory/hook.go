@@ -29,7 +29,7 @@ func runAfterTurn(ctx context.Context, service *Service, summaryModel *SummaryMo
 			CreatedAt: events[i].CreatedAt,
 		})
 	}
-	result, err := projectTurn(ctx, service, req, converted)
+	result, err := projectTurn(ctx, &turnProjection{service: service, req: req, events: converted})
 	if result.Dropped > 0 && logger != nil {
 		logger.DebugContext(ctx, "memory projection dropped secrets", "dropped", result.Dropped, "turn_id", req.TurnID)
 	}
@@ -44,7 +44,14 @@ func runAfterTurn(ctx context.Context, service *Service, summaryModel *SummaryMo
 	return err
 }
 
-func projectTurn(ctx context.Context, service *Service, req *turn.TurnRequest, events []*Event) (BatchResult, error) {
+type turnProjection struct {
+	service *Service
+	req     *turn.TurnRequest
+	events  []*Event
+}
+
+func projectTurn(ctx context.Context, p *turnProjection) (BatchResult, error) {
+	service, req, events := p.service, p.req, p.events
 	switch {
 	case req.Origin != turn.OriginSchedule:
 		return service.ProjectBatch(ctx, req.PrincipalID, events)
