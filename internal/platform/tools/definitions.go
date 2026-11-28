@@ -105,6 +105,8 @@ type Definition struct {
 	Risk                 Risk
 	Operation            string
 	FreshApproval        bool
+	PreviewUntilApply    bool
+	TaintedGrant         TaintedGrant
 	OwnerNotice          bool
 	UntrustedOutput      bool
 	SinkRelief           *SinkRelief
@@ -112,6 +114,13 @@ type Definition struct {
 	Display              []string
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)
 }
+
+type TaintedGrant string
+
+const (
+	TaintedGrantLabels TaintedGrant = "labels"
+	TaintedGrantInert  TaintedGrant = "inert"
+)
 
 type SinkReliefKind string
 

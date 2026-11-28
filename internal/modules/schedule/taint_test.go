@@ -392,3 +392,52 @@ func TestCronConfirmWritesOnlyInsideCommit(t *testing.T) {
 		Outside: rig.starter.fingerprint, Previewed: true,
 	})
 }
+
+func TestCronConfirmPreviewShowsAndBindsJobState(t *testing.T) {
+	rig := newScheduleRig(t, ownerRoute{alias: "me", route: "telegram:owner"})
+	job := rig.createTainted(t)
+	input := `{"id":"` + job.ID + `"}`
+
+	activePreview := rig.preview(t, "cron.confirm", input, operation.SurfaceCLI)
+	if !strings.Contains(strings.Join(activePreview.Lines, "\n"), "State: active") {
+		t.Fatalf("preview lines = %v, want State: active", activePreview.Lines)
+	}
+	if err := rig.service.SetState(t.Context(), job.ID, JobPaused); err != nil {
+		t.Fatalf("SetState paused: %v", err)
+	}
+	if _, err := rig.Registry.Invoke(t.Context(), "cron.confirm", &operation.Call{
+		Caller: ownerCaller(operation.SurfaceCLI), Input: json.RawMessage(input), IdempotencyKey: "confirm-after-pause-cli",
+		RequestDigest: operation.Digest(json.RawMessage(input)), Confirmation: activePreview.Code,
+	}); !fault.HasCode(err, operation.ErrorCodeConfirmation) {
+		t.Fatalf("confirm after pause without preview digest = %v, want %s", err, operation.ErrorCodeConfirmation)
+	}
+	if _, err := rig.Registry.Invoke(t.Context(), "cron.confirm", &operation.Call{
+		Caller: ownerCaller(operation.SurfaceCLI), Input: json.RawMessage(input), IdempotencyKey: "confirm-after-pause",
+		RequestDigest: operation.Digest(json.RawMessage(input)), PreviewDigest: activePreview.Digest, Confirmation: activePreview.Code,
+	}); !fault.HasCode(err, operation.ErrorCodePreviewStale) {
+		t.Fatalf("confirm after pause with stale preview digest = %v, want %s", err, operation.ErrorCodePreviewStale)
+	}
+	if got := rig.job(t, job.ID); !got.Tainted {
+		t.Errorf("paused job lost its taint after a stale confirmation: %+v", got)
+	}
+
+	pausedPreview := rig.preview(t, "cron.confirm", input, operation.SurfaceCLI)
+	if !strings.Contains(strings.Join(pausedPreview.Lines, "\n"), "State: paused") {
+		t.Fatalf("paused preview lines = %v, want State: paused", pausedPreview.Lines)
+	}
+	if pausedPreview.Code == activePreview.Code {
+		t.Error("pausing the job did not change the confirmation code")
+	}
+	if err := rig.service.SetState(t.Context(), job.ID, JobActive); err != nil {
+		t.Fatalf("SetState active: %v", err)
+	}
+	if _, err := rig.Registry.Invoke(t.Context(), "cron.confirm", &operation.Call{
+		Caller: ownerCaller(operation.SurfaceCLI), Input: json.RawMessage(input), IdempotencyKey: "confirm-after-resume-cli",
+		RequestDigest: operation.Digest(json.RawMessage(input)), Confirmation: pausedPreview.Code,
+	}); !fault.HasCode(err, operation.ErrorCodeConfirmation) {
+		t.Fatalf("confirm after resume = %v, want %s", err, operation.ErrorCodeConfirmation)
+	}
+	if _, err := rig.service.Confirm(t.Context(), job.ID, &JobConfirmation{ExpectedVersion: job.Version, ExpectedState: JobPaused}); !fault.HasCode(err, ErrorCodeOccurrenceConflict) {
+		t.Fatalf("direct confirm with stale ExpectedState = %v, want %s", err, ErrorCodeOccurrenceConflict)
+	}
+}

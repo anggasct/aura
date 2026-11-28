@@ -115,6 +115,9 @@ func (b *Broker) approvalAnswer(ctx context.Context, call *authorization) (strin
 	if err != nil {
 		return ApprovalRejected, err
 	}
+	if prompt.ReasonCode == approval.ReasonUntrustedTrustGrant {
+		b.recordTaintedTrustGrant(ctx, "card")
+	}
 	accepted, err := b.decider(ctx, prompt)
 	if err != nil {
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

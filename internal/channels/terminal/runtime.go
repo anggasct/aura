@@ -175,6 +175,7 @@ func ApprovalDecider(approvals *ApprovalBridge) toolbroker.ApprovalDecider {
 			MaxOutputBytes: prompt.MaxOutputBytes,
 			PolicyVersion:  prompt.PolicyVersion,
 			ReasonCode:     prompt.ReasonCode,
+			TaintSource:    prompt.TaintSource,
 			ExpiresAt:      prompt.ExpiresAt,
 		})
 	}

@@ -70,6 +70,8 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 		Risk:                 tools.Risk(descriptor.Risk),
 		Operation:            descriptor.ID,
 		FreshApproval:        descriptor.FreshApproval,
+		PreviewUntilApply:    descriptor.Confirmation == ConfirmPreviewUntilApply,
+		TaintedGrant:         tools.TaintedGrant(descriptor.TaintedGrant),
 		OwnerNotice:          descriptor.OwnerNotice,
 		UntrustedOutput:      descriptor.UntrustedOutput,
 		Description:          description,

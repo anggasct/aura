@@ -230,6 +230,8 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		}
 		toolBudget := newTurnToolBudget(runCtx, x.toolBudget, req.TurnID, x.now, x.logger)
 		runCtx = withTurnToolBudget(runCtx, toolBudget)
+		taintTracker := x.newTurnTaintTracker(runCtx, req)
+		runCtx = withTurnTaintTracker(runCtx, taintTracker)
 		sessionService, err := NewADKSessionService(x.sessions)
 		if err != nil {
 			yield(turn.Event{}, err)
@@ -486,6 +488,9 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 	if !ok {
 		return nil, invalidArgument(fmt.Sprintf("tool %q has no call key", toolName))
 	}
+	if err := slot.AwaitTaint(callCtx); err != nil {
+		return nil, err
+	}
 	requestID := actx.FunctionCallID()
 	if requestID == "" {
 		requestID = actx.InvocationID()
@@ -516,6 +521,7 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		Knowledge:       slices.Clone(access.knowledge),
 		Tainted:         access.tainted,
 		TaintSource:     access.taintSource,
+		TaintMark:       access.taintMark,
 		Origin:          access.origin,
 		Unattended:      access.unattended && x.generatesOperation(definition.Name),
 		WebOnlyRelief:   access.webOnlyRelief,
@@ -532,10 +538,14 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 
 		ContentTaintTracked: access.contentTaintTracked,
 	}
+	taintTracker := turnTaintTrackerFromContext(callCtx)
+	taintTracker.prepareCall(callCtx, slot, request, definition)
+	slot.TaintRecorded()
 	output, err := builtins.Execute(callCtx, request)
 	if err != nil {
 		return nil, err
 	}
+	taintTracker.observeResult(definition, requestID, raw, output)
 	var result map[string]any
 	if err := json.Unmarshal(output, &result); err != nil {
 		return nil, fmt.Errorf("decode builtin tool result: %w", err)
@@ -557,7 +567,11 @@ func contentFromParts(req *turn.TurnRequest, extraParts ...string) (*genai.Conte
 		if strings.TrimSpace(p.Text) == "" {
 			continue
 		}
-		parts = append(parts, &genai.Part{Text: p.Text})
+		text := p.Text
+		if p.Source != "" {
+			text = turn.RenderUntrustedInput(p.Source, p.Text)
+		}
+		parts = append(parts, &genai.Part{Text: text})
 	}
 	if block := turn.RenderUntrustedRecall(req.UntrustedContext); strings.TrimSpace(block) != "" {
 		parts = append(parts, &genai.Part{Text: block})

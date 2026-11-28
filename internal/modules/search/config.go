@@ -30,12 +30,14 @@ type Config struct {
 	Endpoint      string     `json:"endpoint,omitempty"`
 	MaxResults    int        `json:"max_results"`
 
-	WebOnlyQueriesPerRun int `json:"web_only_queries_per_run"`
+	WebOnlyQueriesPerRun  int `json:"web_only_queries_per_run"`
+	TaintedQueriesPerTurn int `json:"tainted_queries_per_turn"`
 }
 
 const (
-	MaxQueryBytes           = 256
-	MaxWebOnlyQueriesPerRun = 20
+	MaxQueryBytes            = 256
+	MaxWebOnlyQueriesPerRun  = 20
+	MaxTaintedQueriesPerTurn = 20
 )
 
 func Default() Config {
@@ -43,7 +45,8 @@ func Default() Config {
 		Provider:   ProviderDuckDuckGo,
 		MaxResults: 5,
 
-		WebOnlyQueriesPerRun: 5,
+		WebOnlyQueriesPerRun:  5,
+		TaintedQueriesPerTurn: 5,
 	}
 }
 
@@ -99,6 +102,9 @@ func (c *Config) Validate() error {
 	}
 	if c.WebOnlyQueriesPerRun < 0 || c.WebOnlyQueriesPerRun > MaxWebOnlyQueriesPerRun {
 		problems = append(problems, configkit.Invalid("web_only_queries_per_run", "must be between 0 and 20"))
+	}
+	if c.TaintedQueriesPerTurn < 0 || c.TaintedQueriesPerTurn > MaxTaintedQueriesPerTurn {
+		problems = append(problems, configkit.Invalid("tainted_queries_per_turn", "must be between 0 and 20"))
 	}
 	return errors.Join(problems...)
 }

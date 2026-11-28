@@ -32,7 +32,12 @@ type SessionStore interface {
 func turnDescriptorFromRequest(req *turn.TurnRequest) runtimesessions.Descriptor {
 	parts := make([]runtimesessions.Part, 0, len(req.Parts))
 	for _, part := range req.Parts {
-		parts = append(parts, runtimesessions.Part{Text: part.Text, Image: part.Image})
+		parts = append(parts, runtimesessions.Part{
+			Text:   part.Text,
+			Image:  part.Image,
+			Source: string(part.Source),
+			Detail: part.Detail,
+		})
 	}
 	return runtimesessions.Descriptor{
 		TurnID:           req.TurnID,
@@ -73,7 +78,12 @@ func cloneToolRestriction(restriction *turn.ToolRestriction) *turn.ToolRestricti
 func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *turn.TurnRequest {
 	parts := make([]runtimeingress.InputPart, 0, len(desc.Parts))
 	for _, part := range desc.Parts {
-		parts = append(parts, runtimeingress.InputPart{Text: part.Text, Image: part.Image})
+		parts = append(parts, runtimeingress.InputPart{
+			Text:   part.Text,
+			Image:  part.Image,
+			Source: runtimeingress.PartSource(part.Source),
+			Detail: part.Detail,
+		})
 	}
 	return &turn.TurnRequest{
 		TurnID:           desc.TurnID,

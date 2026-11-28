@@ -45,6 +45,9 @@ const (
 	MetricCodeRunCPU       = "code.run.cpu"
 	MetricCodeRunOutput    = "code.run.output.bytes"
 	MetricCodeRunArtifacts = "code.run.artifact.bytes"
+
+	MetricToolBrokerTaintReliefTotal       = "toolbroker.taint_relief.total"
+	MetricToolBrokerTaintedTrustGrantTotal = "toolbroker.tainted_trust_grant.total"
 )
 
 const (
@@ -119,6 +122,10 @@ const (
 	AttrCodeRuntime     = "code.runtime"
 	AttrCodeResultClass = "code.result_class"
 	AttrCodePhase       = "code.phase"
+
+	AttrAuraToolName = "aura.tool.name"
+	AttrTaintRelief  = "aura.taint.relief"
+	AttrOutcome      = "outcome"
 )
 
 var turnSpanAttrs = []string{
@@ -166,32 +173,34 @@ var memoryRecallSpanAttrs = []string{
 }
 
 var metricLabelAttrs = map[string][]string{
-	MetricTurnsTotal:                {AttrOrigin, AttrTerminalKind},
-	MetricTurnDuration:              {AttrOrigin, AttrTerminalKind},
-	MetricModelDuration:             {AttrGenAISystem, AttrGenAIOperationName},
-	MetricToolCallsTotal:            {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
-	MetricToolCallDuration:          {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
-	MetricMemoryRecallsTotal:        {AttrRecallOutcome, AttrRecallModelSystem},
-	MetricMemoryRecallDuration:      {AttrRecallOutcome},
-	MetricMemoryRecallDocuments:     {AttrRecallOutcome},
-	MetricMCPCallsTotal:             {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
-	MetricMCPCallDuration:           {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
-	MetricMCPResponseSize:           {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
-	MetricChildSpawnsTotal:          {AttrChildResult},
-	MetricChildSettlesTotal:         {AttrChildState, AttrChildResult},
-	MetricChildActive:               {AttrChildState},
-	MetricChildBudgetTokens:         nil,
-	MetricChildBudgetCost:           nil,
-	MetricProfileExtractionsTotal:   {AttrProfileResult},
-	MetricProfileExtractionQueueAge: {AttrProfileResult},
-	MetricProfileFactsCount:         {AttrProfileStatus, AttrProfileCategory},
-	MetricVisionOperationsTotal:     {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
-	MetricCodeRunsTotal:             {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
-	MetricCodeRunDuration:           {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
-	MetricCodeRunCPU:                {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
-	MetricCodeRunOutput:             {AttrCodeRuntime},
-	MetricCodeRunArtifacts:          {AttrCodeRuntime},
-	MetricVisionOperationDuration:   {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
+	MetricTurnsTotal:                       {AttrOrigin, AttrTerminalKind},
+	MetricTurnDuration:                     {AttrOrigin, AttrTerminalKind},
+	MetricModelDuration:                    {AttrGenAISystem, AttrGenAIOperationName},
+	MetricToolCallsTotal:                   {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricToolCallDuration:                 {AttrToolName, AttrToolStatus, AttrToolPolicyOutcome, AttrToolApproval, AttrToolExecutor, AttrToolOutputBucket},
+	MetricMemoryRecallsTotal:               {AttrRecallOutcome, AttrRecallModelSystem},
+	MetricMemoryRecallDuration:             {AttrRecallOutcome},
+	MetricMemoryRecallDocuments:            {AttrRecallOutcome},
+	MetricMCPCallsTotal:                    {AttrMCPServer, AttrMCPTransport, AttrMCPProtocol, AttrMCPTool, AttrMCPOutcome, AttrMCPCode},
+	MetricMCPCallDuration:                  {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricMCPResponseSize:                  {AttrMCPServer, AttrMCPProtocol, AttrMCPOutcome},
+	MetricChildSpawnsTotal:                 {AttrChildResult},
+	MetricChildSettlesTotal:                {AttrChildState, AttrChildResult},
+	MetricChildActive:                      {AttrChildState},
+	MetricChildBudgetTokens:                nil,
+	MetricChildBudgetCost:                  nil,
+	MetricProfileExtractionsTotal:          {AttrProfileResult},
+	MetricProfileExtractionQueueAge:        {AttrProfileResult},
+	MetricProfileFactsCount:                {AttrProfileStatus, AttrProfileCategory},
+	MetricVisionOperationsTotal:            {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
+	MetricCodeRunsTotal:                    {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
+	MetricCodeRunDuration:                  {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
+	MetricCodeRunCPU:                       {AttrCodeRuntime, AttrCodeResultClass, AttrCodePhase},
+	MetricCodeRunOutput:                    {AttrCodeRuntime},
+	MetricCodeRunArtifacts:                 {AttrCodeRuntime},
+	MetricVisionOperationDuration:          {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
+	MetricToolBrokerTaintReliefTotal:       {AttrAuraToolName, AttrTaintRelief, AttrOutcome},
+	MetricToolBrokerTaintedTrustGrantTotal: {AttrOutcome},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

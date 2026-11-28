@@ -11,8 +11,10 @@ import (
 const MaxImageEnvelopeBytes = 1 << 20
 
 type Part struct {
-	Text  string          `json:"text"`
-	Image json.RawMessage `json:"image,omitempty"`
+	Text   string          `json:"text"`
+	Image  json.RawMessage `json:"image,omitempty"`
+	Source string          `json:"source,omitempty"`
+	Detail string          `json:"detail,omitempty"`
 }
 
 type UntrustedDocument struct {

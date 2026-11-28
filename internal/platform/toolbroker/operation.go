@@ -92,26 +92,40 @@ func operationOwnerOnly(request *ToolRequest, class principal.Class, definition 
 }
 
 func operationRefusal(request *ToolRequest, definition *tools.Definition) error {
+	_, err := operationRefusalReason(request, definition)
+	return err
+}
+
+func operationRefusalReason(request *ToolRequest, definition *tools.Definition) (string, error) {
 	if request == nil || definition == nil {
-		return nilOperationArguments()
+		return "", nilOperationArguments()
 	}
 	key := toolKey(request)
 	if definition.Risk == tools.RiskTrustGrant && request.Tainted {
-		return errorf(ResultUntrustedInputTrustGrant, "tool %q grants trust and this turn carries untrusted input", key)
+		if definition.TaintedGrant == "" {
+			return "refused_undeclared", errorf(ResultUntrustedInputTrustGrant, "tool %q grants trust and does not declare tainted grant handling", key)
+		}
+		if request.TrustGrantOrdinal != 1 {
+			return "refused_ordinal", errorf(ResultUntrustedInputTrustGrant, "tool %q grants trust and only one trust grant card is allowed per tainted turn", key)
+		}
 	}
 	if definition.Privileged() && unattendedRequest(request, definition) {
-		return errorf(ResultOwnerTurnRequired, "tool %q needs an answer from the owner, and an unattended call never asks", key)
+		outcome := ""
+		if definition.Risk == tools.RiskTrustGrant && request.Tainted {
+			outcome = "refused_unattended"
+		}
+		return outcome, errorf(ResultOwnerTurnRequired, "tool %q needs an answer from the owner, and an unattended call never asks", key)
 	}
 	if request.Approval != nil {
 		if definition.FreshApproval {
-			return errorf(ResultFreshApprovalRequired, "tool %q needs a new answer from the owner for each call", key)
+			return "", errorf(ResultFreshApprovalRequired, "tool %q needs a new answer from the owner for each call", key)
 		}
-		return errorf(ResultToolTierDenied, "tool %q does not accept an attached approval", key)
+		return "", errorf(ResultToolTierDenied, "tool %q does not accept an attached approval", key)
 	}
 	if changeNeedsCard(request, definition) && unattendedRequest(request, definition) {
-		return operationNoApprover(request, definition)
+		return "", operationNoApprover(request, definition)
 	}
-	return nil
+	return "", nil
 }
 
 type Disposition string
@@ -140,6 +154,7 @@ func OperationDisposition(definition *tools.Definition, view *OperationTurn) (Di
 		Unattended:          view.Unattended,
 		Tainted:             view.Tainted,
 		ContentTaintTracked: view.ContentTaintTracked,
+		TrustGrantOrdinal:   1,
 	}
 	if refused := operationOwnerOnly(request, principal.ClassOwner, definition) != nil || operationRefusal(request, definition) != nil; refused {
 		return DispositionRefused, nil
@@ -158,10 +173,7 @@ func changeNeedsCard(request *ToolRequest, definition *tools.Definition) bool {
 }
 
 func unattendedRequest(request *ToolRequest, definition *tools.Definition) bool {
-	if request == nil || definition == nil || request.Unattended {
-		return true
-	}
-	return definition.Operation != "" && request.Origin.Unattended()
+	return request == nil || definition == nil || request.Unattended || request.Origin.Unattended()
 }
 
 func operationPolicyOutcome(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {
@@ -293,6 +305,13 @@ func previewRequest(canonical *ToolRequest) *ToolRequest {
 	copied.Arguments = slices.Clone(canonical.Arguments)
 	copied.Capabilities = slices.Clone(canonical.Capabilities)
 	copied.Knowledge = slices.Clone(canonical.Knowledge)
+	copied.SessionRecord = slices.Clone(canonical.SessionRecord)
+	if canonical.ResultBatch != nil {
+		batchCopy := *canonical.ResultBatch
+		batchCopy.Queries = slices.Clone(canonical.ResultBatch.Queries)
+		batchCopy.URLs = slices.Clone(canonical.ResultBatch.URLs)
+		copied.ResultBatch = &batchCopy
+	}
 	copied.Approval = nil
 	return &copied
 }

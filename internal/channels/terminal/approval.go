@@ -23,6 +23,7 @@ type ApprovalCard struct {
 	MaxOutputBytes int64
 	PolicyVersion  string
 	ReasonCode     string
+	TaintSource    string
 	ExpiresAt      time.Time
 }
 
@@ -114,10 +115,15 @@ func renderApprovalCard(card *ApprovalCard, width int) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "approval required: %s@%s\n", sanitizeText(card.ToolName), sanitizeText(card.ToolVersion))
 	switch card.ReasonCode {
+	case approval.ReasonUntrustedTrustGrant:
+		b.WriteString(approval.UntrustedTrustGrantNotice + "\n")
 	case approval.ReasonUntrustedInput:
 		b.WriteString(approval.UntrustedInputNotice + "\n")
 	case approval.ReasonContentUnverified:
 		b.WriteString(approval.ContentUnverifiedNotice + "\n")
+	}
+	if card.TaintSource != "" {
+		fmt.Fprintf(&b, "came in through: %s\n", sanitizeText(card.TaintSource))
 	}
 	fmt.Fprintf(&b, "  session: %s\n", sanitizeText(card.SessionID))
 	fmt.Fprintf(&b, "  principal: %s\n", sanitizeText(card.PrincipalID))

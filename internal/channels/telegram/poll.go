@@ -250,6 +250,11 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 	if msg.isGroup() {
 		conversation = a.groupConversation(persona, msg, principalID, class)
 	}
+	part := runtimeingress.InputPart{Text: text}
+	if msg.relayed() {
+		part.Source = runtimeingress.PartSourceRelayed
+		part.Detail = msg.relayedDetail()
+	}
 	envelope := &runtimeingress.IngressEnvelope{
 		Source:         a.source(),
 		AgentID:        persona,
@@ -258,7 +263,7 @@ func (a *Adapter) admit(ctx context.Context, item *update) (*runtimeingress.Ingr
 		PrincipalClass: string(class),
 		ConversationID: runtimeingress.SessionKey(persona, a.source(), conversation),
 		ReplyContext:   reference,
-		Parts:          []runtimeingress.InputPart{{Text: text}},
+		Parts:          []runtimeingress.InputPart{part},
 		ReceivedAt:     time.Now().UTC(),
 	}
 	return envelope, msg, true

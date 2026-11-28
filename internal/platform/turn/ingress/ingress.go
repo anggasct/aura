@@ -6,9 +6,18 @@ import (
 	"time"
 )
 
+type PartSource string
+
+const (
+	PartSourceRelayed    PartSource = "relayed"
+	PartSourceAttachment PartSource = "attachment"
+)
+
 type InputPart struct {
-	Text  string
-	Image json.RawMessage `json:"image,omitempty"`
+	Text   string
+	Image  json.RawMessage `json:"image,omitempty"`
+	Source PartSource      `json:"source,omitempty"`
+	Detail string          `json:"detail,omitempty"`
 }
 
 type IngressEnvelope struct {

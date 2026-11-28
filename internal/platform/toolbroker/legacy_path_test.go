@@ -92,7 +92,11 @@ func TestLegacyToolsKeepTheirJournaledPathPromptsAndResults(t *testing.T) {
 		{
 			name: "a sink on a tainted turn", tool: "web_fetch", arguments: `{"url":"https://example.com"}`, capabilities: []string{"public-web"}, tainted: true, actions: quiet,
 			states: []string{ApprovalApproved, ApprovalApproved}, class: ResultOK, output: `{"ok":true}`,
-			prompts: []ApprovalPrompt{legacyPrompt("web_fetch", `{"url":"https://example.com"}`, "untrusted_input")},
+			prompts: []ApprovalPrompt{func() ApprovalPrompt {
+				p := legacyPrompt("web_fetch", `{"url":"https://example.com"}`, "untrusted_input")
+				p.TaintSource = "content from outside your control"
+				return p
+			}()},
 		},
 		{
 			name: "a tool that requires approval", tool: "write_file", arguments: `{"path":"a.txt","content":"hello"}`, capabilities: []string{"workspace-write"}, actions: quiet,

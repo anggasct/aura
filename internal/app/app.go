@@ -537,10 +537,12 @@ func openPriceRegistry(ctx context.Context, logger *slog.Logger, cfg *appconfig.
 }
 
 type toolWiring struct {
-	observer  toolbroker.Observer
-	decider   toolbroker.ApprovalDecider
-	access    toolbroker.AccessPolicy
-	reachable func(sessionID string) bool
+	observer                 toolbroker.Observer
+	decider                  toolbroker.ApprovalDecider
+	access                   toolbroker.AccessPolicy
+	reachable                func(sessionID string) bool
+	observeTaintRelief       func(ctx context.Context, toolName, relief, outcome string)
+	observeTaintedTrustGrant func(ctx context.Context, outcome string)
 }
 
 type toolExecutorInput struct {
@@ -599,6 +601,12 @@ func newToolBroker(in *toolExecutorInput) (*toolbroker.Broker, *runtimeadk.Broke
 			Fetches: in.result.Config.Tools.Fetch.WebOnlyFetchesPerRun,
 			Queries: in.result.Config.Tools.WebSearch.WebOnlyQueriesPerRun,
 		},
+		Tainted: toolbroker.TaintedLimits{
+			Fetches: in.result.Config.Tools.Fetch.TaintedFetchesPerTurn,
+			Queries: in.result.Config.Tools.WebSearch.TaintedQueriesPerTurn,
+		},
+		ObserveTaintRelief:       wiring.observeTaintRelief,
+		ObserveTaintedTrustGrant: wiring.observeTaintedTrustGrant,
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -1232,10 +1240,12 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 		onGrantUsed = built.accessRecorder.StandingGrantUsed
 	}
 	return toolWiring{
-		observer:  toolObserver(toolRecorder),
-		decider:   approval.Decider(approvalTargets),
-		access:    auraagent.NewAccessPolicy(b.registry, principal.NewStandingGrantStore(db), onGrantUsed),
-		reachable: approval.Reachable(approvalTargets),
+		observer:                 toolObserver(toolRecorder),
+		decider:                  approval.Decider(approvalTargets),
+		access:                   auraagent.NewAccessPolicy(b.registry, principal.NewStandingGrantStore(db), onGrantUsed),
+		reachable:                approval.Reachable(approvalTargets),
+		observeTaintRelief:       toolRecorder.RecordTaintRelief,
+		observeTaintedTrustGrant: toolRecorder.RecordTaintedTrustGrant,
 	}, nil
 }
 

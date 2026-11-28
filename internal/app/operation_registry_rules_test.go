@@ -151,8 +151,13 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 		Catalogs: operationCatalogs(),
 		Bindings: func(*operationtest.Stubs) []operation.Binding {
 			bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings())
+			seedEmbedded := func(ctx context.Context) error {
+				_, err := kb.Service.Embed(ctx, knowledgetest.Collection)
+				return err
+			}
 			reseeds := map[string]func(context.Context) error{
 				"kb.remove":      seedKnowledgeSource,
+				"kb.unembed":     seedEmbedded,
 				"memory.forget":  seedMemory,
 				"memory.purge":   seedMemory,
 				"profile.delete": seedProfile,
