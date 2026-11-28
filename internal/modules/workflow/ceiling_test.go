@@ -151,7 +151,7 @@ func TestEveryStartChecksTheCeilingBeforeTheRun(t *testing.T) {
 		run  func(ctx context.Context, interpreter *Interpreter) error
 	}{
 		{name: "a configured start", key: "sched-ceiling", run: func(ctx context.Context, interpreter *Interpreter) error {
-			_, err := interpreter.StartConfigured(ctx, "wide", nil, principal.OwnerID, principal.ClassOwner, "sched-ceiling")
+			_, err := interpreter.StartConfigured(ctx, &ConfiguredStart{DefinitionID: "wide", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: "sched-ceiling"})
 			return err
 		}},
 		{name: "a start with an explicit origin", run: func(ctx context.Context, interpreter *Interpreter) error {
@@ -163,7 +163,7 @@ func TestEveryStartChecksTheCeilingBeforeTheRun(t *testing.T) {
 			return err
 		}},
 		{name: "a root whose composed definition is outside the ceiling", key: "sched-composed", run: func(ctx context.Context, interpreter *Interpreter) error {
-			_, err := interpreter.StartConfigured(ctx, "top", nil, principal.OwnerID, principal.ClassOwner, "sched-composed")
+			_, err := interpreter.StartConfigured(ctx, &ConfiguredStart{DefinitionID: "top", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: "sched-composed"})
 			return err
 		}},
 	}
@@ -219,7 +219,7 @@ func TestConfiguredStartRunsAsTheDeclaredPersona(t *testing.T) {
 		interpreter, _, _ := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
 		installAll(t, interpreter, installedRunAs("declared", "lobby"), toolSpec("plain"))
 		for id, want := range map[string]string{"declared": "lobby", "plain": "main"} {
-			summary, err := interpreter.StartConfigured(t.Context(), id, nil, principal.OwnerID, principal.ClassOwner, "")
+			summary, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: id, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 			if err != nil || summary.Origin.AgentID != want {
 				t.Fatalf("StartConfigured(%s) = %+v, %v, want persona %s", id, summary, err, want)
 			}
@@ -234,7 +234,7 @@ func TestConfiguredStartRunsAsTheDeclaredPersona(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, id := range []string{generated.ID, routine.ID} {
-			summary, err := interpreter.StartConfigured(t.Context(), id, nil, principal.OwnerID, principal.ClassOwner, "")
+			summary, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: id, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 			if err != nil || summary.Origin.AgentID != "lobby" {
 				t.Fatalf("StartConfigured(%s) = %+v, %v, want persona lobby", id, summary, err)
 			}
@@ -243,11 +243,11 @@ func TestConfiguredStartRunsAsTheDeclaredPersona(t *testing.T) {
 	t.Run("a keyed start returns the run it already made", func(t *testing.T) {
 		interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
 		installAll(t, interpreter, toolSpec("plain"))
-		first, err := interpreter.StartConfigured(t.Context(), "plain", nil, principal.OwnerID, principal.ClassOwner, "sched-once")
+		first, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "plain", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: "sched-once"})
 		if err != nil {
 			t.Fatal(err)
 		}
-		again, err := interpreter.StartConfigured(t.Context(), "plain", nil, principal.OwnerID, principal.ClassOwner, "sched-once")
+		again, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "plain", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: "sched-once"})
 		if err != nil || again.ID != first.ID || countRuns(t, disk) != 1 {
 			t.Fatalf("keyed restart = %+v, %v, want run %s only", again, err, first.ID)
 		}
@@ -256,14 +256,14 @@ func TestConfiguredStartRunsAsTheDeclaredPersona(t *testing.T) {
 		interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
 		installAll(t, interpreter, installedRunAs("front", "lobby"), toolSpec("plain"))
 		for _, class := range []principal.Class{principal.ClassTrusted, principal.ClassPublic} {
-			if _, err := interpreter.StartConfigured(t.Context(), "plain", nil, "discord:111", class, ""); !hasCode(err, ErrorCodeNotPermitted) {
+			if _, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "plain", Input: nil, PrincipalID: "discord:111", Class: class, DurableKey: ""}); !hasCode(err, ErrorCodeNotPermitted) {
 				t.Fatalf("%s start of an owner persona = %v, want %s", class, err, ErrorCodeNotPermitted)
 			}
 		}
 		if got := countRuns(t, disk); got != 0 {
 			t.Fatalf("%d run rows written, want none", got)
 		}
-		if _, err := interpreter.StartConfigured(t.Context(), "front", nil, "discord:111", principal.ClassPublic, ""); err != nil {
+		if _, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "front", Input: nil, PrincipalID: "discord:111", Class: principal.ClassPublic, DurableKey: ""}); err != nil {
 			t.Fatalf("public start of a public persona = %v, want nil", err)
 		}
 	})
@@ -271,7 +271,7 @@ func TestConfiguredStartRunsAsTheDeclaredPersona(t *testing.T) {
 		interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
 		generated := NormalizeProposal(toolSpec("x"), "prop_ghost")
 		approveAs(t, interpreter, disk, generated, "ghost")
-		if _, err := interpreter.StartConfigured(t.Context(), generated.ID, nil, principal.OwnerID, principal.ClassOwner, ""); !hasCode(err, ErrorCodePersonaMissing) {
+		if _, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: generated.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""}); !hasCode(err, ErrorCodePersonaMissing) {
 			t.Fatalf("StartConfigured = %v, want %s", err, ErrorCodePersonaMissing)
 		}
 	})
@@ -324,7 +324,7 @@ func TestConfiguredStartRunsAsTheDeclaredPersona(t *testing.T) {
 	t.Run("a child run keeps the parent's persona", func(t *testing.T) {
 		interpreter, _, disk := driverTestSetup(t, &fakeToolRunner{}, DriverConcurrent)
 		installAll(t, interpreter, installedRunAs("leaf", "lobby"), composingSpec("top", "leaf"))
-		summary, err := interpreter.StartConfigured(t.Context(), "top", nil, principal.OwnerID, principal.ClassOwner, "")
+		summary, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: "top", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 		if err != nil {
 			t.Fatal(err)
 		}

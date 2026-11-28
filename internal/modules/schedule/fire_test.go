@@ -35,7 +35,7 @@ func seedPass(t *testing.T, store *fakeJobStore, jobs []passJob) {
 	for _, seed := range jobs {
 		if err := store.InsertJob(t.Context(), &Job{
 			ID: seed.id, Name: seed.id, CronExpression: "0 21 * * *", Timezone: "UTC",
-			Prompt: "p", OriginChannel: "discord", OriginDestination: "default",
+			Prompt: "p", Context: ContextFull, OriginChannel: "discord", OriginDestination: "default",
 			OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900, State: seed.state, Version: 1,
 		}); err != nil {
 			t.Fatalf("seed %s: %v", seed.id, err)

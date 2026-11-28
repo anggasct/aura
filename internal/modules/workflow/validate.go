@@ -20,6 +20,7 @@ type AgentResolver interface {
 type ValidationDeps struct {
 	KnownTools         []string
 	EffectfulTools     []string
+	SinkTools          []string
 	Agents             AgentResolver
 	DefaultStepTimeout time.Duration
 	CheckToolCall      func(toolID string, args json.RawMessage) error

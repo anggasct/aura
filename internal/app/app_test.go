@@ -308,7 +308,7 @@ func TestCompositionCommandWorkflowsAreClientsOfTheServer(t *testing.T) {
 	if app.runtime == nil {
 		t.Fatal("a workflows-only command build did not build the durable runtime")
 	}
-	if _, err := app.interpreter.StartConfigured(t.Context(), "demo", nil, principal.OwnerID, principal.ClassOwner, ""); err != nil {
+	if _, err := app.interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: "demo", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""}); err != nil {
 		t.Fatalf("Start: %v", err)
 	}
 	if n := countRows(t, app.db, `SELECT COUNT(*) FROM durable_run WHERE handler = ? AND state = 'running' AND owner IS NULL`, workflow.HandlerName); n != 1 {

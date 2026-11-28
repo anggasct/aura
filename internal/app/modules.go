@@ -2482,7 +2482,7 @@ type cronTurnEngine interface {
 }
 
 type workflowStarter interface {
-	StartConfigured(ctx context.Context, definitionID string, input *workflow.RunInput, principalID string, class principal.Class, durableKey string) (*workflow.RunSummary, error)
+	StartConfigured(ctx context.Context, start *workflow.ConfiguredStart) (*workflow.RunSummary, error)
 }
 
 type scheduleWorkflows struct {
@@ -2509,7 +2509,21 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 			return schedule.TurnResult{}, fmt.Errorf("scheduled workflow input: %w", err)
 		}
 	}
-	run, err := (*starter).StartConfigured(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, req.PrincipalID, principal.ClassForPrincipal(req.PrincipalID), "sched-"+req.IdempotencyKey)
+	run, err := (*starter).StartConfigured(ctx, &workflow.ConfiguredStart{
+		DefinitionID: req.WorkflowID,
+		Input:        &workflow.RunInput{Objective: input.Objective},
+		PrincipalID:  req.PrincipalID,
+		Class:        principal.ClassForPrincipal(req.PrincipalID),
+		DurableKey:   "sched-" + req.IdempotencyKey,
+		Scheduled:    true,
+		Tainted:      req.TaintSource != "",
+	})
+	if fault.HasCode(err, workflow.ErrorCodeUnattendedSink) {
+		return schedule.TurnResult{
+			SafeErrorCode: string(workflow.ErrorCodeUnattendedSink),
+			Text:          fmt.Sprintf("Scheduled workflow %s did not start: a step after a web step could send data out. Remove that step or move it before the web step.", req.WorkflowID),
+		}, nil
+	}
 	if err != nil {
 		return schedule.TurnResult{}, err
 	}
@@ -2539,14 +2553,7 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 	}
 	var stream []terminal.Event
 	var turnID string
-	for event, err := range r.engine.Run(ctx, &turn.TurnRequest{
-		SessionID:      req.SessionID,
-		PrincipalID:    req.PrincipalID,
-		PrincipalClass: principal.ClassForPrincipal(req.PrincipalID),
-		Origin:         turn.Origin(req.Origin),
-		Parts:          []runtimeingress.InputPart{{Text: req.Prompt}},
-		IdempotencyKey: req.IdempotencyKey,
-	}) {
+	for event, err := range r.engine.Run(ctx, scheduledTurn(req)) {
 		if err != nil {
 			if fault.HasCode(err, turn.ErrorCodeRuntimeOverloaded) {
 				return schedule.TurnResult{}, schedule.Errorf(schedule.ErrorCodeRuntimeOverloaded, "runtime is overloaded")
@@ -2573,6 +2580,21 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 		result.SafeErrorCode = "turn_failed"
 	}
 	return result, nil
+}
+
+func scheduledTurn(req *schedule.TurnRequest) *turn.TurnRequest {
+	return &turn.TurnRequest{
+		SessionID:      req.SessionID,
+		PrincipalID:    req.PrincipalID,
+		PrincipalClass: principal.ClassForPrincipal(req.PrincipalID),
+		Origin:         turn.Origin(req.Origin),
+		Parts:          []runtimeingress.InputPart{{Text: req.Prompt}},
+		IdempotencyKey: req.IdempotencyKey,
+		JobID:          req.JobID,
+		JobTaint:       req.TaintSource,
+		WebOnly:        req.Context == schedule.ContextWebOnly,
+		Timezone:       req.Timezone,
+	}
 }
 
 func ensureCronSession(ctx context.Context, sessions turnstore.SessionService, sessionID string) error {
@@ -2628,23 +2650,36 @@ func notifyContentJSON(text string) string {
 }
 
 func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.DB, id string) error {
-	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
+	spec, err := scheduledWorkflowSpec(ctx, cfg, db, id)
 	if err != nil {
 		return err
 	}
-	for _, spec := range specs {
-		if spec.ID == id {
-			return nil
+	deps, err := workflowValidationDeps(cfg)
+	if err != nil {
+		return err
+	}
+	return operation.ModuleFailure[workflow.ErrorCode](workflow.CheckUnattendedSinks(spec, deps))
+}
+
+func scheduledWorkflowSpec(ctx context.Context, cfg *appconfig.Config, db *sql.DB, id string) (*workflow.Spec, error) {
+	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
+	if err != nil {
+		return nil, err
+	}
+	for i := range specs {
+		if specs[i].ID == id {
+			return specs[i], nil
 		}
 	}
 	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if _, err := runs.LatestDefinition(ctx, id); err != nil {
-		return operation.NewError(operation.ErrorCodeInputInvalid, fmt.Sprintf("workflow %q is neither a definition nor a saved routine", id))
+	spec, err := runs.LatestDefinition(ctx, id)
+	if err != nil {
+		return nil, operation.NewError(operation.ErrorCodeInputInvalid, fmt.Sprintf("workflow %q is neither a definition nor a saved routine", id))
 	}
-	return nil
+	return spec, nil
 }
 
 func scheduleRecorderObserver(recorder *telemetry.ScheduleRecorder) schedule.Observer {
@@ -2675,6 +2710,17 @@ func newStepCatalog(extra []tools.Definition) *stepCatalog {
 		catalog.definitions[extra[i].Name] = &extra[i]
 	}
 	return catalog
+}
+
+func (c *stepCatalog) sinkToolNames() []string {
+	var names []string
+	for name, definition := range c.definitions {
+		if definition.IsExternalSink() {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (c *stepCatalog) Lookup(name string) (*tools.Definition, bool) {
@@ -2785,6 +2831,7 @@ func workflowValidationDeps(cfg *appconfig.Config) (*workflow.ValidationDeps, er
 	deps := &workflow.ValidationDeps{
 		KnownTools:     stepToolNames(personaToolNames(cfg)),
 		EffectfulTools: append(effectfulToolNames(), github.ToolNames()...),
+		SinkTools:      catalog.sinkToolNames(),
 		CheckToolCall:  catalog.CheckArguments,
 	}
 	if cfg.Workflows != nil {

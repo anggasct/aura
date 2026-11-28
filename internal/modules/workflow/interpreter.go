@@ -299,7 +299,21 @@ func (i *Interpreter) StartApproved(ctx context.Context, proposalID string, inpu
 	return i.start(ctx, &startRequest{definitionID: approval.DefinitionID, input: input, origin: origin, durableKey: newID("dur"), claimProposalID: proposalID})
 }
 
-func (i *Interpreter) StartConfigured(ctx context.Context, definitionID string, input *RunInput, principalID string, class principal.Class, durableKey string) (*RunSummary, error) {
+type ConfiguredStart struct {
+	DefinitionID string
+	Input        *RunInput
+	PrincipalID  string
+	Class        principal.Class
+	DurableKey   string
+	Scheduled    bool
+	Tainted      bool
+}
+
+func (i *Interpreter) StartConfigured(ctx context.Context, start *ConfiguredStart) (*RunSummary, error) {
+	if start == nil {
+		return nil, codedError(ErrorCodeInvalidArgument, "configured start must not be nil")
+	}
+	durableKey := start.DurableKey
 	if durableKey == "" {
 		durableKey = newID("dur")
 	} else {
@@ -311,8 +325,8 @@ func (i *Interpreter) StartConfigured(ctx context.Context, definitionID string, 
 			return existing, nil
 		}
 	}
-	origin := &RunOrigin{PrincipalID: principalID, PrincipalClass: string(class)}
-	return i.start(ctx, &startRequest{definitionID: definitionID, input: input, origin: origin, durableKey: durableKey, configured: true})
+	origin := &RunOrigin{PrincipalID: start.PrincipalID, PrincipalClass: string(start.Class), Tainted: start.Tainted}
+	return i.start(ctx, &startRequest{definitionID: start.DefinitionID, input: start.Input, origin: origin, durableKey: durableKey, configured: true, scheduled: start.Scheduled})
 }
 
 type startRequest struct {
@@ -322,6 +336,7 @@ type startRequest struct {
 	durableKey      string
 	claimProposalID string
 	configured      bool
+	scheduled       bool
 }
 
 func (i *Interpreter) start(ctx context.Context, req *startRequest) (*RunSummary, error) {
@@ -343,6 +358,11 @@ func (i *Interpreter) start(ctx context.Context, req *startRequest) (*RunSummary
 	}
 	if req.configured {
 		runOrigin.AgentID = configuredAgent(compiled.spec, approval)
+	}
+	if req.scheduled {
+		if err := CheckUnattendedSinks(compiled.spec, i.ValidationDeps()); err != nil {
+			return nil, err
+		}
 	}
 	if err := i.admitRun(ctx, compiled.spec, runOrigin); err != nil {
 		return nil, err

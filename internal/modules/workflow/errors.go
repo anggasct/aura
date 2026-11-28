@@ -40,6 +40,7 @@ const (
 	ErrorCodeApprovalSpent         ErrorCode = "workflow_approval_spent"
 	ErrorCodeAgentOutputInvalid    ErrorCode = "workflow_agent_output_invalid"
 	ErrorCodeToolUnavailable       ErrorCode = "workflow_tool_unavailable"
+	ErrorCodeUnattendedSink        ErrorCode = "workflow_unattended_sink"
 	ErrorCodeInvalidArgument       ErrorCode = "invalid_argument"
 	ErrorCodeCapabilityUnavailable ErrorCode = "capability_unavailable"
 )

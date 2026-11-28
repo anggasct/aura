@@ -196,7 +196,7 @@ func workflowStartCmd(open CommandOpener) *cobra.Command {
 						return fmt.Errorf("invalid --input json: %w", err)
 					}
 				}
-				summary, err := deps.Interpreter.StartConfigured(ctx, args[0], runInput, principal.OwnerID, principal.ClassOwner, "")
+				summary, err := deps.Interpreter.StartConfigured(ctx, &ConfiguredStart{DefinitionID: args[0], Input: runInput, PrincipalID: principal.OwnerID, Class: principal.ClassOwner})
 				if err != nil {
 					return err
 				}

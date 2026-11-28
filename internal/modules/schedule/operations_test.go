@@ -134,7 +134,7 @@ func newConfiguredScheduleRig(t *testing.T, options *rigOptions) *scheduleRig {
 
 func (r *scheduleRig) addArguments(t *testing.T) json.RawMessage {
 	t.Helper()
-	return json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize"}`)
+	return json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full"}`)
 }
 
 func TestCatalogIsValid(t *testing.T) {
@@ -172,7 +172,7 @@ func TestCronAddAgentSchemaNamesNoDestination(t *testing.T) {
 			t.Errorf("the agent schema of cron.add names %q", name)
 		}
 	}
-	for _, name := range []string{"name", "schedule", "prompt", "workflow", "input", "overlap", "grace", "timezone"} {
+	for _, name := range []string{"name", "schedule", "prompt", "context", "workflow", "input", "overlap", "grace", "timezone"} {
 		if _, found := shape.Properties[name]; !found {
 			t.Errorf("the agent schema of cron.add lacks %q", name)
 		}
@@ -237,7 +237,7 @@ func TestCronAddRefusesAChangedOwnerDestinationAfterThePreview(t *testing.T) {
 	rig := newScheduleRig(t, ownerFunc(func() (string, string) { return current.alias, current.route }))
 	preview, err := rig.Registry.Preview(t.Context(), "cron.add", &operation.Call{
 		Caller: operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Direct: true},
-		Input:  json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","channel":"telegram","destination":"me"}`),
+		Input:  json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full","channel":"telegram","destination":"me"}`),
 	})
 	if err != nil {
 		t.Fatalf("Preview: %v", err)
@@ -246,7 +246,7 @@ func TestCronAddRefusesAChangedOwnerDestinationAfterThePreview(t *testing.T) {
 
 	_, err = rig.Registry.Invoke(t.Context(), "cron.add", &operation.Call{
 		Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Direct: true},
-		Input:          json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","channel":"telegram","destination":"me"}`),
+		Input:          json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full","channel":"telegram","destination":"me"}`),
 		IdempotencyKey: "add-1",
 		PreviewDigest:  preview.Digest,
 	})
@@ -263,7 +263,7 @@ func (f ownerFunc) OwnerRoute() (alias, route string) { return f() }
 func TestCronOperationsWriteOnlyInsideCommit(t *testing.T) {
 	rig := newScheduleRig(t, ownerRoute{alias: "me", route: "telegram:owner"})
 	created, err := rig.service.Create(t.Context(), &JobSpec{
-		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p",
+		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p", Context: ContextFull,
 		OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: OverlapSkip,
 	})
 	if err != nil {
@@ -275,7 +275,7 @@ func TestCronOperationsWriteOnlyInsideCommit(t *testing.T) {
 		id    string
 		input string
 	}{
-		{name: "add", id: "cron.add", input: `{"name":"other","schedule":"0 3 * * *","timezone":"UTC","prompt":"p","channel":"discord","destination":"default"}`},
+		{name: "add", id: "cron.add", input: `{"name":"other","schedule":"0 3 * * *","timezone":"UTC","prompt":"p","context":"full","channel":"discord","destination":"default"}`},
 		{name: "pause", id: "cron.pause", input: byID},
 		{name: "resume", id: "cron.resume", input: byID},
 		{name: "run-now", id: "cron.run-now", input: byID},
@@ -291,7 +291,7 @@ func TestCronOperationsWriteOnlyInsideCommit(t *testing.T) {
 func TestCronReadsReturnRows(t *testing.T) {
 	rig := newScheduleRig(t, nil)
 	created, err := rig.service.Create(t.Context(), &JobSpec{
-		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p",
+		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p", Context: ContextFull,
 		OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: OverlapSkip,
 	})
 	if err != nil {
@@ -341,7 +341,7 @@ func TestWriteGuardSeesARunStartedOutsideCommit(t *testing.T) {
 		}
 	})
 	created, err := rig.service.Create(t.Context(), &JobSpec{
-		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p",
+		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p", Context: ContextFull,
 		OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: OverlapSkip,
 	})
 	if err != nil {

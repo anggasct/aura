@@ -198,7 +198,7 @@ func githubTestBinding(t *testing.T, disk *workflow.Store, backend *durabletest.
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("Install: %v", err)
 	}
-	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := interpreter.StartConfigured(ctx, &workflow.ConfiguredStart{DefinitionID: spec.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}

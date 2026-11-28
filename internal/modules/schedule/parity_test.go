@@ -153,9 +153,9 @@ func TestCronOperationsParity(t *testing.T) {
 	}{
 		{
 			name: "a prompt job",
-			add:  `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","overlap":"queue_one","grace":"30m"}`,
-			cli:  `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","overlap":"queue_one","grace":"30m","channel":"telegram","destination":"me"}`,
-			chat: `add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt summarize --overlap queue_one --grace 30m --channel telegram --destination me`,
+			add:  `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full","overlap":"queue_one","grace":"30m"}`,
+			cli:  `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full","overlap":"queue_one","grace":"30m","channel":"telegram","destination":"me"}`,
+			chat: `add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt summarize --context full --overlap queue_one --grace 30m --channel telegram --destination me`,
 		},
 		{
 			name: "a workflow job with input",
@@ -207,11 +207,12 @@ func TestAgentCronAddCardShowsWhatWillBeScheduled(t *testing.T) {
 	}{
 		{
 			name:      "a prompt",
-			arguments: `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize"}`,
+			arguments: `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full"}`,
 			want: []string{
 				"Schedule: 0 21 * * * (UTC)",
 				"Name: nightly",
 				"Runs prompt: summarize",
+				contextFullLine,
 				"Channel: telegram",
 				"Destination alias: me",
 				"Delivers to: telegram:owner",

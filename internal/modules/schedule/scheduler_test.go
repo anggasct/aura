@@ -65,6 +65,26 @@ func (s *fakeJobStore) EditJob(_ context.Context, id string, edit *JobEdit, expe
 	return current, nil
 }
 
+func (s *fakeJobStore) ConfirmJob(_ context.Context, id string, confirm *JobConfirmation, now time.Time) (Job, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.jobs[id]
+	if !ok {
+		return Job{}, Errorf(ErrorCodeJobNotFound, "schedule job not found")
+	}
+	if current.Version != confirm.ExpectedVersion || current.State == JobDeleted {
+		return Job{}, Errorf(ErrorCodeOccurrenceConflict, "schedule job changed after the preview")
+	}
+	current.Tainted, current.TaintSource = false, ""
+	if confirm.Context != "" {
+		current.Context = confirm.Context
+	}
+	current.Version++
+	current.UpdatedAt = now
+	s.jobs[id] = current
+	return current, nil
+}
+
 func (s *fakeJobStore) SetJobState(_ context.Context, id, state string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -107,7 +127,7 @@ func (s *fakeJobStore) OccurrenceByFire(_ context.Context, jobID string, schedul
 func testJobSpec() *JobSpec {
 	return &JobSpec{
 		Name: "nightly summary", CronExpression: "0 21 * * *", Timezone: "UTC",
-		Prompt: "summarize today", OriginChannel: "discord", OriginDestination: "default",
+		Prompt: "summarize today", Context: ContextFull, OriginChannel: "discord", OriginDestination: "default",
 		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900,
 	}
 }

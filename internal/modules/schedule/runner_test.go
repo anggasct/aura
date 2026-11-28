@@ -337,7 +337,7 @@ func (l *recordingLogs) warned() []string {
 func defaultRunSpec() *JobSpec {
 	return &JobSpec{
 		Name: "nightly", CronExpression: "* * * * *", Timezone: "UTC",
-		Prompt: "summarize", OriginChannel: "discord", OriginDestination: "default",
+		Prompt: "summarize", Context: ContextFull, OriginChannel: "discord", OriginDestination: "default",
 		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900,
 	}
 }
@@ -921,10 +921,11 @@ func TestRunner_RejectsBadWiring(t *testing.T) {
 
 func TestRunner_WorkflowJobsPassTheirTargetInsteadOfAPrompt(t *testing.T) {
 	workflowJob := func(spec *JobSpec) {
-		spec.Prompt, spec.WorkflowID, spec.WorkflowInput = "", "routine_weekly_report", `{"objective":"last week"}`
+		spec.Prompt, spec.Context, spec.WorkflowID, spec.WorkflowInput = "", "", "routine_weekly_report", `{"objective":"last week"}`
 	}
 	inBubble(t, workflowJob, func(t *testing.T, f *runFixture) {
-		f.succeed(t, f.scheduled(t, f.nextFire(t)))
+		fire := f.nextFire(t)
+		f.succeed(t, f.scheduled(t, fire))
 		requests := f.turns.requests()
 		if len(requests) != 1 {
 			t.Fatalf("turn calls = %d, want 1", len(requests))
@@ -933,7 +934,7 @@ func TestRunner_WorkflowJobsPassTheirTargetInsteadOfAPrompt(t *testing.T) {
 		if call.WorkflowID != "routine_weekly_report" || call.WorkflowInput != `{"objective":"last week"}` || call.Prompt != "" || call.IdempotencyKey == "" {
 			t.Errorf("fire request = %+v", call)
 		}
-		if call.SessionID != "cron:"+f.job.ID || call.PrincipalID != principal.OwnerID || call.Origin != "schedule" {
+		if call.SessionID != "cron:"+f.job.ID+":"+fire.UTC().Format("20060102T150405.000000000") || call.PrincipalID != principal.OwnerID || call.Origin != "schedule" {
 			t.Errorf("fire request = %+v", call)
 		}
 	})
@@ -947,7 +948,7 @@ func TestJobSpecsNeedExactlyOneTarget(t *testing.T) {
 	base := JobSpec{Name: "n", CronExpression: "* * * * *", Timezone: "UTC", OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: OverlapSkip}
 	for label, mutate := range map[string]func(*JobSpec){
 		"neither":            func(*JobSpec) {},
-		"both":               func(s *JobSpec) { s.Prompt, s.WorkflowID = "p", "w" },
+		"both":               func(s *JobSpec) { s.Prompt, s.WorkflowID, s.Context = "p", "w", "" },
 		"oversized workflow": func(s *JobSpec) { s.WorkflowID, s.WorkflowInput = "w", string(make([]byte, maxPromptBytes+1)) },
 	} {
 		spec := base

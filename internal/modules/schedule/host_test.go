@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/durable/durabletest"
 	"github.com/anggasct/aura/internal/platform/durable/sqlite"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -74,7 +75,7 @@ func newScheduleHost(t *testing.T, mutate func(*JobSpec)) *scheduleHost {
 		mutate(spec)
 	}
 	h := &scheduleHost{
-		t: t, db: sqlitetest.OpenMigrated(t, turnstore.Schema(), sqlite.Schema(), Schema()), clock: durabletest.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)),
+		t: t, db: sqlitetest.OpenMigrated(t, turnstore.Schema(), sqlite.Schema(), operation.Schema(), Schema()), clock: durabletest.NewManualClock(time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)),
 		store: newFakeJobStore(), turns: &fakeTurnRunner{}, notify: &fakeNotifier{}, log: &invocationLog{},
 	}
 	service, err := NewService(h.store)
@@ -282,7 +283,10 @@ func TestOccurrenceRunHandlesItsFireAndStartsTheNext(t *testing.T) {
 			if len(requests) != 1 {
 				t.Fatalf("turn requests = %d, want 1", len(requests))
 			}
-			want := TurnRequest{SessionID: "cron:" + h.job.ID, PrincipalID: principal.OwnerID, Origin: "schedule", Prompt: "summarize", IdempotencyKey: turnKey(h.job.ID, fire)}
+			want := TurnRequest{
+				SessionID: "cron:" + h.job.ID + ":" + fire.UTC().Format("20060102T150405.000000000"), JobID: h.job.ID, PrincipalID: principal.OwnerID,
+				Origin: "schedule", Prompt: "summarize", Context: ContextFull, Timezone: "UTC", IdempotencyKey: turnKey(h.job.ID, fire),
+			}
 			if requests[0] != want {
 				t.Errorf("turn request = %+v, want %+v", requests[0], want)
 			}

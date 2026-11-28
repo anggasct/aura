@@ -43,7 +43,7 @@ func TestProposalOutputsAreTerminalSafe(t *testing.T) {
 	if err := interpreter.Install(t.Context(), []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := interpreter.StartConfigured(t.Context(), spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	run, err := interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: spec.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatal(err)
 	}
