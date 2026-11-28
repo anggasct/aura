@@ -46,7 +46,7 @@ func flagOf(param *Param, surface Surface) Flag {
 		Name:     kebab(param.Name),
 		Param:    param.Name,
 		Kind:     param.Kind,
-		Summary:  param.Summary,
+		Summary:  param.SummaryOn(surface),
 		Required: param.Required,
 		Position: param.Position,
 		Rest:     param.Rest,

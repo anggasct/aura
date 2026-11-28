@@ -57,8 +57,8 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 		}
 	}
 	description := descriptor.Summary
-	if descriptor.Description != "" {
-		description += "\n\n" + descriptor.Description
+	if text := descriptor.DescriptionOn(SurfaceAgent); text != "" {
+		description += "\n\n" + text
 	}
 	definition := tools.Definition{
 		Name:                 ToolName(descriptor.ID),

@@ -118,6 +118,7 @@ func (d *Descriptor) clone() Descriptor {
 	copied.Display = slices.Clone(d.Display)
 	copied.RequiredCapabilities = slices.Clone(d.RequiredCapabilities)
 	copied.Needs = slices.Clone(d.Needs)
+	copied.Texts = slices.Clone(d.Texts)
 	copied.Output.Fields = slices.Clone(d.Output.Fields)
 	for i := range copied.Output.Fields {
 		copied.Output.Fields[i].Surfaces = slices.Clone(copied.Output.Fields[i].Surfaces)
@@ -126,6 +127,7 @@ func (d *Descriptor) clone() Descriptor {
 	for i := range copied.Params {
 		param := &copied.Params[i]
 		param.Surfaces = slices.Clone(param.Surfaces)
+		param.Texts = slices.Clone(param.Texts)
 		param.Default = slices.Clone(param.Default)
 		param.Schema = slices.Clone(param.Schema)
 		param.Enum = slices.Clone(param.Enum)

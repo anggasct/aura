@@ -102,6 +102,32 @@ func TestRegistryRejectsInvalidDescriptors(t *testing.T) {
 		{name: "an interactive operation that is not host", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Read).Interactive = true }, want: 1},
 		{name: "an agent trust grant without a preview", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Grant).Preview = false }, want: 1},
 		{name: "a read with a preview", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Read).Preview = true }, want: 1},
+		{name: "a preview-first operation without a preview", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Change).PreviewFirst = true }, want: 1},
+		{name: "a read that is preview-first", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Read).PreviewFirst = true }, want: 2},
+		{name: "a URL parameter on a parameter that is not a path", mutate: func(c *operation.Catalog) {
+			d := descriptorNamed(c, operationtest.Read)
+			d.Params[0].URLParam = "address"
+			d.Params = append(d.Params, operation.Param{Name: "address", Kind: operation.KindString, Surfaces: []operation.Surface{operation.SurfaceChat}})
+		}, want: 1},
+		{name: "a path whose URL parameter does not exist", mutate: func(c *operation.Catalog) {
+			d := descriptorNamed(c, operationtest.Read)
+			d.Params = append(d.Params, operation.Param{Name: "file", Kind: operation.KindPath, URLParam: "address", Surfaces: []operation.Surface{operation.SurfaceCLI}})
+		}, want: 1},
+		{name: "a path whose URL parameter is projected beside it", mutate: func(c *operation.Catalog) {
+			d := descriptorNamed(c, operationtest.Read)
+			d.Params = append(d.Params,
+				operation.Param{Name: "file", Kind: operation.KindPath, URLParam: "address", Surfaces: []operation.Surface{operation.SurfaceCLI}},
+				operation.Param{Name: "address", Kind: operation.KindString})
+		}, want: 1},
+		{name: "a surface text for an unknown surface", mutate: func(c *operation.Catalog) {
+			descriptorNamed(c, operationtest.Read).Texts = []operation.SurfaceText{{Surface: "radio", Text: "x"}}
+		}, want: 1},
+		{name: "two descriptions for one surface", mutate: func(c *operation.Catalog) {
+			descriptorNamed(c, operationtest.Read).Texts = []operation.SurfaceText{{Surface: operation.SurfaceCLI, Text: "a"}, {Surface: operation.SurfaceCLI, Text: "b"}}
+		}, want: 1},
+		{name: "an empty parameter text", mutate: func(c *operation.Catalog) {
+			descriptorNamed(c, operationtest.Read).Params[0].Texts = []operation.SurfaceText{{Surface: operation.SurfaceCLI}}
+		}, want: 1},
 		{name: "a narrowed surface list without a reason", mutate: func(c *operation.Catalog) {
 			descriptorNamed(c, operationtest.Read).Surfaces = []operation.Surface{operation.SurfaceCLI}
 		}, want: 1},
@@ -269,6 +295,11 @@ func TestRegistryRejectsARequiredPathParameterThatChatProjects(t *testing.T) {
 		{name: "an operation that does not project to chat", mutate: func(d *operation.Descriptor) {
 			d.Params = append(d.Params, path)
 			d.Surfaces, d.SurfaceReason = []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}, "files are not chat input"
+		}},
+		{name: "a required path parameter limited to the CLI and the agent", mutate: func(d *operation.Descriptor) {
+			limited := path
+			limited.Surfaces = []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent}
+			d.Params = append(d.Params, limited)
 		}},
 		{name: "an optional path parameter", mutate: func(d *operation.Descriptor) {
 			optional := path

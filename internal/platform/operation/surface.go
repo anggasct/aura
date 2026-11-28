@@ -83,7 +83,7 @@ func (d *Descriptor) Projects(surface Surface) bool {
 }
 
 func (d *Descriptor) previews() bool {
-	return d.Preview && (d.Risk == RiskDestructive || d.Risk == RiskChange)
+	return d.Preview && (d.PreviewFirst || d.Risk == RiskDestructive)
 }
 
 func (d *Descriptor) GeneratesTool() bool {
@@ -148,4 +148,21 @@ func (d *Descriptor) OutputFieldsOn(surface Surface) []string {
 func ToolName(id string) string {
 	replacer := strings.NewReplacer(".", "_", "-", "_")
 	return tools.OperationToolPrefix + replacer.Replace(id)
+}
+
+func textOn(base string, texts []SurfaceText, surface Surface) string {
+	for i := range texts {
+		if texts[i].Surface == surface {
+			return texts[i].Text
+		}
+	}
+	return base
+}
+
+func (d *Descriptor) DescriptionOn(surface Surface) string {
+	return textOn(d.Description, d.Texts, surface)
+}
+
+func (p *Param) SummaryOn(surface Surface) string {
+	return textOn(p.Summary, p.Texts, surface)
 }

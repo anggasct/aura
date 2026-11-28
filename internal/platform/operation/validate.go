@@ -147,6 +147,7 @@ func (v *validation) descriptor(group string, d *Descriptor) {
 	if d.Summary == "" || len(d.Summary) > maxSummaryBytes {
 		v.reject(id, "the summary is empty or over %d bytes", maxSummaryBytes)
 	}
+	v.texts(id, "the description", d.Texts, maxDescriptionBytes)
 	if len(d.Description) > maxDescriptionBytes {
 		v.reject(id, "the description is over %d bytes", maxDescriptionBytes)
 	}
@@ -218,6 +219,12 @@ func (v *validation) preview(d *Descriptor) {
 	}
 	if d.Risk == RiskRead && d.Preview {
 		v.reject(id, "a read has no preview")
+	}
+	if d.PreviewFirst && !d.Preview {
+		v.reject(id, "preview-first needs a preview")
+	}
+	if d.PreviewFirst && d.Risk == RiskRead {
+		v.reject(id, "a read cannot be preview-first")
 	}
 	if v.checked && v.bindings[id] != nil {
 		bound := v.bindings[id].Preview != nil
@@ -339,6 +346,8 @@ func (v *validation) params(d *Descriptor) {
 		}
 		names[param.Name] = true
 		v.param(id, d.Exposure, d.Projects(SurfaceChat), param)
+		v.pathParam(d, param)
+		v.texts(id, "the parameter "+param.Name, param.Texts, maxDescriptionBytes)
 		if param.Position > 0 {
 			positions = append(positions, param.Position)
 		}
@@ -355,6 +364,44 @@ func (v *validation) params(d *Descriptor) {
 	}
 	if slices.ContainsFunc(d.Params, func(p Param) bool { return p.Rest }) && (restPosition == 0 || restPosition != len(positions)) {
 		v.reject(id, "the rest parameter is not the last positional")
+	}
+}
+
+func (v *validation) texts(id, what string, texts []SurfaceText, limit int) {
+	seen := map[Surface]bool{}
+	for i := range texts {
+		switch {
+		case !texts[i].Surface.valid():
+			v.reject(id, "%s names an unknown surface", what)
+		case seen[texts[i].Surface]:
+			v.reject(id, "%s has two texts for %s", what, texts[i].Surface)
+		case texts[i].Text == "" || len(texts[i].Text) > limit:
+			v.reject(id, "%s has a text for %s that is empty or over %d bytes", what, texts[i].Surface, limit)
+		}
+		seen[texts[i].Surface] = true
+	}
+}
+
+func (v *validation) pathParam(d *Descriptor, p *Param) {
+	id := d.ID
+	if p.Kind != KindPath {
+		if p.URLParam != "" {
+			v.reject(id, "the parameter %q names a URL parameter and is not a path", p.Name)
+		}
+		return
+	}
+	if p.URLParam == "" {
+		return
+	}
+	index := slices.IndexFunc(d.Params, func(candidate Param) bool { return candidate.Name == p.URLParam })
+	if index < 0 || d.Params[index].Kind != KindString {
+		v.reject(id, "the URL parameter %q of %q is not a string parameter of the operation", p.URLParam, p.Name)
+		return
+	}
+	for _, surface := range allSurfaces() {
+		if p.on(surface) && d.Params[index].on(surface) {
+			v.reject(id, "the URL parameter %q of %q is projected on %s with the path", p.URLParam, p.Name, surface)
+		}
 	}
 }
 
@@ -375,7 +422,7 @@ func (v *validation) param(id string, exposure Exposure, chat bool, p *Param) {
 	if p.Secret && exposure != ExposureHost {
 		v.reject(id, "the parameter %q is secret and the operation is not host", name)
 	}
-	if p.Kind == KindPath && p.Required && chat {
+	if p.Kind == KindPath && p.Required && chat && onSurface(p.Surfaces, SurfaceChat) {
 		v.reject(id, "the required path parameter %q can never be supplied in chat", name)
 	}
 	if p.Prompt != "" && !p.Required {

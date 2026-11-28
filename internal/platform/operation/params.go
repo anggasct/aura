@@ -136,8 +136,8 @@ func (p *Param) propertyJSON(surface Surface) (json.RawMessage, error) {
 	default:
 		return nil, NewError(ErrorCodeInvalid, "parameter "+p.Name+" has an unknown kind")
 	}
-	if err == nil && p.Summary != "" {
-		err = put("description", p.Summary)
+	if summary := p.SummaryOn(surface); err == nil && summary != "" {
+		err = put("description", summary)
 	}
 	if err == nil && len(p.Default) > 0 {
 		var compact []byte

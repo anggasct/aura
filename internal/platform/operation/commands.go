@@ -139,7 +139,7 @@ func (t *commandTree) leaf(descriptor *Descriptor, name string) *cobra.Command {
 	command := &cobra.Command{
 		Use:         leaf.usage(name),
 		Short:       descriptor.Summary,
-		Long:        strings.TrimSpace(descriptor.Summary + "\n\n" + descriptor.Description),
+		Long:        strings.TrimSpace(descriptor.Summary + "\n\n" + descriptor.DescriptionOn(SurfaceCLI)),
 		Args:        leaf.arguments,
 		RunE:        leaf.execute,
 		Annotations: map[string]string{AnnotationOperation: descriptor.ID},

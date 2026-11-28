@@ -17,6 +17,7 @@ import (
 
 const (
 	artifactPrefix   = "artifact:"
+	workspacePrefix  = "workspace:"
 	maxArtifactIDLen = 128
 	maxFileNameRunes = 255
 )
@@ -40,27 +41,35 @@ func (d *FileDeps) validate() error {
 	return nil
 }
 
-type openedFile struct {
-	*os.File
+type fileIdentity struct {
 	name      string
 	mediaType string
-	size      int64
+	reference string
+}
+
+type openedFile struct {
+	*os.File
+	fileIdentity
+	size int64
 }
 
 func (f *openedFile) Name() string { return f.name }
 
 func (f *openedFile) MediaType() string { return f.mediaType }
 
+func (f *openedFile) Reference() string { return f.reference }
+
 func (f *openedFile) Size() int64 { return f.size }
 
 type surfaceFiles struct {
 	deps      *FileDeps
 	ownerOnly bool
+	hostPaths bool
 	sessionID string
 }
 
 func (r *Registry) filesFor(caller *Caller) FileAuthority {
-	return &surfaceFiles{deps: r.files, ownerOnly: caller.Surface == SurfaceAgent, sessionID: caller.SessionID}
+	return &surfaceFiles{deps: r.files, ownerOnly: caller.Surface == SurfaceAgent, hostPaths: caller.Surface == SurfaceCLI, sessionID: caller.SessionID}
 }
 
 func (f *surfaceFiles) Open(ctx context.Context, source string) (File, error) {
@@ -69,8 +78,30 @@ func (f *surfaceFiles) Open(ctx context.Context, source string) (File, error) {
 		return nil, NewError(ErrorCodeInputInvalid, "a URL is not a file source")
 	case strings.HasPrefix(source, artifactPrefix):
 		return f.artifact(ctx, strings.TrimPrefix(source, artifactPrefix))
+	case strings.HasPrefix(source, workspacePrefix):
+		return f.workspaceFile(strings.TrimPrefix(source, workspacePrefix))
+	case f.hostPaths:
+		return f.hostFile(source)
 	}
 	return f.workspaceFile(source)
+}
+
+func (f *surfaceFiles) hostFile(location string) (File, error) {
+	file, err := workspace.OpenHost(location)
+	switch {
+	case fault.HasCode(err, workspace.ErrorCodeSymlink):
+		return nil, wrapError(ErrorCodePolicyDenied, "the path is a symbolic link", err)
+	case errors.Is(err, fs.ErrNotExist):
+		return nil, wrapError(ErrorCodeSourceUnavailable, "the file does not exist", err)
+	case err != nil:
+		return nil, wrapError(ErrorCodeSourceUnavailable, "the file cannot be opened", err)
+	}
+	absolute, err := filepath.Abs(location)
+	if err != nil {
+		_ = file.Close()
+		return nil, wrapError(ErrorCodeSourceUnavailable, "the file cannot be opened", err)
+	}
+	return regularFile(file, &fileIdentity{name: filepath.Base(absolute), reference: absolute})
 }
 
 func (f *surfaceFiles) workspaceFile(relative string) (File, error) {
@@ -86,7 +117,8 @@ func (f *surfaceFiles) workspaceFile(relative string) (File, error) {
 	case err != nil:
 		return nil, wrapError(ErrorCodeSourceUnavailable, "the file cannot be opened", err)
 	}
-	return regularFile(file, path.Base(filepath.ToSlash(relative)), "")
+	clean := path.Clean(filepath.ToSlash(relative))
+	return regularFile(file, &fileIdentity{name: path.Base(clean), reference: workspacePrefix + clean})
 }
 
 func (f *surfaceFiles) artifact(ctx context.Context, id string) (File, error) {
@@ -106,23 +138,18 @@ func (f *surfaceFiles) artifact(ctx context.Context, id string) (File, error) {
 		_ = reader.Close()
 		return nil, NewError(ErrorCodeSourceUnavailable, "the attachment is not available")
 	}
-	return regularFile(file, meta.Filename, baseMediaType(meta.MediaType))
+	return regularFile(file, &fileIdentity{name: meta.Filename, mediaType: storage.BaseMediaType(meta.MediaType), reference: artifactPrefix + id})
 }
 
-func regularFile(file *os.File, name, mediaType string) (File, error) {
+func regularFile(file *os.File, identity *fileIdentity) (File, error) {
 	info, err := file.Stat()
 	if err != nil || !info.Mode().IsRegular() {
 		_ = file.Close()
 		return nil, NewError(ErrorCodeSourceUnavailable, "the source is not a regular file")
 	}
-	runes := []rune(name)
+	runes := []rune(identity.name)
 	if len(runes) > maxFileNameRunes {
-		name = string(runes[:maxFileNameRunes])
+		identity.name = string(runes[:maxFileNameRunes])
 	}
-	return &openedFile{File: file, name: name, mediaType: mediaType, size: info.Size()}, nil
-}
-
-func baseMediaType(contentType string) string {
-	head, _, _ := strings.Cut(contentType, ";")
-	return strings.ToLower(strings.TrimSpace(head))
+	return &openedFile{File: file, fileIdentity: *identity, size: info.Size()}, nil
 }

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,9 @@ type invocation struct {
 	committed atomic.Bool
 	first     atomic.Pointer[Result]
 	misused   atomic.Bool
+	paths     map[string]string
+	filesMu   sync.Mutex
+	opened    []File
 }
 
 type runInfo struct {
@@ -144,10 +148,14 @@ func (r *Registry) admit(found *entry, call *Call) (*Call, error) {
 	if err != nil {
 		return nil, err
 	}
+	canonical, paths, err := descriptor.extractPaths(surface, canonical)
+	if err != nil {
+		return nil, err
+	}
 	prepared := *call
 	prepared.Input = canonical
 	prepared.Files = r.filesFor(&prepared.Caller)
-	prepared.run = &invocation{registry: r, entry: found}
+	prepared.run = &invocation{registry: r, entry: found, paths: paths}
 	return &prepared, nil
 }
 
@@ -167,6 +175,7 @@ func (r *Registry) preview(ctx context.Context, found *entry, call *Call) (previ
 		seen.outcome = outcomeRefused
 		return Preview{}, err
 	}
+	defer prepared.run.closeFiles()
 	if found.binding.Preview == nil {
 		seen.outcome = outcomeRefused
 		return Preview{}, NewError(ErrorCodeNotExposed, "operation: the operation has no preview")
@@ -199,6 +208,7 @@ func (r *Registry) run(ctx context.Context, found *entry, call *Call) (result Re
 		seen.outcome = outcomeRefused
 		return Result{}, refusal(err), err
 	}
+	defer prepared.run.closeFiles()
 	if limit := found.binding.RateLimit; limit != nil && prepared.Caller.Surface == SurfaceAgent && !resumedRun(ctx) {
 		if err := limit(ctx, prepared); err != nil {
 			seen.outcome = outcomeRefused

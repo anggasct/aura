@@ -374,7 +374,7 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 4096,
-            "description": "a host path or https URL; for the agent a workspace path, artifact:\u003cid\u003e of an attachment in this session, or an https URL"
+            "description": "a file path in the workspace, artifact:\u003cid\u003e of an attachment of this session, or an https URL"
           }
         },
         "required": [
@@ -514,7 +514,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Re-read the stored sources of a collection\n\nReads again the sources already stored in the collection; a source that fails to read leaves the whole collection unchanged.",
+      "description": "Re-read the stored sources of a collection\n\nReads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a file on the host is refreshed only from the host.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/kb.refresh/v1",
