@@ -168,9 +168,22 @@ func invalidSpec(err error) error {
 	return operation.NewError(operation.ErrorCodeInputInvalid, err.Error())
 }
 
-func (o *Operations) previewAdd(_ context.Context, call *operation.Call) (operation.Preview, error) {
+func (o *Operations) checkWorkflow(ctx context.Context, spec *JobSpec) error {
+	if spec.WorkflowID == "" {
+		return nil
+	}
+	if o.workflow == nil {
+		return fault.New(ErrorCodeInvalidArgument, "workflow checker must not be nil")
+	}
+	return o.workflow(ctx, spec.WorkflowID)
+}
+
+func (o *Operations) previewAdd(ctx context.Context, call *operation.Call) (operation.Preview, error) {
 	spec, err := o.spec(call)
 	if err != nil {
+		return operation.Preview{}, err
+	}
+	if err := o.checkWorkflow(ctx, spec); err != nil {
 		return operation.Preview{}, err
 	}
 	return previewOf(spec, o.routeOf(spec)), nil
@@ -222,13 +235,8 @@ func (o *Operations) add(ctx context.Context, call *operation.Call) (operation.R
 		return operation.Result{}, operation.NotPerformed(operation.ErrorCodePreviewStale,
 			operation.NewError(operation.ErrorCodePreviewStale, "the owner destination changed after the preview"))
 	}
-	if spec.WorkflowID != "" {
-		if o.workflow == nil {
-			return operation.Result{}, fault.New(ErrorCodeInvalidArgument, "workflow checker must not be nil")
-		}
-		if err := o.workflow(ctx, spec.WorkflowID); err != nil {
-			return operation.Result{}, err
-		}
+	if err := o.checkWorkflow(ctx, spec); err != nil {
+		return operation.Result{}, err
 	}
 	return call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
 		job, err := o.service.Create(ctx, spec)

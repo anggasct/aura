@@ -51,12 +51,12 @@ func addParams() []operation.Param {
 
 func Catalog() operation.Catalog {
 	return operation.Catalog{
-		Group: operation.Group{Name: GroupName, Summary: "scheduled jobs"},
+		Group: operation.Group{Name: GroupName, Summary: "Manage scheduled recurring jobs"},
 		Descriptors: []operation.Descriptor{
 			{
 				ID: operationAdd, Summary: "Create a scheduled job and start its run", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskTrustGrant, Commit: operation.CommitTransactional, Sink: true, Preview: true,
-				Description: "Stores a prompt or workflow start that later runs unattended with the owner's authority. Its output goes to the owner's destination.",
+				Description: "Stores a prompt or workflow start that later runs unattended with the owner's authority. The owner picks the destination of its output; a call from the agent always uses the owner destination.",
 				Params:      addParams(), Needs: []string{"durable"},
 				Output: operation.Output{Kind: operation.OutputRecord, Fields: []operation.OutputField{{Name: "id"}}},
 			},

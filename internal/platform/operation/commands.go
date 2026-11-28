@@ -183,10 +183,28 @@ func (l *leafCommand) declare(command *cobra.Command, flag *Flag) {
 		command.Flags().Bool(flag.Name, false, summary)
 	case flag.Repeated:
 		command.Flags().StringArray(flag.Name, nil, summary)
+	case flag.Kind == KindDuration:
+		command.Flags().Var(&typedText{kind: "duration"}, flag.Name, summary)
+	case flag.Kind == KindInteger:
+		command.Flags().Var(&typedText{kind: "int"}, flag.Name, summary)
 	default:
 		command.Flags().String(flag.Name, "", summary)
 	}
 }
+
+type typedText struct {
+	kind string
+	text string
+}
+
+func (t *typedText) String() string { return t.text }
+
+func (t *typedText) Set(text string) error {
+	t.text = text
+	return nil
+}
+
+func (t *typedText) Type() string { return t.kind }
 
 func (l *leafCommand) arguments(cmd *cobra.Command, args []string) error {
 	required := 0
@@ -254,6 +272,9 @@ func (l *leafCommand) setFlag(cmd *cobra.Command, flag *Flag, in *Input) error {
 			return err
 		}
 		return in.Set(flag.Param, values...)
+	}
+	if flag.Kind == KindDuration || flag.Kind == KindInteger {
+		return in.Set(flag.Param, cmd.Flags().Lookup(flag.Name).Value.String())
 	}
 	value, err := cmd.Flags().GetString(flag.Name)
 	if err != nil {

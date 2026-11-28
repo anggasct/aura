@@ -7,7 +7,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Create a scheduled job and start its run\n\nStores a prompt or workflow start that later runs unattended with the owner's authority. Its output goes to the owner's destination.",
+      "description": "Create a scheduled job and start its run\n\nStores a prompt or workflow start that later runs unattended with the owner's authority. The owner picks the destination of its output; a call from the agent always uses the owner destination.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/cron.add/v1",
@@ -62,7 +62,7 @@
           },
           "grace": {
             "type": "string",
-            "pattern": "^\\d+(ns|us|ms|s|m|h)(\\d+(ns|us|ms|s|m|h))*$",
+            "pattern": "^\\+?(0|((\\d+(\\.\\d*)?|\\.\\d+)(ns|us|µs|μs|ms|s|m|h))+)$",
             "description": "catch-up grace (default from config)"
           }
         },

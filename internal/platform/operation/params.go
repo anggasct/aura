@@ -22,7 +22,7 @@ const (
 	maxParams        = 16
 	maxStringsItems  = 32
 	maxPathLength    = 4096
-	durationPattern  = `^\d+(ns|us|ms|s|m|h)(\d+(ns|us|ms|s|m|h))*$`
+	durationPattern  = `^\+?(0|((\d+(\.\d*)?|\.\d+)(ns|us|µs|μs|ms|s|m|h))+)$`
 	schemaIDTemplate = "aura://operations/%s/v1"
 )
 

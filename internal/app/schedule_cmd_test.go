@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -319,4 +320,67 @@ func TestOperationCommandOutputCronListGolden(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	compareAppGolden(t, "cron-list.txt", out)
+}
+
+func TestScheduleAddGraceAcceptsGoDurations(t *testing.T) {
+	cases := []struct {
+		name  string
+		grace string
+		want  string
+	}{
+		{name: "a bare zero", grace: "0", want: "catch_up_grace_seconds=0"},
+		{name: "a fraction", grace: "1.5h", want: "catch_up_grace_seconds=5400"},
+		{name: "a compound duration", grace: "1h30m", want: "catch_up_grace_seconds=5400"},
+		{name: "seconds", grace: "90s", want: "catch_up_grace_seconds=90"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dataDir := t.TempDir()
+			gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, dataDir)}
+
+			addScheduleJob(t, gf, "--grace", tc.grace)
+
+			db := openDatabaseFile(t, filepath.Join(dataDir, "aura.db"))
+			var seconds int64
+			if err := db.QueryRowContext(t.Context(), "SELECT catch_up_grace_seconds FROM scheduled_job").Scan(&seconds); err != nil {
+				t.Fatalf("read the job: %v", err)
+			}
+			if got := "catch_up_grace_seconds=" + strconv.FormatInt(seconds, 10); got != tc.want {
+				t.Fatalf("stored %s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestScheduleAddGraceRefusesWhatIsNotAPositiveDuration(t *testing.T) {
+	gf := &GlobalFlags{ConfigPath: writeScheduleCLIConfig(t, t.TempDir())}
+	for _, grace := range []string{"-1h", "soon", "10"} {
+		t.Run(grace, func(t *testing.T) {
+			_, err := runScheduleCommand(t, gf, "add",
+				"--name", "x", "--schedule", "0 21 * * *", "--timezone", "UTC",
+				"--channel", "discord", "--destination", "default", "--prompt", "p", "--grace", grace)
+
+			if code := ExitCode(nil, nil, err); code != 2 {
+				t.Fatalf("exit code = %d (%v), want 2", code, err)
+			}
+		})
+	}
+}
+
+func TestScheduleHelpNamesTheGroupAndTheFlagTypes(t *testing.T) {
+	gf := &GlobalFlags{}
+	root := &cobra.Command{Use: "aura"}
+	mountOperationCommands(root, gf)
+	cmd, _, _ := root.Find([]string{"cron"})
+	if cmd.Short != "Manage scheduled recurring jobs" {
+		t.Errorf("cron summary = %q", cmd.Short)
+	}
+	add, _, _ := root.Find([]string{"cron", "add"})
+	if got := add.Flags().Lookup("grace").Value.Type(); got != "duration" {
+		t.Errorf("--grace type = %q, want duration", got)
+	}
+	runs, _, _ := root.Find([]string{"cron", "runs"})
+	if got := runs.Flags().Lookup("limit").Value.Type(); got != "int" {
+		t.Errorf("--limit type = %q, want int", got)
+	}
 }
