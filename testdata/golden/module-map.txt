@@ -56,6 +56,7 @@ internal/platform/
   internal/platform/vision
   internal/platform/wallclock
   internal/platform/webhook
+  internal/platform/workspace
 
 internal/modules/
   internal/modules/broadcast
@@ -71,6 +72,7 @@ internal/modules/
   internal/modules/gitsync
   internal/modules/handoff
   internal/modules/knowledge
+  internal/modules/knowledge/knowledgetest
   internal/modules/mcp
   internal/modules/memory
   internal/modules/plugin
