@@ -37,7 +37,7 @@ func (f *fakeRegistry) InsertCandidate(ctx stdcontext.Context, fact *Fact, evide
 			stored.ConflictsWithID = other.ID
 		}
 	}
-	if stored.ConflictsWithID == "" && stored.Confidence >= minConfidence {
+	if stored.ConflictsWithID == "" && minConfidence > 0 && stored.Confidence >= minConfidence {
 		stored.Status = StatusActive
 	}
 	f.facts[fact.ID] = &stored

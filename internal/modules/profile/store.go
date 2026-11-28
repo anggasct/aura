@@ -47,7 +47,7 @@ var profileStatuses = map[string]bool{
 }
 
 func validProfileOrigin(origin string) bool {
-	return origin == OriginDerived || origin == OriginOwner
+	return origin == OriginDerived || origin == OriginOwner || origin == OriginAgent
 }
 
 func checkStoredFact(fact *Fact) error {

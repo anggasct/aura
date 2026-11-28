@@ -20,6 +20,7 @@ const (
 
 	OriginDerived = "derived"
 	OriginOwner   = "owner"
+	OriginAgent   = "agent"
 
 	ConfidencePolicyV1 = "conf-v1"
 
