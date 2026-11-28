@@ -342,6 +342,9 @@ func synopsis(descriptor *Descriptor, surface Surface) string {
 		}
 		parts = append(parts, label)
 	}
+	if surface == SurfaceChat && descriptor.previews() {
+		parts = append(parts, "[--"+flagApply+"]")
+	}
 	return strings.Join(parts, " ")
 }
 

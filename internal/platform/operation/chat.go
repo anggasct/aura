@@ -111,11 +111,7 @@ func (c *Chat) verbList(group string, members []*entry) string {
 }
 
 func chatUsage(descriptor *Descriptor) string {
-	line := "usage: " + synopsis(descriptor, SurfaceChat)
-	if descriptor.previews() {
-		line += " [--apply]"
-	}
-	return line
+	return "usage: " + synopsis(descriptor, SurfaceChat)
 }
 
 func (c *Chat) Plan(group string, tokens []string) command.OperationPlan {
