@@ -44,13 +44,14 @@ func TestPersonaOperationConfigValidation(t *testing.T) {
 			}
 		})
 	}
-	t.Run("an owner persona listing an operation tool loads", func(t *testing.T) {
+	t.Run("an owner persona listing an operation tool is refused as an unknown tool while none is offered", func(t *testing.T) {
 		persona := Persona{ID: "desk", Description: "d", Instructions: "x", Tools: []string{"read_file", operationTool}}
 		if err := (Config{Definitions: []Persona{persona}}).Validate(); err != nil {
 			t.Fatalf("Validate = %v", err)
 		}
-		if _, err := Build([]Persona{persona}, toolsWithAnOperation, catalogWithAnOperation, nil, "en"); err != nil {
-			t.Fatalf("Build = %v", err)
+		_, err := Build([]Persona{persona}, validTools, validToolCatalog, nil, "en")
+		if !fault.HasCode(err, ErrorCodeUnknownTool) {
+			t.Fatalf("Build = %v, want agent_unknown_tool", err)
 		}
 	})
 }
