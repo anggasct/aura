@@ -6,12 +6,24 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const runOutputSeparator = "\n\n"
 
 func (s *Service) ProjectRunOutput(ctx context.Context, ownerID string, events []*Event) (BatchResult, error) {
+	return s.projectRunOutput(ctx, ownerID, nil, events)
+}
+
+func (s *Service) ProjectRunOutputForTurn(ctx context.Context, req *turn.TurnRequest, events []*Event) (BatchResult, error) {
+	if req == nil {
+		return BatchResult{}, fault.New(ErrorCodeInvalidArgument, "turn request must not be nil")
+	}
+	return s.projectRunOutput(ctx, req.PrincipalID, req, events)
+}
+
+func (s *Service) projectRunOutput(ctx context.Context, ownerID string, req *turn.TurnRequest, events []*Event) (BatchResult, error) {
 	var result BatchResult
 	if ctx == nil {
 		return result, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
@@ -30,6 +42,8 @@ func (s *Service) ProjectRunOutput(ctx context.Context, ownerID string, events [
 		result.Skipped = len(events)
 		return result, nil
 	}
+	taintCtx := s.buildBatchTaintContext(ctx, req, events)
+	output.tainted = taintCtx.isOtherEventTainted(ownerID, output.sessionID, output.to)
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
 	droppedBefore := s.secretDrops.Load()

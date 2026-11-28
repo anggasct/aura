@@ -636,9 +636,8 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	memoryOperations := memory.UnavailableOperations()
 	if a.memory != nil {
 		memoryOperations, err = memory.NewOperations(&memory.OperationDeps{
-			Service:    a.memory,
-			TaintMarks: turnstore.NewTaintReader(a.db),
-			Logger:     a.logger,
+			Service: a.memory,
+			Logger:  a.logger,
 		})
 		if err != nil {
 			return nil, err

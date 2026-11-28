@@ -818,6 +818,7 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 			SummaryTTL:           time.Duration(b.cfg.Memory.SummaryTTL),
 			RangeThreshold:       b.cfg.Memory.RangeThreshold,
 			RangeLiveWindow:      b.cfg.Memory.RangeLiveWindow,
+			TaintMarks:           turnstore.NewTaintReader(b.db),
 		})
 		if err != nil {
 			return err
@@ -1230,21 +1231,30 @@ func (b *build) registerLegacyTaint() error {
 		if err != nil {
 			return err
 		}
-		if len(marked) == 0 {
-			return nil
+		recorded := 0
+		if len(marked) > 0 {
+			legacy := make([]workspace.LegacySession, 0, len(marked))
+			for _, m := range marked {
+				legacy = append(legacy, workspace.LegacySession{
+					SessionID:       m.SessionID,
+					FirstTaintedSeq: m.AtSequence,
+				})
+			}
+			recorded, err = workspace.DeriveLegacyWorkspace(ctx, db, legacyTurnEventReader{db: db}, workspaceRoot, legacy)
+			if err != nil {
+				return err
+			}
 		}
-		legacy := make([]workspace.LegacySession, 0, len(marked))
-		for _, m := range marked {
-			legacy = append(legacy, workspace.LegacySession{
-				SessionID:       m.SessionID,
-				FirstTaintedSeq: m.AtSequence,
-			})
-		}
-		recorded, err := workspace.DeriveLegacyWorkspace(ctx, db, legacyTurnEventReader{db: db}, workspaceRoot, legacy)
+		relabelled, err := memory.RelabelUnlabelled(ctx, db, &memory.RelabelOptions{
+			TaintMarks:   turnstore.NewTaintReader(db),
+			ToolMayTaint: toolMayTaint,
+		})
 		if err != nil {
 			return err
 		}
-		logger.InfoContext(ctx, "legacy taint derived", "component", "taint", "sessions", len(marked), "workspace_records", recorded)
+		if len(marked) > 0 || relabelled > 0 {
+			logger.InfoContext(ctx, "legacy taint derived", "component", "taint", "sessions", len(marked), "workspace_records", recorded, "memory_relabelled", relabelled)
+		}
 		return nil
 	}})
 }

@@ -348,7 +348,7 @@ func (l *leafCommand) invoke(ctx context.Context, run *commandRun) error {
 		if err != nil {
 			return usageOr(cliFailure(err))
 		}
-		if !run.apply || preview.Empty {
+		if !preview.Direct && (!run.apply || preview.Empty) {
 			return renderPreview(run.cmd.OutOrStdout(), &preview, run.asJSON)
 		}
 		call.PreviewDigest = preview.Digest

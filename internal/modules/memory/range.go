@@ -24,6 +24,7 @@ func storedToRecall(document *StoredDocument) (RecallDocument, error) {
 		ToSequence:    to,
 		Content:       document.Content,
 		Trust:         approval.TrustLabel(document.TrustLabel),
+		Tainted:       document.IsTainted(),
 		PromptVersion: document.PromptVersion,
 		ModelProtocol: document.ModelProtocol,
 		ModelName:     document.ModelName,

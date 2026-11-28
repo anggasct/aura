@@ -2,6 +2,7 @@ package skills
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
@@ -96,17 +97,41 @@ func (s *SessionContext) Required(_ *turn.TurnRequest) bool {
 	return false
 }
 
+type skillContextJournal struct {
+	Content    string `json:"content"`
+	TaintSkill string `json:"taint_skill,omitempty"`
+}
+
+func decodeSkillContextJournal(raw []byte) skillContextJournal {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return skillContextJournal{}
+	}
+	if strings.HasPrefix(trimmed, "{") {
+		var entry skillContextJournal
+		if err := json.Unmarshal([]byte(trimmed), &entry); err == nil {
+			entry.Content = strings.TrimSpace(entry.Content)
+			return entry
+		}
+	}
+	return skillContextJournal{Content: trimmed}
+}
+
 func (s *SessionContext) TurnContext(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
 	if req == nil || req.PrincipalClass != principal.ClassOwner {
 		return nil, nil
 	}
 	render := func(ctx context.Context) ([]byte, error) {
-		block, err := s.SkillContext(ctx, req)
+		block, taintSkill, err := s.skillContext(ctx, req)
 		if err != nil {
 			s.engine.logger.WarnContext(ctx, "skill context unavailable", "component", "skills", "error", err, "turn_id", req.TurnID)
 			return []byte{}, nil
 		}
-		return []byte(strings.TrimSpace(block)), nil
+		trimmed := strings.TrimSpace(block)
+		if trimmed == "" {
+			return []byte{}, nil
+		}
+		return json.Marshal(skillContextJournal{Content: trimmed, TaintSkill: taintSkill})
 	}
 	var raw []byte
 	if scope, ok := durable.TurnScopeFrom(ctx); ok {
@@ -119,25 +144,34 @@ func (s *SessionContext) TurnContext(ctx context.Context, req *turn.TurnRequest)
 	} else {
 		raw, _ = render(ctx)
 	}
-	block := strings.TrimSpace(string(raw))
-	if block == "" {
+	entry := decodeSkillContextJournal(raw)
+	if entry.Content == "" {
 		return nil, nil
 	}
-	return []turn.ContextBlock{{
+	cb := turn.ContextBlock{
 		Order:   turn.ContextOrderSkills,
-		Content: block,
-	}}, nil
+		Content: entry.Content,
+	}
+	if entry.TaintSkill != "" {
+		cb.Taint = &turn.TaintMark{Source: turn.TaintSourceSkill, Detail: entry.TaintSkill}
+	}
+	return []turn.ContextBlock{cb}, nil
 }
 
 var _ turn.ContextProvider = (*SessionContext)(nil)
 
 func (s *SessionContext) SkillContext(ctx context.Context, req *turn.TurnRequest) (string, error) {
+	block, _, err := s.skillContext(ctx, req)
+	return block, err
+}
+
+func (s *SessionContext) skillContext(ctx context.Context, req *turn.TurnRequest) (block, taintSkill string, err error) {
 	if req == nil {
-		return "", errNilArgument("turn request")
+		return "", "", errNilArgument("turn request")
 	}
 	history, err := s.log.Activations(ctx, req.SessionID, MaxSessionActivations)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	bodies := activationBodies(history)
 	seen := make(map[string]bool, len(history))
@@ -153,13 +187,20 @@ func (s *SessionContext) SkillContext(ctx context.Context, req *turn.TurnRequest
 		if !ok {
 			continue
 		}
-		if activation.TurnID != req.TurnID {
-			current, err := s.engine.Current(ctx, activation.SkillID, activation.Digest)
-			if err != nil {
-				return "", err
+		record, err := s.engine.registry.Get(ctx, activation.SkillID)
+		if err != nil {
+			if activation.TurnID != req.TurnID {
+				if fault.HasCode(err, ErrorCodeSkillNotFound) {
+					continue
+				}
+				return "", "", err
 			}
-			if !current {
+		} else {
+			if activation.TurnID != req.TurnID && (record.State != StateActive || record.Digest != activation.Digest) {
 				continue
+			}
+			if taintSkill == "" && record.AcceptedTaintSource != "" {
+				taintSkill = activation.SkillID
 			}
 		}
 		size := utf8.RuneCountInString(body)
@@ -170,7 +211,7 @@ func (s *SessionContext) SkillContext(ctx context.Context, req *turn.TurnRequest
 		activation.Body = body
 		picked = append(picked, activation)
 	}
-	return renderSkillContext(picked), nil
+	return renderSkillContext(picked), taintSkill, nil
 }
 
 type activationKey struct {

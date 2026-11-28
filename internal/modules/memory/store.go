@@ -22,13 +22,13 @@ const (
 
 const selectMemoryHitColumns = `
 	d.id, d.owner_id, d.session_id, d.kind, d.source_from_sequence, d.source_to_sequence,
-	d.content, d.trust_label, d.prompt_version, d.model_protocol, d.model_name,
+	d.content, d.trust_label, d.tainted, d.prompt_version, d.model_protocol, d.model_name,
 	d.created_at, d.expires_at, d.agent_id, bm25(memory_document_fts)
 `
 
 const selectMemoryDocumentColumns = `
 	d.id, d.owner_id, d.session_id, d.kind, d.source_from_sequence, d.source_to_sequence,
-	d.content, d.trust_label, d.prompt_version, d.model_protocol, d.model_name,
+	d.content, d.trust_label, d.tainted, d.prompt_version, d.model_protocol, d.model_name,
 	d.created_at, d.expires_at, d.agent_id
 `
 
@@ -99,6 +99,35 @@ func nullMemoryTime(value *time.Time) sql.NullString {
 	return sql.NullString{String: sqlite.FormatTime(value.UTC()), Valid: true}
 }
 
+func nullMemoryBool(value *bool) sql.NullInt64 {
+	if value == nil {
+		return sql.NullInt64{}
+	}
+	if *value {
+		return sql.NullInt64{Int64: 1, Valid: true}
+	}
+	return sql.NullInt64{Int64: 0, Valid: true}
+}
+
+func scanMemoryTainted(raw sql.NullInt64, dst **bool) error {
+	if !raw.Valid {
+		*dst = nil
+		return nil
+	}
+	switch raw.Int64 {
+	case 0:
+		v := false
+		*dst = &v
+		return nil
+	case 1:
+		v := true
+		*dst = &v
+		return nil
+	default:
+		return fault.New(ErrorCodeMemoryInvalid, "memory tainted flag is not valid")
+	}
+}
+
 func (s *SQLiteStore) UpsertDocument(ctx context.Context, document *StoredDocument) (bool, error) {
 	if s == nil || s.db == nil {
 		return false, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
@@ -136,13 +165,13 @@ func (s *SQLiteStore) UpsertDocument(ctx context.Context, document *StoredDocume
 	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`INSERT INTO memory_document (
 			id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
-			content, trust_label, prompt_version, model_protocol, model_name,
+			content, trust_label, tainted, prompt_version, model_protocol, model_name,
 			created_at, expires_at, agent_id
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(session_id, kind, source_from_sequence, source_to_sequence, prompt_version) DO NOTHING`,
 		document.ID, document.OwnerID, document.SessionID, document.Kind,
 		document.FromSequence, document.ToSequence, document.Content, document.TrustLabel,
-		document.PromptVersion, nullMemoryText(document.ModelProtocol), nullMemoryText(document.ModelName),
+		nullMemoryBool(document.Tainted), document.PromptVersion, nullMemoryText(document.ModelProtocol), nullMemoryText(document.ModelName),
 		sqlite.FormatTime(document.CreatedAt.UTC()), nullMemoryTime(document.ExpiresAt), agentID,
 	)
 	if err != nil {
@@ -241,15 +270,19 @@ func scanMemoryHit(rows *sql.Rows) (StoredHit, error) {
 	var hit StoredHit
 	var createdAtRaw string
 	var expiresAtRaw sql.NullString
+	var taintedRaw sql.NullInt64
 	var promptVersion, modelProtocol, modelName sql.NullString
 	err := rows.Scan(
 		&hit.ID, &hit.OwnerID, &hit.SessionID, &hit.Kind,
 		&hit.FromSequence, &hit.ToSequence, &hit.Content, &hit.TrustLabel,
-		&promptVersion, &modelProtocol, &modelName,
+		&taintedRaw, &promptVersion, &modelProtocol, &modelName,
 		&createdAtRaw, &expiresAtRaw, &hit.AgentID, &hit.Rank,
 	)
 	if err != nil {
 		return StoredHit{}, sqlite.Classify(fmt.Errorf("scan memory hit: %w", err))
+	}
+	if err := scanMemoryTainted(taintedRaw, &hit.Tainted); err != nil {
+		return StoredHit{}, err
 	}
 	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
@@ -398,7 +431,7 @@ func (s *SQLiteStore) ListSessionDocumentsByKind(ctx context.Context, ownerID, s
 	}
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
-			content, trust_label, prompt_version, model_protocol, model_name,
+			content, trust_label, tainted, prompt_version, model_protocol, model_name,
 			created_at, expires_at, agent_id
 		FROM memory_document
 		WHERE owner_id = ? AND session_id = ? AND kind = ?
@@ -443,7 +476,7 @@ func (s *SQLiteStore) ListSessionDocumentsByKindInRange(ctx context.Context, own
 	}
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
-			content, trust_label, prompt_version, model_protocol, model_name,
+			content, trust_label, tainted, prompt_version, model_protocol, model_name,
 			created_at, expires_at, agent_id
 		FROM memory_document
 		WHERE owner_id = ? AND session_id = ? AND kind = ?
@@ -475,15 +508,19 @@ func scanMemoryDocument(rows rowScanner) (StoredDocument, error) {
 	var document StoredDocument
 	var createdAtRaw string
 	var expiresAtRaw sql.NullString
+	var taintedRaw sql.NullInt64
 	var promptVersion, modelProtocol, modelName sql.NullString
 	err := rows.Scan(
 		&document.ID, &document.OwnerID, &document.SessionID, &document.Kind,
 		&document.FromSequence, &document.ToSequence, &document.Content, &document.TrustLabel,
-		&promptVersion, &modelProtocol, &modelName,
+		&taintedRaw, &promptVersion, &modelProtocol, &modelName,
 		&createdAtRaw, &expiresAtRaw, &document.AgentID,
 	)
 	if err != nil {
 		return StoredDocument{}, sqlite.Classify(fmt.Errorf("scan memory document: %w", err))
+	}
+	if err := scanMemoryTainted(taintedRaw, &document.Tainted); err != nil {
+		return StoredDocument{}, err
 	}
 	createdAt, err := sqlite.ParseTime(createdAtRaw)
 	if err != nil {
@@ -552,7 +589,7 @@ func (s *SQLiteStore) GetDocument(ctx context.Context, id string) (StoredDocumen
 	}
 	row := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
 		`SELECT id, owner_id, session_id, kind, source_from_sequence, source_to_sequence,
-			content, trust_label, prompt_version, model_protocol, model_name,
+			content, trust_label, tainted, prompt_version, model_protocol, model_name,
 			created_at, expires_at, agent_id FROM memory_document WHERE id = ?`, id)
 	document, err := scanMemoryDocument(row)
 	if err != nil {

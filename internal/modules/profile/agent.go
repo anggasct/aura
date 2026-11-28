@@ -18,11 +18,12 @@ const (
 )
 
 type AgentProposal struct {
-	OwnerID   string
-	Category  string
-	Key       string
-	Value     string
-	ExpiresAt *time.Time
+	OwnerID     string
+	Category    string
+	Key         string
+	Value       string
+	TaintSource string
+	ExpiresAt   *time.Time
 }
 
 func (s *Service) ProposeAgentFact(ctx stdcontext.Context, proposal *AgentProposal, now time.Time) (Fact, error) {
@@ -63,7 +64,8 @@ func (s *Service) ProposeAgentFact(ctx stdcontext.Context, proposal *AgentPropos
 	fact := Fact{
 		ID: id, OwnerID: proposal.OwnerID, Category: proposal.Category, Key: proposal.Key, Value: proposal.Value,
 		ValueDigest: digest, Status: StatusCandidate, Origin: OriginAgent, OwnerVerified: false,
-		Confidence: ConfidenceV1(0), ConfidencePolicy: ConfidencePolicyV1,
+		TaintSource: proposal.TaintSource,
+		Confidence:  ConfidenceV1(0), ConfidencePolicy: ConfidencePolicyV1,
 		ExpiresAt: proposal.ExpiresAt, CreatedAt: now, UpdatedAt: now,
 	}
 	for i := range actives {

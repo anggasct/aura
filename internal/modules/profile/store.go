@@ -144,23 +144,25 @@ func sanitizeFTSQuery(raw string) (string, error) {
 const selectProfileFactColumns = `
 	id, owner_id, category, fact_key, fact_value, value_digest, status, origin,
 	owner_verified, confidence, confidence_policy_version, conflicts_with_id,
-	expires_at, created_at, updated_at`
+	expires_at, created_at, updated_at, taint_source`
 
 func scanProfileFact(rows *sql.Rows) (Fact, error) {
 	var fact Fact
 	var verified int64
 	var conflicts sql.NullString
 	var expires sql.NullString
+	var taintSource sql.NullString
 	var created, updated string
 	if err := rows.Scan(
 		&fact.ID, &fact.OwnerID, &fact.Category, &fact.Key, &fact.Value, &fact.ValueDigest,
 		&fact.Status, &fact.Origin, &verified, &fact.Confidence, &fact.ConfidencePolicy,
-		&conflicts, &expires, &created, &updated,
+		&conflicts, &expires, &created, &updated, &taintSource,
 	); err != nil {
 		return Fact{}, sqlite.Classify(fmt.Errorf("scan profile fact: %w", err))
 	}
 	fact.OwnerVerified = verified == 1
 	fact.ConflictsWithID = conflicts.String
+	fact.TaintSource = taintSource.String
 	createdAt, err := sqlite.ParseTime(created)
 	if err != nil {
 		return Fact{}, fmt.Errorf("parse profile fact timestamps: %w", err)
@@ -192,12 +194,13 @@ func (s *SQLiteStore) InsertFact(ctx context.Context, fact *Fact) error {
 		`INSERT INTO profile_fact (
 			id, owner_id, category, fact_key, fact_value, value_digest, status, origin,
 			owner_verified, confidence, confidence_policy_version, conflicts_with_id,
-			expires_at, created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			expires_at, created_at, updated_at, taint_source
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		fact.ID, fact.OwnerID, fact.Category, fact.Key, fact.Value, fact.ValueDigest,
 		fact.Status, fact.Origin, profileBool(fact.OwnerVerified), fact.Confidence,
 		fact.ConfidencePolicy, nullProfileText(fact.ConflictsWithID),
 		nullProfileTime(fact.ExpiresAt), sqlite.FormatTime(fact.CreatedAt.UTC()), sqlite.FormatTime(fact.UpdatedAt.UTC()),
+		nullProfileText(fact.TaintSource),
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -251,12 +254,12 @@ func (s *SQLiteStore) UpdateFact(ctx context.Context, fact *Fact) error {
 		`UPDATE profile_fact SET
 			fact_value = ?, value_digest = ?, status = ?, origin = ?,
 			owner_verified = ?, confidence = ?, confidence_policy_version = ?,
-			conflicts_with_id = ?, expires_at = ?, updated_at = ?
+			conflicts_with_id = ?, expires_at = ?, updated_at = ?, taint_source = ?
 		WHERE id = ?`,
 		fact.Value, fact.ValueDigest, fact.Status, fact.Origin,
 		profileBool(fact.OwnerVerified), fact.Confidence, fact.ConfidencePolicy,
 		nullProfileText(fact.ConflictsWithID), nullProfileTime(fact.ExpiresAt),
-		sqlite.FormatTime(fact.UpdatedAt.UTC()), fact.ID,
+		sqlite.FormatTime(fact.UpdatedAt.UTC()), nullProfileText(fact.TaintSource), fact.ID,
 	)
 	if err != nil {
 		if isUniqueConstraint(err) {
@@ -475,7 +478,7 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 		}
 		sqlQuery = `SELECT f.id, f.owner_id, f.category, f.fact_key, f.fact_value, f.value_digest, f.status, f.origin,
 			f.owner_verified, f.confidence, f.confidence_policy_version, f.conflicts_with_id,
-			f.expires_at, f.created_at, f.updated_at FROM profile_fact_fts
+			f.expires_at, f.created_at, f.updated_at, f.taint_source FROM profile_fact_fts
 			JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
 			WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
 			AND (f.expires_at IS NULL OR f.expires_at > ?)`
@@ -583,6 +586,9 @@ func (s *SQLiteStore) Reinforce(ctx context.Context, factID string, evidence *Ev
 			return sqlite.Classify(fmt.Errorf("count profile evidence: %w", err))
 		}
 		fact.Confidence = ConfidenceV1(count)
+		if !fact.OwnerVerified && fact.TaintSource == "" && evidence.TaintSource != "" {
+			fact.TaintSource = evidence.TaintSource
+		}
 		if fact.Status == StatusCandidate && fact.Confidence >= minConfidence {
 			var conflicts sql.NullString
 			if err := conn.QueryRowContext(ctx,
@@ -626,6 +632,9 @@ func (s *SQLiteStore) SetState(ctx context.Context, factID, status, conflictsWit
 		fact.ConflictsWithID = conflictsWith
 		fact.Confidence = confidence
 		fact.OwnerVerified = verified
+		if status == StatusActive && verified {
+			fact.TaintSource = ""
+		}
 		fact.UpdatedAt = at
 		return s.UpdateFact(ctx, &fact)
 	})
@@ -647,6 +656,7 @@ func (s *SQLiteStore) Promote(ctx context.Context, factID string, expiresAt *tim
 		fact.ConflictsWithID = ""
 		fact.Confidence = 1.0
 		fact.OwnerVerified = true
+		fact.TaintSource = ""
 		fact.Origin = OriginOwner
 		fact.ExpiresAt = expiresAt
 		fact.UpdatedAt = at

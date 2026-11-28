@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type Deps struct {
@@ -21,6 +22,7 @@ type Deps struct {
 	DB           *sql.DB
 	Sessions     SessionStore
 	Events       EventStore
+	TaintReader  SessionTaintAtReader
 	Models       ModelSource
 	ModelConfig  model.Config
 	ModelRoutes  model.Routes
@@ -112,6 +114,12 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 		mod.health.unavailable.Store(true)
 		return mod, nil
 	}
+	taintReader := deps.TaintReader
+	if taintReader == nil {
+		if reader, ok := turnstore.NewTaintReader(deps.DB).(SessionTaintAtReader); ok {
+			taintReader = reader
+		}
+	}
 	mod.extractor, err = NewExtractor(
 		mod.service,
 		NewModelCaller(llm, producer, extractMaxOutputTokens),
@@ -122,6 +130,7 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 		deps.Config.ExtractionQueueCapacity,
 		logger,
 		WithObserver(observer),
+		WithTaintReader(taintReader),
 	)
 	if err != nil {
 		return nil, err

@@ -67,7 +67,7 @@ func ListSessionEventsFrom(ctx context.Context, db *sql.DB, sessionID string, fr
 		return nil, fmt.Errorf("encode event kinds: %w", err)
 	}
 	rows, err := sqlite.Conn(ctx, db).QueryContext(ctx, `
-		SELECT sequence, author, kind, payload_json
+		SELECT sequence, turn_id, author, kind, payload_json
 		FROM runtime_event
 		WHERE session_id = ?
 		  AND sequence >= ?
@@ -82,8 +82,8 @@ func ListSessionEventsFrom(ctx context.Context, db *sql.DB, sessionID string, fr
 	var out []turn.Event
 	for rows.Next() {
 		var seq int64
-		var author, kind, payload string
-		if err := rows.Scan(&seq, &author, &kind, &payload); err != nil {
+		var turnID, author, kind, payload string
+		if err := rows.Scan(&seq, &turnID, &author, &kind, &payload); err != nil {
 			return nil, classify(fmt.Errorf("scan session event: %w", err))
 		}
 		uSeq, err := sequenceFromDB(seq)
@@ -92,6 +92,51 @@ func ListSessionEventsFrom(ctx context.Context, db *sql.DB, sessionID string, fr
 		}
 		out = append(out, turn.Event{
 			SessionID: sessionID,
+			TurnID:    turnID,
+			Sequence:  uSeq,
+			Author:    author,
+			Kind:      kind,
+			Payload:   json.RawMessage(payload),
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, classify(fmt.Errorf("iterate session events: %w", err))
+	}
+	return out, nil
+}
+
+func ListAllSessionEvents(ctx context.Context, db *sql.DB, sessionID string) ([]turn.Event, error) {
+	if db == nil {
+		return nil, errNilArgument("db")
+	}
+	if sessionID == "" {
+		return nil, nil
+	}
+	rows, err := sqlite.Conn(ctx, db).QueryContext(ctx, `
+		SELECT sequence, turn_id, author, kind, payload_json
+		FROM runtime_event
+		WHERE session_id = ?
+		ORDER BY sequence ASC`,
+		sessionID,
+	)
+	if err != nil {
+		return nil, classify(fmt.Errorf("list session events for %s: %w", sessionID, err))
+	}
+	defer func() { _ = rows.Close() }()
+	var out []turn.Event
+	for rows.Next() {
+		var seq int64
+		var turnID, author, kind, payload string
+		if err := rows.Scan(&seq, &turnID, &author, &kind, &payload); err != nil {
+			return nil, classify(fmt.Errorf("scan session event: %w", err))
+		}
+		uSeq, err := sequenceFromDB(seq)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, turn.Event{
+			SessionID: sessionID,
+			TurnID:    turnID,
 			Sequence:  uSeq,
 			Author:    author,
 			Kind:      kind,

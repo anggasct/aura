@@ -56,7 +56,24 @@ func TestProfileAgentOriginStepKeepsEveryFactItsEvidenceAndItsIndex(t *testing.T
 		ConfidencePolicy: profile.ConfidencePolicyV1, CreatedAt: now, UpdatedAt: now,
 	}
 	for _, fact := range []*profile.Fact{&verified, &learned} {
-		if err := store.InsertFact(ctx, fact); err != nil {
+		verifiedInt := 0
+		if fact.OwnerVerified {
+			verifiedInt = 1
+		}
+		var conflicts any
+		if fact.ConflictsWithID != "" {
+			conflicts = fact.ConflictsWithID
+		}
+		if _, err := db.ExecContext(ctx, `
+INSERT INTO profile_fact (
+	id, owner_id, category, fact_key, fact_value, value_digest,
+	status, origin, owner_verified, confidence, confidence_policy_version,
+	conflicts_with_id, expires_at, created_at, updated_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)`,
+			fact.ID, fact.OwnerID, fact.Category, fact.Key, fact.Value, fact.ValueDigest,
+			fact.Status, fact.Origin, verifiedInt, fact.Confidence, fact.ConfidencePolicy,
+			conflicts, fact.CreatedAt.UTC().Format(time.RFC3339Nano), fact.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		); err != nil {
 			t.Fatalf("seed %s: %v", fact.ID, err)
 		}
 	}

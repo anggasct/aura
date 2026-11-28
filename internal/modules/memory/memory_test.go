@@ -45,6 +45,10 @@ func (s *fakeDocumentStore) UpsertDocument(_ context.Context, document *StoredDo
 		return false, nil
 	}
 	stored := *document
+	if document.Tainted != nil {
+		v := *document.Tainted
+		stored.Tainted = &v
+	}
 	stored.AgentID = "main"
 	if agent, ok := s.sessionAgents[document.SessionID]; ok {
 		stored.AgentID = agent

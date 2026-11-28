@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
+
+	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type BatchResult struct {
@@ -13,6 +15,17 @@ type BatchResult struct {
 }
 
 func (s *Service) ProjectBatch(ctx context.Context, ownerID string, events []*Event) (BatchResult, error) {
+	return s.projectBatch(ctx, ownerID, nil, events)
+}
+
+func (s *Service) ProjectTurnBatch(ctx context.Context, req *turn.TurnRequest, events []*Event) (BatchResult, error) {
+	if req == nil {
+		return BatchResult{}, fault.New(ErrorCodeInvalidArgument, "turn request must not be nil")
+	}
+	return s.projectBatch(ctx, req.PrincipalID, req, events)
+}
+
+func (s *Service) projectBatch(ctx context.Context, ownerID string, req *turn.TurnRequest, events []*Event) (BatchResult, error) {
 	var result BatchResult
 	if ctx == nil {
 		return result, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
@@ -31,12 +44,13 @@ func (s *Service) ProjectBatch(ctx context.Context, ownerID string, events []*Ev
 	}
 	s.projectMu.Lock()
 	defer s.projectMu.Unlock()
+	taintCtx := s.buildBatchTaintContext(ctx, req, events)
 	droppedBefore := s.secretDrops.Load()
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
 			return result, err
 		}
-		_, indexed, err := s.ProjectEvent(ctx, ownerID, event)
+		_, indexed, err := s.projectEvent(ctx, ownerID, event, taintCtx)
 		if err != nil {
 			if code, ok := fault.CodeOf[ErrorCode](err); ok && code == ErrorCodeInvalidArgument {
 				result.Skipped++
