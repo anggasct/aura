@@ -325,9 +325,23 @@ func (v *validation) output(d *Descriptor) {
 	if !d.Output.Kind.valid() {
 		v.reject(id, "the output kind is missing or unknown")
 	}
+	if len(d.Output.Header) > 0 && d.Output.Kind != OutputTable {
+		v.reject(id, "only a table output has a header")
+	}
+	for i := range d.Output.Header {
+		if d.Output.Header[i].Secret {
+			v.reject(id, "the output header field %q is secret", d.Output.Header[i].Name)
+		}
+	}
+	v.outputFields(d, d.Output.Header)
+	v.outputFields(d, d.Output.Fields)
+}
+
+func (v *validation) outputFields(d *Descriptor, fields []OutputField) {
+	id := d.ID
 	names := map[string]bool{}
-	for i := range d.Output.Fields {
-		field := &d.Output.Fields[i]
+	for i := range fields {
+		field := &fields[i]
 		if field.Name == "" || names[field.Name] {
 			v.reject(id, "an output field name is empty or repeated")
 		}

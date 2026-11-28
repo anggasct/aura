@@ -27,6 +27,9 @@ func (d *Descriptor) renderOn(surface Surface, out io.Writer, data json.RawMessa
 	escape := d.UntrustedOutput && surface != SurfaceAgent
 	switch d.Output.Kind {
 	case OutputTable:
+		if err := renderRecord(out, object, d.OutputHeaderOn(surface), escape); err != nil {
+			return err
+		}
 		return renderTable(out, object, fields, escape)
 	case OutputText:
 		return renderText(out, object, escape)
@@ -100,7 +103,41 @@ func renderRecord(out io.Writer, object map[string]json.RawMessage, fields []str
 		if !present {
 			continue
 		}
+		if items, isList := listItems(raw); isList {
+			if err := renderList(out, key, items, escape); err != nil {
+				return err
+			}
+			continue
+		}
 		if _, err := fmt.Fprintf(out, "%s: %s\n", key, cellText(raw, escape)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func listItems(raw json.RawMessage) ([]json.RawMessage, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '[' {
+		return nil, false
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(trimmed, &items); err != nil {
+		return nil, false
+	}
+	return items, true
+}
+
+func renderList(out io.Writer, key string, items []json.RawMessage, escape bool) error {
+	if len(items) == 0 {
+		_, err := fmt.Fprintf(out, "%s: %s\n", key, nullCell)
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "%s:\n", key); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if _, err := fmt.Fprintf(out, "  - %s\n", cellText(item, escape)); err != nil {
 			return err
 		}
 	}

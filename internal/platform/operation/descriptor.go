@@ -146,6 +146,7 @@ const (
 type Output struct {
 	Kind   OutputKind
 	Fields []OutputField
+	Header []OutputField
 }
 
 type OutputField struct {
