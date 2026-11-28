@@ -129,6 +129,7 @@ type resumption struct {
 
 func resumeOperation(ctx context.Context, run *Run, resumed *resumption) (Outcome, error) {
 	inv, intent := resumed.inv, resumed.intent
+	resumed.provider.resuming = true
 	recovery := &command.OperationRecovery{
 		Provider: resumed.provider,
 		Settle: func(lines []string, record json.RawMessage) (effect.Outcome, error) {
@@ -182,6 +183,7 @@ type commandProvider struct {
 	ran      bool
 	code     string
 	takeover bool
+	resuming bool
 }
 
 func (p *commandProvider) SupportsIdempotency() bool { return false }
@@ -192,6 +194,14 @@ func (p *commandProvider) Invoke(ctx context.Context, _ *effect.Invocation) (eff
 	result := p.run(ctx)
 	p.ran = true
 	p.code = string(result.Code)
+	if p.resuming {
+		switch result.Fate {
+		case command.FateNotPerformed:
+			return effect.Outcome{SafeErrorCode: p.code}, nil
+		case command.FateAmbiguous:
+			return effect.Outcome{Ambiguous: true}, nil
+		}
+	}
 	var skill *runtimeingress.SkillPin
 	if result.Turn != nil {
 		skill = result.Turn.Skill

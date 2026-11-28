@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,9 +52,28 @@ func (d *dyingEffects) Execute(ctx context.Context, req *effect.PrepareRequest, 
 	return nil, errProcessDied
 }
 
+type startCounter struct {
+	mu    sync.Mutex
+	names []string
+}
+
+func (c *startCounter) Start(ctx context.Context, name, _, _ string) (spanCtx context.Context, finish func(string)) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.names = append(c.names, name)
+	return ctx, func(string) {}
+}
+
+func (c *startCounter) started() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return slices.Clone(c.names)
+}
+
 type operationRig struct {
 	*operationtest.Rig
 	dispatcher *command.Dispatcher
+	recorder   *startCounter
 }
 
 func newOperationRig(t *testing.T) *operationRig {
@@ -69,11 +89,12 @@ func newOperationRig(t *testing.T) *operationRig {
 	if err != nil {
 		t.Fatalf("NewRegistry: %v", err)
 	}
-	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: noSessions{}, Operations: chat}, nil)
+	recorder := &startCounter{}
+	dispatcher, err := command.NewDispatcher(registry, command.Ports{Sessions: noSessions{}, Operations: chat}, recorder)
 	if err != nil {
 		t.Fatalf("NewDispatcher: %v", err)
 	}
-	return &operationRig{Rig: rig, dispatcher: dispatcher}
+	return &operationRig{Rig: rig, dispatcher: dispatcher, recorder: recorder}
 }
 
 func ownerCaller() *command.Caller {
@@ -239,6 +260,53 @@ func TestChatOperationResumesStartedIntent(t *testing.T) {
 			t.Errorf("state = %s, want unknown", row.state)
 		}
 	})
+	t.Run("a re-run that is definitively not performed fails the intent with no recorded success", func(t *testing.T) {
+		rig := newOperationRig(t)
+		rig.dieAfterStart(t, "/stub change notes", "testchat:1")
+		rig.Stubs.FailWith(operationtest.Change, errors.New("the store refused the row"))
+		rig.Clock.Advance(61 * time.Second)
+
+		outcome := rig.run(t, "/stub change notes", "testchat:1")
+
+		if outcome.Receipt == nil || !slices.Equal(outcome.Receipt.Lines, []string{"operation_failed: operation: the call failed"}) || outcome.Receipt.Code != string(command.ErrorCodeFailed) {
+			t.Fatalf("lines %q code %q, want the coded failure", outcome.Receipt.Lines, outcome.Receipt.Code)
+		}
+		if row := intentOf(t, rig.DB, "testchat:1"); row.state != string(effect.StateFailed) {
+			t.Errorf("state = %s, want failed", row.state)
+		}
+		if again := rig.run(t, "/stub change notes", "testchat:1"); again.Receipt != nil || rig.Stubs.Handled(operationtest.Change) != 1 {
+			t.Errorf("a later redelivery = %+v handled %d, want no run and no reply", again, rig.Stubs.Handled(operationtest.Change))
+		}
+	})
+	t.Run("a re-run with an ambiguous outcome leaves the intent unknown", func(t *testing.T) {
+		rig := newOperationRig(t)
+		rig.dieAfterStart(t, "/stub idempotent notes", "testchat:1")
+		rig.Stubs.FailWith(operationtest.Idempotent, errors.New("the connection dropped"))
+		rig.Clock.Advance(61 * time.Second)
+
+		outcome := rig.run(t, "/stub idempotent notes", "testchat:1")
+
+		if outcome.Receipt == nil || outcome.Receipt.Lines[0] != "operation_failed: the earlier attempt is unresolved; see aura effects list" {
+			t.Fatalf("outcome = %+v, want the unresolved reply", outcome)
+		}
+		if row := intentOf(t, rig.DB, "testchat:1"); row.state != string(effect.StateUnknown) {
+			t.Errorf("state = %s, want unknown", row.state)
+		}
+	})
+	t.Run("a re-run that succeeds is recorded as succeeded", func(t *testing.T) {
+		rig := newOperationRig(t)
+		rig.dieAfterStart(t, "/stub idempotent notes", "testchat:1")
+		rig.Clock.Advance(61 * time.Second)
+
+		outcome := rig.run(t, "/stub idempotent notes", "testchat:1")
+
+		if outcome.Receipt == nil || outcome.Receipt.Lines[1] != "operation: "+operationtest.Idempotent || rig.Stubs.Handled(operationtest.Idempotent) != 1 {
+			t.Fatalf("outcome = %+v handled %d, want the reply of one run", outcome, rig.Stubs.Handled(operationtest.Idempotent))
+		}
+		if row := intentOf(t, rig.DB, "testchat:1"); row.state != string(effect.StateSucceeded) {
+			t.Errorf("state = %s, want succeeded", row.state)
+		}
+	})
 	t.Run("an unknown transactional intent without a receipt resolves failed and is never re-run", func(t *testing.T) {
 		rig := newOperationRig(t)
 		rig.dieAfterStart(t, "/stub change notes", "testchat:1")
@@ -300,5 +368,40 @@ func TestChatOperationConflictingRedeliveryIsAHandledOutcome(t *testing.T) {
 	}
 	if rig.Stubs.Handled(operationtest.Change) != 1 {
 		t.Errorf("the handler ran %d times, want only the first message", rig.Stubs.Handled(operationtest.Change))
+	}
+}
+
+func TestChatOperationResumeRecordsTheCommandMetricOnce(t *testing.T) {
+	tests := []struct {
+		name    string
+		prepare func(*testing.T, *operationRig)
+	}{
+		{"a re-run", func(t *testing.T, rig *operationRig) { rig.dieAfterStart(t, "/stub change notes", "testchat:1") }},
+		{"settled from the receipt", func(t *testing.T, rig *operationRig) {
+			rig.dieAfterStart(t, "/stub change notes", "testchat:1")
+			committed := &operation.Call{
+				Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: operationtest.OwnerID, Class: principal.ClassOwner, SessionID: operationtest.SessionID, Direct: true},
+				Input:          json.RawMessage(`{"subject":"notes"}`),
+				IdempotencyKey: "testchat:1",
+				RequestDigest:  operation.Digest(json.RawMessage(`{"subject":"notes"}`)),
+			}
+			if _, err := rig.Registry.Invoke(t.Context(), operationtest.Change, committed); err != nil {
+				t.Fatalf("the call that committed before the death: %v", err)
+			}
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rig := newOperationRig(t)
+			tt.prepare(t, rig)
+			rig.Clock.Advance(61 * time.Second)
+			before := len(rig.recorder.started())
+
+			rig.run(t, "/stub change notes", "testchat:1")
+
+			if started := rig.recorder.started()[before:]; !slices.Equal(started, []string{"stub"}) {
+				t.Errorf("the resumed message started the command metric %q, want it once", started)
+			}
+		})
 	}
 }

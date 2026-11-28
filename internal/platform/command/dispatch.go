@@ -95,7 +95,7 @@ func (d *Dispatcher) Replayed(ctx context.Context, caller *Caller, inv *Invocati
 }
 
 func (d *Dispatcher) start(ctx context.Context, name string, caller *Caller) (spanCtx context.Context, finish func(string)) {
-	if d.recorder == nil {
+	if recorded, _ := ctx.Value(recordedKey{}).(bool); d.recorder == nil || recorded {
 		return ctx, func(string) {}
 	}
 	return d.recorder.Start(ctx, name, caller.Channel, string(caller.Class))

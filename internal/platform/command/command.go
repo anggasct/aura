@@ -131,6 +131,7 @@ type Result struct {
 	Pending    *Invocation
 	Turn       *TurnStart
 	Record     json.RawMessage
+	Fate       OperationFate
 }
 
 type SkillPin = runtimeingress.SkillPin
@@ -201,9 +202,18 @@ type OperationRun struct {
 	Recovery       *OperationRecovery
 }
 
+type OperationFate string
+
+const (
+	FatePerformed    OperationFate = ""
+	FateNotPerformed OperationFate = "not_performed"
+	FateAmbiguous    OperationFate = "ambiguous"
+)
+
 type OperationReply struct {
 	Lines      []string
 	Code       ErrorCode
+	Fate       OperationFate
 	Record     json.RawMessage
 	InProgress bool
 }

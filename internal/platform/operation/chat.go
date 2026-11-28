@@ -305,9 +305,9 @@ func (c *Chat) invoke(ctx context.Context, pending *chatCall) command.OperationR
 		}
 		call.PreviewDigest = preview.Digest
 	}
-	result, err := c.registry.Invoke(ctx, descriptor.ID, call)
+	result, info, err := c.registry.run(ctx, pending.found, call)
 	if err != nil {
-		return failedReply(err)
+		return failedRun(err, info.notPerformed)
 	}
 	lines, err := descriptor.renderedLines(SurfaceChat, result.Data)
 	if err != nil {
@@ -378,6 +378,14 @@ func recordedReply(id string, lines []string) command.OperationReply {
 	return command.OperationReply{Lines: lines, Record: record}
 }
 
+func failedRun(err error, notPerformed bool) command.OperationReply {
+	reply := failedReply(err)
+	if !notPerformed && !reply.InProgress {
+		reply.Fate = command.FateAmbiguous
+	}
+	return reply
+}
+
 func failedReply(err error) command.OperationReply {
 	if fault.HasCode(err, effect.ErrorCodeInProgress) {
 		return command.OperationReply{InProgress: true}
@@ -386,7 +394,7 @@ func failedReply(err error) command.OperationReply {
 	if _, coded := fault.CodeOf[ErrorCode](err); !coded && fault.HasCode(err, effect.ErrorCodeUnknown) {
 		text = string(ErrorCodeFailed) + ": the earlier attempt is unresolved; see aura effects list"
 	}
-	return command.OperationReply{Lines: []string{text}, Code: commandCodeOf(err)}
+	return command.OperationReply{Lines: []string{text}, Code: commandCodeOf(err), Fate: command.FateNotPerformed}
 }
 
 func commandCodeOf(err error) command.ErrorCode {

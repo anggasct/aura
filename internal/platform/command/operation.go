@@ -24,6 +24,8 @@ type operationCall struct {
 	binding *Binding
 }
 
+type recordedKey struct{}
+
 func (d *Dispatcher) operationCallFor(caller *Caller, inv *Invocation) (*operationCall, bool) {
 	b, ok := d.registry.binding(caller.Channel)
 	if !ok {
@@ -131,6 +133,7 @@ func (d *Dispatcher) Resume(ctx context.Context, req *ResumeRequest) (result Res
 		return unknown(req.Invocation), false
 	}
 	ctx, finish := d.start(ctx, call.def.Name, req.Caller)
+	ctx = context.WithValue(ctx, recordedKey{}, true)
 	plan, _ := d.planOperation(call)
 	if plan.Refusal != nil {
 		finish(ResultOf(plan.Refusal.Code))
@@ -152,5 +155,5 @@ func (d *Dispatcher) Resume(ctx context.Context, req *ResumeRequest) (result Res
 }
 
 func (r *OperationReply) result() Result {
-	return Result{Lines: r.Lines, Diagnostic: r.Code != ErrorCodeOK, Code: r.Code, Record: r.Record}
+	return Result{Lines: r.Lines, Diagnostic: r.Code != ErrorCodeOK, Code: r.Code, Record: r.Record, Fate: r.Fate}
 }
