@@ -2,8 +2,10 @@ package memory
 
 import (
 	"context"
-	"github.com/anggasct/aura/internal/platform/fault"
 	"strings"
+	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 const (
@@ -117,63 +119,36 @@ func (s *Service) PreviewForgetByQuery(ctx context.Context, ownerID, sessionID, 
 	return preview, nil
 }
 
-func (s *Service) ForgetBySession(ctx context.Context, ownerID, sessionID string, limit int, apply bool) ([]StoredDocument, int, error) {
-	preview, err := s.PreviewForgetBySession(ctx, ownerID, sessionID, limit)
-	if err != nil {
-		return nil, 0, err
+func (s *Service) Forget(ctx context.Context, ownerID string, documents []StoredDocument) (int, error) {
+	if ctx == nil {
+		return 0, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
-	if !apply || len(preview) == 0 {
-		return preview, 0, nil
+	if len(documents) == 0 {
+		return 0, nil
 	}
-	ids := make([]string, 0, len(preview))
-	for i := range preview {
-		ids = append(ids, preview[i].ID)
+	ids := make([]string, 0, len(documents))
+	for i := range documents {
+		ids = append(ids, documents[i].ID)
 	}
-	deleted, err := s.documents.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
-	if err != nil {
-		return nil, 0, err
-	}
-	return preview, deleted, nil
+	return s.documents.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
 }
 
-func (s *Service) ForgetByID(ctx context.Context, ownerID, documentID string, apply bool) ([]StoredDocument, int, error) {
-	preview, err := s.PreviewForgetByID(ctx, ownerID, documentID)
+func (s *Service) PreviewPurge(ctx context.Context, now time.Time, limit int) ([]StoredDocument, error) {
+	if ctx == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if limit <= 0 || limit > maxPurgeLimit {
+		return nil, fault.New(ErrorCodeInvalidArgument, "purge limit is out of bounds")
+	}
+	expired, err := s.documents.ListExpiredSummaries(ctx, now.UTC(), limit)
 	if err != nil {
-		return nil, 0, err
+		return nil, err
 	}
-	if !apply {
-		return preview, 0, nil
+	preview := make([]StoredDocument, 0, len(expired))
+	for i := range expired {
+		preview = append(preview, s.redactedCopy(&expired[i]))
 	}
-	if len(preview) == 0 {
-		return preview, 0, nil
-	}
-	deleted, err := s.documents.DeleteDocumentsByIDsOwned(ctx, ownerID, []string{documentID})
-	if err != nil {
-		return nil, 0, err
-	}
-	return preview, deleted, nil
-}
-
-func (s *Service) ForgetByQuery(ctx context.Context, ownerID, sessionID, query string, limit int, apply bool) ([]StoredDocument, int, error) {
-	preview, err := s.PreviewForgetByQuery(ctx, ownerID, sessionID, query, limit)
-	if err != nil {
-		return nil, 0, err
-	}
-	if !apply {
-		return preview, 0, nil
-	}
-	if len(preview) == 0 {
-		return preview, 0, nil
-	}
-	ids := make([]string, 0, len(preview))
-	for i := range preview {
-		ids = append(ids, preview[i].ID)
-	}
-	deleted, err := s.documents.DeleteDocumentsByIDsOwned(ctx, ownerID, ids)
-	if err != nil {
-		return nil, 0, err
-	}
-	return preview, deleted, nil
+	return preview, nil
 }
 
 func (s *Service) Inspect(ctx context.Context, ownerID, sessionID, query string, limit int) ([]StoredDocument, error) {

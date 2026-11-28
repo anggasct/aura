@@ -222,6 +222,41 @@ func TestMemoryStore_WatermarkDeleteAndExpiry(t *testing.T) {
 	}
 }
 
+func TestMemoryStore_ListsExactlyTheExpiredSummariesThatThePurgeDeletes(t *testing.T) {
+	db, s := newTestSQLiteStore(t)
+	ctx := t.Context()
+	seedMemorySession(t, db, "sess-1", "owner-1")
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	seed := func(id, kind string, from int64, expires *time.Time) {
+		document := testMemoryDocument(id, "sess-1", kind)
+		document.FromSequence, document.ToSequence, document.ExpiresAt = from, from, expires
+		if _, err := s.UpsertDocument(ctx, document); err != nil {
+			t.Fatalf("seed %s: %v", id, err)
+		}
+	}
+	older, newer, future := now.Add(-2*time.Hour), now.Add(-time.Hour), now.Add(time.Hour)
+	seed("mem-newer", KindSummary, 1, &newer)
+	seed("mem-older", KindSummary, 2, &older)
+	seed("mem-future", KindSummary, 3, &future)
+	seed("mem-event", KindEventText, 4, nil)
+
+	listed, err := s.ListExpiredSummaries(ctx, now, 1)
+	if err != nil || len(listed) != 1 || listed[0].ID != "mem-older" {
+		t.Fatalf("listed = %+v, %v, want the oldest expiry first within the limit", listed, err)
+	}
+	all, err := s.ListExpiredSummaries(ctx, now, 10)
+	if err != nil || len(all) != 2 {
+		t.Fatalf("listed = %+v, %v, want both expired summaries and no event or live summary", all, err)
+	}
+	if _, err := s.ListExpiredSummaries(ctx, now, 0); err == nil {
+		t.Error("a zero limit was accepted")
+	}
+	pruned, err := s.DeleteExpiredSummaries(ctx, now, 10)
+	if err != nil || pruned != len(all) {
+		t.Fatalf("pruned = %d, %v, want the %d documents that were listed", pruned, err, len(all))
+	}
+}
+
 func TestMemoryStore_RejectsInvalidRows(t *testing.T) {
 	_, s := newTestSQLiteStore(t)
 	ctx := t.Context()

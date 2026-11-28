@@ -33,15 +33,19 @@ import (
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
-func kbCommand(gf *GlobalFlags) *cobra.Command {
+func operationGroupCommand(gf *GlobalFlags, group string) *cobra.Command {
 	root := &cobra.Command{Use: "aura", SilenceUsage: true, SilenceErrors: true}
 	root.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return NewUsageError(err) })
 	mountOperationCommands(root, gf)
-	cmd, _, _ := root.Find([]string{"kb"})
+	cmd, _, _ := root.Find([]string{group})
 	root.RemoveCommand(cmd)
 	cmd.SilenceUsage, cmd.SilenceErrors = true, true
 	cmd.SetFlagErrorFunc(func(_ *cobra.Command, err error) error { return NewUsageError(err) })
 	return cmd
+}
+
+func kbCommand(gf *GlobalFlags) *cobra.Command {
+	return operationGroupCommand(gf, "kb")
 }
 
 func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {

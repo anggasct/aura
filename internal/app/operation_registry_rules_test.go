@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strconv"
 	"sync"
 	"testing"
@@ -11,6 +12,9 @@ import (
 	"github.com/anggasct/aura/internal/modules/knowledge"
 	"github.com/anggasct/aura/internal/modules/knowledge/knowledgetest"
 	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/memory/memorytest"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/profile/profiletest"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/operation"
@@ -84,7 +88,7 @@ type registryRig struct {
 
 func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.ApprovalPrompt) (bool, error)) *registryRig {
 	t.Helper()
-	db := operationtest.OpenDatabase(t, schedule.Schema(), knowledge.Schema())
+	db := operationtest.OpenDatabase(t, schedule.Schema(), knowledge.Schema(), memory.Schema(), profile.Schema())
 	kb := knowledgetest.NewRig(t, db)
 	seedKnowledgeSource := func(ctx context.Context) error {
 		prepared, err := kb.Service.PrepareURL(ctx, knowledgetest.Collection, knowledgetest.PageURL)
@@ -100,6 +104,29 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 	knowledgeOperations, err := knowledge.NewOperations(&knowledge.OperationDeps{Service: kb.Service})
 	if err != nil {
 		t.Fatalf("knowledge.NewOperations: %v", err)
+	}
+	mem := memorytest.NewRig(t, db)
+	seedMemory := mem.Seed
+	if err := seedMemory(t.Context()); err != nil {
+		t.Fatalf("seed the memory documents: %v", err)
+	}
+	memoryOperations, err := memory.NewOperations(&memory.OperationDeps{Service: mem.Service})
+	if err != nil {
+		t.Fatalf("memory.NewOperations: %v", err)
+	}
+	prof := profiletest.NewRig(t, db)
+	seedProfile := func(ctx context.Context) error {
+		if err := prof.SeedVerified(ctx); err != nil {
+			return err
+		}
+		return prof.SeedCandidate(ctx)
+	}
+	if err := seedProfile(t.Context()); err != nil {
+		t.Fatalf("seed the profile facts: %v", err)
+	}
+	profileOperations, err := profile.NewOperations(&profile.OperationDeps{Service: prof.Service})
+	if err != nil {
+		t.Fatalf("profile.NewOperations: %v", err)
 	}
 	store, err := schedule.NewSQLiteStore(db)
 	if err != nil {
@@ -123,22 +150,28 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 		DB:       db,
 		Catalogs: operationCatalogs(),
 		Bindings: func(*operationtest.Stubs) []operation.Binding {
-			bindings := append(operations.Bindings(), knowledgeOperations.Bindings()...)
+			bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings())
+			reseeds := map[string]func(context.Context) error{
+				"kb.remove":      seedKnowledgeSource,
+				"memory.forget":  seedMemory,
+				"memory.purge":   seedMemory,
+				"profile.delete": seedProfile,
+			}
 			for i := range bindings {
 				id, handle, preview := bindings[i].ID, bindings[i].Handle, bindings[i].Preview
-				reseed := id == "kb.remove"
+				reseed := reseeds[id]
 				bindings[i].Handle = func(ctx context.Context, call *operation.Call) (operation.Result, error) {
 					handlers.count(id)
-					if reseed {
-						if err := seedKnowledgeSource(ctx); err != nil {
+					if reseed != nil {
+						if err := reseed(ctx); err != nil {
 							return operation.Result{}, err
 						}
 					}
 					return handle(ctx, call)
 				}
-				if preview != nil && reseed {
+				if preview != nil && reseed != nil {
 					bindings[i].Preview = func(ctx context.Context, call *operation.Call) (operation.Preview, error) {
-						if err := seedKnowledgeSource(ctx); err != nil {
+						if err := reseed(ctx); err != nil {
 							return operation.Preview{}, err
 						}
 						return preview(ctx, call)
@@ -199,7 +232,20 @@ var registrySampleInput = map[string]string{
 	"aura_kb_remove":    `{"collection":"support","source":"https://docs.example.test/refunds"}`,
 	"aura_kb_show":      `{"collection":"support"}`,
 	"aura_kb_unembed":   `{"collection":"support"}`,
+
+	"aura_memory_forget":  `{"id":"mem-a1"}`,
+	"aura_memory_inspect": `{}`,
+	"aura_memory_purge":   `{}`,
+
+	"aura_profile_delete": `{"id":"` + profileSampleFactID + `"}`,
+	"aura_profile_list":   `{}`,
+	"aura_profile_reject": `{"id":"` + profileSampleFactID + `"}`,
+	"aura_profile_review": `{}`,
+	"aura_profile_set":    `{"category":"tool","key":"shell","value":"zsh"}`,
+	"aura_profile_show":   `{"id":"` + profileSampleFactID + `"}`,
 }
+
+var profileSampleFactID = profiletest.VerifiedFactID()
 
 func (r *registryRig) sampleInput(t *testing.T, name string) json.RawMessage {
 	t.Helper()

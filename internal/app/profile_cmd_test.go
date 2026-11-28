@@ -9,7 +9,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/profile"
-	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
@@ -47,8 +46,7 @@ func writeFileForTest(path, content string) error {
 func runProfileCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &GlobalFlags{ConfigPath: cfg}
-	cmd := profile.Commands(profileOpener(gf))[0]
+	cmd := operationGroupCommand(&GlobalFlags{ConfigPath: cfg}, "profile")
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -114,12 +112,13 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 		t.Errorf("reject = %q, %v", out, err)
 	}
 	out, err = runProfileCommand(t, cfg, "delete", id)
-	if err == nil {
-		t.Errorf("delete guard = %q, want usage error", out)
-	} else if !command.IsUsageError(err) {
-		t.Errorf("delete guard err = %v (%q), want usage error", err, out)
+	if err != nil || !strings.Contains(out, "dry-run: would delete") || !strings.Contains(out, id) {
+		t.Errorf("delete without --apply = %q, %v, want a preview", out, err)
 	}
-	out, err = runProfileCommand(t, cfg, "delete", id, "--force")
+	if shown, err := runProfileCommand(t, cfg, "show", id); err != nil || !strings.Contains(shown, "status: active") {
+		t.Errorf("the preview changed the fact: %q, %v", shown, err)
+	}
+	out, err = runProfileCommand(t, cfg, "delete", id, "--apply")
 	if err != nil || strings.TrimSpace(out) != "deleted: "+id {
 		t.Errorf("delete = %q, %v", out, err)
 	}

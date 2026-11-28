@@ -9,7 +9,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
-	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
@@ -45,8 +45,7 @@ children:
 func runMemoryCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &GlobalFlags{ConfigPath: cfg}
-	cmd := memory.Commands(memoryOpener(gf))[0]
+	cmd := operationGroupCommand(&GlobalFlags{ConfigPath: cfg}, "memory")
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(&bytes.Buffer{})
@@ -231,11 +230,11 @@ func TestMemoryCLIPurgeBounded(t *testing.T) {
 	seedMemorySummary(t, cfg, "mem-s1", principal.OwnerID, "sess-a", past, 1)
 	seedMemorySummary(t, cfg, "mem-s2", principal.OwnerID, "sess-a", past, 2)
 
-	out, err := runMemoryCommand(t, cfg, "purge", "--limit", "1")
+	out, err := runMemoryCommand(t, cfg, "purge", "--limit", "1", "--apply")
 	if err != nil || strings.TrimSpace(out) != "purged: 1" {
 		t.Fatalf("purge 1 = %q, %v", out, err)
 	}
-	out, err = runMemoryCommand(t, cfg, "purge", "--limit", "10")
+	out, err = runMemoryCommand(t, cfg, "purge", "--limit", "10", "--apply")
 	if err != nil || strings.TrimSpace(out) != "purged: 1" {
 		t.Fatalf("purge rest = %q, %v", out, err)
 	}
@@ -244,11 +243,11 @@ func TestMemoryCLIPurgeBounded(t *testing.T) {
 func TestMemoryCLIForgetRequiresScope(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	_, err := runMemoryCommand(t, cfg, "forget", "--apply")
-	if !command.IsUsageError(err) {
+	if !clikit.IsUsageError(err) {
 		t.Errorf("scope-less forget = %v, want usage error", err)
 	}
 	_, err = runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--id", "mem-a1")
-	if !command.IsUsageError(err) {
+	if !clikit.IsUsageError(err) {
 		t.Errorf("dual-scope forget = %v, want usage error", err)
 	}
 }

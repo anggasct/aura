@@ -87,6 +87,7 @@ type DocumentStore interface {
 	Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error)
 	DeleteSessionDocuments(ctx context.Context, sessionID string) error
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
+	ListExpiredSummaries(ctx context.Context, now time.Time, limit int) ([]StoredDocument, error)
 	ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error)
 	ListSessionDocumentsByKind(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error)
 	ListSessionDocumentsByKindInRange(ctx context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]StoredDocument, error)

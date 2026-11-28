@@ -57,7 +57,7 @@ func TestOperationDescriptionOfTheRealRegistryFitsTheBound(t *testing.T) {
 	}
 }
 
-var describedGroups = []string{"cron", "kb"}
+var describedGroups = []string{"cron", "kb", "memory", "profile"}
 
 func groupTools(t *testing.T, rig *registryRig, group string) []toolbroker.ToolRegistration {
 	t.Helper()
@@ -100,8 +100,14 @@ func TestOperationDescriptionMarkersMatchTheBrokerForTheRealRegistry(t *testing.
 					rig := newRegistryRig(t, nil)
 					markers := groupMarkers(t, describeRealRegistry(t, rig, kind, tracked), group)
 					registrations := groupTools(t, rig, group)
-					if len(markers) != len(registrations) {
-						t.Fatalf("the description lists %d %s verbs, the registry holds %d tools", len(markers), group, len(registrations))
+					callable := 0
+					for verb := range markers {
+						if !strings.HasSuffix(verb, " (owner)") && !strings.HasSuffix(verb, " (host)") {
+							callable++
+						}
+					}
+					if callable != len(registrations) {
+						t.Fatalf("the description lists %d callable %s verbs, the registry holds %d tools", callable, group, len(registrations))
 					}
 					for i := range registrations {
 						name := registrations[i].Definition.Name

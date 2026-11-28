@@ -305,6 +305,35 @@ func (s *SQLiteStore) DeleteExpiredSummaries(ctx context.Context, now time.Time,
 	return int(affected), nil
 }
 
+func (s *SQLiteStore) ListExpiredSummaries(ctx context.Context, now time.Time, limit int) ([]StoredDocument, error) {
+	if s == nil || s.db == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
+	}
+	if limit <= 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "list limit must be positive")
+	}
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
+		`SELECT `+selectMemoryDocumentColumns+` FROM memory_document d
+		WHERE d.kind = ? AND d.expires_at IS NOT NULL AND d.expires_at <= ?
+		ORDER BY d.expires_at, d.id LIMIT ?`, KindSummary, sqlite.FormatTime(now.UTC()), limit)
+	if err != nil {
+		return nil, sqlite.Classify(fmt.Errorf("list expired summaries: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var documents []StoredDocument
+	for rows.Next() {
+		document, err := scanMemoryDocument(rows)
+		if err != nil {
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, sqlite.Classify(fmt.Errorf("list expired summaries: %w", err))
+	}
+	return documents, nil
+}
+
 func (s *SQLiteStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error) {
 	if s == nil || s.db == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")

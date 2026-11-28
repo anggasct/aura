@@ -221,6 +221,25 @@ func (s *fakeDocumentStore) DeleteDocumentsByIDsOwned(_ context.Context, ownerID
 	return deleted, nil
 }
 
+func (s *fakeDocumentStore) ListExpiredSummaries(_ context.Context, now time.Time, limit int) ([]StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var expired []StoredDocument
+	for id := range s.records {
+		record := s.records[id]
+		if record.Kind == KindSummary && record.ExpiresAt != nil && record.ExpiresAt.Before(now) {
+			expired = append(expired, record)
+		}
+	}
+	slices.SortFunc(expired, func(a, b StoredDocument) int {
+		if byExpiry := a.ExpiresAt.Compare(*b.ExpiresAt); byExpiry != 0 {
+			return byExpiry
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return expired[:min(len(expired), limit)], nil
+}
+
 func (s *fakeDocumentStore) DeleteExpiredSummaries(_ context.Context, now time.Time, limit int) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

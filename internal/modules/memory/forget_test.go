@@ -10,6 +10,41 @@ import (
 	"time"
 )
 
+func settleForget(ctx context.Context, service *Service, ownerID string, preview []StoredDocument, apply bool) ([]StoredDocument, int, error) {
+	if !apply {
+		return preview, 0, nil
+	}
+	deleted, err := service.Forget(ctx, ownerID, preview)
+	if err != nil {
+		return nil, 0, err
+	}
+	return preview, deleted, nil
+}
+
+func forgetBySession(ctx context.Context, service *Service, ownerID, sessionID string, limit int, apply bool) ([]StoredDocument, int, error) {
+	preview, err := service.PreviewForgetBySession(ctx, ownerID, sessionID, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	return settleForget(ctx, service, ownerID, preview, apply)
+}
+
+func forgetByID(ctx context.Context, service *Service, ownerID, documentID string, apply bool) ([]StoredDocument, int, error) {
+	preview, err := service.PreviewForgetByID(ctx, ownerID, documentID)
+	if err != nil {
+		return nil, 0, err
+	}
+	return settleForget(ctx, service, ownerID, preview, apply)
+}
+
+func forgetByQuery(ctx context.Context, service *Service, ownerID, sessionID, query string, limit int, apply bool) ([]StoredDocument, int, error) {
+	preview, err := service.PreviewForgetByQuery(ctx, ownerID, sessionID, query, limit)
+	if err != nil {
+		return nil, 0, err
+	}
+	return settleForget(ctx, service, ownerID, preview, apply)
+}
+
 func seedStoredDocument(t *testing.T, s *Service, id, owner, session, content string, seq int64) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -30,7 +65,7 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	seedStoredDocument(t, service, "mem-b1", "owner-1", "sess-b", "beta recording one", 1)
 	seedStoredDocument(t, service, "mem-c1", "owner-2", "sess-c", "alpha foreign recording", 1)
 
-	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, false)
+	preview, deleted, err := forgetBySession(t.Context(), service, "owner-1", "sess-a", 10, false)
 	if err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
@@ -41,7 +76,7 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	if err != nil || len(afterDry) != 2 {
 		t.Fatalf("dry-run wrote: %d, %v", len(afterDry), err)
 	}
-	preview, deleted, err = service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, true)
+	preview, deleted, err = forgetBySession(t.Context(), service, "owner-1", "sess-a", 10, true)
 	if err != nil || deleted != 2 || len(preview) != 2 {
 		t.Fatalf("apply = %d, %d, %v; want 2, 2", deleted, len(preview), err)
 	}
@@ -64,7 +99,7 @@ func TestForgetBySessionApplyMatchesPreviewedSet(t *testing.T) {
 	for seq := int64(1); seq <= 12; seq++ {
 		seedStoredDocument(t, service, fmt.Sprintf("mem-a%02d", seq), "owner-1", "sess-a", "alpha recording", seq)
 	}
-	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, true)
+	preview, deleted, err := forgetBySession(t.Context(), service, "owner-1", "sess-a", 10, true)
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -93,11 +128,11 @@ func TestForgetByIDAndQueryScoped(t *testing.T) {
 	seedStoredDocument(t, service, "mem-a1", "owner-1", "sess-a", "alpha recording one", 1)
 	seedStoredDocument(t, service, "mem-a2", "owner-1", "sess-a", "alpha recording two", 2)
 
-	preview, deleted, err := service.ForgetByID(t.Context(), "owner-1", "mem-a1", false)
+	preview, deleted, err := forgetByID(t.Context(), service, "owner-1", "mem-a1", false)
 	if err != nil || deleted != 0 || len(preview) != 1 {
 		t.Fatalf("id dry-run = %d, %d, %v", deleted, len(preview), err)
 	}
-	_, deleted, err = service.ForgetByID(t.Context(), "owner-1", "mem-a1", true)
+	_, deleted, err = forgetByID(t.Context(), service, "owner-1", "mem-a1", true)
 	if err != nil || deleted != 1 {
 		t.Fatalf("id apply = %d, %v", deleted, err)
 	}
@@ -105,11 +140,11 @@ func TestForgetByIDAndQueryScoped(t *testing.T) {
 	if err != nil || len(remaining) != 1 || remaining[0].ID != "mem-a2" {
 		t.Errorf("remaining = %+v, %v; want mem-a2", remaining, err)
 	}
-	preview, deleted, err = service.ForgetByQuery(t.Context(), "owner-1", "sess-a", "alpha", 10, false)
+	preview, deleted, err = forgetByQuery(t.Context(), service, "owner-1", "sess-a", "alpha", 10, false)
 	if err != nil || deleted != 0 || len(preview) != 1 {
 		t.Fatalf("query dry-run = %d, %d, %v", deleted, len(preview), err)
 	}
-	_, deleted, err = service.ForgetByQuery(t.Context(), "owner-1", "sess-a", "alpha", 10, true)
+	_, deleted, err = forgetByQuery(t.Context(), service, "owner-1", "sess-a", "alpha", 10, true)
 	if err != nil || deleted != 1 {
 		t.Fatalf("query apply = %d, %v", deleted, err)
 	}
@@ -124,17 +159,17 @@ func TestForgetCrossOwnerRejectedWithZeroWrites(t *testing.T) {
 	seedStoredDocument(t, service, "mem-a1", "owner-1", "sess-a", "alpha recording one", 1)
 	seedStoredDocument(t, service, "mem-c1", "owner-2", "sess-c", "alpha foreign recording", 1)
 
-	if _, _, err := service.ForgetBySession(t.Context(), "owner-2", "sess-a", 10, false); err == nil {
+	if _, _, err := forgetBySession(t.Context(), service, "owner-2", "sess-a", 10, false); err == nil {
 		t.Error("cross-owner session preview accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("session code = %v, %v; want forbidden", code, ok)
 	}
-	if _, _, err := service.ForgetBySession(t.Context(), "owner-2", "sess-a", 10, true); err == nil {
+	if _, _, err := forgetBySession(t.Context(), service, "owner-2", "sess-a", 10, true); err == nil {
 		t.Error("cross-owner session apply accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("session apply code = %v, %v", code, ok)
 	}
-	if _, _, err := service.ForgetByID(t.Context(), "owner-2", "mem-a1", true); err == nil {
+	if _, _, err := forgetByID(t.Context(), service, "owner-2", "mem-a1", true); err == nil {
 		t.Error("cross-owner id accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("id code = %v, %v", code, ok)
@@ -149,15 +184,15 @@ func TestForgetNonexistentIsEmptyWithoutError(t *testing.T) {
 	service := testService()
 	seedStoredDocument(t, service, "mem-a1", "owner-1", "sess-a", "alpha recording one", 1)
 
-	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-missing", 10, true)
+	preview, deleted, err := forgetBySession(t.Context(), service, "owner-1", "sess-missing", 10, true)
 	if err != nil || deleted != 0 || len(preview) != 0 {
 		t.Errorf("missing session = %d, %d, %v; want empty", deleted, len(preview), err)
 	}
-	preview, deleted, err = service.ForgetByID(t.Context(), "owner-1", "mem-missing", true)
+	preview, deleted, err = forgetByID(t.Context(), service, "owner-1", "mem-missing", true)
 	if err != nil || deleted != 0 || len(preview) != 0 {
 		t.Errorf("missing id = %d, %d, %v", deleted, len(preview), err)
 	}
-	preview, deleted, err = service.ForgetByQuery(t.Context(), "owner-1", "sess-a", "zebra", 10, true)
+	preview, deleted, err = forgetByQuery(t.Context(), service, "owner-1", "sess-a", "zebra", 10, true)
 	if err != nil || deleted != 0 || len(preview) != 0 {
 		t.Errorf("missing query = %d, %d, %v", deleted, len(preview), err)
 	}

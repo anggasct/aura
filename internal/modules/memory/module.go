@@ -25,7 +25,10 @@ type Deps struct {
 	Logger      *slog.Logger
 }
 
-var _ operation.BehaviorProvider = (*Module)(nil)
+var (
+	_ operation.BehaviorProvider = (*Module)(nil)
+	_ operation.Provider         = (*Module)(nil)
+)
 
 type Module struct {
 	cfg          Config
@@ -33,6 +36,7 @@ type Module struct {
 	provider     *Provider
 	summaryModel *SummaryModel
 	summarizer   Summarizer
+	operations   *Operations
 	logger       *slog.Logger
 }
 
@@ -73,12 +77,17 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
+	operations, err := NewOperations(&OperationDeps{Service: service, Logger: deps.Logger})
+	if err != nil {
+		return nil, err
+	}
 	return &Module{
 		cfg:          deps.Config,
 		service:      service,
 		provider:     provider,
 		summaryModel: summaryModel,
 		summarizer:   summarizer,
+		operations:   operations,
 		logger:       deps.Logger,
 	}, nil
 }
@@ -88,6 +97,13 @@ func (m *Module) Behaviors() []operation.Behavior {
 		return nil
 	}
 	return []operation.Behavior{{ID: "memory", Group: "memory", Summary: "past conversations are recalled into your context when they match"}}
+}
+
+func (m *Module) Bindings() []operation.Binding {
+	if m == nil || m.operations == nil {
+		return nil
+	}
+	return m.operations.Bindings()
 }
 
 func (m *Module) Service() *Service {

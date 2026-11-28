@@ -1576,7 +1576,7 @@ func (b *build) buildOperations() error {
 	if err != nil {
 		return err
 	}
-	registry, err := operation.NewRegistry(operationCatalogs(), b.bindings, &operation.Deps{
+	registry, err := operation.NewRegistry(enabledOperationCatalogs(b.cfg), b.bindings, &operation.Deps{
 		Files:     b.operationFiles(),
 		DB:        b.db,
 		Effects:   b.broker.Effects(),
