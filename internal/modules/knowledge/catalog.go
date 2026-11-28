@@ -73,11 +73,17 @@ func Catalog() operation.Catalog {
 				ID: operationShow, Summary: "Show the sources of a collection", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
 				Description: "Source labels and addresses come from documents and pages, not from the owner.",
-				Params:      []operation.Param{collectionParam()}, Output: textOutput(),
+				Params:      []operation.Param{collectionParam()},
+				Output: operation.Output{Kind: operation.OutputTable, Fields: []operation.OutputField{
+					{Name: "uri"}, {Name: "label"}, {Name: "kind"}, {Name: "chunks"}, {Name: "digest"}, {Name: "ingested"},
+				}},
 			},
 			{
 				ID: operationCheck, Summary: "Verify the knowledge index against its content", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskRead, Commit: operation.CommitNone, Needs: needs, Output: textOutput(),
+				Risk: operation.RiskRead, Commit: operation.CommitNone, Needs: needs,
+				Output: operation.Output{Kind: operation.OutputRecord, Fields: []operation.OutputField{
+					{Name: "collections"}, {Name: "sources"}, {Name: "chunks"}, {Name: "indexed_chunks"}, {Name: "status"},
+				}},
 			},
 			{
 				ID: operationAdd, Summary: "Ingest a document into a collection", Exposure: operation.ExposureAgent,

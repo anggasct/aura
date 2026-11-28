@@ -142,20 +142,16 @@ func (o *Operations) show(ctx context.Context, call *operation.Call) (operation.
 		Digest   string `json:"digest"`
 		Ingested string `json:"ingested"`
 	}
-	lines := []string{fmt.Sprintf("collection: %s sources=%d chunks=%d", detail.ID, len(detail.Sources), detail.Chunks)}
 	sources := make([]listed, 0, len(detail.Sources))
 	for i := range detail.Sources {
 		source := &detail.Sources[i]
-		entry := listed{
+		sources = append(sources, listed{
 			URI: source.URI, Label: source.Label, Kind: source.Kind, Chunks: source.Chunks,
 			Digest:   source.ContentSHA256[:min(digestPrefixLength, len(source.ContentSHA256))],
 			Ingested: source.IngestedAt.UTC().Format(time.RFC3339),
-		}
-		sources = append(sources, entry)
-		lines = append(lines, fmt.Sprintf("source: %s label=%s kind=%s chunks=%d digest=%s ingested=%s",
-			entry.URI, entry.Label, entry.Kind, entry.Chunks, entry.Digest, entry.Ingested))
+		})
 	}
-	return linesResult(lines, map[string]any{"collection": detail.ID, "chunks": detail.Chunks, "sources": sources})
+	return operation.JSONResult(map[string]any{"collection": detail.ID, "chunks": detail.Chunks, "rows": sources})
 }
 
 func (o *Operations) check(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -171,12 +167,9 @@ func (o *Operations) check(ctx context.Context, call *operation.Call) (operation
 		}
 		return operation.Result{}, moduleFailure(err)
 	}
-	lines := []string{
-		fmt.Sprintf("collections=%d sources=%d chunks=%d indexed=%d", report.Collections, report.Sources, report.Chunks, report.IndexedChunks),
-		"ok",
-	}
-	return linesResult(lines, map[string]any{
-		"collections": report.Collections, "sources": report.Sources, "chunks": report.Chunks, "indexed_chunks": report.IndexedChunks,
+	return operation.JSONResult(map[string]any{
+		"collections": report.Collections, "sources": report.Sources, "chunks": report.Chunks,
+		"indexed_chunks": report.IndexedChunks, "status": "ok",
 	})
 }
 
