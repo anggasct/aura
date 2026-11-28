@@ -2,11 +2,14 @@ package app
 
 import (
 	"database/sql"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
+	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/store"
@@ -120,5 +123,47 @@ func TestErasureLinesPrintRunSessionsAfterSessions(t *testing.T) {
 	lines := report.Lines()
 	if len(lines) < 2 || lines[0] != "sessions: 2" || lines[1] != "run_sessions: 5" {
 		t.Fatalf("erasure lines = %v, want sessions then run_sessions", lines)
+	}
+}
+
+func TestRetentionSweepPrunesOldOperationReceipts(t *testing.T) {
+	cfg := writePrincipalCLIConfig(t)
+	db := openAccessDB(t, cfg)
+	loaded, err := appconfig.Load(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 11, 2, 9, 0, 0, 0, time.UTC)
+	for key, age := range map[string]time.Duration{
+		"old":     operation.ReceiptRetention + time.Hour,
+		"recent":  operation.ReceiptRetention - time.Hour,
+		"current": time.Minute,
+	} {
+		if _, err := db.ExecContext(t.Context(),
+			`INSERT INTO operation_receipt (idempotency_key, operation_id, request_digest, surface, result_json, created_at) VALUES (?, 'cron.pause', 'digest', 'agent', '{}', ?)`,
+			key, effect.FormatFixedWidthTime(now.Add(-age))); err != nil {
+			t.Fatalf("seed the receipt %s: %v", key, err)
+		}
+	}
+
+	if _, err := sweepRetention(t.Context(), loaded.Config, db, "", now); err != nil {
+		t.Fatalf("sweepRetention: %v", err)
+	}
+
+	var kept []string
+	rows, err := db.QueryContext(t.Context(), `SELECT idempotency_key FROM operation_receipt ORDER BY idempotency_key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			t.Fatal(err)
+		}
+		kept = append(kept, key)
+	}
+	if want := []string{"current", "recent"}; !slices.Equal(kept, want) {
+		t.Fatalf("receipts after the sweep = %v, want %v", kept, want)
 	}
 }
