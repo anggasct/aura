@@ -15,11 +15,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
-const (
-	listedValueRunes = 40
-	shownValueRunes  = 200
-)
-
 type OperationDeps struct {
 	Service *Service
 	Now     func() time.Time
@@ -80,14 +75,6 @@ func textResult(lines ...string) (operation.Result, error) {
 	return operation.JSONResult(map[string]any{"text": strings.Join(lines, "\n")})
 }
 
-func truncateText(text string, limit int) string {
-	runes := []rune(text)
-	if len(runes) <= limit {
-		return text
-	}
-	return string(runes[:limit]) + "..."
-}
-
 func verifiedMark(verified bool) string {
 	if verified {
 		return " verified"
@@ -95,24 +82,30 @@ func verifiedMark(verified bool) string {
 	return ""
 }
 
-func conflictMark(conflictsWith string) string {
-	if conflictsWith != "" {
-		return " conflicts-with=" + conflictsWith
-	}
-	return ""
-}
-
-func factLine(fact *Fact) string {
-	return fmt.Sprintf("%s %s/%s=%s status=%s conf=%.2f origin=%s%s",
-		fact.ID, fact.Category, fact.Key, truncateText(fact.Value, listedValueRunes), fact.Status,
-		fact.Confidence, fact.Origin, verifiedMark(fact.OwnerVerified))
-}
-
 func factDigest(fact *Fact) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		fact.ID, fact.Status, fact.ValueDigest, fact.Origin, strconv.FormatBool(fact.OwnerVerified),
 	}, "|")))
 	return hex.EncodeToString(sum[:])
+}
+
+type factRow struct {
+	ID            string  `json:"id"`
+	Category      string  `json:"category"`
+	Key           string  `json:"key"`
+	Value         string  `json:"value"`
+	Status        string  `json:"status"`
+	Confidence    float64 `json:"confidence"`
+	Origin        string  `json:"origin"`
+	Verified      bool    `json:"verified"`
+	ConflictsWith string  `json:"conflicts_with,omitempty"`
+}
+
+func rowOf(fact *Fact) factRow {
+	return factRow{
+		ID: fact.ID, Category: fact.Category, Key: fact.Key, Value: fact.Value, Status: fact.Status,
+		Confidence: fact.Confidence, Origin: fact.Origin, Verified: fact.OwnerVerified, ConflictsWith: fact.ConflictsWithID,
+	}
 }
 
 type listInput struct {
@@ -129,18 +122,22 @@ func (o *Operations) list(ctx context.Context, call *operation.Call) (operation.
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	if len(facts) == 0 {
-		return textResult("no facts")
-	}
-	lines := make([]string, 0, len(facts))
+	rows := make([]factRow, 0, len(facts))
 	for i := range facts {
-		lines = append(lines, factLine(&facts[i]))
+		rows = append(rows, rowOf(&facts[i]))
 	}
-	return textResult(lines...)
+	return operation.JSONResult(map[string]any{"rows": rows})
 }
 
 type factInput struct {
 	ID string `json:"id"`
+}
+
+type shownFact struct {
+	factRow
+	Created   string   `json:"created"`
+	ExpiresAt string   `json:"expires_at,omitempty"`
+	Evidence  []string `json:"evidence"`
 }
 
 func (o *Operations) show(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -156,27 +153,34 @@ func (o *Operations) show(ctx context.Context, call *operation.Call) (operation.
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	lines := []string{
-		"id: " + fact.ID,
-		"category: " + fact.Category,
-		"key: " + fact.Key,
-		"value: " + truncateText(fact.Value, shownValueRunes),
-		fmt.Sprintf("status: %s origin: %s%s conf: %.2f", fact.Status, fact.Origin, verifiedMark(fact.OwnerVerified), fact.Confidence),
-		"created: " + fact.CreatedAt.Format(time.RFC3339),
-	}
-	if fact.ConflictsWithID != "" {
-		lines = append(lines, "conflicts-with: "+fact.ConflictsWithID)
-	}
+	shown := shownFact{factRow: rowOf(&fact), Created: fact.CreatedAt.Format(time.RFC3339), Evidence: make([]string, 0, len(evidence))}
 	if fact.ExpiresAt != nil {
-		lines = append(lines, "expires-at: "+fact.ExpiresAt.Format(time.RFC3339))
+		shown.ExpiresAt = fact.ExpiresAt.Format(time.RFC3339)
 	}
-	lines = append(lines, fmt.Sprintf("evidence: %d", len(evidence)))
 	for i := range evidence {
 		item := &evidence[i]
-		lines = append(lines, fmt.Sprintf("  - event=%s model=%s/%s prompt=%s",
+		shown.Evidence = append(shown.Evidence, fmt.Sprintf("event=%s model=%s/%s prompt=%s",
 			item.SourceEventID, item.Provider, item.Model, item.PromptVersion))
 	}
-	return textResult(lines...)
+	return operation.JSONResult(shown)
+}
+
+type reviewRow struct {
+	State         string  `json:"state"`
+	ID            string  `json:"id"`
+	Category      string  `json:"category"`
+	Key           string  `json:"key"`
+	Value         string  `json:"value"`
+	Origin        string  `json:"origin"`
+	Confidence    float64 `json:"confidence"`
+	ConflictsWith string  `json:"conflicts_with,omitempty"`
+}
+
+func reviewRowOf(state string, fact *Fact) reviewRow {
+	return reviewRow{
+		State: state, ID: fact.ID, Category: fact.Category, Key: fact.Key, Value: fact.Value,
+		Origin: fact.Origin, Confidence: fact.Confidence, ConflictsWith: fact.ConflictsWithID,
+	}
 }
 
 func (o *Operations) review(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -192,30 +196,25 @@ func (o *Operations) review(ctx context.Context, call *operation.Call) (operatio
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	var conflicted, plain, unverified []string
+	var conflicted, plain, unverified []reviewRow
 	for i := range candidates {
 		fact := &candidates[i]
-		line := fmt.Sprintf("%s %s/%s=%s conf=%.2f%s",
-			fact.ID, fact.Category, fact.Key, truncateText(fact.Value, listedValueRunes), fact.Confidence, conflictMark(fact.ConflictsWithID))
 		if fact.ConflictsWithID != "" {
-			conflicted = append(conflicted, line)
+			conflicted = append(conflicted, reviewRowOf("conflict", fact))
 		} else {
-			plain = append(plain, line)
+			plain = append(plain, reviewRowOf("candidate", fact))
 		}
 	}
 	for i := range actives {
-		fact := &actives[i]
-		if fact.OwnerVerified {
-			continue
+		if !actives[i].OwnerVerified {
+			unverified = append(unverified, reviewRowOf("unverified", &actives[i]))
 		}
-		unverified = append(unverified, fmt.Sprintf("%s %s/%s=%s conf=%.2f unverified%s",
-			fact.ID, fact.Category, fact.Key, truncateText(fact.Value, listedValueRunes), fact.Confidence, conflictMark(fact.ConflictsWithID)))
 	}
-	if len(conflicted)+len(plain)+len(unverified) == 0 {
-		return textResult("no candidates")
+	rows := append(append(conflicted, plain...), unverified...)
+	if rows == nil {
+		rows = []reviewRow{}
 	}
-	lines := append(append(conflicted, plain...), unverified...)
-	return textResult(lines...)
+	return operation.JSONResult(map[string]any{"rows": rows})
 }
 
 func (o *Operations) accept(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -228,7 +227,9 @@ func (o *Operations) accept(ctx context.Context, call *operation.Call) (operatio
 		if err != nil {
 			return operation.Result{}, err
 		}
-		return textResult("accepted: " + fact.ID)
+		return operation.JSONResult(map[string]any{
+			"accepted": fact.ID, "category": fact.Category, "key": fact.Key, "value": fact.Value, "origin": fact.Origin,
+		})
 	})
 	return result, moduleFailure(err)
 }
@@ -313,14 +314,31 @@ func (o *Operations) proposeUnverified(ctx context.Context, request *setRequest)
 	if err != nil {
 		return operation.Result{}, err
 	}
-	return textResult("proposed: " + fact.ID + " (unverified, waits for the owner's review)")
+	return textResult(proposalOutcome(&fact))
+}
+
+func proposalOutcome(fact *Fact) string {
+	switch {
+	case fact.Status == StatusActive && fact.OwnerVerified:
+		return "stored: " + fact.ID + " (owner-verified, unchanged)"
+	case fact.Status == StatusActive:
+		return "stored: " + fact.ID + " (active, not verified by the owner)"
+	}
+	return "proposed: " + fact.ID + " (unverified, waits for the owner's review)"
 }
 
 func cardLines(fact *Fact) []string {
 	return []string{
 		"would delete 1 profile fact",
-		fmt.Sprintf("%s %s/%s = %s", fact.ID, fact.Category, turn.QuoteUntrustedName(truncateText(fact.Key, listedValueRunes)), turn.QuoteUntrustedName(truncateText(fact.Value, listedValueRunes))),
+		fmt.Sprintf("%s %s/%s = %s origin=%s%s", fact.ID, fact.Category, turn.QuoteUntrustedName(fact.Key), turn.QuoteUntrustedName(fact.Value), fact.Origin, verifiedMark(fact.OwnerVerified)),
 		"this cannot be undone",
+	}
+}
+
+func ownerDeleteLines(fact *Fact) []string {
+	return []string{
+		"dry-run: would delete",
+		fmt.Sprintf("%s %s/%s=%s status=%s conf=%.2f origin=%s%s", fact.ID, fact.Category, fact.Key, fact.Value, fact.Status, fact.Confidence, fact.Origin, verifiedMark(fact.OwnerVerified)),
 	}
 }
 
@@ -333,11 +351,14 @@ func (o *Operations) previewDelete(ctx context.Context, call *operation.Call) (o
 	if err != nil {
 		return operation.Preview{}, moduleFailure(err)
 	}
+	if fact.Status == StatusDeleted {
+		return operation.Preview{Lines: []string{"nothing to delete"}, Digest: factDigest(&fact), Empty: true}, nil
+	}
 	lines := cardLines(&fact)
 	if surface := call.Caller.Surface; surface == operation.SurfaceCLI || surface == operation.SurfaceChat {
-		lines = []string{"dry-run: would delete", factLine(&fact)}
+		lines = ownerDeleteLines(&fact)
 	}
-	return operation.Preview{Lines: lines, Digest: factDigest(&fact), Empty: fact.Status == StatusDeleted}, nil
+	return operation.Preview{Lines: lines, Digest: factDigest(&fact)}, nil
 }
 
 func (o *Operations) delete(ctx context.Context, call *operation.Call) (operation.Result, error) {

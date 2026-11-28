@@ -631,6 +631,28 @@ func (s *SQLiteStore) SetState(ctx context.Context, factID, status, conflictsWit
 	})
 }
 
+func (s *SQLiteStore) Promote(ctx context.Context, factID string, expiresAt *time.Time, at time.Time) error {
+	if s == nil || s.db == nil {
+		return fault.New(ErrorCodeInvalidArgument, "database must not be nil")
+	}
+	return sqlite.RunInTx(ctx, s.db, func(ctx context.Context) error {
+		fact, found, err := s.GetFact(ctx, factID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return fault.New(ErrorCodeProfileNotFound, "fact does not exist")
+		}
+		fact.Status = StatusActive
+		fact.ConflictsWithID = ""
+		fact.Confidence = 1.0
+		fact.OwnerVerified = true
+		fact.ExpiresAt = expiresAt
+		fact.UpdatedAt = at
+		return s.UpdateFact(ctx, &fact)
+	})
+}
+
 func (s *SQLiteStore) ReviveCandidate(ctx context.Context, factID string, at time.Time) error {
 	if s == nil || s.db == nil {
 		return fault.New(ErrorCodeInvalidArgument, "database must not be nil")

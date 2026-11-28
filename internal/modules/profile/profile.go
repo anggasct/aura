@@ -63,6 +63,7 @@ type Registry interface {
 	InsertCandidate(ctx stdcontext.Context, fact *Fact, evidence *Evidence, minConfidence float64) (Fact, error)
 	Reinforce(ctx stdcontext.Context, factID string, evidence *Evidence, minConfidence float64) (Fact, error)
 	SetState(ctx stdcontext.Context, factID, status, conflictsWith string, confidence float64, verified bool, at time.Time) error
+	Promote(ctx stdcontext.Context, factID string, expiresAt *time.Time, at time.Time) error
 	ReviveCandidate(ctx stdcontext.Context, factID string, at time.Time) error
 	Get(ctx stdcontext.Context, id string) (Fact, bool, error)
 	Active(ctx stdcontext.Context, ownerID, category, key string) ([]Fact, error)

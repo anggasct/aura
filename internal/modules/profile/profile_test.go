@@ -106,6 +106,25 @@ func (f *fakeRegistry) SetState(ctx stdcontext.Context, factID, status, conflict
 	return nil
 }
 
+func (f *fakeRegistry) Promote(ctx stdcontext.Context, factID string, expiresAt *time.Time, at time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	stored, exists := f.facts[factID]
+	if !exists {
+		return fault.New(ErrorCodeProfileNotFound, "fact does not exist")
+	}
+	stored.Status = StatusActive
+	stored.ConflictsWithID = ""
+	stored.Confidence = 1.0
+	stored.OwnerVerified = true
+	stored.ExpiresAt = expiresAt
+	stored.UpdatedAt = at
+	return nil
+}
+
 func (f *fakeRegistry) ReviveCandidate(ctx stdcontext.Context, factID string, at time.Time) error {
 	if err := ctx.Err(); err != nil {
 		return err

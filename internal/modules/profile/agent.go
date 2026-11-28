@@ -2,9 +2,19 @@ package profile
 
 import (
 	stdcontext "context"
+	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/turn"
+)
+
+const (
+	AgentKeyChars   = 32
+	AgentValueChars = 200
 )
 
 type AgentProposal struct {
@@ -26,6 +36,9 @@ func (s *Service) ProposeAgentFact(ctx stdcontext.Context, proposal *AgentPropos
 		return Fact{}, fault.New(ErrorCodeInvalidArgument, "agent proposal must not be nil")
 	}
 	if err := checkProposal(proposal.OwnerID, proposal.Category, proposal.Key, proposal.Value); err != nil {
+		return Fact{}, err
+	}
+	if err := checkAgentText(proposal.Key, proposal.Value); err != nil {
 		return Fact{}, err
 	}
 	if reason := SensitiveReason(proposal.Category, proposal.Key, proposal.Value, s.scanner); reason != "" {
@@ -69,4 +82,26 @@ func keptForReview(existing *Fact) (Fact, error) {
 		return Fact{}, fault.New(ErrorCodeProfileConflict, "a decided value cannot be proposed again")
 	}
 	return Fact{}, fault.New(ErrorCodeProfileConflict, "fact is in a terminal state")
+}
+
+func checkAgentText(key, value string) error {
+	if utf8.RuneCountInString(key) > AgentKeyChars {
+		return fault.New(ErrorCodeProfileInvalid, "an agent fact key is over "+strconv.Itoa(AgentKeyChars)+" characters")
+	}
+	if utf8.RuneCountInString(value) > AgentValueChars {
+		return fault.New(ErrorCodeProfileInvalid, "an agent fact value is over "+strconv.Itoa(AgentValueChars)+" characters")
+	}
+	for _, text := range []string{key, value} {
+		if !showable(text) {
+			return fault.New(ErrorCodeProfileInvalid, "an agent fact holds control, direction or non-printing characters or a prompt marker")
+		}
+	}
+	return nil
+}
+
+func showable(text string) bool {
+	if !utf8.ValidString(text) || !tools.DisplaySafe(text) || turn.NeutralizeUntrustedMarkers(text) != text {
+		return false
+	}
+	return !strings.ContainsFunc(text, func(r rune) bool { return !strconv.IsPrint(r) })
 }

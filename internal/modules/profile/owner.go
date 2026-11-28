@@ -136,8 +136,16 @@ func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value 
 			return s.mustGet(ctx, actives[i].ID)
 		}
 	}
+	id := FactID(ownerID, category, key, ValueDigest(value))
+	existing, found, err := s.registry.Get(ctx, id)
+	if err != nil {
+		return Fact{}, err
+	}
+	if found && existing.OwnerID == ownerID && (existing.Status == StatusCandidate || existing.Status == StatusRejected) {
+		return s.promoteExisting(ctx, &existing, actives, expiresAt, now)
+	}
 	fact := Fact{
-		ID: FactID(ownerID, category, key, ValueDigest(value)), OwnerID: ownerID,
+		ID: id, OwnerID: ownerID,
 		Category: category, Key: key, Value: value, ValueDigest: ValueDigest(value),
 		Status: StatusActive, Origin: OriginOwner, OwnerVerified: true,
 		Confidence: 1.0, ConfidencePolicy: ConfidencePolicyV1,
@@ -163,6 +171,31 @@ func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value 
 		return Fact{}, err
 	}
 	return created, nil
+}
+
+func (s *Service) promoteExisting(ctx stdcontext.Context, existing *Fact, actives []Fact, expiresAt *time.Time, now time.Time) (Fact, error) {
+	if existing == nil {
+		return Fact{}, fault.New(ErrorCodeInvalidArgument, "fact must not be nil")
+	}
+	for i := range actives {
+		if actives[i].ID == existing.ID {
+			continue
+		}
+		if err := s.registry.SetState(ctx, actives[i].ID, StatusRejected, existing.ID, actives[i].Confidence, actives[i].OwnerVerified, now); err != nil {
+			return Fact{}, err
+		}
+	}
+	if err := s.registry.Promote(ctx, existing.ID, expiresAt, now); err != nil {
+		return Fact{}, err
+	}
+	promoted, err := s.mustGet(ctx, existing.ID)
+	if err != nil {
+		return Fact{}, err
+	}
+	if err := s.recordAction(ctx, existing.OwnerID, promoted.ID, "set", &promoted, now); err != nil {
+		return Fact{}, err
+	}
+	return promoted, nil
 }
 
 func (s *Service) mustGet(ctx stdcontext.Context, factID string) (Fact, error) {
