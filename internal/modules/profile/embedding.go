@@ -4,6 +4,7 @@ import (
 	stdcontext "context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/embedding"
@@ -66,6 +67,7 @@ type EmbeddingOptions struct {
 	Scanner           SecretScanner
 	SecretSource      SecretSource
 	MaxVectorScanRows int
+	Logger            *slog.Logger
 }
 
 type EmbeddingCoverage struct {

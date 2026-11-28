@@ -75,6 +75,7 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 			Settings:     deps.Embedding,
 			Scanner:      deps.Scanner,
 			SecretSource: deps.SecretSource,
+			Logger:       logger,
 		}
 	}
 	store, err := NewSQLiteStoreWithEmbedding(deps.DB, embedOpts)

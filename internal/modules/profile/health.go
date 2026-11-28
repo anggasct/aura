@@ -102,6 +102,17 @@ func (h *profileEmbeddingHealth) Check(ctx context.Context) []health.Finding {
 			CheckedAt:   now,
 		}}
 	}
+	if cov.Embedded < cov.Total {
+		return []health.Finding{{
+			Component:   ComponentProfileEmbedding,
+			Code:        "coverage_pending",
+			Status:      health.StatusDegraded,
+			Severity:    health.SeverityWarning,
+			Detail:      fmt.Sprintf("profile embeddings cover %d of %d verified active facts; pending or screened facts await the background backfill", cov.Embedded, cov.Total),
+			Remediation: remediationProfileEmbed,
+			CheckedAt:   now,
+		}}
+	}
 	return []health.Finding{{
 		Component:   ComponentProfileEmbedding,
 		Code:        "ok",

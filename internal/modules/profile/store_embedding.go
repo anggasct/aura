@@ -5,6 +5,7 @@ import (
 	stdcontext "context"
 	"database/sql"
 	"fmt"
+	"log/slog"
 	"math"
 	"slices"
 	"strings"
@@ -54,7 +55,11 @@ func NewSQLiteStoreWithEmbedding(db *sql.DB, opts *EmbeddingOptions) (*SQLiteSto
 		if copied.MaxVectorScanRows <= 0 {
 			copied.MaxVectorScanRows = maxVectorScanRows
 		}
+		if copied.Logger == nil {
+			copied.Logger = slog.Default()
+		}
 		store.embedding = &copied
+		store.logger = copied.Logger
 	}
 	return store, nil
 }
@@ -204,7 +209,7 @@ func (s *SQLiteStore) BackfillEmbeddingsOnce(ctx stdcontext.Context, maxRows int
 		maxRows = maxBackfillRowsPerTick
 	}
 	batchSize := min(s.embedding.Settings.batchSize(), maxRows)
-	var cursorUpdatedAt, cursorID string
+	cursorUpdatedAt, cursorID := s.backfill.Resume()
 	embedded := 0
 	scanned := 0
 	now := time.Now().UTC()
@@ -218,10 +223,12 @@ func (s *SQLiteStore) BackfillEmbeddingsOnce(ctx stdcontext.Context, maxRows int
 			return embedded, err
 		}
 		if len(pending) == 0 {
+			s.backfill.MarkExhausted()
 			return embedded, nil
 		}
 		last := pending[len(pending)-1]
 		cursorUpdatedAt, cursorID = last.UpdatedAt, last.ID
+		s.backfill.Advance(cursorUpdatedAt, cursorID)
 		scanned += len(pending)
 
 		screen, err := s.embedScreenSnapshot(ctx)
@@ -341,27 +348,30 @@ func offerProfileHit(top *[]scoredProfileFact, limit int, candidate *scoredProfi
 	*top = items
 }
 
-func (s *SQLiteStore) searchFactVectors(ctx stdcontext.Context, ownerID, category, query string, candidateLimit int, nowUTC time.Time) ([]scoredProfileFact, bool) {
+func (s *SQLiteStore) searchFactVectors(ctx stdcontext.Context, ownerID, category, query string, candidateLimit int, nowUTC time.Time) ([]scoredProfileFact, bool, error) {
 	if !s.EmbeddingActive() || len(query) > MaxEmbedQueryBytes || strings.TrimSpace(query) == "" {
-		return nil, false
+		return nil, false, nil
 	}
 	has, err := s.hasFactEmbeddings(ctx, ownerID, category, s.embedding.Settings.Fingerprint, nowUTC)
-	if err != nil || !has {
-		return nil, false
+	if err != nil {
+		return nil, false, err
+	}
+	if !has {
+		return nil, false, nil
 	}
 	screen, err := s.embedScreenSnapshot(ctx)
 	if err != nil || s.textBlockedForEmbed(query, screen) {
-		return nil, false
+		return nil, false, nil
 	}
 	embedCtx, cancel := stdcontext.WithTimeout(ctx, s.embedding.Settings.queryTimeout())
 	defer cancel()
 	vectors, err := s.embedding.Embedder.Embed(embedCtx, embedding.RoleQuery, []string{query})
 	if err != nil || len(vectors) != 1 {
-		return nil, false
+		return nil, false, nil
 	}
 	queryVec, ok := embedding.Normalize(vectors[0], s.embedding.Settings.Dimensions)
 	if !ok {
-		return nil, false
+		return nil, false, nil
 	}
 	sqlQuery := `SELECT f.id, f.owner_id, f.category, f.fact_key, f.fact_value, f.value_digest, f.status, f.origin,
 		f.owner_verified, f.confidence, f.confidence_policy_version, f.conflicts_with_id,
@@ -378,7 +388,7 @@ func (s *SQLiteStore) searchFactVectors(ctx stdcontext.Context, ownerID, categor
 	sqlQuery += ` ORDER BY f.updated_at DESC, f.id ASC`
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
-		return nil, false
+		return nil, false, sqlite.Classify(fmt.Errorf("search profile vectors: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -394,13 +404,13 @@ func (s *SQLiteStore) searchFactVectors(ctx stdcontext.Context, ownerID, categor
 		}
 		if scanned%vectorScanCancelInterval == 0 {
 			if err := ctx.Err(); err != nil {
-				return nil, false
+				return nil, false, err
 			}
 		}
 		scanned++
 		fact, digest, blob, err := scanProfileVectorRow(rows)
 		if err != nil {
-			return nil, false
+			return nil, false, err
 		}
 		if fact.ExpiresAt != nil && !fact.ExpiresAt.After(nowUTC) {
 			continue
@@ -425,9 +435,9 @@ func (s *SQLiteStore) searchFactVectors(ctx stdcontext.Context, ownerID, categor
 		offerProfileHit(&top, candidateLimit, &candidate)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, false
+		return nil, false, sqlite.Classify(fmt.Errorf("search profile vectors: %w", err))
 	}
-	return top, true
+	return top, true, nil
 }
 
 func scanProfileVectorRow(rows *sql.Rows) (fact Fact, digest string, blob []byte, err error) {

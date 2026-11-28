@@ -54,6 +54,17 @@ func (h *memoryEmbeddingHealth) Check(ctx context.Context) []health.Finding {
 			CheckedAt:   now,
 		}}
 	}
+	if cov.Embedded < cov.Total {
+		return []health.Finding{{
+			Component:   ComponentMemoryEmbedding,
+			Code:        "coverage_pending",
+			Status:      health.StatusDegraded,
+			Severity:    health.SeverityWarning,
+			Detail:      fmt.Sprintf("memory embeddings cover %d of %d documents; pending or screened documents await the background backfill", cov.Embedded, cov.Total),
+			Remediation: remediationMemoryEmbed,
+			CheckedAt:   now,
+		}}
+	}
 	return []health.Finding{{
 		Component:   ComponentMemoryEmbedding,
 		Code:        "ok",

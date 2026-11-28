@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/textsearch"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -278,6 +279,7 @@ type Service struct {
 	secretDrops        atomic.Int64
 	projectionFailures atomic.Int64
 	projectMu          sync.Mutex
+	backfill           embedding.BackfillCursor
 }
 
 func NewService(documents DocumentStore, secrets Secrets, config *ServiceOptions) (*Service, error) {

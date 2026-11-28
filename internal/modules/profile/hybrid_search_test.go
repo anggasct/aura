@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -497,4 +499,156 @@ func TestProfileHybridSearchMatchesVerifiedActiveFactsOnly(t *testing.T) {
 			t.Fatalf("stale profile health findings = %+v, want reembed_required", findings)
 		}
 	})
+}
+
+func TestProfileEmbeddingBackfillSurvivesPermanentlyBlockedNewestRows(t *testing.T) {
+	now := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+	_, db := newTestSQLiteStore(t)
+	embedder := &profileTestEmbedder{
+		vectors: map[string][]float32{
+			"destination: terbang ke Jepang": {1, 0, 0, 0},
+		},
+	}
+	store, err := NewSQLiteStoreWithEmbedding(db, &EmbeddingOptions{
+		Enabled:  true,
+		Embedder: embedder,
+		Settings: &EmbeddingSettings{Fingerprint: "fp-starve", Dimensions: 4, BatchSize: 50},
+	})
+	if err != nil {
+		t.Fatalf("NewSQLiteStoreWithEmbedding: %v", err)
+	}
+
+	awsKey := "AKIA" + "ABCDEFGHIJKLMNOP"
+	blocked := maxBackfillRowsPerTick + 20
+	for i := range blocked {
+		seedActiveProfileFact(t, store, fmt.Sprintf("pf-blocked-%03d", i), "preference",
+			fmt.Sprintf("credential_%03d", i), "value "+awsKey, true, now.Add(-time.Duration(blocked-i)*time.Minute))
+	}
+	seedActiveProfileFact(t, store, "pf-eligible", "preference", "destination", "terbang ke Jepang", true, now.Add(-24*time.Hour))
+
+	settings := &EmbeddingSettings{Fingerprint: "fp-starve", Dimensions: 4}
+	healthCheck := &profileEmbeddingHealth{store: store, settings: settings, available: true}
+
+	if embedded, err := store.BackfillEmbeddingsOnce(t.Context(), maxBackfillRowsPerTick); err != nil || embedded != 0 {
+		t.Fatalf("first tick = (%d, %v), want (0, nil) while blocked rows fill the scan budget", embedded, err)
+	}
+	if findings := healthCheck.Check(t.Context()); len(findings) != 1 || findings[0].Code != "coverage_pending" || findings[0].Status != health.StatusDegraded {
+		t.Fatalf("health with embedded<total and stale=0 = %+v, want degraded coverage_pending", findings)
+	}
+
+	if embedded, err := store.BackfillEmbeddingsOnce(t.Context(), maxBackfillRowsPerTick); err != nil || embedded != 1 {
+		t.Fatalf("second tick = (%d, %v), want (1, nil) once the cursor resumes past blocked rows", embedded, err)
+	}
+	if !hasProfileEmbedding(t, db, "pf-eligible") {
+		t.Fatal("older eligible fact never gained an embedding behind the blocked run")
+	}
+	if embedder.sentContains(awsKey) {
+		t.Fatal("credential-bearing blocked fact was sent to the embedder")
+	}
+	if findings := healthCheck.Check(t.Context()); len(findings) != 1 || findings[0].Code != "coverage_pending" || findings[0].Status != health.StatusDegraded {
+		t.Fatalf("health after bounded backfill = %+v, want degraded coverage_pending for the permanent gap", findings)
+	}
+}
+
+func TestProfileVectorSearchFailureIsRecordedAndFallsBackLexically(t *testing.T) {
+	now := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+
+	t.Run("database scan error logs a warning and keeps lexical results", func(t *testing.T) {
+		_, db := newTestSQLiteStore(t)
+		records := &recordingLogHandler{}
+		embedder := &profileTestEmbedder{vectors: map[string][]float32{"golang systems": {1, 0, 0, 0}}}
+		store, err := NewSQLiteStoreWithEmbedding(db, &EmbeddingOptions{
+			Enabled:  true,
+			Embedder: embedder,
+			Settings: &EmbeddingSettings{Fingerprint: "fp-fail", Dimensions: 4},
+			Logger:   slog.New(records),
+		})
+		if err != nil {
+			t.Fatalf("NewSQLiteStoreWithEmbedding: %v", err)
+		}
+		seedActiveProfileFact(t, store, "pf-go", "language", "backend", "golang systems programming", true, now.Add(-time.Hour))
+
+		if _, err := db.ExecContext(t.Context(), `DROP TABLE profile_embedding`); err != nil {
+			t.Fatalf("drop profile_embedding: %v", err)
+		}
+
+		facts, err := store.SearchFacts(t.Context(), "owner-1", "", "golang systems", true, 5, now)
+		if err != nil {
+			t.Fatalf("SearchFacts must keep lexical results on a vector scan failure: %v", err)
+		}
+		if len(facts) != 1 || facts[0].ID != "pf-go" {
+			t.Fatalf("SearchFacts = %+v, want lexical hit pf-go", facts)
+		}
+		warn := records.warnings()
+		if len(warn) != 1 {
+			t.Fatalf("vector scan failure warnings = %d, want 1", len(warn))
+		}
+		if warn[0].Message != "profile vector search failed" {
+			t.Fatalf("warning message = %q, want profile vector search failed", warn[0].Message)
+		}
+	})
+
+	t.Run("row scan error is returned instead of silently dropping the vector leg", func(t *testing.T) {
+		_, db := newTestSQLiteStore(t)
+		store, err := NewSQLiteStoreWithEmbedding(db, &EmbeddingOptions{
+			Enabled:  true,
+			Embedder: &profileTestEmbedder{vectors: map[string][]float32{"golang systems": {1, 0, 0, 0}}},
+			Settings: &EmbeddingSettings{Fingerprint: "fp-scan", Dimensions: 4},
+		})
+		if err != nil {
+			t.Fatalf("NewSQLiteStoreWithEmbedding: %v", err)
+		}
+		seedActiveProfileFact(t, store, "pf-corrupt", "language", "backend", "golang systems programming", true, now.Add(-time.Hour))
+		if err := store.upsertFactEmbeddings(t.Context(), "fp-scan", []profileVectorWrite{{
+			FactID:        "pf-corrupt",
+			FactKey:       "backend",
+			FactValue:     "golang systems programming",
+			ContentSHA256: factContentSHA256(factEmbedText("backend", "golang systems programming")),
+			Vector:        []float32{1, 0, 0, 0},
+			CreatedAt:     now,
+		}}); err != nil {
+			t.Fatalf("upsertFactEmbeddings: %v", err)
+		}
+		if _, err := db.ExecContext(t.Context(), `UPDATE profile_fact SET created_at = 'not-a-time' WHERE id = 'pf-corrupt'`); err != nil {
+			t.Fatalf("corrupt profile_fact timestamp: %v", err)
+		}
+
+		hits, ran, err := store.searchFactVectors(t.Context(), "owner-1", "", "golang systems", 5, now)
+		if err == nil {
+			t.Fatalf("searchFactVectors = (%+v, ran=%t, nil), want a scan error", hits, ran)
+		}
+		if ran || hits != nil {
+			t.Fatalf("searchFactVectors on scan error = (%+v, ran=%t), want (nil, false)", hits, ran)
+		}
+	})
+}
+
+type recordingLogHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
+}
+
+func (h *recordingLogHandler) Enabled(stdcontext.Context, slog.Level) bool { return true }
+
+func (h *recordingLogHandler) Handle(_ stdcontext.Context, record slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, record.Clone())
+	return nil
+}
+
+func (h *recordingLogHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+
+func (h *recordingLogHandler) WithGroup(string) slog.Handler { return h }
+
+func (h *recordingLogHandler) warnings() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	out := make([]slog.Record, 0, len(h.records))
+	for i := range h.records {
+		if h.records[i].Level == slog.LevelWarn {
+			out = append(out, h.records[i])
+		}
+	}
+	return out
 }

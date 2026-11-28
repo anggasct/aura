@@ -847,6 +847,7 @@ func (b *build) buildCommandParts(ctx context.Context) error {
 				Settings:     embedSettings,
 				Scanner:      scanner,
 				SecretSource: &strictSecretSource{cfg: b.cfg},
+				Logger:       b.logger,
 			}
 		}
 		store, err := profile.NewSQLiteStoreWithEmbedding(b.db, embedOpts)

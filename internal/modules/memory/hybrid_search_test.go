@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -1023,4 +1024,62 @@ func TestMemoryEmbeddingRespectsOptInSecretsPublicQueriesFingerprintAndFallback(
 			t.Fatalf("memory_embedding count = %d, want 1", got)
 		}
 	})
+}
+
+func TestMemoryEmbeddingBackfillSurvivesPermanentlyBlockedNewestRows(t *testing.T) {
+	now := time.Date(2026, 11, 28, 12, 0, 0, 0, time.UTC)
+	db, store := newTestSQLiteStore(t)
+	seedMemorySessionWithAgent(t, db, "sess-starve", principal.OwnerID, "main")
+
+	vault := secret.New()
+	embedder := &deterministicEmbedder{
+		vectors: map[string][]float32{
+			"terbang ke Jepang": {1, 0, 0, 0},
+		},
+	}
+	service, err := NewService(store, vault, &ServiceOptions{
+		EmbeddingEnabled: true,
+		Embedder:         embedder,
+		Embedding:        &EmbeddingSettings{Fingerprint: "fp-starve", Dimensions: 4, BatchSize: 50},
+		SecretSource:     staticSecretSource{screen: vault},
+		Vectors:          store,
+	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
+	awsKey := "AKIA" + "ABCDEFGHIJKLMNOP"
+	blocked := maxBackfillRowsPerTick + 20
+	for i := range blocked {
+		seedHybridDoc(t, store, fmt.Sprintf("mem-blocked-%03d", i), principal.OwnerID, "sess-starve",
+			fmt.Sprintf("credential %s row %d", awsKey, i), int64(i+1), now.Add(-time.Duration(blocked-i)*time.Minute), false)
+	}
+	seedHybridDoc(t, store, "mem-eligible", principal.OwnerID, "sess-starve", "terbang ke Jepang", int64(blocked+1), now.Add(-24*time.Hour), false)
+
+	settings := &EmbeddingSettings{Fingerprint: "fp-starve", Dimensions: 4}
+	healthCheck := &memoryEmbeddingHealth{store: store, settings: settings, available: true}
+
+	if embedded, err := service.BackfillEmbeddingsOnce(t.Context(), maxBackfillRowsPerTick); err != nil || embedded != 0 {
+		t.Fatalf("first tick = (%d, %v), want (0, nil) while blocked rows fill the scan budget", embedded, err)
+	}
+	if findings := healthCheck.Check(t.Context()); len(findings) != 1 || findings[0].Code != "coverage_pending" || findings[0].Status != health.StatusDegraded {
+		t.Fatalf("health with embedded<total and stale=0 = %+v, want degraded coverage_pending", findings)
+	}
+
+	if embedded, err := service.BackfillEmbeddingsOnce(t.Context(), maxBackfillRowsPerTick); err != nil || embedded != 1 {
+		t.Fatalf("second tick = (%d, %v), want (1, nil) once the cursor resumes past blocked rows", embedded, err)
+	}
+	var hasEligible bool
+	if err := db.QueryRowContext(t.Context(), `SELECT EXISTS(SELECT 1 FROM memory_embedding WHERE document_id = 'mem-eligible')`).Scan(&hasEligible); err != nil {
+		t.Fatalf("check eligible embedding: %v", err)
+	}
+	if !hasEligible {
+		t.Fatal("older eligible document never gained an embedding behind the blocked run")
+	}
+	if embedder.sentContains(awsKey) {
+		t.Fatal("credential-bearing blocked document was sent to the embedder")
+	}
+	if findings := healthCheck.Check(t.Context()); len(findings) != 1 || findings[0].Code != "coverage_pending" || findings[0].Status != health.StatusDegraded {
+		t.Fatalf("health after bounded backfill = %+v, want degraded coverage_pending for the permanent gap", findings)
+	}
 }

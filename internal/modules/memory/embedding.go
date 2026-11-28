@@ -309,7 +309,7 @@ func (s *Service) BackfillEmbeddingsOnce(ctx context.Context, maxRows int) (int,
 		maxRows = maxBackfillRowsPerTick
 	}
 	batchSize := min(s.embedding.batchSize(), maxRows)
-	var cursorCreatedAt, cursorID string
+	cursorCreatedAt, cursorID := s.backfill.Resume()
 	embedded := 0
 	scanned := 0
 	now := time.Now().UTC()
@@ -323,10 +323,12 @@ func (s *Service) BackfillEmbeddingsOnce(ctx context.Context, maxRows int) (int,
 			return embedded, err
 		}
 		if len(pending) == 0 {
+			s.backfill.MarkExhausted()
 			return embedded, nil
 		}
 		last := pending[len(pending)-1]
 		cursorCreatedAt, cursorID = last.CreatedAt, last.DocumentID
+		s.backfill.Advance(cursorCreatedAt, cursorID)
 		scanned += len(pending)
 
 		screen, err := s.embedScreenSnapshot(ctx)
