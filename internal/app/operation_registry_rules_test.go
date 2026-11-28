@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/operation"
@@ -82,6 +83,9 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 		Bindings:    func(*operationtest.Stubs) []operation.Binding { return operations.Bindings() },
 		Access:      access,
 		AnswerCards: answer,
+
+		WithDiscovery: true,
+		Behaviors:     new(memory.Module).Behaviors(),
 	})
 	registrations := rig.Registry.Tools()
 	for i := range registrations {

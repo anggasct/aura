@@ -43,6 +43,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/tools"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
@@ -556,6 +557,19 @@ func broadcastOpener(gf *GlobalFlags) broadcast.Opener {
 
 func operationCatalogs() []operation.Catalog {
 	return []operation.Catalog{schedule.Catalog()}
+}
+
+func operationToolNames() []string {
+	names := []string{tools.OperationSearchToolName}
+	for _, catalog := range operationCatalogs() {
+		for i := range catalog.Descriptors {
+			if catalog.Descriptors[i].GeneratesTool() {
+				names = append(names, operation.ToolName(catalog.Descriptors[i].ID))
+			}
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 func IsOperationCommand(cmd *cobra.Command) bool {

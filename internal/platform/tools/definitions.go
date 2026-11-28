@@ -10,6 +10,8 @@ import (
 const (
 	MCPToolPrefix       = "mcp_"
 	OperationToolPrefix = "aura_"
+
+	OperationSearchToolName = "aura_operation_search"
 )
 
 func IsOperationEntry(name string) bool {

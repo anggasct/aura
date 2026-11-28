@@ -81,6 +81,50 @@ func TestBrokerRejectsInconsistentOperationDefinitions(t *testing.T) {
 	}
 }
 
+func TestOperationToolPrefixIsReservedAtRegistration(t *testing.T) {
+	validator := func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }
+	legacy := tools.Definition{Name: "aura_sneaky", Version: tools.Version, Validator: validator}
+	legacyRule := DefaultRule(&legacy)
+	search := tools.Definition{Name: tools.OperationSearchToolName, Version: tools.Version, Validator: validator}
+	searchRule := DefaultRule(&search)
+	plain := tools.Definition{Name: "web_fetch", Version: tools.Version, Validator: validator}
+	plainRule := DefaultRule(&plain)
+
+	t.Run("a legacy tool named like an operation tool is refused one by one", func(t *testing.T) {
+		broker := newProbeBroker(t)
+		if err := broker.RegisterTool(&legacy, unusedAdapter, &legacyRule); !fault.HasCode(err, ResultInvalidArgument) {
+			t.Fatalf("RegisterTool = %v, want %s", err, ResultInvalidArgument)
+		}
+		if _, found := broker.Definition(legacy.Name, tools.Version); found {
+			t.Error("the refused tool was registered")
+		}
+	})
+	t.Run("a legacy tool named like an operation tool is refused in a provider", func(t *testing.T) {
+		broker := newProbeBroker(t)
+		err := broker.RegisterProvider(stubOperations{{Definition: legacy, Adapter: unusedAdapter, Rule: legacyRule}})
+		if !fault.HasCode(err, ResultInvalidArgument) {
+			t.Fatalf("RegisterProvider = %v, want %s", err, ResultInvalidArgument)
+		}
+	})
+	t.Run("the discovery tool and other names are accepted", func(t *testing.T) {
+		broker := newProbeBroker(t)
+		if err := broker.RegisterTool(&search, unusedAdapter, &searchRule); err != nil {
+			t.Fatalf("RegisterTool(discovery): %v", err)
+		}
+		if err := broker.RegisterTool(&plain, unusedAdapter, &plainRule); err != nil {
+			t.Fatalf("RegisterTool(web_fetch): %v", err)
+		}
+	})
+	t.Run("a generated operation tool is accepted", func(t *testing.T) {
+		broker := newProbeBroker(t)
+		generated := readStub.definition(t)
+		generatedRule := DefaultRule(&generated)
+		if err := broker.RegisterTool(&generated, unusedAdapter, &generatedRule); err != nil {
+			t.Fatalf("RegisterTool(generated): %v", err)
+		}
+	})
+}
+
 func TestRejectedOperationRegistrationRegistersNothing(t *testing.T) {
 	broker := newProbeBroker(t)
 	good := changeStub.definition(t)

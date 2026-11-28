@@ -353,6 +353,53 @@
       "untrusted_output": false
     },
     {
+      "key": "aura_operation_search@v1",
+      "name": "aura_operation_search",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Find Aura operations by words or by group and load the ones you can call. Results also give the aura command of operations only the owner or the host can run.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://tools/aura_operation_search/v1",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "group": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10
+          }
+        },
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": null,
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
       "key": "code_execute@v1",
       "name": "code_execute",
       "version": "v1",
@@ -1334,6 +1381,22 @@
     },
     {
       "tool_name": "aura_cron_runs",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_operation_search",
       "tool_version": "v1",
       "requires_approval": false,
       "required_capabilities": null,

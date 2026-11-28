@@ -37,6 +37,8 @@ func (r *Registry) buildTools() error {
 		if definition.Effectful {
 			registration.Recovery = r.recovery(found)
 		}
+		stored := definition
+		found.definition = &stored
 		r.byTool[definition.Name] = found
 		r.registrations = append(r.registrations, registration)
 	}

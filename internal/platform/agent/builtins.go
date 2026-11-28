@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/anggasct/aura/internal/platform/tools"
+
 const DefaultID = "main"
 
 const DefaultName = "Aura"
@@ -8,13 +10,9 @@ const defaultModelRoute = "primary"
 
 var builtins = []Definition{
 	{
-		ID:   DefaultID,
-		Name: DefaultName,
-		// The default target must keep the prompt surface it had before
-		// definitions existed: the executor maps these fields straight onto
-		// the ADK agent, so any text here would silently change every
-		// default turn's system prompt.
-		Tools: []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"},
+		ID:    DefaultID,
+		Name:  DefaultName,
+		Tools: []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search", tools.OperationSearchToolName},
 	},
 	{
 		ID:           "engineer",

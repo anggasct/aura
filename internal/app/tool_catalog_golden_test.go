@@ -161,6 +161,13 @@ func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
 	if err := broker.RegisterProvider(registry); err != nil {
 		t.Fatalf("RegisterProvider(operations): %v", err)
 	}
+	discovery, err := operation.NewDiscovery(&operation.DiscoveryDeps{Registry: registry})
+	if err != nil {
+		t.Fatalf("operation.NewDiscovery: %v", err)
+	}
+	if err := broker.RegisterProvider(discovery); err != nil {
+		t.Fatalf("RegisterProvider(discovery): %v", err)
+	}
 }
 
 func TestToolCatalogGolden(t *testing.T) {
@@ -175,8 +182,8 @@ func TestToolCatalogGolden(t *testing.T) {
 	registerOperationToolProvider(t, broker)
 
 	definitions := broker.Definitions()
-	if len(definitions) != 23 {
-		t.Fatalf("registered definitions = %d, want 23", len(definitions))
+	if len(definitions) != 24 {
+		t.Fatalf("registered definitions = %d, want 24", len(definitions))
 	}
 
 	catalog := toolCatalog{}

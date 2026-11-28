@@ -9,7 +9,6 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 func defectCount(err error) int {
@@ -328,12 +327,9 @@ func TestRegisteredDescriptorsCannotBeChangedAfterwards(t *testing.T) {
 }
 
 func TestRegistryRejectsAToolNameThatIsAlreadyRegistered(t *testing.T) {
-	legacy := tools.Definition{Name: operationtest.ToolOf(operationtest.Read), Version: tools.Version, Validator: func(raw json.RawMessage) (json.RawMessage, error) { return raw, nil }}
-	rig := operationtest.NewRig(t, &operationtest.Options{
-		AllowInvalid: true,
-		Tools:        operationtest.LegacyTools(&legacy),
-	})
-	if !fault.HasCode(rig.RegistryErr, operation.ErrorCodeInvalid) || defectCount(rig.RegistryErr) != 1 {
-		t.Fatalf("NewRegistry = %v, want one operation_invalid defect", rig.RegistryErr)
+	rig := operationtest.NewRig(t, nil)
+	_, err := operation.NewRegistry([]operation.Catalog{operationtest.Catalog()}, rig.Stubs.Bindings(), &operation.Deps{DB: rig.DB, Effects: rig.Executor, Tools: rig.Broker, Clock: rig.Clock})
+	if !fault.HasCode(err, operation.ErrorCodeInvalid) || defectCount(err) != 8 {
+		t.Fatalf("a second NewRegistry over the same broker = %v, want one operation_invalid defect per generated tool", err)
 	}
 }

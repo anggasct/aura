@@ -44,12 +44,38 @@ func TestPersonaOperationConfigValidation(t *testing.T) {
 			}
 		})
 	}
-	t.Run("an owner persona listing an operation tool is refused as an unknown tool while none is offered", func(t *testing.T) {
-		persona := Persona{ID: "desk", Description: "d", Instructions: "x", Tools: []string{"read_file", operationTool}}
+	t.Run("an owner persona may list the discovery tool and a generated operation tool", func(t *testing.T) {
+		persona := Persona{ID: "desk", Description: "d", Instructions: "x", Tools: []string{"read_file", operationTool, auratools.OperationSearchToolName}}
 		if err := (Config{Definitions: []Persona{persona}}).Validate(); err != nil {
 			t.Fatalf("Validate = %v", err)
 		}
-		_, err := Build([]Persona{persona}, validTools, validToolCatalog, nil, "en")
+		registry, err := Build([]Persona{persona}, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+		if err != nil {
+			t.Fatalf("Build = %v", err)
+		}
+		desk, _ := registry.Lookup("desk")
+		for _, want := range []string{operationTool, auratools.OperationSearchToolName} {
+			if !slices.Contains(desk.Tools, want) {
+				t.Fatalf("tools = %v, want %s", desk.Tools, want)
+			}
+		}
+	})
+	t.Run("an owner persona listing an aura_ name that is not generated fails at build", func(t *testing.T) {
+		persona := Persona{ID: "desk", Description: "d", Instructions: "x", Tools: []string{"read_file", "aura_cron_everything"}}
+		if err := (Config{Definitions: []Persona{persona}}).Validate(); err != nil {
+			t.Fatalf("Validate = %v", err)
+		}
+		_, err := Build([]Persona{persona}, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+		if !fault.HasCode(err, ErrorCodePersonaInvalid) {
+			t.Fatalf("Build = %v, want persona_invalid", err)
+		}
+		if !strings.Contains(err.Error(), "agents.definitions[0].tools") || strings.Contains(err.Error(), "aura_cron_everything") {
+			t.Fatalf("Build = %q, want the path and no tool name", err)
+		}
+	})
+	t.Run("an ordinary unknown tool is still an unknown tool", func(t *testing.T) {
+		persona := Persona{ID: "desk", Description: "d", Instructions: "x", Tools: []string{"read_file", "no_such_tool"}}
+		_, err := Build([]Persona{persona}, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
 		if !fault.HasCode(err, ErrorCodeUnknownTool) {
 			t.Fatalf("Build = %v, want agent_unknown_tool", err)
 		}
@@ -80,7 +106,7 @@ func TestPersonaWithoutToolListGetsNoOperations(t *testing.T) {
 }
 
 func TestBuiltinOverrideWithNonOwnerAudienceDropsOperationTools(t *testing.T) {
-	inherited := []string{"read_file", operationTool, "aura_operation_search"}
+	inherited := []string{"read_file", operationTool, auratools.OperationSearchToolName}
 	cases := []struct {
 		name     string
 		audience string
@@ -128,4 +154,72 @@ func TestLiveMainShapeStillLoads(t *testing.T) {
 	if len(got.Tools) != len(known) || got.Audience != AudienceOwner {
 		t.Fatalf("main = %d tools, audience %q; want %d tools, owner", len(got.Tools), got.Audience, len(known))
 	}
+}
+
+func TestBuiltinMainPersonaShapeIsPinned(t *testing.T) {
+	registry, err := Build(nil, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main, ok := registry.Lookup(DefaultID)
+	if !ok {
+		t.Fatal("the built-in main persona is missing")
+	}
+	if main.Instructions != "" {
+		t.Errorf("main instructions = %q, want none: any text here changes every default turn's system prompt", main.Instructions)
+	}
+	want := []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search", auratools.OperationSearchToolName}
+	if !slices.Equal(main.Tools, want) {
+		t.Errorf("main tools = %v, want %v", main.Tools, want)
+	}
+}
+
+func TestAMainOverrideWithAToolListDoesNotInheritTheDiscoveryTool(t *testing.T) {
+	var explicit []string
+	for _, name := range toolsWithAnOperation {
+		if !auratools.IsOperationEntry(name) {
+			explicit = append(explicit, name)
+		}
+	}
+	registry, err := Build([]Persona{{ID: DefaultID, Tools: explicit}}, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main, _ := registry.Lookup(DefaultID)
+	if slices.ContainsFunc(main.Tools, auratools.IsOperationEntry) {
+		t.Fatalf("main lists %v, want no operation entry: an explicit tool list replaces the inherited one", main.Tools)
+	}
+	if !slices.Equal(main.Tools, explicit) {
+		t.Fatalf("main tools = %v, want exactly the listed %v", main.Tools, explicit)
+	}
+}
+
+func TestBuiltinMainPersonaEnablesOperations(t *testing.T) {
+	registry, err := Build(nil, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main, ok := registry.Lookup(DefaultID)
+	if !ok || !slices.Contains(main.Tools, auratools.OperationSearchToolName) {
+		t.Fatalf("main = %+v, want it to list the discovery tool", main)
+	}
+	if main.Audience != AudienceOwner {
+		t.Fatalf("main audience = %q, want owner", main.Audience)
+	}
+	for _, id := range []string{"engineer", "reviewer", "researcher"} {
+		definition, _ := registry.Lookup(id)
+		if slices.ContainsFunc(definition.Tools, auratools.IsOperationEntry) {
+			t.Errorf("%s lists %v, want no operation tool", id, definition.Tools)
+		}
+	}
+	t.Run("an override of main without a tool list keeps the discovery tool", func(t *testing.T) {
+		registry, err := Build([]Persona{{ID: DefaultID, Instructions: "be brief"}}, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+		if err != nil {
+			t.Fatalf("Build: %v", err)
+		}
+		main, _ := registry.Lookup(DefaultID)
+		if !slices.Contains(main.Tools, auratools.OperationSearchToolName) {
+			t.Fatalf("tools = %v, want the discovery tool", main.Tools)
+		}
+	})
 }

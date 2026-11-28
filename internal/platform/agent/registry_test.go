@@ -10,9 +10,10 @@ import (
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 )
 
-var validTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"}
+var validTools = []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search", auratools.OperationSearchToolName}
 
 var validToolCatalog = []auratools.Definition{
+	{Name: auratools.OperationSearchToolName, Version: auratools.Version},
 	{Name: "read_file", Version: auratools.Version},
 	{Name: "write_file", Version: auratools.Version, RequiresApproval: true, Effectful: true},
 	{Name: "list_dir", Version: auratools.Version},

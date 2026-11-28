@@ -678,6 +678,7 @@ type build struct {
 	broker     *toolbroker.Broker
 	clock      durable.Clock
 	bindings   []operation.Binding
+	behaviors  []operation.Behavior
 	artifacts  storage.ArtifactStore
 	builtin    *runtimeadk.BrokerExecutor
 	routeModel func(route string) (string, error)
@@ -688,7 +689,9 @@ type build struct {
 	modules   moduleParts
 
 	executor *runtimeadk.ADKExecutor
-	engine   *runtimeengine.Engine
+
+	operationPort *runtimeadk.OperationPort
+	engine        *runtimeengine.Engine
 
 	serve func(ctx context.Context) error
 
@@ -1340,7 +1343,8 @@ func (b *build) buildTurnRuntime() error {
 		return invalidOptions("the turn runtime requires the live event bus")
 	}
 	var broker turn.ToolBroker = terminal.DenyPolicy{}
-	execOpts := append([]runtimeadk.ExecutorOption{runtimeadk.WithToolBudget(toolBudgetFromRuntime(b.cfg.Runtime))}, b.execOpts...)
+	b.operationPort = runtimeadk.NewOperationPort()
+	execOpts := append([]runtimeadk.ExecutorOption{runtimeadk.WithToolBudget(toolBudgetFromRuntime(b.cfg.Runtime)), runtimeadk.WithOperations(b.operationPort)}, b.execOpts...)
 	if b.builtin != nil {
 		broker = b.builtin
 		if len(b.builtin.Definitions()) > 0 {
@@ -1572,7 +1576,23 @@ func (b *build) buildOperations() error {
 	if err := b.broker.RegisterProvider(registry); err != nil {
 		return err
 	}
-	return nil
+	discovery, err := operation.NewDiscovery(&operation.DiscoveryDeps{
+		Registry:     registry,
+		Behaviors:    b.behaviors,
+		Capabilities: b.result.CapabilityReport.Active(),
+		Withholdable: b.executor.WithholdableTools(),
+		Telemetry:    recorder,
+	})
+	if err != nil {
+		return err
+	}
+	if err := b.broker.RegisterProvider(discovery); err != nil {
+		return err
+	}
+	if b.builtin == nil {
+		return invalidOptions("the operation tools need the builtin tool executor")
+	}
+	return b.operationPort.Bind(discovery, b.builtin)
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {

@@ -53,6 +53,9 @@ func checkOperationRegistration(definition *tools.Definition, rule *approval.Rul
 	if err := definition.ValidateOperation(); err != nil {
 		return err
 	}
+	if tools.IsOperationEntry(definition.Name) && definition.Operation == "" && definition.Name != tools.OperationSearchToolName {
+		return errorf(ResultInvalidArgument, "tool name %q is reserved for operation tools", definition.Name)
+	}
 	if definition.Operation == "" {
 		if previewer != nil {
 			return errorf(ResultInvalidArgument, "tool %q has a previewer but no operation", definition.Name)
@@ -111,6 +114,45 @@ func operationRefusal(request *ToolRequest, definition *tools.Definition) error 
 	return nil
 }
 
+type Disposition string
+
+const (
+	DispositionRuns    Disposition = "runs"
+	DispositionAsks    Disposition = "asks"
+	DispositionAlways  Disposition = "always"
+	DispositionRefused Disposition = "refused"
+)
+
+type OperationTurn struct {
+	Origin              turn.Origin
+	Unattended          bool
+	Tainted             bool
+	ContentTaintTracked bool
+}
+
+func OperationDisposition(definition *tools.Definition, view *OperationTurn) (Disposition, error) {
+	if definition == nil || view == nil {
+		return DispositionRefused, nilOperationArguments()
+	}
+	request := &ToolRequest{
+		ToolName:            definition.Name,
+		Origin:              view.Origin,
+		Unattended:          view.Unattended,
+		Tainted:             view.Tainted,
+		ContentTaintTracked: view.ContentTaintTracked,
+	}
+	if refused := operationOwnerOnly(request, principal.ClassOwner, definition) != nil || operationRefusal(request, definition) != nil; refused {
+		return DispositionRefused, nil
+	}
+	switch {
+	case definition.Privileged():
+		return DispositionAlways, nil
+	case changeNeedsCard(request, definition):
+		return DispositionAsks, nil
+	}
+	return DispositionRuns, nil
+}
+
 func changeNeedsCard(request *ToolRequest, definition *tools.Definition) bool {
 	return definition.Risk == tools.RiskChange && !definition.OwnerNotice && (!request.ContentTaintTracked || request.Tainted)
 }
@@ -119,7 +161,7 @@ func unattendedRequest(request *ToolRequest, definition *tools.Definition) bool 
 	if request == nil || definition == nil || request.Unattended {
 		return true
 	}
-	return definition.Operation != "" && (request.Origin == turn.OriginSchedule || request.Origin == turn.OriginHTTP)
+	return definition.Operation != "" && request.Origin.Unattended()
 }
 
 func operationPolicyOutcome(decision *approval.PolicyDecision, request *ToolRequest, definition *tools.Definition) error {

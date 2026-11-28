@@ -227,6 +227,9 @@ func (b *build) registerModule(name string, mod any) error {
 	if provider, ok := mod.(operation.Provider); ok {
 		b.bindings = append(b.bindings, provider.Bindings()...)
 	}
+	if provider, ok := mod.(operation.BehaviorProvider); ok {
+		b.behaviors = append(b.behaviors, provider.Behaviors()...)
+	}
 	switch m := mod.(type) {
 	case server.Lifecycle:
 		if err := b.group.Add(m); err != nil {
@@ -535,7 +538,7 @@ func parsePersonaEvalCron(expr string) (func(loc *time.Location, now time.Time) 
 }
 
 func personaToolNames(cfg *appconfig.Config) []string {
-	names := definitionNames()
+	names := append(definitionNames(), operationToolNames()...)
 	if len(githubCredentials(cfg)) > 0 {
 		names = append(names, github.ToolNames()...)
 	}
@@ -2640,7 +2643,7 @@ func stepToolNames(personaTools []string) []string {
 			orchestration[builtins[i].Name] = true
 		}
 	}
-	return slices.DeleteFunc(slices.Clone(personaTools), func(name string) bool { return orchestration[name] })
+	return slices.DeleteFunc(slices.Clone(personaTools), func(name string) bool { return orchestration[name] || tools.IsOperationEntry(name) })
 }
 
 func configuredToolSecrets(toolsCfg *appconfig.Tools) []string {
