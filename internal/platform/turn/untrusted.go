@@ -16,6 +16,10 @@ func NeutralizeUntrustedMarkers(text string) string {
 	return untrustedMarker.ReplaceAllString(text, "(untrusted")
 }
 
+func RenderUntrustedInput(source PartSource, text string) string {
+	return "[untrusted_input " + string(source) + "]\n" + NeutralizeUntrustedMarkers(text) + "\n[/untrusted_input]"
+}
+
 func QuoteUntrusted(text string) string {
 	var encoded bytes.Buffer
 	encoder := json.NewEncoder(&encoded)

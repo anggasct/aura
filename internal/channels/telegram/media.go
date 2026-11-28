@@ -210,11 +210,25 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 	if err := attachArtifacts(envelope, []media.ArtifactSummary{summary}); err != nil {
 		return err
 	}
+	var source runtimeingress.PartSource
+	var detail string
+	if msg.relayed() {
+		source = runtimeingress.PartSourceRelayed
+		detail = msg.relayedDetail()
+	}
 	if media.IsTextDocument(item.mediaType) {
-		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Text: media.ReferencePart(&summary, item.mediaType)})
+		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
+			Text:   media.ReferencePart(&summary, item.mediaType),
+			Source: source,
+			Detail: detail,
+		})
 	}
 	if len(image) > 0 {
-		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Image: image})
+		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
+			Image:  image,
+			Source: source,
+			Detail: detail,
+		})
 	} else if strings.TrimSpace(envelope.Parts[0].Text) == "" {
 		envelope.Parts[0].Text = "[" + item.kind + " attachment]"
 	}

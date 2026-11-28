@@ -11,20 +11,29 @@ type Batch struct {
 }
 
 type Slot struct {
-	batch      *Batch
-	number     int
-	index      int
-	alone      bool
-	authorize  sync.Once
-	authorized chan struct{}
-	closing    sync.Once
-	closed     chan struct{}
+	batch         *Batch
+	number        int
+	index         int
+	alone         bool
+	taintOnce     sync.Once
+	taintRecorded chan struct{}
+	authorize     sync.Once
+	authorized    chan struct{}
+	closing       sync.Once
+	closed        chan struct{}
 }
 
 func NewBatch(number, size int) *Batch {
 	batch := &Batch{slots: make([]*Slot, max(size, 0))}
 	for i := range batch.slots {
-		batch.slots[i] = &Slot{batch: batch, number: number, index: i, authorized: make(chan struct{}), closed: make(chan struct{})}
+		batch.slots[i] = &Slot{
+			batch:         batch,
+			number:        number,
+			index:         i,
+			taintRecorded: make(chan struct{}),
+			authorized:    make(chan struct{}),
+			closed:        make(chan struct{}),
+		}
 	}
 	return batch
 }
@@ -61,6 +70,21 @@ func From(ctx context.Context) (*Slot, bool) {
 	return slot, true
 }
 
+func (s *Slot) AwaitTaint(ctx context.Context) error {
+	for _, earlier := range s.batch.slots[:s.index] {
+		if err := waitFor(ctx, earlier.taintRecorded); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Slot) TaintRecorded() {
+	s.taintOnce.Do(func() {
+		close(s.taintRecorded)
+	})
+}
+
 func (s *Slot) AwaitAuthorization(ctx context.Context) error {
 	for _, earlier := range s.batch.slots[:s.index] {
 		if err := waitFor(ctx, earlier.authorized); err != nil {
@@ -93,6 +117,7 @@ func (s *Slot) AwaitExecution(ctx context.Context) error {
 }
 
 func (s *Slot) Close() {
+	s.TaintRecorded()
 	s.Authorized(true)
 	s.closing.Do(func() { close(s.closed) })
 }

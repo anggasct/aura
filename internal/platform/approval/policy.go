@@ -70,10 +70,12 @@ const (
 )
 
 const (
-	ReasonUntrustedInput    = "untrusted_input"
-	ReasonContentUnverified = "content_unverified"
-	UntrustedInputNotice    = "untrusted input: content from outside your control shaped this request, so it can be approved only once"
-	ContentUnverifiedNotice = "content not verified: Aura cannot tell whether content from outside your control shaped this request, so check it before you approve"
+	ReasonUntrustedInput      = "untrusted_input"
+	ReasonUntrustedTrustGrant = "untrusted_trust_grant"
+	ReasonContentUnverified   = "content_unverified"
+	UntrustedInputNotice      = "untrusted input: content from outside your control shaped this request, so it can be approved only once"
+	UntrustedTrustGrantNotice = "WARNING: this conversation holds content from outside your control, and it may have asked for this. Approve only what you asked for yourself."
+	ContentUnverifiedNotice   = "content not verified: Aura cannot tell whether content from outside your control shaped this request, so check it before you approve"
 )
 
 type ToolResult struct {
