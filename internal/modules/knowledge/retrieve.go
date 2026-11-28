@@ -38,6 +38,7 @@ type Hit struct {
 	Ordinal    int
 	Content    string
 	Score      float64
+	Trusted    bool
 }
 
 type Index interface {
@@ -135,6 +136,11 @@ func (r *Retriever) Search(ctx context.Context, request *SearchRequest) (Retriev
 	screened, err := r.screen(ctx, hits, collections, vault)
 	if err != nil {
 		return Retrieval{}, err
+	}
+	if request.Class != principal.ClassOwner {
+		for i := range screened {
+			screened[i].Trusted = false
+		}
 	}
 	return Retrieval{Hits: screened[:min(len(screened), request.Depth)], Mode: mode}, nil
 }

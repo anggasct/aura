@@ -27,6 +27,11 @@ const (
 
 	ActionEmbed    = "embed"
 	ActionEmbedOff = "embed_off"
+	ActionTrust    = "trust"
+	ActionUntrust  = "untrust"
+
+	TrustUntrusted = "untrusted"
+	TrustTrusted   = "trusted"
 )
 
 type HTMLReducer func(ctx context.Context, source []byte, maxBytes int64) (markdown string, truncated bool, err error)
@@ -58,6 +63,8 @@ type CollectionSummary struct {
 	Generation int64
 	Sources    int
 	Chunks     int
+	Trust      string
+	TrustedAt  *time.Time
 	CreatedAt  time.Time
 }
 
@@ -68,9 +75,29 @@ type SourceRecord struct {
 	URI           string
 	Label         string
 	ContentSHA256 string
+	VouchedSHA256 string
+	VouchedAt     *time.Time
 	IngestVersion int
 	IngestedAt    time.Time
 	Chunks        int
+}
+
+func (s *SourceRecord) Vouched() bool {
+	if s == nil {
+		return false
+	}
+	return s.VouchedSHA256 != "" && s.VouchedSHA256 == s.ContentSHA256
+}
+
+type TrustOutcome struct {
+	Collection string
+	TrustedAt  time.Time
+	Vouched    int64
+}
+
+type UntrustOutcome struct {
+	Collection string
+	Cleared    int64
 }
 
 type RemoveOutcome struct {
@@ -89,9 +116,12 @@ type IndexReport struct {
 type Store interface {
 	ReplaceSource(ctx context.Context, write *SourceWrite) (WriteResult, error)
 	ListCollections(ctx context.Context) ([]CollectionSummary, error)
+	GetCollection(ctx context.Context, collection string) (CollectionSummary, bool, error)
 	ListSources(ctx context.Context, collection string) ([]SourceRecord, error)
 	GetSource(ctx context.Context, collection, uri string) (SourceRecord, bool, error)
 	DeleteSource(ctx context.Context, collection, uri string) (RemoveOutcome, error)
+	TrustCollection(ctx context.Context, collection string, at time.Time) (TrustOutcome, error)
+	UntrustCollection(ctx context.Context, collection string) (UntrustOutcome, error)
 	TruncateWAL(ctx context.Context) (bool, error)
 	Check(ctx context.Context) (IndexReport, error)
 }
@@ -317,9 +347,12 @@ func (s *Service) List(ctx context.Context) ([]CollectionSummary, error) {
 }
 
 type CollectionDetail struct {
-	ID      string
-	Sources []SourceRecord
-	Chunks  int
+	ID         string
+	Generation int64
+	Trust      string
+	TrustedAt  *time.Time
+	Sources    []SourceRecord
+	Chunks     int
 }
 
 func (s *Service) Show(ctx context.Context, collection string) (CollectionDetail, error) {
@@ -333,11 +366,61 @@ func (s *Service) Show(ctx context.Context, collection string) (CollectionDetail
 	if len(records) == 0 {
 		return CollectionDetail{}, Errorf(ErrorCodeSourceNotFound, "collection has no sources")
 	}
-	detail := CollectionDetail{ID: collection, Sources: records}
+	summary, found, err := s.store.GetCollection(ctx, collection)
+	if err != nil {
+		return CollectionDetail{}, err
+	}
+	detail := CollectionDetail{ID: collection, Trust: TrustUntrusted, Sources: records}
+	if found {
+		detail.Generation = summary.Generation
+		if summary.Trust != "" {
+			detail.Trust = summary.Trust
+		}
+		detail.TrustedAt = summary.TrustedAt
+	}
 	for i := range records {
 		detail.Chunks += records[i].Chunks
 	}
 	return detail, nil
+}
+
+func (s *Service) Trust(ctx context.Context, collection string) (TrustOutcome, error) {
+	if err := requireCollection(collection); err != nil {
+		return TrustOutcome{}, err
+	}
+	now := s.now().UTC()
+	outcome, err := s.store.TrustCollection(ctx, collection, now)
+	if err != nil {
+		return TrustOutcome{}, err
+	}
+	if err := s.actions.RecordOwnerAction(ctx, &OwnerAction{
+		Action:     ActionTrust,
+		Collection: collection,
+		Outcome:    TrustTrusted,
+		At:         now,
+	}); err != nil {
+		return TrustOutcome{}, fmt.Errorf("record owner action: %w", err)
+	}
+	return outcome, nil
+}
+
+func (s *Service) Untrust(ctx context.Context, collection string) (UntrustOutcome, error) {
+	if err := requireCollection(collection); err != nil {
+		return UntrustOutcome{}, err
+	}
+	outcome, err := s.store.UntrustCollection(ctx, collection)
+	if err != nil {
+		return UntrustOutcome{}, err
+	}
+	if err := s.actions.RecordOwnerAction(ctx, &OwnerAction{
+		Action:     ActionUntrust,
+		Collection: collection,
+		Outcome:    TrustUntrusted,
+		At:         s.now().UTC(),
+	}); err != nil {
+		return UntrustOutcome{}, fmt.Errorf("record owner action: %w", err)
+	}
+	return outcome, nil
 }
 
 func (s *Service) PreviewRemove(ctx context.Context, collection, source string) (SourceRecord, error) {

@@ -165,7 +165,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 		t.Fatalf("list --json = %q, %v", out, err)
 	}
 	out, err = runKBCommand(t, cfg, "show", "support")
-	if err != nil || !strings.HasPrefix(out, "collection: support\nsources: 1\nchunks: 2\nURI\tLABEL\tKIND\tCHUNKS\tDIGEST\tINGESTED\n") || !strings.Contains(out, "policy.md\tfile\t2\t") {
+	if err != nil || !strings.HasPrefix(out, "collection: support\nsources: 1\nchunks: 2\ntrust: untrusted\ntrusted_at: -\nURI\tLABEL\tKIND\tCHUNKS\tDIGEST\tINGESTED\tVOUCHED\n") || !strings.Contains(out, "policy.md\tfile\t2\t") {
 		t.Fatalf("show = %q, %v", out, err)
 	}
 
@@ -192,7 +192,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 	if err != nil || !strings.Contains(out, "removed: 2 chunks") || !strings.Contains(out, "not removed: earlier replies") || !strings.Contains(out, "vacuumed") {
 		t.Fatalf("remove apply = %q, %v", out, err)
 	}
-	if out, err = runKBCommand(t, cfg, "list"); err != nil || out != "COLLECTION\tSOURCES\tCHUNKS\tGENERATION\n" {
+	if out, err = runKBCommand(t, cfg, "list"); err != nil || out != "COLLECTION\tSOURCES\tCHUNKS\tGENERATION\tTRUST\tTRUSTED_AT\n" {
 		t.Fatalf("list after remove = %q, %v", out, err)
 	}
 	_, err = runKBCommand(t, cfg, "show", "support")
@@ -650,5 +650,113 @@ func TestKBAddHelpDescribesOnlyWhatTheCLIDoes(t *testing.T) {
 		if strings.Contains(out, refused) {
 			t.Errorf("help = %q, mentions %q which is not true on the CLI", out, refused)
 		}
+	}
+}
+
+func extractConfirmCode(t *testing.T, preview, prefix string) string {
+	t.Helper()
+	for line := range strings.SplitSeq(preview, "\n") {
+		if after, ok := strings.CutPrefix(strings.TrimSpace(line), prefix); ok {
+			code := strings.TrimSpace(after)
+			if code != "" {
+				return code
+			}
+		}
+	}
+	t.Fatalf("preview lacks %q:\n%s", prefix, preview)
+	return ""
+}
+
+func TestKnowledgeOperationCommandOutput(t *testing.T) {
+	cfg := writeMemoryCLIConfig(t)
+	doc1 := writeKBDocument(t, "notes.md", "# Notes\nOwner notes on deployment steps.\n")
+	doc2 := writeKBDocument(t, "extra.md", "# Extra\nFresh unvouched document.\n")
+
+	if out, err := runKBCommand(t, cfg, "add", "notes", doc1); err != nil {
+		t.Fatalf("add doc1: %v (%s)", err, out)
+	}
+
+	listed, err := runKBCommand(t, cfg, "list")
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if !strings.HasPrefix(listed, "COLLECTION\tSOURCES\tCHUNKS\tGENERATION\tTRUST\tTRUSTED_AT\n") || !strings.Contains(listed, "notes\t1\t1\t1\tuntrusted\t-\n") {
+		t.Fatalf("list untrusted = %q", listed)
+	}
+
+	shown, err := runKBCommand(t, cfg, "show", "notes")
+	if err != nil {
+		t.Fatalf("show untrusted: %v", err)
+	}
+	if !strings.HasPrefix(shown, "collection: notes\nsources: 1\nchunks: 1\ntrust: untrusted\ntrusted_at: -\nURI\tLABEL\tKIND\tCHUNKS\tDIGEST\tINGESTED\tVOUCHED\n") ||
+		!strings.Contains(shown, "\tno\n") {
+		t.Fatalf("show untrusted = %q", shown)
+	}
+
+	preview, err := runKBCommand(t, cfg, "trust", "notes")
+	if err != nil {
+		t.Fatalf("trust preview: %v", err)
+	}
+	const warning = "Passages from this collection will no longer mark a conversation as carrying untrusted content; their text stays reference material, never instructions."
+	for _, want := range []string{"notes", "1 source(s)", "1 chunk(s)", "notes.md", "not vouched", warning} {
+		if !strings.Contains(preview, want) {
+			t.Errorf("trust preview lacks %q:\n%s", want, preview)
+		}
+	}
+	code := extractConfirmCode(t, preview, "confirm with: aura kb trust notes --apply ")
+
+	if _, err := runKBCommand(t, cfg, "trust", "notes", "--apply", "AAAA-BBBB"); !fault.HasCode(err, operation.ErrorCodeConfirmation) {
+		t.Fatalf("trust wrong code = %v, want %s", err, operation.ErrorCodeConfirmation)
+	}
+
+	applied, err := runKBCommand(t, cfg, "trust", "notes", "--apply", code)
+	if err != nil || !strings.Contains(applied, "trusted: notes") {
+		t.Fatalf("trust apply = %q, %v", applied, err)
+	}
+
+	listedTrusted, err := runKBCommand(t, cfg, "list")
+	if err != nil {
+		t.Fatalf("list trusted: %v", err)
+	}
+	if !strings.Contains(listedTrusted, "\ttrusted\t") || strings.Contains(listedTrusted, "\ttrusted\t-\n") {
+		t.Fatalf("list trusted = %q, want trust=trusted with non-empty trusted_at", listedTrusted)
+	}
+
+	shownTrusted, err := runKBCommand(t, cfg, "show", "notes")
+	if err != nil {
+		t.Fatalf("show trusted: %v", err)
+	}
+	if !strings.Contains(shownTrusted, "trust: trusted\n") || strings.Contains(shownTrusted, "trusted_at: -\n") || !strings.Contains(shownTrusted, "\tyes\n") {
+		t.Fatalf("show trusted = %q, want trust=trusted, trusted_at set, and vouched=yes", shownTrusted)
+	}
+
+	if out, err := runKBCommand(t, cfg, "add", "notes", doc2); err != nil {
+		t.Fatalf("add doc2: %v (%s)", err, out)
+	}
+	shownMixed, err := runKBCommand(t, cfg, "show", "notes")
+	if err != nil {
+		t.Fatalf("show mixed: %v", err)
+	}
+	if !strings.Contains(shownMixed, "notes.md\t") || !strings.Contains(shownMixed, "\tyes\n") || !strings.Contains(shownMixed, "\tno\n") {
+		t.Fatalf("show mixed = %q, want one vouched=yes and one vouched=no", shownMixed)
+	}
+
+	untrusted, err := runKBCommand(t, cfg, "untrust", "notes")
+	if err != nil || !strings.Contains(untrusted, "untrusted: notes") {
+		t.Fatalf("untrust = %q, %v", untrusted, err)
+	}
+	listedAfter, err := runKBCommand(t, cfg, "list")
+	if err != nil {
+		t.Fatalf("list after untrust: %v", err)
+	}
+	if !strings.Contains(listedAfter, "\tuntrusted\t-\n") {
+		t.Fatalf("list after untrust = %q, want untrusted and -", listedAfter)
+	}
+	shownAfter, err := runKBCommand(t, cfg, "show", "notes")
+	if err != nil {
+		t.Fatalf("show after untrust: %v", err)
+	}
+	if !strings.Contains(shownAfter, "trust: untrusted\ntrusted_at: -\n") || strings.Contains(shownAfter, "\tyes\n") {
+		t.Fatalf("show after untrust = %q, want untrusted and no vouched sources", shownAfter)
 	}
 }

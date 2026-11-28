@@ -43,7 +43,7 @@ func TestRootCommandMountsEverySubcommand(t *testing.T) {
 		"grants":      {"list", "revoke"},
 		"handoff":     {"list", "release"},
 		"interpreter": {"install", "list", "remove"},
-		"kb":          {"add", "check", "embed", "list", "refresh", "remove", "show", "unembed"},
+		"kb":          {"add", "check", "embed", "list", "refresh", "remove", "show", "trust", "unembed", "untrust"},
 		"mcp":         {"list", "trust"},
 		"memory":      {"forget", "inspect", "purge"},
 		"models":      {"circuit-reset", "circuits", "routes"},

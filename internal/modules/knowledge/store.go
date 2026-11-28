@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
@@ -248,16 +249,27 @@ func loadChunkKeys(ctx context.Context, conn sqlite.Querier, sourceID string) (m
 	return keys, nil
 }
 
+func parseOptionalTime(value sql.NullString) (time.Time, bool, error) {
+	if !value.Valid || value.String == "" {
+		return time.Time{}, false, nil
+	}
+	parsed, err := sqlite.ParseTime(value.String)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return parsed, true, nil
+}
+
 func (s *SQLiteStore) ListCollections(ctx context.Context) ([]CollectionSummary, error) {
 	if s == nil || s.db == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
 	}
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
-		`SELECT c.id, c.generation, c.created_at, count(DISTINCT s.id), count(k.id)
+		`SELECT c.id, c.generation, c.created_at, c.trust, c.trusted_at, count(DISTINCT s.id), count(k.id)
 		 FROM kb_collection c
 		 JOIN kb_source s ON s.collection = c.id
 		 LEFT JOIN kb_chunk k ON k.source_id = s.id
-		 GROUP BY c.id, c.generation, c.created_at
+		 GROUP BY c.id, c.generation, c.created_at, c.trust, c.trusted_at
 		 ORDER BY c.id`)
 	if err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("list knowledge collections: %w", err))
@@ -267,11 +279,17 @@ func (s *SQLiteStore) ListCollections(ctx context.Context) ([]CollectionSummary,
 	for rows.Next() {
 		var summary CollectionSummary
 		var created string
-		if err := rows.Scan(&summary.ID, &summary.Generation, &created, &summary.Sources, &summary.Chunks); err != nil {
+		var trustedAt sql.NullString
+		if err := rows.Scan(&summary.ID, &summary.Generation, &created, &summary.Trust, &trustedAt, &summary.Sources, &summary.Chunks); err != nil {
 			return nil, sqlite.Classify(fmt.Errorf("scan knowledge collection: %w", err))
 		}
 		if summary.CreatedAt, err = sqlite.ParseTime(created); err != nil {
 			return nil, fmt.Errorf("parse knowledge collection time: %w", err)
+		}
+		if parsed, ok, err := parseOptionalTime(trustedAt); err != nil {
+			return nil, fmt.Errorf("parse knowledge collection trust time: %w", err)
+		} else if ok {
+			summary.TrustedAt = &parsed
 		}
 		out = append(out, summary)
 	}
@@ -281,15 +299,145 @@ func (s *SQLiteStore) ListCollections(ctx context.Context) ([]CollectionSummary,
 	return out, nil
 }
 
-const selectSourceColumns = `s.id, s.collection, s.kind, s.uri, s.label, s.content_sha256, s.ingest_version, s.ingested_at,
+func (s *SQLiteStore) GetCollection(ctx context.Context, collection string) (CollectionSummary, bool, error) {
+	if s == nil || s.db == nil {
+		return CollectionSummary{}, false, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
+	}
+	var summary CollectionSummary
+	var created string
+	var trustedAt sql.NullString
+	err := sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
+		`SELECT c.id, c.generation, c.created_at, c.trust, c.trusted_at,
+		        (SELECT count(*) FROM kb_source s WHERE s.collection = c.id),
+		        (SELECT count(*) FROM kb_chunk k JOIN kb_source s ON s.id = k.source_id WHERE s.collection = c.id)
+		 FROM kb_collection c
+		 WHERE c.id = ?`, collection).Scan(
+		&summary.ID, &summary.Generation, &created, &summary.Trust, &trustedAt, &summary.Sources, &summary.Chunks,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return CollectionSummary{}, false, nil
+	}
+	if err != nil {
+		return CollectionSummary{}, false, sqlite.Classify(fmt.Errorf("get knowledge collection: %w", err))
+	}
+	if summary.CreatedAt, err = sqlite.ParseTime(created); err != nil {
+		return CollectionSummary{}, false, fmt.Errorf("parse knowledge collection time: %w", err)
+	}
+	if parsed, ok, err := parseOptionalTime(trustedAt); err != nil {
+		return CollectionSummary{}, false, fmt.Errorf("parse knowledge collection trust time: %w", err)
+	} else if ok {
+		summary.TrustedAt = &parsed
+	}
+	return summary, true, nil
+}
+
+func (s *SQLiteStore) TrustCollection(ctx context.Context, collection string, at time.Time) (TrustOutcome, error) {
+	if s == nil || s.db == nil {
+		return TrustOutcome{}, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
+	}
+	if collection == "" || at.IsZero() {
+		return TrustOutcome{}, Errorf(ErrorCodeInvalidArgument, "collection and time are required")
+	}
+	var outcome TrustOutcome
+	err := sqlite.RunInTx(ctx, s.db, func(txCtx context.Context) error {
+		conn := sqlite.Conn(txCtx, s.db)
+		var sources int
+		if err := conn.QueryRowContext(txCtx, `SELECT count(*) FROM kb_source WHERE collection = ?`, collection).Scan(&sources); err != nil {
+			return sqlite.Classify(fmt.Errorf("count knowledge sources: %w", err))
+		}
+		if sources == 0 {
+			return Errorf(ErrorCodeSourceNotFound, "collection has no sources")
+		}
+		stamp := sqlite.FormatTime(at.UTC())
+		res, err := conn.ExecContext(txCtx,
+			`UPDATE kb_collection SET trust = ?, trusted_at = ?, generation = generation + 1 WHERE id = ?`,
+			TrustTrusted, stamp, collection)
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("trust knowledge collection: %w", err))
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("trust knowledge collection rows: %w", err))
+		}
+		if affected == 0 {
+			return Errorf(ErrorCodeSourceNotFound, "collection has no sources")
+		}
+		vouchedRes, err := conn.ExecContext(txCtx,
+			`UPDATE kb_source SET vouched_sha256 = content_sha256, vouched_at = ? WHERE collection = ?`,
+			stamp, collection)
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("vouch knowledge sources: %w", err))
+		}
+		vouched, err := vouchedRes.RowsAffected()
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("vouch knowledge sources rows: %w", err))
+		}
+		outcome = TrustOutcome{Collection: collection, TrustedAt: at.UTC(), Vouched: vouched}
+		return nil
+	})
+	if err != nil {
+		return TrustOutcome{}, err
+	}
+	return outcome, nil
+}
+
+func (s *SQLiteStore) UntrustCollection(ctx context.Context, collection string) (UntrustOutcome, error) {
+	if s == nil || s.db == nil {
+		return UntrustOutcome{}, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
+	}
+	if collection == "" {
+		return UntrustOutcome{}, Errorf(ErrorCodeInvalidArgument, "collection is required")
+	}
+	var outcome UntrustOutcome
+	err := sqlite.RunInTx(ctx, s.db, func(txCtx context.Context) error {
+		conn := sqlite.Conn(txCtx, s.db)
+		res, err := conn.ExecContext(txCtx,
+			`UPDATE kb_collection SET trust = ?, trusted_at = NULL, generation = generation + 1 WHERE id = ?`,
+			TrustUntrusted, collection)
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("untrust knowledge collection: %w", err))
+		}
+		affected, err := res.RowsAffected()
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("untrust knowledge collection rows: %w", err))
+		}
+		if affected == 0 {
+			return Errorf(ErrorCodeSourceNotFound, "knowledge collection does not exist")
+		}
+		clearedRes, err := conn.ExecContext(txCtx,
+			`UPDATE kb_source SET vouched_sha256 = NULL, vouched_at = NULL WHERE collection = ?`,
+			collection)
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("clear knowledge source vouching: %w", err))
+		}
+		cleared, err := clearedRes.RowsAffected()
+		if err != nil {
+			return sqlite.Classify(fmt.Errorf("clear knowledge source vouching rows: %w", err))
+		}
+		outcome = UntrustOutcome{Collection: collection, Cleared: cleared}
+		return nil
+	})
+	if err != nil {
+		return UntrustOutcome{}, err
+	}
+	return outcome, nil
+}
+
+const selectSourceColumns = `s.id, s.collection, s.kind, s.uri, s.label, s.content_sha256, coalesce(s.vouched_sha256, ''), s.vouched_at, s.ingest_version, s.ingested_at,
 	(SELECT count(*) FROM kb_chunk k WHERE k.source_id = s.id)`
 
 func scanSource(row rowScanner) (SourceRecord, error) {
 	var source SourceRecord
+	var vouchedAt sql.NullString
 	var ingested string
 	if err := row.Scan(&source.ID, &source.Collection, &source.Kind, &source.URI, &source.Label,
-		&source.ContentSHA256, &source.IngestVersion, &ingested, &source.Chunks); err != nil {
+		&source.ContentSHA256, &source.VouchedSHA256, &vouchedAt, &source.IngestVersion, &ingested, &source.Chunks); err != nil {
 		return SourceRecord{}, err
+	}
+	if parsed, ok, err := parseOptionalTime(vouchedAt); err != nil {
+		return SourceRecord{}, fmt.Errorf("parse knowledge source vouch time: %w", err)
+	} else if ok {
+		source.VouchedAt = &parsed
 	}
 	at, err := sqlite.ParseTime(ingested)
 	if err != nil {

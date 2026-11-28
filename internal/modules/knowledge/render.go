@@ -77,6 +77,7 @@ type SearchResult struct {
 	Label   string `json:"label"`
 	Heading string `json:"heading"`
 	Text    string `json:"text"`
+	Trusted bool   `json:"trusted"`
 }
 
 type SearchOutput struct {
@@ -99,6 +100,7 @@ func ShapeSearch(hits []Hit, limit int) SearchOutput {
 			Label:   sanitizeLabel(hits[i].Label),
 			Heading: turn.NeutralizeUntrustedMarkers(cleanHeading(hits[i].Heading)),
 			Text:    turn.NeutralizeUntrustedMarkers(cleanText(hits[i].Content)),
+			Trusted: hits[i].Trusted,
 		}
 		size += len(result.ID) + len(result.Label) + len(result.Heading) + len(result.Text)
 		if size > MaxSearchBytes && len(out.Results) > 0 {

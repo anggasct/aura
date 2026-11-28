@@ -20,8 +20,11 @@ const (
 const kbCollectionVersionsSQL = `SELECT id, generation, coalesce(embedding_fingerprint, '')
 	FROM kb_collection WHERE id IN (SELECT value FROM json_each(?))`
 
-const kbChunksByRowIDSQL = `SELECT k.rowid, k.id, k.source_id, s.collection, s.label, coalesce(k.heading, ''), k.ordinal, k.content, k.content_sha256
-	FROM kb_chunk k JOIN kb_source s ON s.id = k.source_id
+const kbChunksByRowIDSQL = `SELECT k.rowid, k.id, k.source_id, s.collection, s.label, coalesce(k.heading, ''), k.ordinal, k.content, k.content_sha256,
+	(c.trust = 'trusted' AND s.vouched_sha256 IS NOT NULL AND s.vouched_sha256 <> '' AND s.vouched_sha256 = s.content_sha256)
+	FROM kb_chunk k
+	JOIN kb_source s ON s.id = k.source_id
+	JOIN kb_collection c ON c.id = s.collection
 	WHERE k.rowid IN (SELECT value FROM json_each(?))`
 
 const kbVectorPageSQL = `SELECT e.chunk_rowid, e.content_sha256, e.vector
@@ -139,12 +142,14 @@ func (s *SQLiteVectorSource) Chunks(ctx context.Context, rowIDs []int64) ([]Vect
 	chunks := make([]VectorChunk, 0, len(rowIDs))
 	for rows.Next() {
 		var chunk VectorChunk
+		var vouched int
 		if err := rows.Scan(
 			&chunk.RowID, &chunk.Hit.ChunkID, &chunk.Hit.SourceID, &chunk.Hit.Collection,
-			&chunk.Hit.Label, &chunk.Hit.Heading, &chunk.Hit.Ordinal, &chunk.Hit.Content, &chunk.SHA256,
+			&chunk.Hit.Label, &chunk.Hit.Heading, &chunk.Hit.Ordinal, &chunk.Hit.Content, &chunk.SHA256, &vouched,
 		); err != nil {
 			return nil, sqlite.Classify(fmt.Errorf("scan knowledge chunk: %w", err))
 		}
+		chunk.Hit.Trusted = vouched == 1
 		chunks = append(chunks, chunk)
 	}
 	if err := rows.Err(); err != nil {

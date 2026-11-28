@@ -14,7 +14,9 @@ const (
 	operationRefresh = "kb.refresh"
 	operationRemove  = "kb.remove"
 	operationShow    = "kb.show"
+	operationTrust   = "kb.trust"
 	operationUnembed = "kb.unembed"
+	operationUntrust = "kb.untrust"
 
 	maxCollectionIDBytes = 48
 	maxSourceInputBytes  = 4096
@@ -66,7 +68,7 @@ func Catalog() operation.Catalog {
 				ID: operationList, Summary: "List collections that have sources", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskRead, Commit: operation.CommitNone, Needs: needs,
 				Output: operation.Output{Kind: operation.OutputTable, Fields: []operation.OutputField{
-					{Name: "collection"}, {Name: "sources"}, {Name: "chunks"}, {Name: "generation"},
+					{Name: "collection"}, {Name: "sources"}, {Name: "chunks"}, {Name: "generation"}, {Name: "trust"}, {Name: "trusted_at"},
 				}},
 			},
 			{
@@ -76,9 +78,9 @@ func Catalog() operation.Catalog {
 				Params:      []operation.Param{collectionParam()},
 				Output: operation.Output{
 					Kind:   operation.OutputTable,
-					Header: []operation.OutputField{{Name: "collection"}, {Name: "sources"}, {Name: "chunks"}},
+					Header: []operation.OutputField{{Name: "collection"}, {Name: "sources"}, {Name: "chunks"}, {Name: "trust"}, {Name: "trusted_at"}},
 					Fields: []operation.OutputField{
-						{Name: "uri"}, {Name: "label"}, {Name: "kind"}, {Name: "chunks"}, {Name: "digest"}, {Name: "ingested"},
+						{Name: "uri"}, {Name: "label"}, {Name: "kind"}, {Name: "chunks"}, {Name: "digest"}, {Name: "ingested"}, {Name: "vouched"},
 					},
 				},
 			},
@@ -121,6 +123,21 @@ func Catalog() operation.Catalog {
 				ID: operationUnembed, Summary: "Clear a collection's embedding opt-in and erase its vectors", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Preview: true, Confirmation: operation.ConfirmPreviewUntilApply, Needs: needs,
 				Params: []operation.Param{collectionParam()}, Output: textOutput(),
+			},
+			{
+				ID: operationTrust, Summary: "Mark a collection trusted and vouch for its current sources", Exposure: operation.ExposureHost,
+				Risk: operation.RiskTrustGrant, Commit: operation.CommitTransactional,
+				Surfaces:      []operation.Surface{operation.SurfaceCLI},
+				SurfaceReason: "only the host CLI trusts a knowledge collection",
+				Preview:       true, Confirmation: operation.ConfirmPreviewWithCode, Needs: needs,
+				Description: "Previews the collection and its current sources with a confirmation code. With --apply <code>, marks the collection trusted and vouches every current source at its current content digest.",
+				Params:      []operation.Param{collectionParam()}, Output: textOutput(),
+			},
+			{
+				ID: operationUntrust, Summary: "Mark a collection untrusted and clear its sources' vouching", Exposure: operation.ExposureOwner,
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Needs: needs,
+				Description: "Clears the collection's trusted state and every source's vouched digest so its passages mark conversations as carrying untrusted content again.",
+				Params:      []operation.Param{collectionParam()}, Output: textOutput(),
 			},
 		},
 	}

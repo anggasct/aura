@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -26,6 +27,9 @@ const (
 
 	embeddingStateFailed = "failed"
 	embeddingNotApplied  = ""
+
+	maxTrustPreviewSources = 20
+	trustWarningLine       = "Passages from this collection will no longer mark a conversation as carrying untrusted content; their text stays reference material, never instructions."
 )
 
 var removalNotes = []string{
@@ -69,6 +73,8 @@ func (o *Operations) Bindings() []operation.Binding {
 		{ID: operationRemove, Handle: o.remove, Preview: o.previewRemove},
 		{ID: operationEmbed, Handle: o.embed, Preview: o.previewEmbed},
 		{ID: operationUnembed, Handle: o.unembed, Preview: o.previewUnembed},
+		{ID: operationTrust, Handle: o.trust, Preview: o.previewTrust},
+		{ID: operationUntrust, Handle: o.untrust},
 	}
 }
 
@@ -100,6 +106,21 @@ func linesResult(lines []string, data map[string]any) (operation.Result, error) 
 	return operation.JSONResult(data)
 }
 
+func formatOptionalRFC3339(t *time.Time) *string {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	formatted := t.UTC().Format(time.RFC3339)
+	return &formatted
+}
+
+func trustState(value string) string {
+	if value == TrustTrusted {
+		return TrustTrusted
+	}
+	return TrustUntrusted
+}
+
 func (o *Operations) list(ctx context.Context, call *operation.Call) (operation.Result, error) {
 	var in collectionInput
 	if err := o.ready(call, &in); err != nil {
@@ -110,16 +131,22 @@ func (o *Operations) list(ctx context.Context, call *operation.Call) (operation.
 		return operation.Result{}, moduleFailure(err)
 	}
 	type row struct {
-		Collection string `json:"collection"`
-		Sources    int    `json:"sources"`
-		Chunks     int    `json:"chunks"`
-		Generation int64  `json:"generation"`
+		Collection string  `json:"collection"`
+		Sources    int     `json:"sources"`
+		Chunks     int     `json:"chunks"`
+		Generation int64   `json:"generation"`
+		Trust      string  `json:"trust"`
+		TrustedAt  *string `json:"trusted_at"`
 	}
 	rows := make([]row, 0, len(collections))
 	for i := range collections {
 		rows = append(rows, row{
-			Collection: collections[i].ID, Sources: collections[i].Sources,
-			Chunks: collections[i].Chunks, Generation: collections[i].Generation,
+			Collection: collections[i].ID,
+			Sources:    collections[i].Sources,
+			Chunks:     collections[i].Chunks,
+			Generation: collections[i].Generation,
+			Trust:      trustState(collections[i].Trust),
+			TrustedAt:  formatOptionalRFC3339(collections[i].TrustedAt),
 		})
 	}
 	return operation.JSONResult(map[string]any{"rows": rows})
@@ -141,17 +168,30 @@ func (o *Operations) show(ctx context.Context, call *operation.Call) (operation.
 		Chunks   int    `json:"chunks"`
 		Digest   string `json:"digest"`
 		Ingested string `json:"ingested"`
+		Vouched  string `json:"vouched"`
 	}
 	sources := make([]listed, 0, len(detail.Sources))
 	for i := range detail.Sources {
 		source := &detail.Sources[i]
+		vouched := "no"
+		if detail.Trust == TrustTrusted && source.Vouched() {
+			vouched = "yes"
+		}
 		sources = append(sources, listed{
 			URI: source.URI, Label: source.Label, Kind: source.Kind, Chunks: source.Chunks,
 			Digest:   source.ContentSHA256[:min(digestPrefixLength, len(source.ContentSHA256))],
 			Ingested: source.IngestedAt.UTC().Format(time.RFC3339),
+			Vouched:  vouched,
 		})
 	}
-	return operation.JSONResult(map[string]any{"collection": detail.ID, "sources": len(sources), "chunks": detail.Chunks, "rows": sources})
+	return operation.JSONResult(map[string]any{
+		"collection": detail.ID,
+		"sources":    len(sources),
+		"chunks":     detail.Chunks,
+		"trust":      trustState(detail.Trust),
+		"trusted_at": formatOptionalRFC3339(detail.TrustedAt),
+		"rows":       sources,
+	})
 }
 
 func (o *Operations) check(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -735,4 +775,126 @@ func unembeddedResult(outcome *DisableOutcome, wal walState) (operation.Result, 
 	lines = append(lines, walLines(wal)...)
 	lines = append(lines, removalNotes...)
 	return linesResult(lines, walData(wal, map[string]any{"vectors": outcome.Vectors}))
+}
+
+func trustDigest(detail *CollectionDetail) string {
+	parts := make([]string, 0, 2+len(detail.Sources))
+	parts = append(parts, detail.ID, strconv.FormatInt(detail.Generation, 10))
+	sources := slices.Clone(detail.Sources)
+	slices.SortFunc(sources, func(a, b SourceRecord) int {
+		return cmp.Or(cmp.Compare(a.ID, b.ID), cmp.Compare(a.URI, b.URI))
+	})
+	for i := range sources {
+		parts = append(parts, sources[i].ID+"|"+sources[i].ContentSHA256)
+	}
+	return digestOf(parts...)
+}
+
+func trustPreviewLines(detail *CollectionDetail) []string {
+	shown := min(len(detail.Sources), maxTrustPreviewSources)
+	lines := make([]string, 0, shown+3)
+	lines = append(lines, fmt.Sprintf("collection %s: %d source(s), %d chunk(s), currently %s",
+		detail.ID, len(detail.Sources), detail.Chunks, trustState(detail.Trust)))
+	for i := range shown {
+		source := &detail.Sources[i]
+		status := "not vouched"
+		if detail.Trust == TrustTrusted && source.Vouched() {
+			status = "vouched"
+		}
+		lines = append(lines, fmt.Sprintf("- %s (%s) %s [%s]", source.Label, source.Kind, source.URI, status))
+	}
+	if extra := len(detail.Sources) - shown; extra > 0 {
+		lines = append(lines, fmt.Sprintf("and %d more", extra))
+	}
+	lines = append(lines, trustWarningLine)
+	return lines
+}
+
+func (o *Operations) previewTrust(ctx context.Context, call *operation.Call) (operation.Preview, error) {
+	var in collectionInput
+	if err := o.ready(call, &in); err != nil {
+		return operation.Preview{}, err
+	}
+	detail, err := o.service.Show(ctx, in.Collection)
+	if err != nil {
+		return operation.Preview{}, moduleFailure(err)
+	}
+	return operation.Preview{
+		Lines:  trustPreviewLines(&detail),
+		Digest: trustDigest(&detail),
+	}, nil
+}
+
+func (o *Operations) trust(ctx context.Context, call *operation.Call) (operation.Result, error) {
+	var in collectionInput
+	if err := o.ready(call, &in); err != nil {
+		return operation.Result{}, err
+	}
+	var outcome TrustOutcome
+	var applied bool
+	committed, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
+		detail, err := o.service.Show(ctx, in.Collection)
+		if err != nil {
+			return operation.Result{}, err
+		}
+		if call.PreviewDigest == "" || trustDigest(&detail) != call.PreviewDigest {
+			return operation.Result{}, staleSet("the collection changed after the preview")
+		}
+		trusted, err := o.service.Trust(ctx, in.Collection)
+		if err != nil {
+			return operation.Result{}, err
+		}
+		outcome, applied = trusted, true
+		return linesResult(
+			[]string{fmt.Sprintf("trusted: %s (%d source(s) vouched)", trusted.Collection, trusted.Vouched)},
+			map[string]any{
+				"collection": trusted.Collection,
+				"trust":      TrustTrusted,
+				"trusted_at": trusted.TrustedAt.UTC().Format(time.RFC3339),
+				"vouched":    trusted.Vouched,
+			},
+		)
+	})
+	if err != nil {
+		return operation.Result{}, moduleFailure(err)
+	}
+	if !applied {
+		return committed, nil
+	}
+	o.logger.InfoContext(ctx, "knowledge collection trusted",
+		"component", "knowledge", "operation", "trust", "collection", outcome.Collection, "sources", outcome.Vouched)
+	return committed, nil
+}
+
+func (o *Operations) untrust(ctx context.Context, call *operation.Call) (operation.Result, error) {
+	var in collectionInput
+	if err := o.ready(call, &in); err != nil {
+		return operation.Result{}, err
+	}
+	var outcome UntrustOutcome
+	var applied bool
+	committed, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
+		untrusted, err := o.service.Untrust(ctx, in.Collection)
+		if err != nil {
+			return operation.Result{}, err
+		}
+		outcome, applied = untrusted, true
+		return linesResult(
+			[]string{fmt.Sprintf("untrusted: %s (cleared vouching on %d source(s))", untrusted.Collection, untrusted.Cleared)},
+			map[string]any{
+				"collection": untrusted.Collection,
+				"trust":      TrustUntrusted,
+				"cleared":    untrusted.Cleared,
+			},
+		)
+	})
+	if err != nil {
+		return operation.Result{}, moduleFailure(err)
+	}
+	if !applied {
+		return committed, nil
+	}
+	o.logger.InfoContext(ctx, "knowledge collection untrusted",
+		"component", "knowledge", "operation", "untrust", "collection", outcome.Collection, "sources", outcome.Cleared)
+	return committed, nil
 }

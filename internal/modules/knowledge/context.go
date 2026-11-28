@@ -12,6 +12,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -38,6 +39,7 @@ type knowledgeEvidence struct {
 	Collections []string
 	Retrieved   int
 	Mode        string
+	OnlyTrusted bool
 }
 
 type knowledgeCounts struct {
@@ -163,7 +165,7 @@ func (p *ContextProvider) retrieve(ctx context.Context, req *turn.TurnRequest) [
 	budgeted, cancel := context.WithTimeout(ctx, RetrievalBudget)
 	defer cancel()
 	evidence, err := p.search(budgeted, req)
-	onlyTrusted := false
+	onlyTrusted := evidence.OnlyTrusted
 	journal := knowledgeJournal{
 		Block:       strings.TrimSpace(evidence.Block),
 		ChunkIDs:    evidence.ChunkIDs,
@@ -211,10 +213,14 @@ func (p *ContextProvider) search(ctx context.Context, req *turn.TurnRequest) (kn
 	}
 	selected := SelectContext(found.Hits)
 	rendered := RenderContext(selected)
+	onlyTrusted := req.PrincipalClass == principal.ClassOwner && len(selected) > 0
 	var collections []string
 	for i := range selected {
-		if selected[i].Collection != "" && !slices.Contains(collections, selected[i].Collection) {
-			collections = append(collections, selected[i].Collection)
+		if !selected[i].Trusted {
+			onlyTrusted = false
+			if selected[i].Collection != "" && !slices.Contains(collections, selected[i].Collection) {
+				collections = append(collections, selected[i].Collection)
+			}
 		}
 	}
 	slices.Sort(collections)
@@ -224,6 +230,7 @@ func (p *ContextProvider) search(ctx context.Context, req *turn.TurnRequest) (kn
 		Collections: collections,
 		Retrieved:   len(found.Hits),
 		Mode:        found.Mode,
+		OnlyTrusted: onlyTrusted,
 	}, nil
 }
 
