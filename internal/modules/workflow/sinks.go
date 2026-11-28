@@ -70,7 +70,14 @@ func (c *sinkCheck) check(id string, spec *Spec) error {
 	downstream := downstreamOfWebSteps(spec, web, conditions)
 	for index := range spec.Steps {
 		step := &spec.Steps[index]
-		if downstream[step.ID] && !sinkFree(step, c.deps) {
+		if !downstream[step.ID] {
+			continue
+		}
+		free, err := c.sinkFree(step)
+		if err != nil {
+			return err
+		}
+		if !free {
 			return c.refuse("step %q follows a web step and could send out; a scheduled workflow keeps only agent steps without web tools, tool steps that are neither sinks nor effectful, wait steps and approval steps after one", step.ID)
 		}
 	}
@@ -158,17 +165,36 @@ func followsAny(step *StepSpec, parsed *condition, marked func(id string) bool) 
 	return slices.ContainsFunc(parsed.referencedSteps(), marked)
 }
 
-func sinkFree(step *StepSpec, deps *ValidationDeps) bool {
+func (c *sinkCheck) sinkFree(step *StepSpec) (bool, error) {
 	switch step.Executor.Kind {
 	case KindAgent:
-		return !hasWebTool(step)
+		return !hasWebTool(step), nil
 	case KindTool:
 		tool := deref(step.Executor.ToolID)
-		return !slices.Contains(deps.SinkTools, tool) && !slices.Contains(deps.EffectfulTools, tool)
+		return !slices.Contains(c.deps.SinkTools, tool) && !slices.Contains(c.deps.EffectfulTools, tool), nil
 	case KindWait, KindApproval:
-		return true
+		return true, nil
 	case KindWorkflow:
-		return false
+		id, spec, err := c.child(step)
+		if err != nil {
+			return false, err
+		}
+		return c.freeOfSinks(id, spec)
 	}
-	return false
+	return false, nil
+}
+
+func (c *sinkCheck) freeOfSinks(id string, spec *Spec) (bool, error) {
+	if c.walking[id] {
+		return false, c.refuse("workflow %q starts itself, directly or through another workflow", id)
+	}
+	c.walking[id] = true
+	defer delete(c.walking, id)
+	for index := range spec.Steps {
+		free, err := c.sinkFree(&spec.Steps[index])
+		if err != nil || !free {
+			return false, err
+		}
+	}
+	return true, nil
 }
