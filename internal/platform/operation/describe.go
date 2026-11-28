@@ -4,7 +4,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const MaxDescriptionBytes = 6144
@@ -14,23 +16,24 @@ const (
 	headingBehaves  = "# Running on its own"
 	headingWithheld = "# Other Aura tools not enabled for this persona"
 
-	introSentence       = "You run inside Aura and can operate Aura itself. Each line is a group: name, summary, verbs. "
-	searchSentence      = "Call " + tools.OperationSearchToolName + " with a group or with words to load the operations you need, then call them. "
-	listedSentence      = "Call the operation tools you have been given to run them. "
-	attendedAsks        = "A verb marked ^ always needs the owner's approval card; a verb marked ? asks the owner first; other verbs run without a card unless this conversation carries untrusted input. "
-	attendedTracked     = "A verb marked ^ always needs the owner's approval card; other verbs run without a card unless this conversation carries untrusted input. "
-	unattendedAsksHead  = "Nobody can approve on this turn: verbs marked ^ or ? are refused here; give the owner the "
-	unattendedTrackHead = "Nobody can approve on this turn: verbs marked ^ are refused here; give the owner the "
-	unattendedTail      = " for them. Other verbs run. "
-	chatForm            = "chat command /<group> <verb>"
-	terminalForm        = "command aura <group> <verb>"
-	trustGrantSentence  = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
-	trustGrantSearch    = "; a search result states what applies now. "
-	trustGrantListed    = ". "
-	ownerHostChat       = "A verb marked (owner) only the owner can run: give them the chat command /<group> <verb> in a direct chat. A verb marked (host) only runs on the host: give them aura <group> <verb>. "
-	ownerHostTerminal   = "A verb marked (owner) or (host) is not yours to run: give the owner the command aura <group> <verb> to run it in a terminal on the host. "
-	honestySentence     = "Do not say you lack a capability listed here, and do not say you did something you did not call."
-	sessionFullSentence = " Loaded operations stay for this session; when a search says the session is full, the owner can start a new one with /new."
+	introSentence        = "You run inside Aura and can operate Aura itself. Each line is a group: name, summary, verbs. "
+	searchSentence       = "Call " + tools.OperationSearchToolName + " with a group or with words to load the operations you need, then call them. "
+	listedSentence       = "Call the operation tools you have been given to run them. "
+	attendedAsks         = "A verb marked ^ always needs the owner's approval card; a verb marked ? asks the owner first; other verbs run without a card unless this conversation carries untrusted input. "
+	attendedTracked      = "A verb marked ^ always needs the owner's approval card; other verbs run without a card unless this conversation carries untrusted input. "
+	unattendedAsksHead   = "Nobody can approve on this turn: verbs marked ^ or ? are refused here; give the owner the "
+	unattendedTrackHead  = "Nobody can approve on this turn: verbs marked ^ are refused here; give the owner the "
+	unattendedTail       = " for them. Other verbs run. "
+	chatForm             = "chat command /<group> <verb>"
+	terminalForm         = "command aura <group> <verb>"
+	trustGrantSentence   = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
+	trustGrantSearch     = "; a search result states what applies now. "
+	trustGrantListed     = ". "
+	ownerHostChat        = "A verb marked (owner) only the owner can run: give them the chat command /<group> <verb> in a direct chat. A verb marked (host) only runs on the host: give them aura <group> <verb>. "
+	ownerHostTerminal    = "A verb marked (owner) or (host) is not yours to run: give the owner the command aura <group> <verb> to run it in a terminal on the host. "
+	honestySentence      = "Do not say you lack a capability listed here, and do not say you did something you did not call."
+	sessionFullNew       = " Loaded operations stay for this session; when a search says the session is full, the owner can start a new one with /new."
+	sessionFullElsewhere = " Loaded operations stay for this session; when a search says the session is full, tell the owner so they can continue in a new session."
 )
 
 type DescriptionInput struct {
@@ -72,9 +75,19 @@ func (d *Discovery) preamble(in *DescriptionInput) string {
 	text.WriteString(ownerHost)
 	text.WriteString(honestySentence)
 	if in.Search {
-		text.WriteString(sessionFullSentence)
+		text.WriteString(d.sessionFull(in.Turn.Origin))
 	}
 	return text.String()
+}
+
+func (d *Discovery) sessionFull(origin turn.Origin) string {
+	switch {
+	case origin == turn.OriginTerminal:
+		return sessionFullNew
+	case d.chatCommands && (origin == turn.Origin(principal.ChannelTelegram) || origin == turn.Origin(principal.ChannelDiscord)):
+		return sessionFullNew
+	}
+	return sessionFullElsewhere
 }
 
 func (d *Discovery) Describe(in *DescriptionInput) (string, error) {

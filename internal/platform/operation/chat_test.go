@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 func chatRig(t *testing.T) (*operationtest.Rig, *operation.Chat) {
@@ -326,5 +327,42 @@ func TestChatCanonicalInputEqualsTheCLIAndToolInput(t *testing.T) {
 	plan := chat.Plan(operationtest.Group, tokens(t, `change "two words"`))
 	if string(plan.Input) != string(tool) || string(plan.Input) != string(cli) || operation.Digest(plan.Input) != operation.Digest(tool) {
 		t.Errorf("chat %s, tool %s, cli %s: want one canonical input and digest", plan.Input, tool, cli)
+	}
+}
+
+func TestSessionFullSentenceNamesNewOnlyWhereTheCommandExists(t *testing.T) {
+	const withNew = "the owner can start a new one with /new."
+	const without = "tell the owner so they can continue in a new session."
+	tests := []struct {
+		name   string
+		chat   bool
+		origin turn.Origin
+		want   string
+	}{
+		{"the console", false, turn.OriginTerminal, withNew},
+		{"telegram with chat commands", true, "telegram", withNew},
+		{"discord with chat commands", true, "discord", withNew},
+		{"telegram without chat commands", false, "telegram", without},
+		{"http", true, turn.OriginHTTP, without},
+		{"schedule", true, turn.OriginSchedule, without},
+		{"webhook", true, turn.OriginWebhook, without},
+		{"internal", true, turn.OriginInternal, without},
+		{"an unknown origin", true, "carrier-pigeon", without},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rig := operationtest.NewRig(t, &operationtest.Options{WithDiscovery: true, ChatCommands: tt.chat})
+			text, err := rig.Discovery.Describe(&operation.DescriptionInput{Turn: operation.Turn{Origin: tt.origin, Kind: operation.TurnAttended}, Search: true})
+			if err != nil {
+				t.Fatalf("Describe: %v", err)
+			}
+			if !strings.HasSuffix(strings.SplitN(text, "\n", 3)[1], tt.want) {
+				t.Errorf("preamble = %q, want it to end with %q", strings.SplitN(text, "\n", 3)[1], tt.want)
+			}
+			listed, err := rig.Discovery.Describe(&operation.DescriptionInput{Turn: operation.Turn{Origin: tt.origin, Kind: operation.TurnAttended}})
+			if err != nil || strings.Contains(listed, "session is full") {
+				t.Errorf("a listed description = %q, %v; want no session-full sentence", listed, err)
+			}
+		})
 	}
 }
