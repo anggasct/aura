@@ -15,7 +15,9 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/workspace"
 	"golang.org/x/sys/unix"
 )
 
@@ -65,16 +67,10 @@ func readFile(_ context.Context, request *toolbroker.ToolRequest, options Option
 	if args.MaxBytes > 0 && args.MaxBytes < limit {
 		limit = args.MaxBytes
 	}
-	root, err := openWorkspace(options.Workspace)
-	if err != nil {
-		return toolbroker.ToolResult{}, err
-	}
-	defer func() { _ = unix.Close(root) }()
-	fd, err := openRelative(root, args.Path, uint64(unix.O_RDONLY|unix.O_CLOEXEC))
+	file, err := workspace.OpenRead(options.Workspace, args.Path)
 	if err != nil {
 		return toolbroker.ToolResult{}, pathError("read", args.Path, err)
 	}
-	file := os.NewFile(uintptr(fd), "read-file")
 	defer func() { _ = file.Close() }()
 	data, err := io.ReadAll(io.LimitReader(file, limit+1))
 	if err != nil {
@@ -98,13 +94,13 @@ func writeFile(ctx context.Context, request *toolbroker.ToolRequest, options Opt
 	if int64(len(args.Content)) > options.MaxFileBytes {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "file content exceeds configured limit")
 	}
-	root, err := openWorkspace(options.Workspace)
+	root, err := workspace.OpenRoot(options.Workspace)
 	if err != nil {
 		return toolbroker.ToolResult{}, err
 	}
 	defer func() { _ = unix.Close(root) }()
 	parentPath, base := splitParent(args.Path)
-	parent, err := openRelative(root, parentPath, uint64(unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC))
+	parent, err := workspace.OpenBeneath(root, parentPath, uint64(unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC), 0)
 	if err != nil {
 		return toolbroker.ToolResult{}, pathError("write", args.Path, err)
 	}
@@ -148,7 +144,7 @@ func listDir(ctx context.Context, request *toolbroker.ToolRequest, options Optio
 	if err := validateRelativePath(args.Path); err != nil {
 		return toolbroker.ToolResult{}, err
 	}
-	root, err := openWorkspace(options.Workspace)
+	root, err := workspace.OpenRoot(options.Workspace)
 	if err != nil {
 		return toolbroker.ToolResult{}, err
 	}
@@ -161,7 +157,7 @@ func listDir(ctx context.Context, request *toolbroker.ToolRequest, options Optio
 }
 
 func listDirectory(ctx context.Context, root int, relative string, recursive bool, limit int, result *directoryResult) error {
-	fd, err := openRelative(root, relative, uint64(unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC))
+	fd, err := workspace.OpenBeneath(root, relative, uint64(unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC), 0)
 	if err != nil {
 		return pathError("list", relative, err)
 	}
@@ -244,22 +240,18 @@ func encodeResult(value any) (toolbroker.ToolResult, error) {
 }
 
 func validateRelativePath(path string) error {
-	if path == "" || filepath.IsAbs(path) {
-		return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "path must be relative to the workspace")
-	}
-	for _, part := range strings.FieldsFunc(path, func(r rune) bool { return r == '/' || r == '\\' }) {
-		if part == ".." {
-			return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "path traversal is not allowed")
+	if err := workspace.ValidateRelative(path); err != nil {
+		var coded *fault.Error[workspace.ErrorCode]
+		if errors.As(err, &coded) {
+			return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "%s", coded.Detail)
 		}
-	}
-	if filepath.Clean(path) == ".." || strings.HasPrefix(filepath.Clean(path), ".."+string(filepath.Separator)) {
-		return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "path traversal is not allowed")
+		return err
 	}
 	return nil
 }
 
 func pathError(operation, path string, err error) error {
-	if errors.Is(err, unix.ELOOP) || errors.Is(err, unix.EXDEV) || errors.Is(err, unix.EPERM) || errors.Is(err, unix.EEXIST) {
+	if workspace.Escapes(err) || fault.HasCode(err, workspace.ErrorCodeOutside) {
 		return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "%s path is outside the workspace", operation)
 	}
 	return fmt.Errorf("filesystem: %s %s: %w", operation, path, err)
@@ -274,29 +266,12 @@ func splitParent(path string) (dir, base string) {
 	return dir, base
 }
 
-func openWorkspace(path string) (int, error) {
-	return unix.Open(path, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0)
-}
-
-func openRelative(root int, path string, flags uint64) (int, error) {
-	how := &unix.OpenHow{
-		Flags:   flags,
-		Mode:    0,
-		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV,
-	}
-	return unix.Openat2(root, path, how)
-}
-
 func openNew(parent int, name string) (int, error) {
-	return unix.Openat2(parent, name, &unix.OpenHow{
-		Flags:   unix.O_WRONLY | unix.O_CREAT | unix.O_EXCL | unix.O_CLOEXEC | unix.O_NOFOLLOW,
-		Mode:    0o600,
-		Resolve: unix.RESOLVE_BENEATH | unix.RESOLVE_NO_MAGICLINKS | unix.RESOLVE_NO_SYMLINKS | unix.RESOLVE_NO_XDEV,
-	})
+	return workspace.OpenBeneath(parent, name, unix.O_WRONLY|unix.O_CREAT|unix.O_EXCL|unix.O_CLOEXEC|unix.O_NOFOLLOW, 0o600)
 }
 
 func rejectHardLink(parent int, name string) error {
-	fd, err := openRelative(parent, name, uint64(unix.O_PATH|unix.O_CLOEXEC))
+	fd, err := workspace.OpenBeneath(parent, name, uint64(unix.O_PATH|unix.O_CLOEXEC), 0)
 	if errors.Is(err, unix.ENOENT) {
 		return nil
 	}
