@@ -348,6 +348,7 @@ func TestKnowledgeOperationsWriteOnlyInsideCommit(t *testing.T) {
 		{name: "refresh", id: "kb.refresh", input: byCollection, seed: true},
 		{name: "remove", id: "kb.remove", input: bySource, seed: true},
 		{name: "unembed", id: "kb.unembed", input: byCollection, seed: true},
+		{name: "untrust", id: "kb.untrust", input: byCollection, seed: true},
 		{name: "list", id: "kb.list", input: `{}`, seed: true},
 		{name: "show", id: "kb.show", input: byCollection, seed: true},
 		{name: "check", id: "kb.check", input: `{}`, seed: true},
@@ -377,6 +378,7 @@ func TestKnowledgeWritesRollBackWhenTheOwnerActionCannotBeRecorded(t *testing.T)
 	}{
 		{name: "add", id: "kb.add", input: `{"collection":"support","url":"` + knowledgetest.PageURL + `"}`},
 		{name: "remove", id: "kb.remove", input: `{"collection":"support","source":"` + knowledgetest.PageURL + `"}`, seed: true},
+		{name: "untrust", id: "kb.untrust", input: `{"collection":"support"}`, seed: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

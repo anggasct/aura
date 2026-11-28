@@ -64,6 +64,22 @@ CREATE TRIGGER kb_chunk_fts_update AFTER UPDATE OF content, heading, scope ON kb
 INSERT INTO kb_chunk_fts(kb_chunk_fts, rank) VALUES ('secure-delete', 1);
 `
 
+const trustStepVersion = 33
+
+const trustStepSQL = `
+ALTER TABLE kb_collection ADD COLUMN trust TEXT NOT NULL DEFAULT 'untrusted' CHECK (trust IN ('untrusted','trusted'));
+
+ALTER TABLE kb_collection ADD COLUMN trusted_at TEXT;
+
+ALTER TABLE kb_source ADD COLUMN vouched_sha256 TEXT;
+
+ALTER TABLE kb_source ADD COLUMN vouched_at TEXT;
+`
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "knowledge", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "knowledge",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: trustStepVersion, SQL: trustStepSQL}},
+	}
 }

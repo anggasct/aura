@@ -19,6 +19,8 @@ func Fuse(lexical, semantic []Hit) []Hit {
 			if entry == nil {
 				entry = &fused{hit: hit}
 				byChunk[hit.ChunkID] = entry
+			} else {
+				entry.hit.Trusted = entry.hit.Trusted && hit.Trusted
 			}
 			entry.score += 1 / float64(rrfRankOffset+rank+1)
 		}

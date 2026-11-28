@@ -34,7 +34,19 @@ func (s *fakeStore) ReplaceSource(_ context.Context, write *SourceWrite) (WriteR
 }
 
 func (s *fakeStore) ListCollections(context.Context) ([]CollectionSummary, error) {
-	return []CollectionSummary{{ID: "support", Sources: 1, Chunks: 2}}, nil
+	return []CollectionSummary{{ID: "support", Sources: 1, Chunks: 2, Trust: TrustUntrusted}}, nil
+}
+
+func (s *fakeStore) GetCollection(_ context.Context, collection string) (CollectionSummary, bool, error) {
+	return CollectionSummary{ID: collection, Generation: 1, Sources: len(s.sources[collection]), Trust: TrustUntrusted}, true, nil
+}
+
+func (s *fakeStore) TrustCollection(_ context.Context, collection string, at time.Time) (TrustOutcome, error) {
+	return TrustOutcome{Collection: collection, TrustedAt: at, Vouched: int64(len(s.sources[collection]))}, nil
+}
+
+func (s *fakeStore) UntrustCollection(_ context.Context, collection string) (UntrustOutcome, error) {
+	return UntrustOutcome{Collection: collection, Cleared: int64(len(s.sources[collection]))}, nil
 }
 
 func (s *fakeStore) ListSources(_ context.Context, collection string) ([]SourceRecord, error) {

@@ -126,10 +126,12 @@ func (s *SQLiteIndex) Search(ctx context.Context, collections, terms []string, d
 		   SELECT rowid AS rid, bm25(kb_chunk_fts, 1.0, 1.0, 0.0) AS score
 		   FROM kb_chunk_fts WHERE kb_chunk_fts MATCH ? ORDER BY score LIMIT ?
 		 )
-		 SELECT k.id, k.source_id, s.collection, s.label, coalesce(k.heading, ''), k.ordinal, k.content, r.score
+		 SELECT k.id, k.source_id, s.collection, s.label, coalesce(k.heading, ''), k.ordinal, k.content, r.score,
+		        (c.trust = 'trusted' AND s.vouched_sha256 IS NOT NULL AND s.vouched_sha256 <> '' AND s.vouched_sha256 = s.content_sha256)
 		 FROM ranked r
 		 JOIN kb_chunk k ON k.rowid = r.rid
 		 JOIN kb_source s ON s.id = k.source_id
+		 JOIN kb_collection c ON c.id = s.collection
 		 ORDER BY r.score, k.id`, kbMatch(collections, terms), depth)
 	if err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search knowledge: %w", err))
@@ -138,9 +140,11 @@ func (s *SQLiteIndex) Search(ctx context.Context, collections, terms []string, d
 	var hits []Hit
 	for rows.Next() {
 		var hit Hit
-		if err := rows.Scan(&hit.ChunkID, &hit.SourceID, &hit.Collection, &hit.Label, &hit.Heading, &hit.Ordinal, &hit.Content, &hit.Score); err != nil {
+		var vouched int
+		if err := rows.Scan(&hit.ChunkID, &hit.SourceID, &hit.Collection, &hit.Label, &hit.Heading, &hit.Ordinal, &hit.Content, &hit.Score, &vouched); err != nil {
 			return nil, sqlite.Classify(fmt.Errorf("scan knowledge hit: %w", err))
 		}
+		hit.Trusted = vouched == 1
 		if slices.Contains(collections, hit.Collection) {
 			hits = append(hits, hit)
 		}
