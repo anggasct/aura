@@ -17,6 +17,7 @@ const (
 	ErrorCodeNotExposed      ErrorCode = "operation_not_exposed"
 	ErrorCodeDenied          ErrorCode = "operation_denied"
 	ErrorCodePreviewStale    ErrorCode = "operation_preview_stale"
+	ErrorCodeConfirmation    ErrorCode = "operation_confirmation_invalid"
 	ErrorCodeUncommitted     ErrorCode = "operation_uncommitted"
 	ErrorCodeKeyReused       ErrorCode = "operation_key_reused"
 	ErrorCodeNotCommitted    ErrorCode = "operation_not_committed"

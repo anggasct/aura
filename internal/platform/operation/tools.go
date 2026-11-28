@@ -95,6 +95,7 @@ func agentCall(request *toolbroker.ToolRequest) *Call {
 			AgentID:     request.AgentID,
 			Origin:      string(request.Origin),
 			Tainted:     request.Tainted,
+			TaintSource: request.TaintSource,
 		},
 		Input:          request.Arguments,
 		IdempotencyKey: request.IdempotencyKey,

@@ -87,11 +87,11 @@ func TestSavedRoutinesVersionAndStayStartable(t *testing.T) {
 	}
 	fresh := mustNewInterpreter(t, disk, durabletest.NewFake(), &Options{Driver: DriverConcurrent, Tools: tools})
 	installAll(t, fresh, toolSpec("leaf"))
-	started, err := fresh.StartConfigured(context.Background(), first.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-once")
+	started, err := fresh.StartConfigured(context.Background(), &ConfiguredStart{DefinitionID: first.ID, Input: &RunInput{}, PrincipalID: "local-owner", Class: principal.ClassOwner, DurableKey: "sched-once"})
 	if err != nil || started.DefinitionVersion != 2 {
 		t.Fatalf("starting a routine that is only in the store = %+v, %v", started, err)
 	}
-	again, err := fresh.StartConfigured(context.Background(), first.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-once")
+	again, err := fresh.StartConfigured(context.Background(), &ConfiguredStart{DefinitionID: first.ID, Input: &RunInput{}, PrincipalID: "local-owner", Class: principal.ClassOwner, DurableKey: "sched-once"})
 	if err != nil || again.ID != started.ID {
 		t.Fatalf("a replayed keyed start created %v, %v instead of returning %s", again, err, started.ID)
 	}

@@ -101,7 +101,7 @@ func TestStartRefusesAnUnapprovedDefinition(t *testing.T) {
 			if _, err := interpreter.Start(t.Context(), generated.ID, &RunInput{}, ownerOrigin()); !hasCode(err, ErrorCodeApprovalMissing) {
 				t.Fatalf("Start = %v, want %s", err, ErrorCodeApprovalMissing)
 			}
-			if _, err := interpreter.StartConfigured(t.Context(), generated.ID, &RunInput{}, "local-owner", principal.ClassOwner, "sched-unapproved"); !hasCode(err, ErrorCodeApprovalMissing) {
+			if _, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: generated.ID, Input: &RunInput{}, PrincipalID: "local-owner", Class: principal.ClassOwner, DurableKey: "sched-unapproved"}); !hasCode(err, ErrorCodeApprovalMissing) {
 				t.Fatalf("StartConfigured = %v, want %s", err, ErrorCodeApprovalMissing)
 			}
 			if got := countRuns(t, disk); got != 0 {

@@ -29,12 +29,21 @@ type Config struct {
 	CredentialRef secret.Ref `json:"credential_ref,omitzero"`
 	Endpoint      string     `json:"endpoint,omitempty"`
 	MaxResults    int        `json:"max_results"`
+
+	WebOnlyQueriesPerRun int `json:"web_only_queries_per_run"`
 }
+
+const (
+	MaxQueryBytes           = 256
+	MaxWebOnlyQueriesPerRun = 20
+)
 
 func Default() Config {
 	return Config{
 		Provider:   ProviderDuckDuckGo,
 		MaxResults: 5,
+
+		WebOnlyQueriesPerRun: 5,
 	}
 }
 
@@ -87,6 +96,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxResults < 1 || c.MaxResults > 20 {
 		problems = append(problems, configkit.Invalid("max_results", "must be between 1 and 20"))
+	}
+	if c.WebOnlyQueriesPerRun < 0 || c.WebOnlyQueriesPerRun > MaxWebOnlyQueriesPerRun {
+		problems = append(problems, configkit.Invalid("web_only_queries_per_run", "must be between 0 and 20"))
 	}
 	return errors.Join(problems...)
 }

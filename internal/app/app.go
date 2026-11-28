@@ -595,6 +595,10 @@ func newToolBroker(in *toolExecutorInput) (*toolbroker.Broker, *runtimeadk.Broke
 		HostCapabilities:     host,
 		ApprovalReachable:    wiring.reachable,
 		Clock:                in.clock,
+		WebOnly: toolbroker.WebOnlyLimits{
+			Fetches: in.result.Config.Tools.Fetch.WebOnlyFetchesPerRun,
+			Queries: in.result.Config.Tools.WebSearch.WebOnlyQueriesPerRun,
+		},
 	})
 	if err != nil {
 		return nil, nil, nil, err
@@ -1304,6 +1308,9 @@ func (b *build) startMCPServers(ctx context.Context, plugins *plugin.Module) err
 	if len(configuredMCPServers(cfg)) == 0 && len(mcpPlugins) == 0 {
 		return nil
 	}
+	if err := checkMCPWorkingDir(cfg, mcpPlugins); err != nil {
+		return err
+	}
 	trustPath, err := mcpTrustRegistryPath(cfg)
 	if err != nil {
 		return err
@@ -1500,7 +1507,7 @@ func (b *build) buildSchedule() error {
 	s.scheduleMod, err = schedule.New(&schedule.ModuleDeps{
 		Config:   cfg.Scheduler,
 		DB:       db,
-		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows},
+		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows, webTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil })},
 		Notify:   &cronNotifier{broadcaster: s.broadcastMod.Broadcaster()},
 		Starter:  s.broadcastRuntime,
 		Logger:   logger,
@@ -1509,7 +1516,8 @@ func (b *build) buildSchedule() error {
 		WorkflowChecker: func(ctx context.Context, id string) error {
 			return checkScheduledWorkflow(ctx, cfg, db, id)
 		},
-		Owner: &cfg.Broadcast,
+		WebTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil }),
+		Owner:    &cfg.Broadcast,
 	})
 	if err != nil {
 		return err
@@ -1568,6 +1576,14 @@ func (b *build) buildSchedule() error {
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
 }
 
+func operationConfirmer(cfg *appconfig.Config) (*operation.Confirmer, error) {
+	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
+	return operation.NewConfirmer(dataRoot)
+}
+
 func (b *build) buildOperations() error {
 	recorder, err := telemetry.NewOperationRecorder(b.meters())
 	if err != nil {
@@ -1577,7 +1593,12 @@ func (b *build) buildOperations() error {
 	if err != nil {
 		return err
 	}
+	confirmer, err := operationConfirmer(b.cfg)
+	if err != nil {
+		return err
+	}
 	registry, err := operation.NewRegistry(enabledOperationCatalogs(b.cfg), b.bindings, &operation.Deps{
+		Confirmer: confirmer,
 		Files:     b.operationFiles(),
 		DB:        b.db,
 		Effects:   b.broker.Effects(),

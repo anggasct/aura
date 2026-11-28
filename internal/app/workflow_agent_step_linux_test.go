@@ -136,7 +136,7 @@ func TestWorkflowAgentStepRunsOnTheServer(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			server := newAgentStepServer(t, map[string]string{"note-agent": agentStepDefinition("note-agent", "reviewer", tc.tools)}, tc.steps)
-			summary, err := server.srv.app.interpreter.StartConfigured(t.Context(), "note-agent", nil, principal.OwnerID, principal.ClassOwner, "")
+			summary, err := server.srv.app.interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: "note-agent", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 			if err != nil {
 				t.Fatalf("Start: %v", err)
 			}
@@ -218,7 +218,7 @@ func TestWorkflowStartFromCLIWithAgentStepRunsOnTheServer(t *testing.T) {
 	)
 	command := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, server.path), &syncBuffer{}, PartWorkflows))
 	t.Cleanup(func() { _ = command.Close(context.Background()) })
-	summary, err := command.interpreter.StartConfigured(t.Context(), "note-agent", nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := command.interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: "note-agent", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -248,7 +248,7 @@ func TestCommandSurfaceBuildsNoAgentStepExecutor(t *testing.T) {
 	if err := command.workflowMod.BindAgentTurns(nil, nil); !fault.HasCode(err, workflow.ErrorCodeInvalidArgument) {
 		t.Fatalf("BindAgentTurns on a command surface module = %v, want %s", err, workflow.ErrorCodeInvalidArgument)
 	}
-	summary, err := command.interpreter.StartConfigured(t.Context(), "note-agent", nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := command.interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: "note-agent", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

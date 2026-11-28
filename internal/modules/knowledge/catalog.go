@@ -113,8 +113,9 @@ func Catalog() operation.Catalog {
 			{
 				ID: operationEmbed, Summary: "Send a collection's chunks to the embedding provider for vectors", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskTrustGrant, Commit: operation.CommitExternal, Preview: true, Confirmation: operation.ConfirmPreviewUntilApply, ReachesNetwork: true, Needs: needs,
-				Description: "Opts the collection in to sending its chunk text to the configured embedding provider and stores the vectors; it also rebuilds vectors after the model or destination changed.",
-				Params:      []operation.Param{collectionParam()}, Output: textOutput(),
+				TaintedGrant: operation.TaintedGrantInert,
+				Description:  "Opts the collection in to sending its chunk text to the configured embedding provider and stores the vectors; it also rebuilds vectors after the model or destination changed.",
+				Params:       []operation.Param{collectionParam()}, Output: textOutput(),
 			},
 			{
 				ID: operationUnembed, Summary: "Clear a collection's embedding opt-in and erase its vectors", Exposure: operation.ExposureAgent,

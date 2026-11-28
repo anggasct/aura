@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"strings"
 
 	"github.com/anggasct/aura/internal/platform/durable"
 )
@@ -26,6 +27,9 @@ func (i *Interpreter) createChildRun(ctx context.Context, workflowID string, inp
 		return nil, err
 	}
 	if err := i.admitRun(ctx, compiled.spec, runOrigin); err != nil {
+		return nil, err
+	}
+	if err := i.checkScheduledChild(ctx, parentRunID, compiled.spec); err != nil {
 		return nil, err
 	}
 	return i.store.createRun(ctx, &runCreate{Spec: compiled.spec, Input: input, Origin: runOrigin, DurableKey: newID("dur"), ParentRunID: parentRunID, ClaimProposalID: claim})
@@ -116,4 +120,53 @@ func (e *stepExecution) runWorkflowStepSerial(ctx context.Context, step *StepSpe
 	update := childUpdate(string(raw), status, driveErr)
 	update.Attempt = attempt + 1
 	return update, false
+}
+
+const maxRunAncestry = 64
+
+func (i *Interpreter) childLookup() ChildLookup {
+	return func(id string) (*Spec, error) {
+		compiled, ok := i.specs.get(id)
+		if !ok {
+			return nil, codedError(ErrorCodeDefinitionNotFound, "definition "+id+" is not loaded")
+		}
+		return compiled.spec, nil
+	}
+}
+
+func (i *Interpreter) scheduledRoot(ctx context.Context, runID string) (bool, error) {
+	for range maxRunAncestry {
+		run, err := i.store.Run(ctx, runID)
+		if err != nil {
+			return false, err
+		}
+		if run.ParentRunID == "" {
+			return strings.HasPrefix(run.DurableKey, ScheduledKeyPrefix), nil
+		}
+		runID = run.ParentRunID
+	}
+	return false, codedError(ErrorCodeCompositionInvalid, "the run has too many ancestors")
+}
+
+func (i *Interpreter) checkScheduledChild(ctx context.Context, parentRunID string, child *Spec) error {
+	scheduled, err := i.scheduledRoot(ctx, parentRunID)
+	if err != nil {
+		return err
+	}
+	if !scheduled {
+		return nil
+	}
+	parent, err := i.store.Run(ctx, parentRunID)
+	if err != nil {
+		return err
+	}
+	parentSpec, ok := i.compiledFor(ctx, parent.DefinitionID, parent.DefinitionVersion)
+	if !ok {
+		return codedError(ErrorCodeDefinitionNotFound, "definition "+parent.DefinitionID+" is not loaded")
+	}
+	deps := i.ValidationDeps()
+	if err := CheckUnattendedSinks(parentSpec.spec, deps, i.childLookup()); err != nil {
+		return err
+	}
+	return CheckUnattendedSinks(child, deps, i.childLookup())
 }

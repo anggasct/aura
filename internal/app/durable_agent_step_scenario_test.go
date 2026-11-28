@@ -157,7 +157,7 @@ func hostAgentStep(t *testing.T, life *runLife) {
 
 func startAgentStepRun(t *testing.T, life *runLife) {
 	t.Helper()
-	summary, err := life.interpreter.StartConfigured(t.Context(), agentStepDefinitionID, &workflow.RunInput{Objective: "survive the kill"}, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := life.interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: agentStepDefinitionID, Input: &workflow.RunInput{Objective: "survive the kill"}, PrincipalID: principal.OwnerID, Class: principal.ClassOwner})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

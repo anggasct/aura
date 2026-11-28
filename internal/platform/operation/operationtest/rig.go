@@ -57,6 +57,8 @@ type Options struct {
 
 	WithoutRegistry bool
 
+	WithoutConfirmer bool
+
 	Files *operation.FileDeps
 }
 
@@ -157,8 +159,14 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 	if options.Bindings != nil {
 		bindings = options.Bindings(rig.Stubs)
 	}
+	var confirmer *operation.Confirmer
+	if !options.WithoutConfirmer {
+		if confirmer, err = operation.NewConfirmer(tb.TempDir()); err != nil {
+			tb.Fatalf("new confirmer: %v", err)
+		}
+	}
 	rig.Registry, err = operation.NewRegistry(catalogs, bindings, &operation.Deps{
-		DB: rig.DB, Effects: rig.Executor, Tools: rig.Broker, Clock: rig.Clock, Logger: logger, Telemetry: options.Telemetry, Files: options.Files,
+		DB: rig.DB, Effects: rig.Executor, Tools: rig.Broker, Clock: rig.Clock, Logger: logger, Telemetry: options.Telemetry, Files: options.Files, Confirmer: confirmer,
 	})
 	if err != nil && options.AllowInvalid {
 		rig.RegistryErr = err

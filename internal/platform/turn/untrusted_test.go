@@ -1,6 +1,12 @@
 package turn
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"unicode/utf8"
+
+	"github.com/anggasct/aura/internal/platform/principal"
+)
 
 func TestNeutralizeUntrustedMarkers(t *testing.T) {
 	tests := map[string]struct {
@@ -92,6 +98,78 @@ func TestTurnInputIsUntrustedUnlessAPrincipalAuthoredIt(t *testing.T) {
 				t.Errorf("Tainted() = %v, want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestStepOneAdmissionSourcesAndLabels(t *testing.T) {
+	tests := map[string]struct {
+		req        *TurnRequest
+		wantSource TaintSource
+		wantDetail string
+		wantLabel  string
+	}{
+		"nil request":          {req: nil, wantSource: TaintSourceOrigin, wantLabel: "a turn from an unknown origin"},
+		"webhook":              {req: &TurnRequest{Origin: OriginWebhook}, wantSource: TaintSourceOrigin, wantDetail: "webhook", wantLabel: "a webhook"},
+		"webhook account":      {req: &TurnRequest{Origin: "webhook:main"}, wantSource: TaintSourceOrigin, wantDetail: "webhook:main", wantLabel: "a webhook"},
+		"child":                {req: &TurnRequest{Origin: OriginChild}, wantSource: TaintSourceOrigin, wantDetail: "child", wantLabel: "a turn started by child"},
+		"client history":       {req: &TurnRequest{Origin: OriginHTTP, UntrustedContext: &UntrustedRecall{}}, wantSource: TaintSourceClientHistory, wantLabel: "HTTP client history"},
+		"workflow input":       {req: &TurnRequest{Origin: OriginWorkflow, InputTainted: true}, wantSource: TaintSourceWorkflowInput, wantLabel: "a workflow step"},
+		"tainted job":          {req: &TurnRequest{Origin: OriginSchedule, JobTaint: "x", JobID: "job-1"}, wantSource: TaintSourceScheduleOrigin, wantDetail: "job-1", wantLabel: "a schedule created in a conversation with untrusted content"},
+		"web only":             {req: &TurnRequest{Origin: OriginSchedule, WebOnly: true, JobID: "job-2"}, wantSource: TaintSourceWebOnly, wantDetail: "job-2", wantLabel: "a web-only scheduled run"},
+		"knowledge":            {req: &TurnRequest{Origin: OriginTerminal, Knowledge: []string{"faq"}}, wantSource: TaintSourceKnowledgeScope, wantLabel: "knowledge attached to this persona"},
+		"knowledge for owner":  {req: &TurnRequest{Origin: OriginTerminal, PrincipalClass: principal.ClassOwner, Knowledge: []string{"faq"}}, wantSource: TaintSourceKnowledgeScope, wantLabel: "knowledge attached to this persona"},
+		"origin beats history": {req: &TurnRequest{Origin: OriginWebhook, UntrustedContext: &UntrustedRecall{}, InputTainted: true, WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceOrigin, wantDetail: "webhook", wantLabel: "a webhook"},
+		"history beats input":  {req: &TurnRequest{Origin: OriginHTTP, UntrustedContext: &UntrustedRecall{}, InputTainted: true, JobTaint: "x", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceClientHistory, wantLabel: "HTTP client history"},
+		"input beats job":      {req: &TurnRequest{Origin: OriginSchedule, InputTainted: true, JobTaint: "x", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceWorkflowInput, wantLabel: "a workflow step"},
+		"job beats web only":   {req: &TurnRequest{Origin: OriginSchedule, JobTaint: "x", JobID: "job-3", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceScheduleOrigin, wantDetail: "job-3", wantLabel: "a schedule created in a conversation with untrusted content"},
+		"web only beats scope": {req: &TurnRequest{Origin: OriginSchedule, WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceWebOnly, wantLabel: "a web-only scheduled run"},
+	}
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			mark, tainted := tc.req.AdmissionTaint()
+			if !tainted {
+				t.Fatal("AdmissionTaint() = clean, want tainted")
+			}
+			if mark.Source != tc.wantSource || mark.Detail != tc.wantDetail {
+				t.Errorf("AdmissionTaint() = %+v, want source %q detail %q", mark, tc.wantSource, tc.wantDetail)
+			}
+			if got := mark.Label(); got != tc.wantLabel {
+				t.Errorf("Label() = %q, want %q", got, tc.wantLabel)
+			}
+			if !tc.req.Tainted() {
+				t.Error("Tainted() = false, want the boolean of AdmissionTaint()")
+			}
+		})
+	}
+	clean := map[string]*TurnRequest{
+		"terminal":         {Origin: OriginTerminal},
+		"schedule":         {Origin: OriginSchedule},
+		"clean job":        {Origin: OriginSchedule, JobID: "job-1"},
+		"discord account":  {Origin: "discord:main"},
+		"workflow origin":  {Origin: OriginWorkflow},
+		"job id but clean": {Origin: OriginSchedule, JobID: "job-9", Timezone: "UTC"},
+	}
+	for name, req := range clean {
+		t.Run("clean "+name, func(t *testing.T) {
+			if mark, tainted := req.AdmissionTaint(); tainted || mark != (TaintMark{}) {
+				t.Errorf("AdmissionTaint() = %+v %v, want clean", mark, tainted)
+			}
+			if req.Tainted() {
+				t.Error("Tainted() = true, want the boolean of AdmissionTaint()")
+			}
+		})
+	}
+}
+
+func TestTaintLabelsStayWithinTheDetailBound(t *testing.T) {
+	long := strings.Repeat("é", 100)
+	req := &TurnRequest{Origin: Origin("slack:" + long)}
+	mark, _ := req.AdmissionTaint()
+	if len(mark.Detail) > MaxTaintDetailBytes || !utf8.ValidString(mark.Detail) {
+		t.Errorf("detail is %d bytes, valid utf8 %v; want at most %d and valid", len(mark.Detail), utf8.ValidString(mark.Detail), MaxTaintDetailBytes)
+	}
+	if label := mark.Label(); len(label) > MaxTaintDetailBytes || !utf8.ValidString(label) {
+		t.Errorf("label is %d bytes, valid utf8 %v; want at most %d and valid", len(label), utf8.ValidString(label), MaxTaintDetailBytes)
 	}
 }
 

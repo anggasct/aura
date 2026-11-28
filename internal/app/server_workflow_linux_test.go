@@ -63,7 +63,7 @@ func TestServerHostsWorkflowRunsTheCLIStarts(t *testing.T) {
 
 	command := buildApp(t, commandCompositionOptions(loadCompositionConfig(t, path), &syncBuffer{}, PartWorkflows))
 	t.Cleanup(func() { _ = command.Close(context.Background()) })
-	summary, err := command.interpreter.StartConfigured(t.Context(), "two-reads", nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := command.interpreter.StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: "two-reads", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}

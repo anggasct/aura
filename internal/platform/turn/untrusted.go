@@ -31,7 +31,8 @@ func QuoteUntrustedName(text string) string {
 }
 
 func (r *TurnRequest) Tainted() bool {
-	return r == nil || len(r.Knowledge) > 0 || r.UntrustedContext != nil || r.InputTainted || !authoredInputOrigin(r.Origin)
+	_, tainted := r.AdmissionTaint()
+	return tainted
 }
 
 func authoredInputOrigin(origin Origin) bool {

@@ -217,7 +217,7 @@ func (r *registryRig) requireNothingHappened(t *testing.T, before string) {
 }
 
 var registrySampleInput = map[string]string{
-	"aura_cron_add":     `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize"}`,
+	"aura_cron_add":     `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","context":"full"}`,
 	"aura_cron_delete":  `{"id":"job-1"}`,
 	"aura_cron_list":    `{}`,
 	"aura_cron_pause":   `{"id":"job-1"}`,

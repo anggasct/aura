@@ -184,6 +184,10 @@ func (r *Registry) preview(ctx context.Context, found *entry, call *Call) (previ
 	if err != nil {
 		return Preview{}, asOperationError(err)
 	}
+	preview, err = r.confirmable(found.descriptor, prepared, preview)
+	if err != nil {
+		return Preview{}, asOperationError(err)
+	}
 	return preview, nil
 }
 
@@ -209,6 +213,10 @@ func (r *Registry) run(ctx context.Context, found *entry, call *Call) (result Re
 		return Result{}, refusal(err), err
 	}
 	defer prepared.run.closeFiles()
+	if err := r.confirmed(found.descriptor, prepared); err != nil {
+		seen.outcome = outcomeRefused
+		return Result{}, refusal(err), err
+	}
 	if limit := found.binding.RateLimit; limit != nil && prepared.Caller.Surface == SurfaceAgent && !resumedRun(ctx) {
 		if err := limit(ctx, prepared); err != nil {
 			seen.outcome = outcomeRefused
@@ -392,4 +400,17 @@ func (r *Registry) winner(ctx context.Context, call *Call) (Result, error) {
 		return Result{}, NewError(ErrorCodeFailed, "operation: the receipt that won the key is missing")
 	}
 	return recordedResult(&found, call.RequestDigest)
+}
+
+func (r *Registry) confirmed(descriptor *Descriptor, call *Call) error {
+	if !descriptor.confirmsWithCode() {
+		return nil
+	}
+	if call.Caller.Surface == SurfaceAgent {
+		return NewError(ErrorCodeConfirmation, "an operation that confirms with a code cannot be applied from the agent surface")
+	}
+	if call.PreviewDigest == "" || call.Confirmation == "" || !r.confirmer.Matches(call.PreviewDigest, call.Confirmation) {
+		return NewError(ErrorCodeConfirmation, "the code does not match the current preview")
+	}
+	return nil
 }

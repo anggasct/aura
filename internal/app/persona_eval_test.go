@@ -18,7 +18,7 @@ func writePersonaEvalConfig(t *testing.T, instructions, publicTools string) stri
 storage:
   path: ` + root + `
 tools:
-  workspace: ` + root + `
+  workspace: ` + t.TempDir() + `
 agents:
   definitions:
     - id: lobby

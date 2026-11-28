@@ -243,7 +243,7 @@ func writePrincipalCLIConfig(t *testing.T) string {
 storage:
   path: ` + dataRoot + `
 tools:
-  workspace: ` + dataRoot + `
+  workspace: ` + t.TempDir() + `
 owner:
   identities: ["discord:777"]
 channels:

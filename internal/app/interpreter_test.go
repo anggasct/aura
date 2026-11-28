@@ -89,11 +89,11 @@ func interpreterManifestFor(t *testing.T, archive []byte) *interpreter.Manifest 
 	return manifest
 }
 
-func interpreterConfigText(dataRoot string) string {
+func interpreterConfigText(dataRoot, workspace string) string {
 	return "version: 1\n" +
 		"capabilities:\n  enabled: [code-interpreter]\n" +
 		"storage:\n  path: " + dataRoot + "\n" +
-		"tools:\n  workspace: " + dataRoot + "/workspace\n" +
+		"tools:\n  workspace: " + workspace + "\n" +
 		"skills:\n  roots: [" + dataRoot + "/skills]\n" +
 		"context:\n  recent_complete_turns: 5\n" +
 		"profile:\n  prompt_version: v1\n" +
@@ -111,7 +111,7 @@ func newInterpreterRig(t *testing.T, build capability.Build, dependencies capabi
 		archivePath: filepath.Join(dir, "tool.tar.gz"),
 		manifest:    interpreterManifestFor(t, archive),
 	}
-	if err := os.WriteFile(rig.configPath, []byte(interpreterConfigText(rig.dataRoot)), 0o600); err != nil {
+	if err := os.WriteFile(rig.configPath, []byte(interpreterConfigText(rig.dataRoot, t.TempDir())), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(rig.archivePath, archive, 0o600); err != nil {
@@ -402,7 +402,7 @@ func TestInterpreterStatusChecksAreRegisteredOnlyForAnEnabledCapability(t *testi
 	if err != nil || len(checks) != 1 || checks[0].ID != codeexec.ComponentInterpreter {
 		t.Fatalf("enabled: checks = %+v, %v", checks, err)
 	}
-	disabled := interpreterConfigText(rig.dataRoot)
+	disabled := interpreterConfigText(rig.dataRoot, t.TempDir())
 	disabled = strings.Replace(disabled, "enabled: [code-interpreter]", "enabled: []", 1)
 	path := filepath.Join(t.TempDir(), "config.yaml")
 	if err := os.WriteFile(path, []byte(disabled), 0o600); err != nil {

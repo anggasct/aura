@@ -12,7 +12,11 @@ type Config struct {
 	MaxRedirects    int                `json:"max_redirects"`
 	MaxEncodedBytes int64              `json:"max_encoded_bytes"`
 	MaxDecodedBytes int64              `json:"max_decoded_bytes"`
+
+	WebOnlyFetchesPerRun int `json:"web_only_fetches_per_run"`
 }
+
+const MaxWebOnlyFetchesPerRun = 50
 
 func Default() Config {
 	return Config{
@@ -20,6 +24,8 @@ func Default() Config {
 		MaxRedirects:    5,
 		MaxEncodedBytes: 2097152,
 		MaxDecodedBytes: 8388608,
+
+		WebOnlyFetchesPerRun: 10,
 	}
 }
 
@@ -36,6 +42,9 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxEncodedBytes <= 0 || c.MaxDecodedBytes <= 0 {
 		problems = append(problems, configkit.Invalid("", "body limits must be positive"))
+	}
+	if c.WebOnlyFetchesPerRun < 0 || c.WebOnlyFetchesPerRun > MaxWebOnlyFetchesPerRun {
+		problems = append(problems, configkit.Invalid("web_only_fetches_per_run", "must be between 0 and 50"))
 	}
 	return errors.Join(problems...)
 }

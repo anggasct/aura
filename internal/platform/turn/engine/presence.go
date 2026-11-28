@@ -77,32 +77,6 @@ func (e *Engine) currentPresence(req *turn.TurnRequest, deadline time.Time) (run
 	return presenceAdapterFor(req, deadline, e.adapters)
 }
 
-func hasToolActivity(payload json.RawMessage) bool {
-	if len(payload) == 0 {
-		return false
-	}
-	var decoded struct {
-		Content *struct {
-			Parts []struct {
-				FunctionCall     *struct{} `json:"functionCall"`
-				FunctionResponse *struct{} `json:"functionResponse"`
-			} `json:"parts"`
-		} `json:"content"`
-		Partial bool `json:"partial"`
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return false
-	}
-	if decoded.Content != nil {
-		for _, part := range decoded.Content.Parts {
-			if part.FunctionCall != nil || part.FunctionResponse != nil {
-				return true
-			}
-		}
-	}
-	return false
-}
-
 type functionCall struct {
 	ID string `json:"id"`
 }
@@ -188,7 +162,7 @@ func (t *presenceTracker) observe(ev *turn.Event) []runtimechannelhost.PresenceU
 	if hasCalls {
 		step := &presenceStep{
 			callIDs:  callIDs,
-			activity: adkModelText(ev.Payload, false),
+			activity: turnstore.ModelText(ev.Payload, false),
 			pending:  pending,
 		}
 		if len(callIDs) > 0 {

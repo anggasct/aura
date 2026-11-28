@@ -52,7 +52,9 @@ type BuiltinToolRequest struct {
 	EventAuthor     string
 	Knowledge       []string
 	Tainted         bool
+	TaintSource     string
 	Unattended      bool
+	WebOnlyRelief   bool
 	Origin          turn.Origin
 
 	ContentTaintTracked bool
@@ -82,16 +84,27 @@ type turnAccess struct {
 	agentID     string
 	knowledge   []string
 	tainted     bool
+	taintSource string
 	origin      turn.Origin
 
 	unattended          bool
+	webOnlyRelief       bool
 	contentTaintTracked bool
 }
 
 func (x *ADKExecutor) withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
+	mark, tainted := req.AdmissionTaint()
+	knowledge := slices.Clone(req.Knowledge)
+	if req.WebOnly {
+		knowledge = nil
+	}
 	access := turnAccess{
-		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: req.Tainted(), origin: req.Origin,
-		unattended: x.turnKind(req.Origin) == operation.TurnUnattended,
+		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: knowledge, tainted: tainted, origin: req.Origin,
+		unattended:    x.turnKind(req.Origin) == operation.TurnUnattended,
+		webOnlyRelief: req.WebOnly && req.JobTaint == "",
+	}
+	if tainted {
+		access.taintSource = mark.Label()
 	}
 	return context.WithValue(ctx, turnAccessContextKey{}, access)
 }

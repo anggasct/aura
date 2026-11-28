@@ -33,11 +33,11 @@ func TestTaintedProposalStartsOnce(t *testing.T) {
 			return err
 		}},
 		{name: "a keyed configured start", start: func(t *testing.T, interpreter *Interpreter, id string) error {
-			_, err := interpreter.StartConfigured(t.Context(), id, &RunInput{}, "local-owner", principal.ClassOwner, "schedule-key")
+			_, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: id, Input: &RunInput{}, PrincipalID: "local-owner", Class: principal.ClassOwner, DurableKey: "schedule-key"})
 			return err
 		}},
 		{name: "a configured start", start: func(t *testing.T, interpreter *Interpreter, id string) error {
-			_, err := interpreter.StartConfigured(t.Context(), id, &RunInput{}, "local-owner", principal.ClassOwner, "")
+			_, err := interpreter.StartConfigured(t.Context(), &ConfiguredStart{DefinitionID: id, Input: &RunInput{}, PrincipalID: "local-owner", Class: principal.ClassOwner, DurableKey: ""})
 			return err
 		}},
 		{name: "a child start", start: func(t *testing.T, interpreter *Interpreter, id string) error {

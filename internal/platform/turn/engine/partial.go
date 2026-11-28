@@ -18,7 +18,7 @@ func partialModelText(ev *turn.Event) (text string, partial bool) {
 	if err := json.Unmarshal(ev.Payload, &decoded); err != nil || !decoded.Partial {
 		return "", false
 	}
-	return adkModelText(ev.Payload, true), true
+	return turnstore.ModelText(ev.Payload, true), true
 }
 
 func (e *Engine) deltaFromPartial(t *turnState, next *uint64, ev *turn.Event) (delta *turn.Event, partial bool, err error) {

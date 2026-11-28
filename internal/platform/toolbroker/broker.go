@@ -50,7 +50,9 @@ type ToolRequest struct {
 	EventAuthor     string
 	Knowledge       []string
 	Tainted         bool
+	TaintSource     string
 	Unattended      bool
+	WebOnlyRelief   bool
 
 	Origin              turn.Origin
 	ContentTaintTracked bool
@@ -144,6 +146,7 @@ type Options struct {
 	HostCapabilities     []string
 	ArgumentChecks       map[string]ArgumentCheck
 	Clock                durable.Clock
+	WebOnly              WebOnlyLimits
 }
 
 type ArgumentCheck func(arguments json.RawMessage) error
@@ -167,6 +170,8 @@ type Broker struct {
 	previewers           map[string]Previewer
 	recoveries           map[string]Recovery
 	clock                durable.Clock
+	webOnly              WebOnlyLimits
+	webOnlyUse           webOnlyRuns
 }
 
 func New(options *Options) (*Broker, error) {
@@ -215,6 +220,7 @@ func New(options *Options) (*Broker, error) {
 		previewers:           map[string]Previewer{},
 		recoveries:           map[string]Recovery{},
 		clock:                clock,
+		webOnly:              options.WebOnly,
 	}, nil
 }
 
@@ -531,7 +537,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		return ToolResult{}, err
 	}
 	settled := false
-	tainted := canonical.Tainted && definition.IsExternalSink()
+	tainted := canonical.Tainted && definition.IsExternalSink() && !b.webOnlyRelieved(&canonical, definition)
 	if (guarded || tainted || (class != principal.ClassOwner && definition.Effectful)) && decision.Outcome == approval.OutcomeAllow {
 		decision.Outcome = approval.OutcomeRequireApproval
 		policyOutcome = decision.Outcome

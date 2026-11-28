@@ -15,6 +15,8 @@ import (
 
 const HandlerName = "schedule"
 
+const sessionFireLayout = "20060102T150405.000000000"
+
 const overlapPollInterval = 30 * time.Second
 
 const (
@@ -24,9 +26,13 @@ const (
 
 type TurnRequest struct {
 	SessionID      string
+	JobID          string
 	PrincipalID    string
 	Origin         string
 	Prompt         string
+	Context        string
+	Timezone       string
+	TaintSource    string
 	IdempotencyKey string
 	WorkflowID     string
 	WorkflowInput  string
@@ -372,7 +378,8 @@ func (r *Runner) decideTurn(ctx context.Context, sub *submission) ([]byte, error
 		return json.Marshal(turnOutcome{Kind: outcomeExpired})
 	}
 	result, err := r.turns.RunTurn(ctx, &TurnRequest{
-		SessionID: "cron:" + job.ID, PrincipalID: r.principal, Origin: string(turn.OriginSchedule), Prompt: job.Prompt,
+		SessionID: sessionKey(job.ID, sub.occurrence.ScheduledForUTC), JobID: job.ID, PrincipalID: r.principal,
+		Origin: string(turn.OriginSchedule), Prompt: job.Prompt, Context: job.Context, Timezone: job.Timezone, TaintSource: job.TaintSource,
 		IdempotencyKey: turnKey(job.ID, sub.occurrence.ScheduledForUTC),
 		WorkflowID:     job.WorkflowID, WorkflowInput: job.WorkflowInput,
 	})
@@ -401,8 +408,10 @@ func (r *Runner) conclude(ctx context.Context, inv durable.Invocation, end *turn
 	case outcomeCancelled:
 		return r.settle(ctx, occurrence, &settlement{state: OccurrenceCancelled})
 	}
-	if err := r.jobs.AttachTurn(ctx, occurrence.ID, outcome.TurnID, r.now()); err != nil {
-		return settledElsewhere(err)
+	if outcome.TurnID != "" {
+		if err := r.jobs.AttachTurn(ctx, occurrence.ID, outcome.TurnID, r.now()); err != nil {
+			return settledElsewhere(err)
+		}
 	}
 	if err := r.notifyOutcome(ctx, inv, end); err != nil {
 		return err
@@ -513,9 +522,13 @@ func (r *Runner) observeFired(ctx context.Context, instant time.Time) {
 func turnKey(jobID string, fire time.Time) string {
 	layout := "20060102T150405"
 	if isManual(fire) {
-		layout = "20060102T150405.000000000"
+		layout = sessionFireLayout
 	}
 	return "cron:" + jobID + ":" + fire.UTC().Format(layout)
+}
+
+func sessionKey(jobID string, fire time.Time) string {
+	return "cron:" + jobID + ":" + fire.UTC().Format(sessionFireLayout)
 }
 
 func isManual(instant time.Time) bool {

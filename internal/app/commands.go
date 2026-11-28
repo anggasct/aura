@@ -618,7 +618,8 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 		WorkflowChecker: func(ctx context.Context, id string) error {
 			return checkScheduledWorkflow(ctx, cfg, a.db, id)
 		},
-		Owner: &cfg.Broadcast,
+		WebTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return buildAgentRegistry(cfg) }),
+		Owner:    &cfg.Broadcast,
 	})
 	if err != nil {
 		return nil, err
@@ -656,13 +657,18 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	confirmer, err := operationConfirmer(cfg)
+	if err != nil {
+		return nil, err
+	}
 	bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings())
 	return operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{
-		DB:      a.db,
-		Effects: effects,
-		Tools:   lookup,
-		Files:   operationFileDeps(cfg, a.db, artifactRoot),
-		Logger:  a.logger,
+		DB:        a.db,
+		Effects:   effects,
+		Tools:     lookup,
+		Files:     operationFileDeps(cfg, a.db, artifactRoot),
+		Logger:    a.logger,
+		Confirmer: confirmer,
 	})
 }
 

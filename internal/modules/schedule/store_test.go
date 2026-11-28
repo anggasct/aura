@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
@@ -15,7 +16,7 @@ import (
 
 func scheduleBaselineMigrations(t *testing.T) []sqlite.Migration {
 	t.Helper()
-	migrations, err := sqlite.History(turnstore.Schema(), Schema())
+	migrations, err := sqlite.History(turnstore.Schema(), operation.Schema(), Schema())
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
@@ -34,7 +35,7 @@ func testScheduledJob(id string) *Job {
 	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
 	return &Job{
 		ID: id, Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC",
-		Prompt: "summarize", OriginChannel: "discord", OriginDestination: "default",
+		Prompt: "summarize", Context: ContextFull, OriginChannel: "discord", OriginDestination: "default",
 		OverlapPolicy: OverlapSkip, CatchUpGraceSeconds: 900,
 		State: JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 	}
@@ -42,7 +43,7 @@ func testScheduledJob(id string) *Job {
 
 func mustNewSQLiteStore(t *testing.T) *SQLiteStore {
 	t.Helper()
-	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), operation.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(): %v", err)
@@ -293,7 +294,7 @@ func TestScheduleStore_ActiveJobsAndListJobs(t *testing.T) {
 }
 
 func TestScheduleStore_SchemaAppliesCleanly(t *testing.T) {
-	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), operation.Schema(), Schema())
 	applied, latest, err := sqlite.SchemaVersions(t.Context(), db, scheduleBaselineMigrations(t))
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
@@ -326,7 +327,7 @@ func TestScheduleStore_RecordFireMissingJob(t *testing.T) {
 }
 
 func TestScheduleStoreJoinsCallersTransaction(t *testing.T) {
-	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), Schema())
+	db := sqlitetest.OpenMigrated(t, turnstore.Schema(), operation.Schema(), Schema())
 	s, err := NewSQLiteStore(db)
 	if err != nil {
 		t.Fatalf("NewSQLiteStore(): %v", err)

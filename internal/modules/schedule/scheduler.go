@@ -31,6 +31,17 @@ const (
 	OccurrenceCancelled      = "cancelled"
 )
 
+const (
+	ContextFull    = "full"
+	ContextWebOnly = "web_only"
+)
+
+const (
+	legacyTaintLabel   = "content this conversation held before taint tracking"
+	unknownTaintLabel  = "content from outside your control"
+	maxTaintSourceSize = 120
+)
+
 const maxNameRunes = 128
 
 const maxPromptBytes = 1 << 16
@@ -53,6 +64,9 @@ type Job struct {
 	UpdatedAt           time.Time
 	WorkflowID          string
 	WorkflowInput       string
+	Context             string
+	Tainted             bool
+	TaintSource         string
 }
 
 type JobSpec struct {
@@ -66,6 +80,8 @@ type JobSpec struct {
 	CatchUpGraceSeconds int64
 	WorkflowID          string
 	WorkflowInput       string
+	Context             string
+	TaintSource         string
 }
 
 type JobEdit struct {
@@ -77,6 +93,17 @@ type JobEdit struct {
 	OriginDestination   string
 	OverlapPolicy       string
 	CatchUpGraceSeconds int64
+}
+
+type JobConfirmation struct {
+	ExpectedVersion int64
+	Context         string
+}
+
+type JobConfirmRequest struct {
+	JobConfirmation
+	ID string
+	At time.Time
 }
 
 type Occurrence struct {
@@ -96,6 +123,7 @@ type JobStore interface {
 	InsertJob(ctx context.Context, job *Job) error
 	Job(ctx context.Context, id string) (Job, bool, error)
 	EditJob(ctx context.Context, id string, edit *JobEdit, expectedVersion int64, now time.Time) (Job, error)
+	ConfirmJob(ctx context.Context, req *JobConfirmRequest) (Job, error)
 	SetJobState(ctx context.Context, id, state string, now time.Time) error
 	RecordFire(ctx context.Context, occurrence *Occurrence) error
 	OccurrenceByFire(ctx context.Context, jobID string, scheduledFor time.Time) (Occurrence, bool, error)
@@ -133,15 +161,24 @@ func validateJobSpec(spec *JobSpec) error {
 	if _, err := time.LoadLocation(spec.Timezone); err != nil {
 		return Errorf(ErrorCodeTimezoneInvalid, "timezone is not a valid IANA name")
 	}
-	if spec.WorkflowID != "" {
+	switch {
+	case spec.WorkflowID != "":
 		if spec.Prompt != "" {
 			return Errorf(ErrorCodeInvalidArgument, "a job runs either a prompt or a workflow, not both")
 		}
 		if len(spec.WorkflowInput) > maxPromptBytes {
 			return Errorf(ErrorCodeInvalidArgument, "job workflow input is not within bounds")
 		}
-	} else if strings.TrimSpace(spec.Prompt) == "" || len(spec.Prompt) > maxPromptBytes {
+		if spec.Context != "" {
+			return Errorf(ErrorCodeInvalidArgument, "a workflow job has no context")
+		}
+	case strings.TrimSpace(spec.Prompt) == "" || len(spec.Prompt) > maxPromptBytes:
 		return Errorf(ErrorCodeInvalidArgument, "job prompt is not within bounds")
+	case !validContext(spec.Context):
+		return Errorf(ErrorCodeInvalidArgument, "a prompt job states its context as full or web_only")
+	}
+	if len(spec.TaintSource) > maxTaintSourceSize {
+		return Errorf(ErrorCodeInvalidArgument, "job taint source is too long")
 	}
 	if strings.TrimSpace(spec.OriginChannel) == "" || len([]rune(spec.OriginChannel)) > maxOriginRunes {
 		return Errorf(ErrorCodeInvalidArgument, "job origin channel is not valid")
@@ -176,11 +213,30 @@ func (s *Service) Create(ctx context.Context, spec *JobSpec) (Job, error) {
 		OverlapPolicy: spec.OverlapPolicy, CatchUpGraceSeconds: spec.CatchUpGraceSeconds,
 		State: JobActive, Version: 1, CreatedAt: now, UpdatedAt: now,
 		WorkflowID: spec.WorkflowID, WorkflowInput: spec.WorkflowInput,
+		Context: contextOf(spec), Tainted: spec.TaintSource != "", TaintSource: spec.TaintSource,
 	}
 	if err := s.jobs.InsertJob(ctx, job); err != nil {
 		return Job{}, err
 	}
 	return *job, nil
+}
+
+func validContext(value string) bool {
+	return value == ContextFull || value == ContextWebOnly
+}
+
+func promptContext(job *Job) string {
+	if job.WorkflowID != "" {
+		return ""
+	}
+	return job.Context
+}
+
+func contextOf(spec *JobSpec) string {
+	if spec.WorkflowID != "" {
+		return ContextFull
+	}
+	return spec.Context
 }
 
 func (s *Service) Get(ctx context.Context, id string) (Job, error) {
@@ -216,6 +272,7 @@ func (s *Service) Edit(ctx context.Context, id string, edit *JobEdit) (Job, erro
 		Prompt: edit.Prompt, OriginChannel: edit.OriginChannel, OriginDestination: edit.OriginDestination,
 		OverlapPolicy: edit.OverlapPolicy, CatchUpGraceSeconds: edit.CatchUpGraceSeconds,
 		WorkflowID: current.WorkflowID, WorkflowInput: current.WorkflowInput,
+		Context: promptContext(&current),
 	}); err != nil {
 		return Job{}, err
 	}
@@ -228,6 +285,26 @@ func (s *Service) Edit(ctx context.Context, id string, edit *JobEdit) (Job, erro
 		return Job{}, err
 	}
 	return updated, nil
+}
+
+func (s *Service) Confirm(ctx context.Context, id string, confirm *JobConfirmation) (Job, error) {
+	if ctx == nil {
+		return Job{}, Errorf(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if confirm == nil {
+		return Job{}, Errorf(ErrorCodeInvalidArgument, "job confirmation must not be nil")
+	}
+	if confirm.Context != "" && !validContext(confirm.Context) {
+		return Job{}, Errorf(ErrorCodeInvalidArgument, "context must be full or web_only")
+	}
+	current, err := s.Get(ctx, id)
+	if err != nil {
+		return Job{}, err
+	}
+	if confirm.Context != "" && current.WorkflowID != "" {
+		return Job{}, Errorf(ErrorCodeInvalidArgument, "a workflow job has no context")
+	}
+	return s.jobs.ConfirmJob(ctx, &JobConfirmRequest{JobConfirmation: *confirm, ID: id, At: time.Now().UTC()})
 }
 
 func (s *Service) SetState(ctx context.Context, id, state string) error {

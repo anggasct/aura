@@ -108,20 +108,6 @@ func (x *ADKExecutor) ownerTurn(definition *auraagent.Definition, class principa
 	return class == principal.ClassOwner && definition.Audience == auraagent.AudienceOwner && origin != "" && origin != turn.OriginChild && origin != turn.OriginWorkflow
 }
 
-func (x *ADKExecutor) allowedTools(definition *auraagent.Definition, class principal.Class) ([]string, bool) {
-	allowed := definition.Tools
-	if class != "" {
-		ceiling, restricted := definition.ToolCeiling(class)
-		if restricted {
-			allowed = ceiling
-			if len(allowed) == 0 {
-				return nil, false
-			}
-		}
-	}
-	return allowed, true
-}
-
 type planInput struct {
 	definition *auraagent.Definition
 	req        *turn.TurnRequest
@@ -135,7 +121,7 @@ func (x *ADKExecutor) planOperations(ctx context.Context, in *planInput) *operat
 	if binding == nil || extra.restriction != nil || !x.ownerTurn(definition, req.PrincipalClass, req.Origin) {
 		return plan
 	}
-	allowed, ok := x.allowedTools(definition, req.PrincipalClass)
+	allowed, ok := definition.ListedTools(req.PrincipalClass)
 	if !ok || !slices.ContainsFunc(allowed, auratools.IsOperationEntry) {
 		return plan
 	}

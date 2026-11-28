@@ -25,6 +25,7 @@ const (
 	ErrorCodePersonaNotFound            ErrorCode = "persona_not_found"
 	ErrorCodePersonaMismatch            ErrorCode = "persona_mismatch"
 	ErrorCodeSkillUnavailable           ErrorCode = "skill_unavailable"
+	ErrorCodeWebOnlyUnavailable         ErrorCode = "web_only_unavailable"
 )
 
 func (c ErrorCode) Retryable() bool {

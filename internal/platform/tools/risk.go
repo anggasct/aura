@@ -1,7 +1,9 @@
 package tools
 
 import (
+	"encoding/json"
 	"errors"
+	"slices"
 )
 
 type Risk string
@@ -64,6 +66,9 @@ func (d *Definition) ValidateOperation() error {
 	if d == nil {
 		return errorf(ErrorCodeDefinitionInvalid, "tool definition must not be nil")
 	}
+	if err := d.validateSinkRelief(); err != nil {
+		return err
+	}
 	if d.Operation == "" {
 		return d.validateWithoutOperation()
 	}
@@ -111,4 +116,37 @@ func (d *Definition) validateWithoutOperation() error {
 		defects = append(defects, errorf(ErrorCodeDefinitionInvalid, "tool %q is an owner notice without an operation", d.Name))
 	}
 	return errors.Join(defects...)
+}
+
+func (d *Definition) validateSinkRelief() error {
+	relief := d.SinkRelief
+	if relief == nil {
+		return nil
+	}
+	reject := func(reason string) error {
+		return errorf(ErrorCodeDefinitionInvalid, "tool %q declares a sink relief but %s", d.Name, reason)
+	}
+	switch {
+	case !d.ExternalSink || d.Server != "" || d.Plugin != nil || d.Operation != "":
+		return reject("is not a built-in external sink")
+	case relief.Argument == "" || !requiredArgument(d.Schema, relief.Argument):
+		return reject("names an argument its schema does not require")
+	case relief.Kind == SinkReliefBoundedQuery && relief.MaxBytes <= 0:
+		return reject("sets no byte bound for a bounded query")
+	case relief.Kind == SinkReliefLinkProvenance && relief.MaxBytes != 0:
+		return reject("sets a byte bound for link provenance")
+	case relief.Kind != SinkReliefBoundedQuery && relief.Kind != SinkReliefLinkProvenance:
+		return reject("names an unknown kind")
+	}
+	return nil
+}
+
+func requiredArgument(schema json.RawMessage, name string) bool {
+	var shape struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(schema, &shape); err != nil {
+		return false
+	}
+	return slices.Contains(shape.Required, name)
 }

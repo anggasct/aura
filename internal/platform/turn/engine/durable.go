@@ -56,6 +56,10 @@ func turnDescriptorFromRequest(req *turn.TurnRequest) runtimesessions.Descriptor
 		Knowledge:        slices.Clone(req.Knowledge),
 		InputTainted:     req.InputTainted,
 		ToolRestriction:  cloneToolRestriction(req.ToolRestriction),
+		JobTaint:         req.JobTaint,
+		JobID:            req.JobID,
+		WebOnly:          req.WebOnly,
+		Timezone:         req.Timezone,
 	}
 }
 
@@ -92,6 +96,10 @@ func turnRequestFromDescriptor(desc *runtimesessions.Descriptor) *turn.TurnReque
 		Knowledge:        slices.Clone(desc.Knowledge),
 		InputTainted:     desc.InputTainted,
 		ToolRestriction:  cloneToolRestriction(desc.ToolRestriction),
+		JobTaint:         desc.JobTaint,
+		JobID:            desc.JobID,
+		WebOnly:          desc.WebOnly,
+		Timezone:         desc.Timezone,
 	}
 }
 

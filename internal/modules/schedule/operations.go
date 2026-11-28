@@ -21,12 +21,15 @@ type OwnerDestination interface {
 
 type WorkflowChecker func(ctx context.Context, id string) error
 
+type WebToolsOffered func(ctx context.Context) (offered bool, err error)
+
 type OperationDeps struct {
 	Config          Config
 	Store           *SQLiteStore
 	Service         *Service
 	Starter         Starter
 	WorkflowChecker WorkflowChecker
+	WebTools        WebToolsOffered
 	Owner           OwnerDestination
 	Now             func() time.Time
 }
@@ -37,6 +40,7 @@ type Operations struct {
 	service  *Service
 	starter  Starter
 	workflow WorkflowChecker
+	webTools WebToolsOffered
 	owner    OwnerDestination
 	now      func() time.Time
 }
@@ -54,7 +58,7 @@ func NewOperations(deps *OperationDeps) (*Operations, error) {
 	}
 	return &Operations{
 		config: deps.Config, store: deps.Store, service: deps.Service, starter: deps.Starter,
-		workflow: deps.WorkflowChecker, owner: deps.Owner, now: now,
+		workflow: deps.WorkflowChecker, webTools: deps.WebTools, owner: deps.Owner, now: now,
 	}, nil
 }
 
@@ -66,6 +70,7 @@ func (o *Operations) Bindings() []operation.Binding {
 		{ID: operationPause, Handle: o.setState(JobPaused)},
 		{ID: operationResum, Handle: o.resume},
 		{ID: operationNow, Handle: o.runNow},
+		{ID: operationConf, Handle: o.confirm, Preview: o.previewConfirm},
 		{ID: operationRuns, Handle: o.runs},
 	}
 }
@@ -78,14 +83,16 @@ type addInput struct {
 	Destination string          `json:"destination"`
 	Prompt      string          `json:"prompt"`
 	Workflow    string          `json:"workflow"`
+	Context     string          `json:"context"`
 	Input       json.RawMessage `json:"input"`
 	Overlap     string          `json:"overlap"`
 	Grace       string          `json:"grace"`
 }
 
 type jobInput struct {
-	ID    string `json:"id"`
-	Limit int    `json:"limit"`
+	ID      string `json:"id"`
+	Limit   int    `json:"limit"`
+	Context string `json:"context"`
 }
 
 func decodeInput(call *operation.Call, into any) error {
@@ -132,6 +139,12 @@ func (o *Operations) spec(call *operation.Call) (*JobSpec, error) {
 	if len(in.Input) > 0 && in.Workflow == "" {
 		return nil, usage("input requires workflow")
 	}
+	if in.Prompt != "" && in.Context == "" {
+		return nil, usage("context is required with a prompt: full or web_only")
+	}
+	if in.Workflow != "" && in.Context != "" {
+		return nil, usage("context applies to a prompt, not to a workflow")
+	}
 	if err := validateWorkflowInput(in.Input); err != nil {
 		return nil, err
 	}
@@ -156,12 +169,19 @@ func (o *Operations) spec(call *operation.Call) (*JobSpec, error) {
 		Name: in.Name, CronExpression: in.Schedule, Timezone: cmp.Or(in.Timezone, o.config.DefaultTimezone),
 		Prompt: in.Prompt, OriginChannel: channel, OriginDestination: destination,
 		OverlapPolicy: in.Overlap, CatchUpGraceSeconds: graceSeconds, WorkflowID: in.Workflow,
-		WorkflowInput: string(in.Input),
+		WorkflowInput: string(in.Input), Context: in.Context, TaintSource: callerTaintSource(&call.Caller),
 	}
 	if err := validateJobSpec(spec); err != nil {
 		return nil, invalidSpec(err)
 	}
 	return spec, nil
+}
+
+func callerTaintSource(caller *operation.Caller) string {
+	if !caller.Tainted && caller.TaintSource == "" {
+		return ""
+	}
+	return cmp.Or(caller.TaintSource, unknownTaintLabel)
 }
 
 func invalidSpec(err error) error {
@@ -178,25 +198,56 @@ func (o *Operations) checkWorkflow(ctx context.Context, spec *JobSpec) error {
 	return o.workflow(ctx, spec.WorkflowID)
 }
 
+const noWebToolsDetail = "a web-only job needs web_search or web_fetch, and the persona that runs scheduled jobs lists neither for the owner; add one to its tools or use the full context"
+
+func (o *Operations) checkRun(ctx context.Context, spec *JobSpec) error {
+	if err := o.checkWorkflow(ctx, spec); err != nil {
+		return err
+	}
+	if spec.WorkflowID != "" || spec.Context != ContextWebOnly || o.webTools == nil {
+		return nil
+	}
+	offered, err := o.webTools(ctx)
+	if err == nil && !offered {
+		return operation.NewError(operation.ErrorCodeInputInvalid, noWebToolsDetail)
+	}
+	return nil
+}
+
 func (o *Operations) previewAdd(ctx context.Context, call *operation.Call) (operation.Preview, error) {
 	spec, err := o.spec(call)
 	if err != nil {
 		return operation.Preview{}, err
 	}
-	if err := o.checkWorkflow(ctx, spec); err != nil {
+	if err := o.checkRun(ctx, spec); err != nil {
 		return operation.Preview{}, err
 	}
-	return previewOf(spec, o.routeOf(spec)), nil
+	return previewOf(spec, o.routeOf(spec.OriginDestination)), nil
 }
 
-func (o *Operations) routeOf(spec *JobSpec) string {
+func (o *Operations) routeOf(destination string) string {
 	if o.owner == nil {
 		return ""
 	}
-	if alias, route := o.owner.OwnerRoute(); alias == spec.OriginDestination {
+	if alias, route := o.owner.OwnerRoute(); alias == destination {
 		return route
 	}
 	return ""
+}
+
+const contextNone = "-"
+
+const (
+	contextFullLine    = "Context: full (the persona's memory, profile, knowledge and skills, and its tools)"
+	contextWebOnlyLine = "Context: web only (no memory, profile, knowledge or skills; tools web_search and web_fetch)"
+	webOnlyLeavesLine  = "This prompt's text may be sent to any website the run visits."
+)
+
+func contextLines(value string) []string {
+	if value == ContextWebOnly {
+		return []string{contextWebOnlyLine, webOnlyLeavesLine}
+	}
+	return []string{contextFullLine}
 }
 
 func previewOf(spec *JobSpec, route string) operation.Preview {
@@ -211,6 +262,7 @@ func previewOf(spec *JobSpec, route string) operation.Preview {
 		}
 	} else {
 		lines = append(lines, "Runs prompt: "+spec.Prompt)
+		lines = append(lines, contextLines(spec.Context)...)
 	}
 	lines = append(lines,
 		"Channel: "+spec.OriginChannel,
@@ -231,11 +283,11 @@ func (o *Operations) add(ctx context.Context, call *operation.Call) (operation.R
 	if err != nil {
 		return operation.Result{}, err
 	}
-	if call.PreviewDigest != "" && previewOf(spec, o.routeOf(spec)).Digest != call.PreviewDigest {
+	if call.PreviewDigest != "" && previewOf(spec, o.routeOf(spec.OriginDestination)).Digest != call.PreviewDigest {
 		return operation.Result{}, operation.NotPerformed(operation.ErrorCodePreviewStale,
 			operation.NewError(operation.ErrorCodePreviewStale, "the owner destination changed after the preview"))
 	}
-	if err := o.checkWorkflow(ctx, spec); err != nil {
+	if err := o.checkRun(ctx, spec); err != nil {
 		return operation.Result{}, err
 	}
 	return call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
@@ -317,12 +369,15 @@ func (o *Operations) runNow(ctx context.Context, call *operation.Call) (operatio
 }
 
 type listedJob struct {
-	ID       string  `json:"id"`
-	Name     string  `json:"name"`
-	Schedule string  `json:"schedule"`
-	Timezone string  `json:"timezone"`
-	State    string  `json:"state"`
-	NextFire *string `json:"next_fire"`
+	ID          string  `json:"id"`
+	Name        string  `json:"name"`
+	Schedule    string  `json:"schedule"`
+	Timezone    string  `json:"timezone"`
+	State       string  `json:"state"`
+	Context     string  `json:"context"`
+	Tainted     bool    `json:"tainted"`
+	TaintSource string  `json:"taint_source"`
+	NextFire    *string `json:"next_fire"`
 }
 
 func (o *Operations) list(ctx context.Context, _ *operation.Call) (operation.Result, error) {
@@ -333,7 +388,10 @@ func (o *Operations) list(ctx context.Context, _ *operation.Call) (operation.Res
 	now := o.now().UTC()
 	rows := make([]listedJob, 0, len(jobs))
 	for i := range jobs {
-		row := listedJob{ID: jobs[i].ID, Name: jobs[i].Name, Schedule: jobs[i].CronExpression, Timezone: jobs[i].Timezone, State: jobs[i].State}
+		row := listedJob{
+			ID: jobs[i].ID, Name: jobs[i].Name, Schedule: jobs[i].CronExpression, Timezone: jobs[i].Timezone, State: jobs[i].State,
+			Context: listedContext(&jobs[i]), Tainted: jobs[i].Tainted, TaintSource: jobs[i].TaintSource,
+		}
 		if jobs[i].State == JobActive {
 			if fire, err := o.service.NextFire(ctx, jobs[i].ID, now); err == nil {
 				next := fire.Format(time.RFC3339)
@@ -346,6 +404,13 @@ func (o *Operations) list(ctx context.Context, _ *operation.Call) (operation.Res
 		return operation.Result{}, err
 	}
 	return encodeResult(map[string]any{"rows": rows})
+}
+
+func listedContext(job *Job) string {
+	if job.WorkflowID != "" {
+		return contextNone
+	}
+	return job.Context
 }
 
 type listedRun struct {

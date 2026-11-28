@@ -117,45 +117,10 @@ func extractDeliveryTexts(events []turn.Event) []string {
 }
 
 func adkAnswerText(payload json.RawMessage, includePartial bool) string {
-	if hasToolActivity(payload) {
+	if turnstore.HasToolActivity(payload) {
 		return ""
 	}
-	return adkModelText(payload, includePartial)
-}
-
-func adkModelText(payload json.RawMessage, includePartial bool) string {
-	if len(payload) == 0 {
-		return ""
-	}
-	var decoded struct {
-		Content *struct {
-			Role  string `json:"role"`
-			Parts []struct {
-				Text *string `json:"text"`
-			} `json:"parts"`
-		} `json:"content"`
-		Partial bool `json:"partial"`
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		return ""
-	}
-	if decoded.Content == nil {
-		return ""
-	}
-	if decoded.Content.Role == "user" {
-		return ""
-	}
-	if decoded.Partial && !includePartial {
-		return ""
-	}
-	var out strings.Builder
-	for _, part := range decoded.Content.Parts {
-		if part.Text == nil {
-			continue
-		}
-		out.WriteString(*part.Text)
-	}
-	return out.String()
+	return turnstore.ModelText(payload, includePartial)
 }
 
 func messageCompletedTexts(payload json.RawMessage) []string {

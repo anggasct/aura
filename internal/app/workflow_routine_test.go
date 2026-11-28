@@ -40,7 +40,7 @@ func succeededGeneratedRun(t *testing.T, controller *workflow.Controller, runs *
 	}); err != nil {
 		t.Fatal(err)
 	}
-	run, err := controller.Interpreter().StartConfigured(t.Context(), generated.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	run, err := controller.Interpreter().StartConfigured(t.Context(), &workflow.ConfiguredStart{DefinitionID: generated.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatal(err)
 	}

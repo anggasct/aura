@@ -40,6 +40,35 @@ CREATE TABLE scheduled_occurrence (
 CREATE INDEX scheduled_occurrence_job_idx ON scheduled_occurrence(job_id, scheduled_for_utc);
 `
 
+const taintStepVersion = 29
+
+const taintStepSQL = `
+ALTER TABLE scheduled_job ADD COLUMN context TEXT NOT NULL DEFAULT 'full' CHECK (context IN ('full','web_only') AND (context = 'full' OR workflow_id IS NULL));
+
+ALTER TABLE scheduled_job ADD COLUMN tainted INTEGER NOT NULL DEFAULT 0 CHECK (tainted IN (0,1));
+
+ALTER TABLE scheduled_job ADD COLUMN taint_source TEXT CHECK ((taint_source IS NOT NULL) = (tainted = 1) AND (taint_source IS NULL OR length(taint_source) BETWEEN 1 AND 120));
+
+UPDATE scheduled_job SET tainted = 1, taint_source = '` + legacyTaintLabel + `'
+WHERE id IN (
+    SELECT json_extract(result_json, '$.id') FROM operation_receipt
+    WHERE operation_id = 'cron.add' AND surface = 'agent' AND json_type(result_json, '$.id') = 'text'
+    UNION
+    SELECT json_extract(event.payload_json, part.fullkey || '.functionResponse.response.id')
+    FROM (
+        SELECT payload_json FROM runtime_event
+        WHERE kind = 'adk_event' AND json_valid(payload_json) AND instr(payload_json, 'aura_cron_add') > 0
+    ) AS event, json_each(event.payload_json, '$.content.parts') AS part
+    WHERE json_extract(event.payload_json, part.fullkey || '.functionResponse.name') = 'aura_cron_add'
+      AND json_type(event.payload_json, part.fullkey || '.functionResponse.response.id') = 'text'
+      AND json_type(event.payload_json, part.fullkey || '.functionResponse.response.error') IS NULL
+);
+`
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "schedule", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "schedule",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: taintStepVersion, SQL: taintStepSQL}},
+	}
 }

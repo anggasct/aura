@@ -294,7 +294,7 @@ func TestWorkflowCancelPreservesTerminalRun(t *testing.T) {
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := interpreter.StartConfigured(ctx, &workflow.ConfiguredStart{DefinitionID: spec.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -360,7 +360,7 @@ func TestWorkflowInspectRendersStepOutputs(t *testing.T) {
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := interpreter.StartConfigured(ctx, &workflow.ConfiguredStart{DefinitionID: spec.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}
@@ -557,7 +557,7 @@ func TestWorkflowToolRunnerRunsNoPlaceholderPayloadOverInterpreter(t *testing.T)
 		t.Fatalf("Load: %v", err)
 	}
 
-	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := interpreter.StartConfigured(ctx, &workflow.ConfiguredStart{DefinitionID: spec.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -676,7 +676,7 @@ END;`); err != nil {
 		t.Fatalf("create trigger: %v", err)
 	}
 
-	summary, err := interpreter.StartConfigured(ctx, "demo", nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := interpreter.StartConfigured(ctx, &workflow.ConfiguredStart{DefinitionID: "demo", Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -748,7 +748,7 @@ func TestWorkflowInspectListsCorrelations(t *testing.T) {
 	if err := interpreter.Install(ctx, []*workflow.Spec{spec}, &workflow.ValidationDeps{KnownTools: definitionNames(), Agents: builtinRegistry(t), CheckToolCall: acceptToolCall, StepAllowed: acceptStepAllowed}); err != nil {
 		t.Fatalf("install definition: %v", err)
 	}
-	summary, err := interpreter.StartConfigured(ctx, spec.ID, nil, principal.OwnerID, principal.ClassOwner, "")
+	summary, err := interpreter.StartConfigured(ctx, &workflow.ConfiguredStart{DefinitionID: spec.ID, Input: nil, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, DurableKey: ""})
 	if err != nil {
 		t.Fatalf("create run: %v", err)
 	}

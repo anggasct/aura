@@ -157,7 +157,11 @@ func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
 		t.Fatalf("schedule.NewOperations: %v", err)
 	}
 	bindings := slices.Concat(operations.Bindings(), knowledge.UnavailableOperations().Bindings(), memory.UnavailableOperations().Bindings(), profile.UnavailableOperations().Bindings())
-	registry, err := operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{DB: db, Effects: effects, Tools: broker})
+	confirmer, err := operation.NewConfirmer(t.TempDir())
+	if err != nil {
+		t.Fatalf("operation.NewConfirmer: %v", err)
+	}
+	registry, err := operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{DB: db, Effects: effects, Tools: broker, Confirmer: confirmer})
 	if err != nil {
 		t.Fatalf("operation.NewRegistry: %v", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"log/slog"
 	"maps"
 	"math"
+	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -56,6 +57,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/capability"
 	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/configkit"
 	"github.com/anggasct/aura/internal/platform/durable"
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
@@ -2424,6 +2426,39 @@ func mcpServerFromBackend(s *plugin.BackendServer) mcp.ServerConfig {
 	return out
 }
 
+func checkMCPWorkingDir(cfg *appconfig.Config, plugins []mcp.PluginServer) error {
+	if !runsStdioServer(cfg, plugins) {
+		return nil
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("resolve the working directory: %w", err)
+	}
+	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
+	if err != nil {
+		return err
+	}
+	if !appconfig.ContainsPath(workingDir, dataRoot) {
+		return nil
+	}
+	return configkit.Invalid("mcp", fmt.Sprintf("a stdio server gets the working directory %s read-write, which holds the data directory %s; start the daemon from another directory", workingDir, dataRoot))
+}
+
+func runsStdioServer(cfg *appconfig.Config, plugins []mcp.PluginServer) bool {
+	servers := configuredMCPServers(cfg)
+	for i := range servers {
+		if servers[i].Transport == mcp.TransportStdio {
+			return true
+		}
+	}
+	for i := range plugins {
+		if plugins[i].Server.Transport == mcp.TransportStdio {
+			return true
+		}
+	}
+	return false
+}
+
 func mcpPluginsFromBackends(backends []plugin.Active) []mcp.PluginServer {
 	servers := make([]mcp.PluginServer, 0, len(backends))
 	for i := range backends {
@@ -2482,7 +2517,7 @@ type cronTurnEngine interface {
 }
 
 type workflowStarter interface {
-	StartConfigured(ctx context.Context, definitionID string, input *workflow.RunInput, principalID string, class principal.Class, durableKey string) (*workflow.RunSummary, error)
+	StartConfigured(ctx context.Context, start *workflow.ConfiguredStart) (*workflow.RunSummary, error)
 }
 
 type scheduleWorkflows struct {
@@ -2509,7 +2544,21 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 			return schedule.TurnResult{}, fmt.Errorf("scheduled workflow input: %w", err)
 		}
 	}
-	run, err := (*starter).StartConfigured(ctx, req.WorkflowID, &workflow.RunInput{Objective: input.Objective}, req.PrincipalID, principal.ClassForPrincipal(req.PrincipalID), "sched-"+req.IdempotencyKey)
+	run, err := (*starter).StartConfigured(ctx, &workflow.ConfiguredStart{
+		DefinitionID: req.WorkflowID,
+		Input:        &workflow.RunInput{Objective: input.Objective},
+		PrincipalID:  req.PrincipalID,
+		Class:        principal.ClassForPrincipal(req.PrincipalID),
+		DurableKey:   req.IdempotencyKey,
+		Scheduled:    true,
+		Tainted:      req.TaintSource != "",
+	})
+	if fault.HasCode(err, workflow.ErrorCodeUnattendedSink) {
+		return schedule.TurnResult{
+			SafeErrorCode: string(workflow.ErrorCodeUnattendedSink),
+			Text:          fmt.Sprintf("Scheduled workflow %s did not start: a step after a web step could send data out. Remove that step or move it before the web step.", req.WorkflowID),
+		}, nil
+	}
 	if err != nil {
 		return schedule.TurnResult{}, err
 	}
@@ -2520,6 +2569,42 @@ type engineTurnRunner struct {
 	engine    cronTurnEngine
 	sessions  turnstore.SessionService
 	workflows *scheduleWorkflows
+	webTools  schedule.WebToolsOffered
+}
+
+const webOnlyUnavailableCode = string(turn.ErrorCodeWebOnlyUnavailable)
+
+func webToolsOfPersona(load func() (*auraagent.Registry, error)) schedule.WebToolsOffered {
+	return func(context.Context) (bool, error) {
+		registry, err := load()
+		if err != nil {
+			return false, err
+		}
+		definition, err := registry.Resolve(nil, nil)
+		if err != nil {
+			return false, err
+		}
+		for _, name := range turn.WebOnlyRestriction().Allowed {
+			if definition.OffersPlainTool(principal.ClassOwner, name) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+}
+
+func (r *engineTurnRunner) webOnlyRefusal(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, bool) {
+	if req.Context != schedule.ContextWebOnly || r.webTools == nil {
+		return schedule.TurnResult{}, false
+	}
+	offered, err := r.webTools(ctx)
+	if err == nil && offered {
+		return schedule.TurnResult{}, false
+	}
+	return schedule.TurnResult{
+		SafeErrorCode: webOnlyUnavailableCode,
+		Text:          "Scheduled web-only job did not run: the persona that runs scheduled jobs offers neither web_search nor web_fetch. Add one to its tools or change the job to the full context.",
+	}, true
 }
 
 func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, error) {
@@ -2532,6 +2617,9 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 	if r.engine == nil {
 		return schedule.TurnResult{}, errors.New("turn engine is not wired")
 	}
+	if refused, found := r.webOnlyRefusal(ctx, req); found {
+		return refused, nil
+	}
 	if r.sessions != nil {
 		if err := ensureCronSession(ctx, r.sessions, req.SessionID); err != nil {
 			return schedule.TurnResult{}, err
@@ -2539,14 +2627,7 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 	}
 	var stream []terminal.Event
 	var turnID string
-	for event, err := range r.engine.Run(ctx, &turn.TurnRequest{
-		SessionID:      req.SessionID,
-		PrincipalID:    req.PrincipalID,
-		PrincipalClass: principal.ClassForPrincipal(req.PrincipalID),
-		Origin:         turn.Origin(req.Origin),
-		Parts:          []runtimeingress.InputPart{{Text: req.Prompt}},
-		IdempotencyKey: req.IdempotencyKey,
-	}) {
+	for event, err := range r.engine.Run(ctx, scheduledTurn(req)) {
 		if err != nil {
 			if fault.HasCode(err, turn.ErrorCodeRuntimeOverloaded) {
 				return schedule.TurnResult{}, schedule.Errorf(schedule.ErrorCodeRuntimeOverloaded, "runtime is overloaded")
@@ -2573,6 +2654,21 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 		result.SafeErrorCode = "turn_failed"
 	}
 	return result, nil
+}
+
+func scheduledTurn(req *schedule.TurnRequest) *turn.TurnRequest {
+	return &turn.TurnRequest{
+		SessionID:      req.SessionID,
+		PrincipalID:    req.PrincipalID,
+		PrincipalClass: principal.ClassForPrincipal(req.PrincipalID),
+		Origin:         turn.Origin(req.Origin),
+		Parts:          []runtimeingress.InputPart{{Text: req.Prompt}},
+		IdempotencyKey: req.IdempotencyKey,
+		JobID:          req.JobID,
+		JobTaint:       req.TaintSource,
+		WebOnly:        req.Context == schedule.ContextWebOnly,
+		Timezone:       req.Timezone,
+	}
 }
 
 func ensureCronSession(ctx context.Context, sessions turnstore.SessionService, sessionID string) error {
@@ -2628,23 +2724,43 @@ func notifyContentJSON(text string) string {
 }
 
 func checkScheduledWorkflow(ctx context.Context, cfg *appconfig.Config, db *sql.DB, id string) error {
-	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(cfg))
+	source := &definitionSource{cfg: cfg, db: db}
+	spec, err := source.spec(ctx, id)
 	if err != nil {
 		return err
 	}
-	for _, spec := range specs {
-		if spec.ID == id {
-			return nil
+	deps, err := workflowValidationDeps(cfg)
+	if err != nil {
+		return err
+	}
+	lookup := func(child string) (*workflow.Spec, error) { return source.spec(ctx, child) }
+	return operation.ModuleFailure[workflow.ErrorCode](workflow.CheckUnattendedSinks(spec, deps, lookup))
+}
+
+type definitionSource struct {
+	cfg *appconfig.Config
+	db  *sql.DB
+}
+
+func (s *definitionSource) spec(ctx context.Context, id string) (*workflow.Spec, error) {
+	specs, err := workflow.LoadDefinitionsDir(workflowDefinitionsDir(s.cfg))
+	if err != nil {
+		return nil, err
+	}
+	for i := range specs {
+		if specs[i].ID == id {
+			return specs[i], nil
 		}
 	}
-	runs, err := workflow.NewStore(db, turnstore.NewTurnStore(db))
+	runs, err := workflow.NewStore(s.db, turnstore.NewTurnStore(s.db))
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if _, err := runs.LatestDefinition(ctx, id); err != nil {
-		return operation.NewError(operation.ErrorCodeInputInvalid, fmt.Sprintf("workflow %q is neither a definition nor a saved routine", id))
+	spec, err := runs.LatestDefinition(ctx, id)
+	if err != nil {
+		return nil, operation.NewError(operation.ErrorCodeInputInvalid, fmt.Sprintf("workflow %q is neither a definition nor a saved routine", id))
 	}
-	return nil
+	return spec, nil
 }
 
 func scheduleRecorderObserver(recorder *telemetry.ScheduleRecorder) schedule.Observer {
@@ -2675,6 +2791,17 @@ func newStepCatalog(extra []tools.Definition) *stepCatalog {
 		catalog.definitions[extra[i].Name] = &extra[i]
 	}
 	return catalog
+}
+
+func (c *stepCatalog) sinkToolNames() []string {
+	var names []string
+	for name, definition := range c.definitions {
+		if definition.IsExternalSink() {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (c *stepCatalog) Lookup(name string) (*tools.Definition, bool) {
@@ -2785,6 +2912,7 @@ func workflowValidationDeps(cfg *appconfig.Config) (*workflow.ValidationDeps, er
 	deps := &workflow.ValidationDeps{
 		KnownTools:     stepToolNames(personaToolNames(cfg)),
 		EffectfulTools: append(effectfulToolNames(), github.ToolNames()...),
+		SinkTools:      catalog.sinkToolNames(),
 		CheckToolCall:  catalog.CheckArguments,
 	}
 	if cfg.Workflows != nil {

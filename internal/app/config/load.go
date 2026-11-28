@@ -131,6 +131,7 @@ func validateLoaded(cfg *Config, doc *document, buildProfile capability.Profile)
 		configkit.Under("models", cfg.Models.Validate()),
 		configkit.Under("model_routes", model.ValidateRoutes(cfg.ModelRoutes)),
 		configkit.Under("tools", cfg.Tools.Validate()),
+		validateWorkspaceNesting(cfg),
 		validateSkills(cfg.Skills),
 		validateContext(cfg.Context),
 		validateProfile(cfg.Profile),

@@ -17,6 +17,7 @@ func ToolDefinition() tools.Definition {
 		Schema:               []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_fetch/v1","type":"object","properties":{"url":{"type":"string","format":"uri","minLength":1}},"required":["url"],"additionalProperties":false}`),
 		RequiredCapabilities: []string{"public-web"},
 		ExternalSink:         true,
+		SinkRelief:           &tools.SinkRelief{Kind: tools.SinkReliefLinkProvenance, Argument: "url"},
 		Validator:            validateFetchArguments,
 	}
 }

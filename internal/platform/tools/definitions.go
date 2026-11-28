@@ -107,9 +107,23 @@ type Definition struct {
 	FreshApproval        bool
 	OwnerNotice          bool
 	UntrustedOutput      bool
+	SinkRelief           *SinkRelief
 	Description          string
 	Display              []string
 	Validator            func(raw json.RawMessage) (json.RawMessage, error)
+}
+
+type SinkReliefKind string
+
+const (
+	SinkReliefLinkProvenance SinkReliefKind = "link_provenance"
+	SinkReliefBoundedQuery   SinkReliefKind = "bounded_query"
+)
+
+type SinkRelief struct {
+	Kind     SinkReliefKind
+	Argument string
+	MaxBytes int
 }
 
 func (d *Definition) IsExternalSink() bool {

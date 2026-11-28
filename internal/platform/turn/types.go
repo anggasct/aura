@@ -58,6 +58,10 @@ type TurnRequest struct {
 	Knowledge        []string
 	InputTainted     bool
 	ToolRestriction  *ToolRestriction
+	JobTaint         string
+	JobID            string
+	WebOnly          bool
+	Timezone         string
 }
 
 type ToolRestriction struct {

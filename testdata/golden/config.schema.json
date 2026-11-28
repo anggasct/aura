@@ -90,6 +90,9 @@
             },
             "max_decoded_bytes": {
               "type": "integer"
+            },
+            "web_only_fetches_per_run": {
+              "type": "integer"
             }
           },
           "additionalProperties": false
@@ -108,6 +111,9 @@
               "type": "string"
             },
             "max_results": {
+              "type": "integer"
+            },
+            "web_only_queries_per_run": {
               "type": "integer"
             }
           },

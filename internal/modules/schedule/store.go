@@ -40,6 +40,11 @@ func validJobState(state string) bool {
 	}
 }
 
+const jobColumns = `id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
+		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
+		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, ''),
+		context, tainted, COALESCE(taint_source, '')`
+
 func validOverlapPolicy(policy string) bool {
 	return policy == OverlapSkip || policy == OverlapQueueOne
 }
@@ -76,6 +81,12 @@ func validateStoredJob(job *Job) error {
 	if job.Version <= 0 {
 		return fault.New(ErrorCodeInvalidArgument, "schedule job version must be positive")
 	}
+	if !validContext(job.Context) || (job.Context == ContextWebOnly && job.WorkflowID != "") {
+		return fault.New(ErrorCodeInvalidArgument, "schedule job context is not valid")
+	}
+	if job.Tainted != (job.TaintSource != "") || len(job.TaintSource) > maxTaintSourceSize {
+		return fault.New(ErrorCodeInvalidArgument, "schedule job taint and its source must agree")
+	}
 	return nil
 }
 
@@ -90,12 +101,13 @@ func (s *SQLiteStore) InsertJob(ctx context.Context, job *Job) error {
 		`INSERT INTO scheduled_job (
 			id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
 			overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
-			workflow_id, workflow_input_json
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			workflow_id, workflow_input_json, context, tainted, taint_source
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		job.ID, job.Name, job.CronExpression, job.Timezone, job.Prompt,
 		job.OriginChannel, job.OriginDestination, job.OverlapPolicy, job.CatchUpGraceSeconds,
 		job.State, job.Version, sqlite.FormatTime(job.CreatedAt.UTC()), sqlite.FormatTime(job.UpdatedAt.UTC()),
 		nullableText(job.WorkflowID), nullableText(job.WorkflowInput),
+		job.Context, job.Tainted, nullableText(job.TaintSource),
 	)
 	if err != nil {
 		classified := sqlite.Classify(err)
@@ -112,9 +124,7 @@ func (s *SQLiteStore) Job(ctx context.Context, id string) (Job, bool, error) {
 		return Job{}, false, fault.New(ErrorCodeInvalidArgument, "schedule store must not be nil")
 	}
 	return scanOneScheduledJob(sqlite.Conn(ctx, s.db).QueryRowContext(ctx,
-		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
-		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, '')
+		`SELECT `+jobColumns+`
 		FROM scheduled_job WHERE id = ?`, id))
 }
 
@@ -137,6 +147,7 @@ func (s *SQLiteStore) EditJob(ctx context.Context, id string, edit *JobEdit, exp
 		Prompt: edit.Prompt, OriginChannel: edit.OriginChannel, OriginDestination: edit.OriginDestination,
 		OverlapPolicy: edit.OverlapPolicy, CatchUpGraceSeconds: edit.CatchUpGraceSeconds,
 		State: JobActive, Version: expectedVersion + 1, WorkflowID: current.WorkflowID,
+		Context: current.Context, Tainted: current.Tainted, TaintSource: current.TaintSource,
 	}
 	if err := validateStoredJob(candidate); err != nil {
 		return Job{}, err
@@ -173,6 +184,50 @@ func (s *SQLiteStore) EditJob(ctx context.Context, id string, edit *JobEdit, exp
 		return Job{}, fault.New(ErrorCodeJobNotFound, "schedule job not found")
 	}
 	return updated, nil
+}
+
+func (s *SQLiteStore) ConfirmJob(ctx context.Context, req *JobConfirmRequest) (Job, error) {
+	if s == nil || s.db == nil {
+		return Job{}, fault.New(ErrorCodeInvalidArgument, "schedule store must not be nil")
+	}
+	if req == nil || req.ExpectedVersion <= 0 {
+		return Job{}, fault.New(ErrorCodeInvalidArgument, "job confirmation needs the version it was previewed at")
+	}
+	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
+		`UPDATE scheduled_job SET tainted = 0, taint_source = NULL, context = COALESCE(NULLIF(?, ''), context),
+		version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND state != ?`,
+		req.Context, sqlite.FormatTime(req.At.UTC()), req.ID, req.ExpectedVersion, JobDeleted)
+	if err != nil {
+		return Job{}, fault.Wrap(ErrorCodeUnavailable, "confirm schedule job", sqlite.Classify(err))
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return Job{}, fault.Wrap(ErrorCodeUnavailable, "confirm schedule job", sqlite.Classify(err))
+	}
+	if affected == 0 {
+		return Job{}, s.confirmRefusal(ctx, req.ID)
+	}
+	confirmed, found, err := s.Job(ctx, req.ID)
+	if err != nil {
+		return Job{}, err
+	}
+	if !found {
+		return Job{}, fault.New(ErrorCodeJobNotFound, "schedule job not found")
+	}
+	return confirmed, nil
+}
+
+func (s *SQLiteStore) confirmRefusal(ctx context.Context, id string) error {
+	current, found, err := s.Job(ctx, id)
+	switch {
+	case err != nil:
+		return err
+	case !found:
+		return fault.New(ErrorCodeJobNotFound, "schedule job not found")
+	case current.State == JobDeleted:
+		return fault.New(ErrorCodeJobStateInvalid, "deleted jobs are not confirmed")
+	}
+	return fault.New(ErrorCodeOccurrenceConflict, "schedule job changed after the preview")
 }
 
 func (s *SQLiteStore) SetJobState(ctx context.Context, id, state string, now time.Time) error {
@@ -315,6 +370,7 @@ func scanOneScheduledJob(row rowScanner) (Job, bool, error) {
 		&job.ID, &job.Name, &job.CronExpression, &job.Timezone, &job.Prompt,
 		&job.OriginChannel, &job.OriginDestination, &job.OverlapPolicy, &job.CatchUpGraceSeconds,
 		&job.State, &job.Version, &createdAtRaw, &updatedAtRaw, &job.WorkflowID, &job.WorkflowInput,
+		&job.Context, &job.Tainted, &job.TaintSource,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Job{}, false, nil
@@ -330,8 +386,8 @@ func scanOneScheduledJob(row rowScanner) (Job, bool, error) {
 	if err != nil {
 		return Job{}, false, fault.New(ErrorCodeUnavailable, "job updated_at is not a valid timestamp")
 	}
-	if !validOverlapPolicy(job.OverlapPolicy) || !validJobState(job.State) {
-		return Job{}, false, fault.New(ErrorCodeUnavailable, "job row carries invalid policy or state")
+	if !validOverlapPolicy(job.OverlapPolicy) || !validJobState(job.State) || !validContext(job.Context) || job.Tainted != (job.TaintSource != "") {
+		return Job{}, false, fault.New(ErrorCodeUnavailable, "job row carries invalid policy, state, context or taint")
 	}
 	job.CreatedAt = createdAt
 	job.UpdatedAt = updatedAt
@@ -482,9 +538,7 @@ func (s *SQLiteStore) ActiveJobs(ctx context.Context, limit int) ([]Job, error) 
 		return nil, fault.New(ErrorCodeInvalidArgument, "list limit must be positive")
 	}
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
-		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
-		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, '')
+		`SELECT `+jobColumns+`
 		FROM scheduled_job WHERE state = ? ORDER BY id LIMIT ?`,
 		JobActive, limit)
 	if err != nil {
@@ -575,9 +629,7 @@ func (s *SQLiteStore) ListJobs(ctx context.Context, limit int) ([]Job, error) {
 		return nil, fault.New(ErrorCodeInvalidArgument, "list limit must be positive")
 	}
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
-		`SELECT id, name, cron_expression, timezone, prompt, origin_channel, origin_destination,
-		overlap_policy, catch_up_grace_seconds, state, version, created_at, updated_at,
-		COALESCE(workflow_id, ''), COALESCE(workflow_input_json, '')
+		`SELECT `+jobColumns+`
 		FROM scheduled_job ORDER BY created_at DESC, id DESC LIMIT ?`,
 		limit)
 	if err != nil {

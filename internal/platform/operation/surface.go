@@ -96,6 +96,14 @@ func (d *Descriptor) previews() bool {
 	return d.OwnerConfirmation() == ConfirmPreviewUntilApply
 }
 
+func (d *Descriptor) confirmsWithCode() bool {
+	return d.OwnerConfirmation() == ConfirmPreviewWithCode
+}
+
+func (d *Descriptor) appliesAfterPreview() bool {
+	return d.previews() || d.confirmsWithCode()
+}
+
 func (d *Descriptor) GeneratesTool() bool {
 	return d != nil && d.Exposure == ExposureAgent && d.ModuleTool == "" && d.Projects(SurfaceAgent)
 }
