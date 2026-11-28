@@ -169,7 +169,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 		t.Fatalf("list --json = %q, %v", out, err)
 	}
 	out, err = runKBCommand(t, cfg, "show", "support")
-	if err != nil || !strings.Contains(out, "collection: support sources=1 chunks=2") || !strings.Contains(out, "label=policy.md kind=file chunks=2") {
+	if err != nil || !strings.Contains(out, "policy.md\tfile\t2\t") {
 		t.Fatalf("show = %q, %v", out, err)
 	}
 
@@ -265,7 +265,7 @@ func TestKBRefreshFailureKeepsOldChunks(t *testing.T) {
 		t.Errorf("error %q does not name the source and its reason", err.Error())
 	}
 	out, err := runKBCommand(t, cfg, "show", "support")
-	if err != nil || !strings.Contains(out, "chunks=1") {
+	if err != nil || !strings.Contains(out, "policy.md\tfile\t1\t") {
 		t.Fatalf("show after failed refresh = %q, %v; want the old chunks kept", out, err)
 	}
 	_, db, _ := kbTestStorage(t, cfg)
@@ -525,7 +525,7 @@ func TestKBCheckReportsADamagedIndexAndFailsOtherwiseClean(t *testing.T) {
 		t.Fatalf("add: %v (%s)", err, out)
 	}
 	out, err := runKBCommand(t, cfg, "check")
-	if err != nil || !strings.Contains(out, "collections=1 sources=1 chunks=2 indexed=2") || !strings.Contains(out, "ok") {
+	if err != nil || !strings.Contains(out, "collections: 1\nsources: 1\nchunks: 2\nindexed_chunks: 2\n") || !strings.Contains(out, "status: ok") {
 		t.Fatalf("healthy check = %q, %v", out, err)
 	}
 
