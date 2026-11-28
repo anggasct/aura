@@ -75,14 +75,23 @@ type Descriptor struct {
 	Preview              bool
 	Confirmation         OwnerConfirmation
 	ReachesNetwork       bool
+	TaintedGrant         TaintedGrant
 	Texts                []SurfaceText
 }
+
+type TaintedGrant string
+
+const (
+	TaintedGrantLabels TaintedGrant = "labels"
+	TaintedGrantInert  TaintedGrant = "inert"
+)
 
 type OwnerConfirmation string
 
 const (
 	ConfirmPreviewUntilApply OwnerConfirmation = "preview_until_apply"
 	ConfirmRunDirectly       OwnerConfirmation = "run_directly"
+	ConfirmPreviewWithCode   OwnerConfirmation = "preview_with_code"
 )
 
 type ParamKind string
@@ -166,6 +175,7 @@ type Caller struct {
 	Origin      string
 	Direct      bool
 	Tainted     bool
+	TaintSource string
 }
 
 type Call struct {
@@ -174,6 +184,7 @@ type Call struct {
 	IdempotencyKey string
 	RequestDigest  string
 	PreviewDigest  string
+	Confirmation   string
 	Files          FileAuthority
 	Terminal       *Terminal
 
@@ -188,6 +199,7 @@ type Preview struct {
 	Lines  []string
 	Digest string
 	Empty  bool
+	Code   string
 }
 
 type Handler func(ctx context.Context, call *Call) (Result, error)

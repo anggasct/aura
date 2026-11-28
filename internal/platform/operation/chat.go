@@ -138,7 +138,7 @@ func (c *Chat) Plan(group string, tokens []string) command.OperationPlan {
 	if err != nil {
 		return chatRefusal(command.ErrorCodeUsage, safeText(err), chatUsage(descriptor))
 	}
-	return command.OperationPlan{Operation: descriptor.ID, Input: canonical, Apply: parsed.apply}
+	return command.OperationPlan{Operation: descriptor.ID, Input: canonical, Apply: parsed.apply, Code: parsed.code}
 }
 
 func notExposedText(descriptor *Descriptor) string {
@@ -153,6 +153,7 @@ type chatArguments struct {
 	descriptor *Descriptor
 	in         *Input
 	apply      bool
+	code       string
 }
 
 func (a *chatArguments) promptFor() (*Param, bool) {
@@ -207,6 +208,9 @@ func parseChatArguments(descriptor *Descriptor, tokens []string) (*chatArguments
 
 func (a *chatArguments) flag(flags []Flag, tokens []string) (consumed int, err error) {
 	name, value, attached := strings.Cut(strings.TrimPrefix(tokens[0], flagPrefix), "=")
+	if name == flagApply && a.descriptor.confirmsWithCode() {
+		return a.codeFlag(tokens, value, attached)
+	}
 	if name == flagApply && a.descriptor.previews() {
 		if !attached {
 			a.apply = true
@@ -233,6 +237,17 @@ func (a *chatArguments) flag(flags []Flag, tokens []string) (consumed int, err e
 		value, consumed = tokens[1], 1
 	}
 	return consumed, a.in.Set(flag.Param, value)
+}
+
+func (a *chatArguments) codeFlag(tokens []string, value string, attached bool) (consumed int, err error) {
+	if !attached {
+		if len(tokens) < 2 {
+			return 0, NewError(ErrorCodeInputInvalid, "flag --"+flagApply+" needs the code the preview printed")
+		}
+		value, consumed = tokens[1], 1
+	}
+	a.apply, a.code = true, value
+	return consumed, nil
 }
 
 func (a *chatArguments) positionals(free []string) error {
@@ -295,7 +310,7 @@ type chatCall struct {
 
 func (c *Chat) invoke(ctx context.Context, pending *chatCall) command.OperationReply {
 	descriptor, call, apply := pending.found.descriptor, pending.call, pending.run.Plan.Apply
-	if descriptor.previews() {
+	if descriptor.appliesAfterPreview() {
 		preview, err := c.registry.Preview(ctx, descriptor.ID, call)
 		if err != nil {
 			return failedReply(err)
@@ -304,6 +319,7 @@ func (c *Chat) invoke(ctx context.Context, pending *chatCall) command.OperationR
 			return recordedReply(descriptor.ID, previewLines(&preview))
 		}
 		call.PreviewDigest = preview.Digest
+		call.Confirmation = pending.run.Plan.Code
 	}
 	result, info, err := c.registry.run(ctx, pending.found, call)
 	if err != nil {
@@ -408,7 +424,7 @@ func commandCodeOf(err error) command.ErrorCode {
 	switch {
 	case !coded:
 		return command.ErrorCodeFailed
-	case code == ErrorCodeInputInvalid || code == ErrorCodeInvalidArgument:
+	case code == ErrorCodeInputInvalid || code == ErrorCodeInvalidArgument || code == ErrorCodeConfirmation:
 		return command.ErrorCodeUsage
 	case code == ErrorCodeDenied:
 		return command.ErrorCodeDenied
@@ -430,7 +446,7 @@ func safeText(err error) string {
 }
 
 func safeDetail(code ErrorCode) bool {
-	return slices.Contains([]ErrorCode{ErrorCodeInputInvalid, ErrorCodeFailed, ErrorCodePolicyDenied, ErrorCodeSourceUnavailable}, code)
+	return slices.Contains([]ErrorCode{ErrorCodeInputInvalid, ErrorCodeFailed, ErrorCodePolicyDenied, ErrorCodeSourceUnavailable, ErrorCodeConfirmation}, code)
 }
 
 type detailedError interface {

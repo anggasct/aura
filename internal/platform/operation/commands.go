@@ -126,6 +126,7 @@ type leafCommand struct {
 	flags       []Flag
 	positionals []Flag
 	previewing  bool
+	coded       bool
 }
 
 func (t *commandTree) leaf(descriptor *Descriptor, name string) *cobra.Command {
@@ -134,7 +135,8 @@ func (t *commandTree) leaf(descriptor *Descriptor, name string) *cobra.Command {
 		open:        t.open,
 		flags:       descriptor.Flags(SurfaceCLI),
 		positionals: descriptor.Positionals(SurfaceCLI),
-		previewing:  descriptor.previews(),
+		previewing:  descriptor.appliesAfterPreview(),
+		coded:       descriptor.confirmsWithCode(),
 	}
 	command := &cobra.Command{
 		Use:         leaf.usage(name),
@@ -148,7 +150,10 @@ func (t *commandTree) leaf(descriptor *Descriptor, name string) *cobra.Command {
 		leaf.declare(command, &leaf.flags[i])
 	}
 	command.Flags().Bool(flagJSON, false, "print the result as JSON")
-	if leaf.previewing {
+	switch {
+	case leaf.coded:
+		command.Flags().String(flagApply, "", "apply the change with the code the preview printed; without it only the preview is printed")
+	case leaf.previewing:
 		command.Flags().Bool(flagApply, false, "apply the change; without it only the preview is printed")
 	}
 	return command
@@ -284,10 +289,22 @@ func (l *leafCommand) setFlag(cmd *cobra.Command, flag *Flag, in *Input) error {
 }
 
 func usageOr(err error) error {
-	if fault.HasCode(err, ErrorCodeInputInvalid) {
+	if fault.HasCode(err, ErrorCodeInputInvalid) || fault.HasCode(err, ErrorCodeConfirmation) {
 		return clikit.NewUsageError(err)
 	}
 	return err
+}
+
+func (l *leafCommand) applyRequest(cmd *cobra.Command) (apply bool, code string, err error) {
+	switch {
+	case l.coded:
+		code, err = cmd.Flags().GetString(flagApply)
+		return cmd.Flags().Changed(flagApply), code, err
+	case l.previewing:
+		apply, err = cmd.Flags().GetBool(flagApply)
+		return apply, "", err
+	}
+	return false, "", nil
 }
 
 type commandRun struct {
@@ -296,6 +313,7 @@ type commandRun struct {
 	canonical []byte
 	asJSON    bool
 	apply     bool
+	code      string
 }
 
 func (l *leafCommand) execute(cmd *cobra.Command, args []string) error {
@@ -307,14 +325,12 @@ func (l *leafCommand) execute(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	apply := false
-	if l.previewing {
-		if apply, err = cmd.Flags().GetBool(flagApply); err != nil {
-			return err
-		}
+	apply, code, err := l.applyRequest(cmd)
+	if err != nil {
+		return err
 	}
 	return l.open(cmd, l.descriptor, func(ctx context.Context, invoker Invoker) error {
-		return l.invoke(ctx, &commandRun{cmd: cmd, invoker: invoker, canonical: canonical, asJSON: asJSON, apply: apply})
+		return l.invoke(ctx, &commandRun{cmd: cmd, invoker: invoker, canonical: canonical, asJSON: asJSON, apply: apply, code: code})
 	})
 }
 
@@ -336,6 +352,7 @@ func (l *leafCommand) invoke(ctx context.Context, run *commandRun) error {
 			return renderPreview(run.cmd.OutOrStdout(), &preview, run.asJSON)
 		}
 		call.PreviewDigest = preview.Digest
+		call.Confirmation = run.code
 	}
 	result, err := run.invoker.Invoke(ctx, l.descriptor.ID, call)
 	if err != nil {

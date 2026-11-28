@@ -30,10 +30,11 @@ type ToolLookup interface {
 }
 
 type validation struct {
-	tools    ToolLookup
-	bindings map[string]*Binding
-	checked  bool
-	defects  []error
+	tools     ToolLookup
+	bindings  map[string]*Binding
+	checked   bool
+	confirmer bool
+	defects   []error
 }
 
 func (v *validation) reject(id, format string, args ...any) {
@@ -163,6 +164,7 @@ func (v *validation) descriptor(group string, d *Descriptor) {
 		}
 	}
 	v.preview(d)
+	v.taintedGrant(d)
 	v.moduleTool(d)
 	v.ownerNotice(d)
 	v.toolName(d)
@@ -213,8 +215,12 @@ func (v *validation) surfaces(d *Descriptor) {
 
 func (v *validation) confirmation(d *Descriptor) {
 	id := d.ID
-	valid := d.Confirmation == ConfirmPreviewUntilApply || d.Confirmation == ConfirmRunDirectly
+	valid := d.Confirmation == ConfirmPreviewUntilApply || d.Confirmation == ConfirmRunDirectly || d.Confirmation == ConfirmPreviewWithCode
 	switch {
+	case d.Confirmation == ConfirmPreviewWithCode && d.Exposure == ExposureAgent:
+		v.reject(id, "an operation confirmed with a code has no agent projection")
+	case d.Confirmation == ConfirmPreviewWithCode && v.checked && !v.confirmer:
+		v.reject(id, "an operation confirmed with a code needs the registry's confirmation key")
 	case d.Confirmation != "" && !d.Preview:
 		v.reject(id, "an owner confirmation needs a preview")
 	case d.Confirmation != "" && d.Risk == RiskRead:
@@ -225,6 +231,18 @@ func (v *validation) confirmation(d *Descriptor) {
 		v.reject(id, "a destructive operation always previews until --apply")
 	case d.Preview && d.Risk != RiskDestructive && d.Risk != RiskRead && d.Confirmation == "":
 		v.reject(id, "a preview on a non-destructive operation needs an owner confirmation")
+	}
+}
+
+func (v *validation) taintedGrant(d *Descriptor) {
+	switch {
+	case d.TaintedGrant == "":
+	case d.TaintedGrant != TaintedGrantLabels && d.TaintedGrant != TaintedGrantInert:
+		v.reject(d.ID, "the tainted grant %q is unknown", d.TaintedGrant)
+	case d.Risk != RiskTrustGrant:
+		v.reject(d.ID, "a tainted grant declaration belongs to a trust grant")
+	case d.Exposure != ExposureAgent:
+		v.reject(d.ID, "a tainted grant declaration belongs to an agent operation")
 	}
 }
 

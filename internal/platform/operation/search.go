@@ -315,12 +315,16 @@ func (d *Discovery) result(matches []match, view *Turn, scope *SearchScope) (res
 	return result, len(loaded)
 }
 
-func synopsis(descriptor *Descriptor, surface Surface) string {
+func commandWords(descriptor *Descriptor, surface Surface) []string {
 	path := commandPath(descriptor.ID)
-	parts := append([]string{rootGroup}, path...)
 	if surface == SurfaceChat {
-		parts = append([]string{"/" + path[0]}, path[1:]...)
+		return append([]string{"/" + path[0]}, path[1:]...)
 	}
+	return append([]string{rootGroup}, path...)
+}
+
+func synopsis(descriptor *Descriptor, surface Surface) string {
+	parts := commandWords(descriptor, surface)
 	positionals := descriptor.Positionals(surface)
 	for i := range positionals {
 		positional := &positionals[i]
@@ -342,8 +346,11 @@ func synopsis(descriptor *Descriptor, surface Surface) string {
 		}
 		parts = append(parts, label)
 	}
-	if descriptor.previews() {
+	switch {
+	case descriptor.previews():
 		parts = append(parts, "[--"+flagApply+"]")
+	case descriptor.confirmsWithCode():
+		parts = append(parts, "[--"+flagApply+" <code>]")
 	}
 	return strings.Join(parts, " ")
 }

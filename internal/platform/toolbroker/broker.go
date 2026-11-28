@@ -50,6 +50,7 @@ type ToolRequest struct {
 	EventAuthor     string
 	Knowledge       []string
 	Tainted         bool
+	TaintSource     string
 	Unattended      bool
 
 	Origin              turn.Origin

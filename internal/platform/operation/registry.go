@@ -22,6 +22,7 @@ type Deps struct {
 	Logger    *slog.Logger
 	Telemetry *telemetry.OperationRecorder
 	Files     *FileDeps
+	Confirmer *Confirmer
 }
 
 type entry struct {
@@ -43,6 +44,7 @@ type Registry struct {
 	logger        *slog.Logger
 	recorder      *telemetry.OperationRecorder
 	files         *FileDeps
+	confirmer     *Confirmer
 }
 
 func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry, error) {
@@ -53,7 +55,7 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 		return nil, err
 	}
 	bound := make(map[string]*Binding, len(bindings))
-	v := &validation{tools: deps.Tools, checked: true, bindings: bound}
+	v := &validation{tools: deps.Tools, checked: true, bindings: bound, confirmer: deps.Confirmer != nil}
 	for i := range bindings {
 		binding := &bindings[i]
 		switch {
@@ -70,15 +72,16 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 		return nil, err
 	}
 	registry := &Registry{
-		entries:  map[string]*entry{},
-		byTool:   map[string]*entry{},
-		members:  map[string][]string{},
-		receipts: receiptStore{db: deps.DB},
-		effects:  deps.Effects,
-		clock:    deps.Clock,
-		logger:   deps.Logger,
-		recorder: deps.Telemetry,
-		files:    deps.Files,
+		entries:   map[string]*entry{},
+		byTool:    map[string]*entry{},
+		members:   map[string][]string{},
+		receipts:  receiptStore{db: deps.DB},
+		effects:   deps.Effects,
+		clock:     deps.Clock,
+		logger:    deps.Logger,
+		recorder:  deps.Telemetry,
+		files:     deps.Files,
+		confirmer: deps.Confirmer,
 	}
 	if registry.clock == nil {
 		registry.clock = durable.RealClock()

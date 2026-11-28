@@ -1568,6 +1568,14 @@ func (b *build) buildSchedule() error {
 	return b.group.Add(&lifecycleStage{name: "channels", start: host.Start, stop: host.Shutdown})
 }
 
+func operationConfirmer(cfg *appconfig.Config) (*operation.Confirmer, error) {
+	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
+	return operation.NewConfirmer(dataRoot)
+}
+
 func (b *build) buildOperations() error {
 	recorder, err := telemetry.NewOperationRecorder(b.meters())
 	if err != nil {
@@ -1577,7 +1585,12 @@ func (b *build) buildOperations() error {
 	if err != nil {
 		return err
 	}
+	confirmer, err := operationConfirmer(b.cfg)
+	if err != nil {
+		return err
+	}
 	registry, err := operation.NewRegistry(enabledOperationCatalogs(b.cfg), b.bindings, &operation.Deps{
+		Confirmer: confirmer,
 		Files:     b.operationFiles(),
 		DB:        b.db,
 		Effects:   b.broker.Effects(),

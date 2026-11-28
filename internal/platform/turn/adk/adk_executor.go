@@ -502,6 +502,7 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		AgentID:         access.agentID,
 		Knowledge:       slices.Clone(access.knowledge),
 		Tainted:         access.tainted,
+		TaintSource:     access.taintSource,
 		Origin:          access.origin,
 		Unattended:      access.unattended && x.generatesOperation(definition.Name),
 		ToolName:        definition.Name,

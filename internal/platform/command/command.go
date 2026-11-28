@@ -179,6 +179,7 @@ type OperationPlan struct {
 	Operation string
 	Input     json.RawMessage
 	Apply     bool
+	Code      string
 	Missing   *OperationPrompt
 	Refusal   *Result
 }
