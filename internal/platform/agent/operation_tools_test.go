@@ -156,6 +156,44 @@ func TestLiveMainShapeStillLoads(t *testing.T) {
 	}
 }
 
+func TestBuiltinMainPersonaShapeIsPinned(t *testing.T) {
+	registry, err := Build(nil, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main, ok := registry.Lookup(DefaultID)
+	if !ok {
+		t.Fatal("the built-in main persona is missing")
+	}
+	if main.Instructions != "" {
+		t.Errorf("main instructions = %q, want none: any text here changes every default turn's system prompt", main.Instructions)
+	}
+	want := []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search", auratools.OperationSearchToolName}
+	if !slices.Equal(main.Tools, want) {
+		t.Errorf("main tools = %v, want %v", main.Tools, want)
+	}
+}
+
+func TestAMainOverrideWithAToolListDoesNotInheritTheDiscoveryTool(t *testing.T) {
+	var explicit []string
+	for _, name := range toolsWithAnOperation {
+		if !auratools.IsOperationEntry(name) {
+			explicit = append(explicit, name)
+		}
+	}
+	registry, err := Build([]Persona{{ID: DefaultID, Tools: explicit}}, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	main, _ := registry.Lookup(DefaultID)
+	if slices.ContainsFunc(main.Tools, auratools.IsOperationEntry) {
+		t.Fatalf("main lists %v, want no operation entry: an explicit tool list replaces the inherited one", main.Tools)
+	}
+	if !slices.Equal(main.Tools, explicit) {
+		t.Fatalf("main tools = %v, want exactly the listed %v", main.Tools, explicit)
+	}
+}
+
 func TestBuiltinMainPersonaEnablesOperations(t *testing.T) {
 	registry, err := Build(nil, toolsWithAnOperation, catalogWithAnOperation, nil, "en")
 	if err != nil {
