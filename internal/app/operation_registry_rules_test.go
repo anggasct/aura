@@ -110,7 +110,7 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 	if err := seedMemory(t.Context()); err != nil {
 		t.Fatalf("seed the memory documents: %v", err)
 	}
-	memoryOperations, err := memory.NewOperations(&memory.OperationDeps{Service: mem.Service})
+	memoryOperations, err := memory.NewOperations(&memory.OperationDeps{Service: mem.Service, Scopes: memorytest.PersonaScopes()})
 	if err != nil {
 		t.Fatalf("memory.NewOperations: %v", err)
 	}

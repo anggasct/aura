@@ -29,13 +29,13 @@ func TestAServerOffersAModuleGroupOnlyWhenTheModuleIsEnabled(t *testing.T) {
 		name    string
 		memory  bool
 		profile *profile.Config
-		want    []string
+		absent  []string
 	}{
-		{name: "neither module", want: []string{"cron", "kb"}},
-		{name: "memory only", memory: true, want: []string{"cron", "kb", "memory"}},
-		{name: "profile only", profile: &enabledProfile, want: []string{"cron", "kb", "profile"}},
-		{name: "a profile section that is switched off", profile: &profile.Config{}, want: []string{"cron", "kb"}},
-		{name: "both modules", memory: true, profile: &enabledProfile, want: []string{"cron", "kb", "memory", "profile"}},
+		{name: "neither module", absent: []string{memory.GroupName, profile.GroupName}},
+		{name: "memory only", memory: true, absent: []string{profile.GroupName}},
+		{name: "profile only", profile: &enabledProfile, absent: []string{memory.GroupName}},
+		{name: "a profile section that is switched off", profile: &profile.Config{}, absent: []string{memory.GroupName, profile.GroupName}},
+		{name: "both modules", memory: true, profile: &enabledProfile},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -44,9 +44,10 @@ func TestAServerOffersAModuleGroupOnlyWhenTheModuleIsEnabled(t *testing.T) {
 			cfg.Profile = tc.profile
 
 			got := groupNames(enabledOperationCatalogs(&cfg))
+			want := slices.DeleteFunc(groupNames(operationCatalogs()), func(name string) bool { return slices.Contains(tc.absent, name) })
 
-			if strings.Join(got, ",") != strings.Join(tc.want, ",") {
-				t.Errorf("groups = %v, want %v", got, tc.want)
+			if strings.Join(got, ",") != strings.Join(want, ",") {
+				t.Errorf("groups = %v, want %v", got, want)
 			}
 		})
 	}
@@ -70,7 +71,7 @@ func TestADisabledProfileLeavesNoToolAndNoDescriptionLine(t *testing.T) {
 				cfg.Profile = &enabled
 			}
 			db := operationtest.OpenDatabase(t, memory.Schema(), profile.Schema())
-			memoryOperations, err := memory.NewOperations(&memory.OperationDeps{Service: memorytest.NewRig(t, db).Service})
+			memoryOperations, err := memory.NewOperations(&memory.OperationDeps{Service: memorytest.NewRig(t, db).Service, Scopes: memorytest.PersonaScopes()})
 			if err != nil {
 				t.Fatalf("memory.NewOperations: %v", err)
 			}
@@ -83,7 +84,7 @@ func TestADisabledProfileLeavesNoToolAndNoDescriptionLine(t *testing.T) {
 				bindings = append(bindings, profileOperations.Bindings()...)
 			}
 			catalogs := enabledOperationCatalogs(&cfg)
-			catalogs = withoutGroups(catalogs, "cron", "kb")
+			catalogs = onlyGroups(catalogs, memory.GroupName, profile.GroupName)
 			rig := operationtest.NewRig(t, &operationtest.Options{
 				DB: db, Catalogs: catalogs, Bindings: func(*operationtest.Stubs) []operation.Binding { return bindings },
 				WithDiscovery: true,
@@ -115,18 +116,10 @@ func TestADisabledProfileLeavesNoToolAndNoDescriptionLine(t *testing.T) {
 	}
 }
 
-func withoutGroups(catalogs []operation.Catalog, names ...string) []operation.Catalog {
-	kept := make([]operation.Catalog, 0, len(catalogs))
-	for i := range catalogs {
-		drop := false
-		for _, name := range names {
-			drop = drop || catalogs[i].Group.Name == name
-		}
-		if !drop {
-			kept = append(kept, catalogs[i])
-		}
-	}
-	return kept
+func onlyGroups(catalogs []operation.Catalog, names ...string) []operation.Catalog {
+	return slices.DeleteFunc(slices.Clone(catalogs), func(catalog operation.Catalog) bool {
+		return !slices.Contains(names, catalog.Group.Name)
+	})
 }
 
 func TestAPersonaMayListAModuleToolWhileTheModuleIsDisabled(t *testing.T) {

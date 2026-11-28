@@ -15,6 +15,7 @@ import (
 )
 
 const (
+	MainPersona  = "main"
 	AlphaPersona = "alpha"
 	BetaPersona  = "beta"
 	AlphaSession = "session-alpha"
@@ -112,7 +113,7 @@ func (s Scopes) RecallScope(agentID string) ([]string, bool) {
 }
 
 func PersonaScopes() Scopes {
-	return Scopes{AlphaPersona: {AlphaPersona}, BetaPersona: {BetaPersona}}
+	return Scopes{MainPersona: {MainPersona}, AlphaPersona: {AlphaPersona}, BetaPersona: {BetaPersona}}
 }
 
 func (r *Rig) SeedPersonas(ctx context.Context) error {

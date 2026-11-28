@@ -20,7 +20,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 )
 
-const defaultPersona = "main"
+const defaultPersona = memorytest.MainPersona
 
 type opsRig struct {
 	*operationtest.Rig
@@ -40,9 +40,7 @@ func newOpsRigAnswering(t *testing.T, answer func(ctx context.Context, prompt *t
 	if err := mem.Seed(t.Context()); err != nil {
 		t.Fatalf("seed the documents: %v", err)
 	}
-	scopes := memorytest.PersonaScopes()
-	scopes[defaultPersona] = []string{defaultPersona}
-	operations, err := memory.NewOperations(&memory.OperationDeps{Service: mem.Service, Scopes: scopes})
+	operations, err := memory.NewOperations(&memory.OperationDeps{Service: mem.Service, Scopes: memorytest.PersonaScopes()})
 	if err != nil {
 		t.Fatalf("NewOperations: %v", err)
 	}

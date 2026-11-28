@@ -701,7 +701,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Preview or delete recall documents\n\nDeletes recall documents of one session, one document by id, or the ones a query finds; exactly one of session, id and query is required. The preview lists the documents that would be deleted and the delete removes exactly those. Conversation history is not touched.",
+      "description": "Preview or delete recall documents\n\nDeletes recall documents of your own persona: of one session, one document by id, or the ones a query finds; exactly one of session, id and query is required. The owner sees the documents that would be deleted on a card and the delete removes exactly those. Memory of another persona is out of reach and conversation history is not touched.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/memory.forget/v1",
@@ -763,7 +763,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "List recall documents with their provenance\n\nLists what Aura remembers from past conversations, with session, range, trust label and expiry. The content comes from conversations and tool results, not from the owner alone.",
+      "description": "List recall documents with their provenance\n\nLists what your persona remembers from past conversations, with session, range, trust label and expiry; memory of another persona is never listed. The content comes from conversations and tool results, not from the owner alone.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/memory.inspect/v1",
@@ -818,7 +818,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Preview or delete expired summary documents\n\nDeletes summary documents past their expiry, the cleanup the server also runs on a timer. The preview lists the documents that would be deleted and the delete removes exactly those.",
+      "description": "Preview or delete expired summary documents\n\nDeletes summary documents whose retention period has already ended, for every persona; recall no longer returns them and the server runs the same cleanup on a timer. It deletes nothing that is still within its retention. The preview lists the documents that would be deleted and the delete removes exactly those.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/memory.purge/v1",
@@ -906,7 +906,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Preview or delete a profile fact\n\nDeletes a profile fact so it is never injected again and keeps a tombstone of the deletion. The preview names the fact and the delete removes exactly that fact.",
+      "description": "Preview or delete a profile fact\n\nDeletes a profile fact so it is never injected again and keeps a tombstone of the deletion. The preview shows the whole fact, key and value, and the delete removes exactly that fact; a fact too long to show whole is deleted from the CLI or chat command instead. A fact that is already deleted needs nothing.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/profile.delete/v1",
@@ -949,7 +949,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "List profile facts\n\nLists the learned and owner-set facts with status, confidence and origin. The values come from conversations, not from the owner alone.",
+      "description": "List profile facts\n\nLists the learned and owner-set facts with status, confidence, origin and the whole value. The values come from conversations, not from the owner alone.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/profile.list/v1",
@@ -1050,7 +1050,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "List facts that need review, conflicts first\n\nLists candidates and unverified active facts that wait for the owner, the ones that conflict with a verified fact first. The values come from conversations, not from the owner alone.",
+      "description": "List facts that need review, conflicts first\n\nLists candidates and unverified active facts that wait for the owner, the ones that conflict with a verified fact first, with origin and the whole value. The values come from conversations, not from the owner alone.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/profile.review/v1",
@@ -1081,7 +1081,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Set a profile fact\n\nRecords a fact with origin agent. It is not verified and is not injected into owner turns: it waits in the owner's review with the learned facts until the owner accepts it. You cannot verify a fact yourself.",
+      "description": "Set a profile fact\n\nRecords a fact with origin agent. It is not verified and is not injected into owner turns: it waits in the owner's review with the learned facts until the owner accepts it. You cannot verify a fact yourself. The key takes up to 32 and the value up to 200 printable characters on one line, with no control, direction or prompt-marker characters, so the owner can read the whole fact on the review screen.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/profile.set/v1",
@@ -1102,19 +1102,19 @@
           "key": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 128,
+            "maxLength": 32,
             "description": "fact key"
           },
           "value": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 4000,
+            "maxLength": 200,
             "description": "fact value"
           },
           "expires_at": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 64,
+            "maxLength": 40,
             "description": "RFC3339 expiry in the future"
           }
         },
@@ -1153,7 +1153,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Show one profile fact with its provenance\n\nShows a fact with its status, origin, conflicts and the evidence it was learned from. The value comes from conversations, not from the owner alone.",
+      "description": "Show one profile fact with its provenance\n\nShows a fact with its status, origin, conflicts, the whole value and the evidence it was learned from. The value comes from conversations, not from the owner alone.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://operations/profile.show/v1",

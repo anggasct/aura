@@ -83,6 +83,9 @@ func verifiedMark(verified bool) string {
 }
 
 func factDigest(fact *Fact) string {
+	if fact == nil {
+		return ""
+	}
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		fact.ID, fact.Status, fact.ValueDigest, fact.Origin, strconv.FormatBool(fact.OwnerVerified),
 	}, "|")))
@@ -102,6 +105,9 @@ type factRow struct {
 }
 
 func rowOf(fact *Fact) factRow {
+	if fact == nil {
+		return factRow{}
+	}
 	return factRow{
 		ID: fact.ID, Category: fact.Category, Key: fact.Key, Value: fact.Value, Status: fact.Status,
 		Confidence: fact.Confidence, Origin: fact.Origin, Verified: fact.OwnerVerified, ConflictsWith: fact.ConflictsWithID,
@@ -177,6 +183,9 @@ type reviewRow struct {
 }
 
 func reviewRowOf(state string, fact *Fact) reviewRow {
+	if fact == nil {
+		return reviewRow{}
+	}
 	return reviewRow{
 		State: state, ID: fact.ID, Category: fact.Category, Key: fact.Key, Value: fact.Value,
 		Origin: fact.Origin, Confidence: fact.Confidence, ConflictsWith: fact.ConflictsWithID,
@@ -318,6 +327,9 @@ func (o *Operations) proposeUnverified(ctx context.Context, request *setRequest)
 }
 
 func proposalOutcome(fact *Fact) string {
+	if fact == nil {
+		return ""
+	}
 	switch {
 	case fact.Status == StatusActive && fact.OwnerVerified:
 		return "stored: " + fact.ID + " (owner-verified, unchanged)"
@@ -328,6 +340,9 @@ func proposalOutcome(fact *Fact) string {
 }
 
 func cardLines(fact *Fact) []string {
+	if fact == nil {
+		return nil
+	}
 	return []string{
 		"would delete 1 profile fact",
 		fmt.Sprintf("%s %s/%s = %s origin=%s%s", fact.ID, fact.Category, turn.QuoteUntrustedName(fact.Key), turn.QuoteUntrustedName(fact.Value), fact.Origin, verifiedMark(fact.OwnerVerified)),
@@ -336,6 +351,9 @@ func cardLines(fact *Fact) []string {
 }
 
 func ownerDeleteLines(fact *Fact) []string {
+	if fact == nil {
+		return nil
+	}
 	return []string{
 		"dry-run: would delete",
 		fmt.Sprintf("%s %s/%s=%s status=%s conf=%.2f origin=%s%s", fact.ID, fact.Category, fact.Key, fact.Value, fact.Status, fact.Confidence, fact.Origin, verifiedMark(fact.OwnerVerified)),

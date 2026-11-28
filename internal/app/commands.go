@@ -517,23 +517,21 @@ func operationCatalogs() []operation.Catalog {
 	return []operation.Catalog{schedule.Catalog(), knowledge.Catalog(), memory.Catalog(), profile.Catalog()}
 }
 
+func operationGroupEnabled(cfg *appconfig.Config, group string) bool {
+	switch group {
+	case memory.GroupName:
+		return cfg.Memory.Enabled
+	case profile.GroupName:
+		return cfg.Profile != nil && cfg.Profile.Enabled
+	}
+	return true
+}
+
 func enabledOperationCatalogs(cfg *appconfig.Config) []operation.Catalog {
 	catalogs := operationCatalogs()
-	enabled := make([]operation.Catalog, 0, len(catalogs))
-	for i := range catalogs {
-		switch catalogs[i].Group.Name {
-		case memory.GroupName:
-			if !cfg.Memory.Enabled {
-				continue
-			}
-		case profile.GroupName:
-			if cfg.Profile == nil || !cfg.Profile.Enabled {
-				continue
-			}
-		}
-		enabled = append(enabled, catalogs[i])
-	}
-	return enabled
+	return slices.DeleteFunc(catalogs, func(catalog operation.Catalog) bool {
+		return !operationGroupEnabled(cfg, catalog.Group.Name)
+	})
 }
 
 func operationToolNames() []string {

@@ -306,6 +306,9 @@ func (o *Operations) doomed(ctx context.Context, request *forgetRequest) ([]Stor
 }
 
 func forgetHeadline(request *forgetRequest, count int) string {
+	if request == nil {
+		return ""
+	}
 	headline := fmt.Sprintf("would delete %d memory documents", count)
 	switch request.scope {
 	case "query":

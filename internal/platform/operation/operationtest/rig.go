@@ -31,6 +31,7 @@ var Epoch = time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
 const (
 	SessionID = "session-1"
 	OwnerID   = "owner-1"
+	AgentID   = "main"
 )
 
 type Options struct {
@@ -224,7 +225,7 @@ func Request(tb testing.TB, tool, subject string) *toolbroker.ToolRequest {
 
 func RequestFor(tool string, arguments json.RawMessage, key string) *toolbroker.ToolRequest {
 	return &toolbroker.ToolRequest{
-		RequestID: "call-1", TurnID: "turn-1", SessionID: SessionID,
+		RequestID: "call-1", TurnID: "turn-1", SessionID: SessionID, AgentID: AgentID,
 		PrincipalID: OwnerID, PrincipalClass: principal.ClassOwner, Origin: turn.OriginTerminal,
 		ToolName: tool, ToolVersion: tools.Version, Arguments: arguments,
 		Trust: approval.TrustOwnerInput, IdempotencyKey: key,

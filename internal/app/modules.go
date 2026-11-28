@@ -247,7 +247,7 @@ func (b *build) registerModule(name string, mod any) error {
 
 func (b *build) buildMemory(ctx context.Context) error {
 	cfg, logger := b.cfg, b.logger
-	if !cfg.Memory.Enabled {
+	if !operationGroupEnabled(cfg, memory.GroupName) {
 		return nil
 	}
 	var observer memory.Observer
@@ -303,7 +303,7 @@ func memoryRecorderObserver(recorder *telemetry.MemoryRecorder) memory.Observer 
 
 func (b *build) buildProfile(ctx context.Context) error {
 	cfg := b.cfg
-	if cfg.Profile == nil || !cfg.Profile.Enabled {
+	if !operationGroupEnabled(cfg, profile.GroupName) {
 		return nil
 	}
 	mod, err := profile.New(ctx, &profile.Deps{
@@ -1942,6 +1942,7 @@ type chatCommandDeps struct {
 	skills     command.Skills
 	operations command.Operations
 	recorder   command.Recorder
+	catalogs   []operation.Catalog
 }
 
 func addOperationGroups(binding *command.Binding, groups []command.Definition) {
@@ -1954,7 +1955,7 @@ func newChatCommandDispatcher(deps *chatCommandDeps) (*command.Dispatcher, error
 	if deps == nil {
 		return nil, invalidOptions("the chat command dispatcher needs its ports")
 	}
-	groups := operation.ChatGroups(operationCatalogs())
+	groups := operation.ChatGroups(deps.catalogs)
 	discordBinding, telegramBinding := discord.CommandBinding(), telegram.CommandBinding()
 	addOperationGroups(&discordBinding, groups)
 	addOperationGroups(&telegramBinding, groups)

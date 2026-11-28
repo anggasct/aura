@@ -126,7 +126,7 @@ func TestMemoryCLIForgetSessionDryRunThenApply(t *testing.T) {
 		t.Fatalf("apply = %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
-	if err != nil || !strings.Contains(out, "no documents") {
+	if err != nil || strings.Contains(out, "mem-a") {
 		t.Errorf("sess-a survives: %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-b")
@@ -154,12 +154,12 @@ func TestMemoryCLIForgetSessionApplyMatchesPreview(t *testing.T) {
 		t.Fatalf("inspect: %v", err)
 	}
 	for _, gone := range []string{"mem-a01", "mem-a05", "mem-a10"} {
-		if strings.Contains(out, gone+" ") {
+		if strings.Contains(out, gone+"\t") {
 			t.Errorf("prepared doc %s still present: %q", gone, out)
 		}
 	}
 	for _, kept := range []string{"mem-a11", "mem-a12"} {
-		if !strings.Contains(out, kept+" ") {
+		if !strings.Contains(out, kept+"\t") {
 			t.Errorf("unpreviewed doc %s missing: %q", kept, out)
 		}
 	}
@@ -200,7 +200,7 @@ func TestMemoryCLIForgetByIDAndQuery(t *testing.T) {
 		t.Fatalf("query apply = %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
-	if err != nil || !strings.Contains(out, "no documents") {
+	if err != nil || strings.Contains(out, "mem-a") {
 		t.Errorf("sess-a not empty: %q, %v", out, err)
 	}
 }
@@ -213,7 +213,7 @@ func TestMemoryCLIInspectProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
-	for _, want := range []string{"mem-a1", "session=sess-a", "kind=event_text", "range=", "trust=", "prompt=", "expires="} {
+	for _, want := range []string{"mem-a1", "SESSION", "sess-a", "event_text", "FROM", "TO", "TRUST", "owner_input", "PROMPT", "EXPIRES", "never"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inspect missing %q in %q", want, out)
 		}
@@ -258,7 +258,7 @@ func TestMemoryCLIPurgeListsWhatItWouldDeleteUntilApplied(t *testing.T) {
 		t.Fatalf("purge --apply = %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "purge")
-	if err != nil || !strings.Contains(out, "dry-run: 0 would be deleted") {
+	if err != nil || strings.TrimSpace(out) != "nothing to delete" {
 		t.Errorf("a purge with nothing expired = %q, %v", out, err)
 	}
 }

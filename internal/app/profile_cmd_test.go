@@ -61,8 +61,8 @@ func TestProfileCLIListEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if strings.TrimSpace(out) != "no facts" {
-		t.Errorf("out = %q", out)
+	if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "ID\t") {
+		t.Errorf("out = %q, want only the table header", out)
 	}
 }
 
@@ -80,7 +80,7 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show: %v", err)
 	}
-	for _, want := range []string{"category: language", "key: backend", "origin: owner", "verified"} {
+	for _, want := range []string{"category: language", "key: backend", "value: Go", "origin: owner", "verified: true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show missing %q:\n%s", want, out)
 		}
@@ -98,15 +98,14 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 		t.Errorf("review missing candidate")
 	}
 	out, err = runProfileCommand(t, cfg, "accept", candidate)
-	if err != nil || strings.TrimSpace(out) != "accepted: "+candidate {
+	if err != nil || !strings.HasPrefix(out, "accepted: "+candidate+"\n") || !strings.Contains(out, "value: neovim") {
 		t.Errorf("accept = %q, %v", out, err)
 	}
 	rival := seedProfileConflictingCandidate(t, cfg)
 	out, err = runProfileCommand(t, cfg, "review")
-	if err != nil || !strings.Contains(out, "conflicts-with="+id) {
+	if err != nil || !strings.Contains(out, "conflict\t"+rival) || !strings.Contains(out, id) {
 		t.Errorf("review conflict = %q, %v", out, err)
 	}
-	_ = rival
 	out, err = runProfileCommand(t, cfg, "reject", rival)
 	if err != nil || strings.TrimSpace(out) != "rejected: "+rival {
 		t.Errorf("reject = %q, %v", out, err)

@@ -1210,6 +1210,7 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 		skills:     s.commandSkills,
 		operations: s.commandOperations,
 		recorder:   commandRecorder,
+		catalogs:   enabledOperationCatalogs(cfg),
 	})
 	if err != nil {
 		return toolWiring{}, err

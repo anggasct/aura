@@ -57,7 +57,9 @@ func TestOperationDescriptionOfTheRealRegistryFitsTheBound(t *testing.T) {
 	}
 }
 
-var describedGroups = []string{"cron", "kb", "memory", "profile"}
+func describedGroups() []string {
+	return groupNames(operationCatalogs())
+}
 
 func groupTools(t *testing.T, rig *registryRig, group string) []toolbroker.ToolRegistration {
 	t.Helper()
@@ -93,7 +95,7 @@ func groupMarkers(t *testing.T, description, group string) map[string]string {
 }
 
 func TestOperationDescriptionMarkersMatchTheBrokerForTheRealRegistry(t *testing.T) {
-	for _, group := range describedGroups {
+	for _, group := range describedGroups() {
 		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
 			for _, tracked := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s %s tracked=%t", group, kind, tracked), func(t *testing.T) {
@@ -382,7 +384,7 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 
 func TestOperationDescriptionNeverClaimsLessFrictionThanTheBrokerOnTaintedTurns(t *testing.T) {
 	const clause = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
-	for _, group := range describedGroups {
+	for _, group := range describedGroups() {
 		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
 			for _, tracked := range []bool{false, true} {
 				t.Run(fmt.Sprintf("%s %s tracked=%t", group, kind, tracked), func(t *testing.T) {

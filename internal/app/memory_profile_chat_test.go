@@ -36,7 +36,7 @@ func TestMemoryAndProfileChatCommandsOnlyInDirectChatsForTheOwner(t *testing.T) 
 			rig := newChatRigE2E(t)
 
 			inspected := rig.say(t, owner, "/memory inspect --session session-1")
-			if len(inspected) != 2 || !strings.Contains(inspected[0], "mem-a1") || !strings.Contains(inspected[1], "mem-a2") {
+			if len(inspected) != 3 || !strings.Contains(inspected[1], "mem-a1") || !strings.Contains(inspected[2], "mem-a2") {
 				t.Fatalf("inspect replied %q, want the documents of the session", inspected)
 			}
 			previewed := rig.say(t, owner, "/memory forget --id mem-a1")
@@ -59,7 +59,7 @@ func TestMemoryAndProfileChatCommandsOnlyInDirectChatsForTheOwner(t *testing.T) 
 				t.Errorf("the chat-set fact is %q, want it active, owner-origin and verified", state)
 			}
 			accepted := rig.say(t, owner, "/profile accept "+candidate)
-			if !slices.Equal(accepted, []string{"accepted: " + candidate}) || rig.factState(t, candidate) != "active:agent:1" {
+			if len(accepted) != 5 || accepted[0] != "accepted: "+candidate || accepted[3] != "value: neovim" || rig.factState(t, candidate) != "active:agent:1" {
 				t.Fatalf("accept replied %q with the fact %q, want it verified", accepted, rig.factState(t, candidate))
 			}
 			shown := rig.say(t, owner, "/profile delete "+candidate)
@@ -109,11 +109,11 @@ func TestMemoryAndProfileChatCommandsAreAnsweredOnceWhenAMessageIsRedelivered(t 
 		name    string
 		command string
 		handler string
-		want    string
+		want    []string
 	}{
-		{name: "an accept", command: "/profile accept " + candidate, handler: "profile.accept", want: "accepted: " + candidate},
-		{name: "a forget that deletes", command: "/memory forget --id mem-a1 --apply", handler: "memory.forget", want: "deleted: 1"},
-		{name: "a purge that deletes", command: "/memory purge --apply", handler: "memory.purge", want: "purged: 1"},
+		{name: "an accept", command: "/profile accept " + candidate, handler: "profile.accept", want: []string{"accepted: " + candidate, "category: tool", "key: editor", "value: neovim", "origin: agent"}},
+		{name: "a forget that deletes", command: "/memory forget --id mem-a1 --apply", handler: "memory.forget", want: []string{"deleted: 1"}},
+		{name: "a purge that deletes", command: "/memory purge --apply", handler: "memory.purge", want: []string{"purged: 1"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,7 +125,7 @@ func TestMemoryAndProfileChatCommandsAreAnsweredOnceWhenAMessageIsRedelivered(t 
 			rig.messages = 40
 			second := rig.say(t, owner, tc.command)
 
-			if !slices.Equal(first, second) || !slices.Equal(first, []string{tc.want}) {
+			if !slices.Equal(first, second) || !slices.Equal(first, tc.want) {
 				t.Fatalf("first %q second %q, want the same journaled reply %q", first, second, tc.want)
 			}
 			if runs := rig.handlers.handled(tc.handler); runs != 1 {
