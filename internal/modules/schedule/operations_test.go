@@ -236,7 +236,7 @@ func TestCronAddRefusesAChangedOwnerDestinationAfterThePreview(t *testing.T) {
 	current := ownerRoute{alias: "me", route: "telegram:owner"}
 	rig := newScheduleRig(t, ownerFunc(func() (string, string) { return current.alias, current.route }))
 	preview, err := rig.Registry.Preview(t.Context(), "cron.add", &operation.Call{
-		Caller: operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner},
+		Caller: operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Direct: true},
 		Input:  json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","channel":"telegram","destination":"me"}`),
 	})
 	if err != nil {
@@ -245,7 +245,7 @@ func TestCronAddRefusesAChangedOwnerDestinationAfterThePreview(t *testing.T) {
 	current = ownerRoute{alias: "me", route: "telegram:elsewhere"}
 
 	_, err = rig.Registry.Invoke(t.Context(), "cron.add", &operation.Call{
-		Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner},
+		Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Direct: true},
 		Input:          json.RawMessage(`{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","channel":"telegram","destination":"me"}`),
 		IdempotencyKey: "add-1",
 		PreviewDigest:  preview.Digest,
@@ -297,7 +297,7 @@ func TestCronReadsReturnRows(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	owner := operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner}
+	owner := operation.Caller{Surface: operation.SurfaceChat, PrincipalID: principal.OwnerID, Class: principal.ClassOwner, Direct: true}
 
 	list, err := rig.Registry.Invoke(t.Context(), "cron.list", &operation.Call{Caller: owner, Input: json.RawMessage(`{}`)})
 	if err != nil {
