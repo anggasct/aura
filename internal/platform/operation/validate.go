@@ -165,6 +165,9 @@ func (v *validation) descriptor(group string, d *Descriptor) {
 	}
 	v.preview(d)
 	v.taintedGrant(d)
+	if d.UntrustedOutput && d.ResultTaint != nil {
+		v.reject(id, "cannot declare both UntrustedOutput and ResultTaint")
+	}
 	v.moduleTool(d)
 	v.ownerNotice(d)
 	v.toolName(d)

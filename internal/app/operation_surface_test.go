@@ -58,7 +58,20 @@ func TestOperationDescriptionOfTheRealRegistryFitsTheBound(t *testing.T) {
 }
 
 func describedGroups() []string {
-	return groupNames(operationCatalogs())
+	var names []string
+	for _, catalog := range operationCatalogs() {
+		hasCallable := false
+		for i := range catalog.Descriptors {
+			if catalog.Descriptors[i].Exposure != operation.ExposureHost {
+				hasCallable = true
+				break
+			}
+		}
+		if hasCallable {
+			names = append(names, catalog.Group.Name)
+		}
+	}
+	return names
 }
 
 func groupTools(t *testing.T, rig *registryRig, group string) []toolbroker.ToolRegistration {
@@ -299,15 +312,15 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("a change asks because the content is unverified and applies after approval", func(t *testing.T) {
+	t.Run("an untainted owner change runs without a card", func(t *testing.T) {
 		before := len(cards())
 		session.turn(turn.OriginTerminal, nil, operationtest.CallOf("aura_cron_pause", map[string]any{"id": jobID}))
 		prompts := cards()[before:]
-		if len(prompts) != 1 || prompts[0].ToolName != "aura_cron_pause" || prompts[0].ReasonCode != approval.ReasonContentUnverified {
-			t.Fatalf("approval cards = %+v, want one for aura_cron_pause with reason %s", prompts, approval.ReasonContentUnverified)
+		if len(prompts) != 0 {
+			t.Fatalf("approval cards = %+v, want none on an untainted owner turn", prompts)
 		}
 		if state := jobStates(t, rig)[jobID]; state != "paused" {
-			t.Errorf("job state after the approved pause = %q, want paused", state)
+			t.Errorf("job state after pause = %q, want paused", state)
 		}
 	})
 
@@ -331,21 +344,21 @@ func TestOperationDiscoveryEndToEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("an http owner turn runs reads and is refused changes and privileged calls", func(t *testing.T) {
-		before, jobs := len(cards()), jobStates(t, rig)
+	t.Run("an untainted http owner turn runs reads and changes and is refused privileged calls", func(t *testing.T) {
+		before := len(cards())
 		calls := session.turn(turn.OriginHTTP, nil, list, operationtest.CallOf("aura_cron_resume", map[string]any{"id": jobID}), add)
 		last := calls[len(calls)-1]
 		if got := answersMentioning(last, jobID); got < 2 {
 			t.Errorf("the model saw %d answers naming the job, want the earlier listing and the new one", got)
 		}
-		if refusals := answersMentioning(last, string(toolbroker.ResultOwnerTurnRequired)); refusals < 3 {
-			t.Errorf("refusals seen = %d, want the scheduled add and the http resume and add", refusals)
+		if refusals := answersMentioning(last, string(toolbroker.ResultOwnerTurnRequired)); refusals < 2 {
+			t.Errorf("refusals seen = %d, want the scheduled add and the http add", refusals)
 		}
 		if got := len(cards()) - before; got != 0 {
 			t.Errorf("approval cards = %d, want none on an http turn", got)
 		}
-		if !maps.Equal(jobStates(t, rig), jobs) {
-			t.Errorf("jobs changed on an http turn: %v", jobStates(t, rig))
+		if state := jobStates(t, rig)[jobID]; state != "active" {
+			t.Errorf("job state after untainted http resume = %q, want active", state)
 		}
 	})
 

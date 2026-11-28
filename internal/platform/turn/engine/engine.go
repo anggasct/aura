@@ -17,12 +17,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/channelhost"
 	runtimesessions "github.com/anggasct/aura/internal/platform/turn/sessions"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type Deps struct {
 	Events             EventStore
 	Dedupe             DedupeStore
 	Executor           TurnExecutor
+	TaintReader        turnstore.TaintReader
 	Logger             *slog.Logger
 	Config             Config
 	DefaultAgentID     string
@@ -57,6 +59,7 @@ type Engine struct {
 	events         EventStore
 	dedupe         DedupeStore
 	executor       TurnExecutor
+	taintReader    turnstore.TaintReader
 	logger         *slog.Logger
 	sessionStore   SessionStore
 	durableRuntime durable.Runtime
@@ -113,20 +116,26 @@ func New(deps *Deps) (*Engine, error) {
 		return nil, err
 	}
 	engine := &Engine{
-		cfg:        d.Config,
-		deps:       d,
-		events:     d.Events,
-		dedupe:     d.Dedupe,
-		executor:   d.Executor,
-		logger:     d.Logger,
-		statusPoll: durableStatusPoll,
-		sessions:   make(map[string]*sessionQueue),
-		turns:      make(map[string]*turnState),
-		staged:     make(map[string]*turnState),
-		granted:    make(map[string]struct{}),
-		sesKeys:    make(map[string]struct{}),
-		adapters:   slices.Clone(d.Channels),
-		delivered:  make(map[string]time.Time),
+		cfg:         d.Config,
+		deps:        d,
+		events:      d.Events,
+		dedupe:      d.Dedupe,
+		executor:    d.Executor,
+		taintReader: d.TaintReader,
+		logger:      d.Logger,
+		statusPoll:  durableStatusPoll,
+		sessions:    make(map[string]*sessionQueue),
+		turns:       make(map[string]*turnState),
+		staged:      make(map[string]*turnState),
+		granted:     make(map[string]struct{}),
+		sesKeys:     make(map[string]struct{}),
+		adapters:    slices.Clone(d.Channels),
+		delivered:   make(map[string]time.Time),
+	}
+	if engine.taintReader == nil {
+		if tr, ok := d.Events.(turnstore.TaintReader); ok {
+			engine.taintReader = tr
+		}
 	}
 	if d.Durable != nil {
 		engine.sessionStore = d.Durable.Sessions
@@ -699,8 +708,8 @@ func (e *Engine) runTurn(ctx context.Context, t *turnState) {
 	if end.cancelled {
 		terminalKind, terminalPayload = turn.EventKindTurnCancelled, cancelledPayload("turn cancelled", e.agentID(&t.req))
 	} else {
-		final := e.planFinalMessage(&t.req, executed, end)
 		deliveryCtx := context.WithoutCancel(ctx)
+		final := e.planFinalMessage(deliveryCtx, &t.req, executed, end)
 		deliveryErr := e.deliverFinalMessage(deliveryCtx, &t.req, &final)
 		terminalKind, terminalPayload = e.inMemoryTerminal(deliveryCtx, &t.req, &final, deliveryErr)
 	}

@@ -11,22 +11,30 @@ import (
 	"github.com/anggasct/aura/internal/platform/configkit"
 )
 
+const (
+	DefaultWorkspaceTaintScanEntries = 50000
+	MinWorkspaceTaintScanEntries     = 1000
+	MaxWorkspaceTaintScanEntries     = 1000000
+)
+
 type Tools struct {
-	Workspace            string           `json:"workspace"`
-	MaxInlineResultBytes int64            `json:"max_inline_result_bytes"`
-	Exec                 shellexec.Config `json:"exec"`
-	Fetch                fetch.Config     `json:"fetch"`
-	WebSearch            search.Config    `json:"web_search"`
-	GitHub               github.Config    `json:"github,omitzero"`
+	Workspace                 string           `json:"workspace"`
+	MaxInlineResultBytes      int64            `json:"max_inline_result_bytes"`
+	WorkspaceTaintScanEntries int              `json:"workspace_taint_scan_entries"`
+	Exec                      shellexec.Config `json:"exec"`
+	Fetch                     fetch.Config     `json:"fetch"`
+	WebSearch                 search.Config    `json:"web_search"`
+	GitHub                    github.Config    `json:"github,omitzero"`
 }
 
 func DefaultTools() *Tools {
 	return &Tools{
-		Workspace:            "/srv/aura/workspace",
-		MaxInlineResultBytes: 65536,
-		Exec:                 shellexec.Default(),
-		Fetch:                fetch.Default(),
-		WebSearch:            search.Default(),
+		Workspace:                 "/srv/aura/workspace",
+		MaxInlineResultBytes:      65536,
+		WorkspaceTaintScanEntries: DefaultWorkspaceTaintScanEntries,
+		Exec:                      shellexec.Default(),
+		Fetch:                     fetch.Default(),
+		WebSearch:                 search.Default(),
 	}
 }
 
@@ -42,6 +50,9 @@ func (t *Tools) Validate() error {
 	}
 	if t.MaxInlineResultBytes <= 0 {
 		return configkit.Invalid("max_inline_result_bytes", "must be positive")
+	}
+	if t.WorkspaceTaintScanEntries < MinWorkspaceTaintScanEntries || t.WorkspaceTaintScanEntries > MaxWorkspaceTaintScanEntries {
+		return configkit.Invalid("workspace_taint_scan_entries", "must be between 1000 and 1000000")
 	}
 	if err := configkit.Under("exec", t.Exec.Validate()); err != nil {
 		return err

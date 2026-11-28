@@ -19,6 +19,7 @@ import (
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
 type gateLog struct {
@@ -649,8 +650,14 @@ func TestAttachments_AreBoundedAndLandAsArtifacts(t *testing.T) {
 				t.Errorf("stored = %v, want %v", names, tc.wantStored)
 			}
 			wantInput := tc.wantInput
-			if len(env.Parts) != 1 || env.Parts[0].Text != wantInput {
-				t.Errorf("turn input = %+v, want %q", env.Parts, wantInput)
+			wantParts := 1 + len(tc.wantStored)
+			if len(env.Parts) != wantParts || env.Parts[0].Text != wantInput {
+				t.Errorf("turn input = %+v, want %d parts starting with %q", env.Parts, wantParts, wantInput)
+			}
+			for _, part := range env.Parts[1:] {
+				if part.Source != runtimeingress.PartSourceAttachment {
+					t.Errorf("attachment part = %+v, want attachment source", part)
+				}
 			}
 			var reply replyReference
 			if err := json.Unmarshal(env.ReplyContext, &reply); err != nil || len(reply.Artifacts) != len(tc.wantStored) {

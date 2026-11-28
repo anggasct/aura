@@ -14,7 +14,7 @@ func TestRootCommandMountsEverySubcommand(t *testing.T) {
 		"agents", "apikey", "bindings", "broadcast", "chat", "children", "config", "cron", "doctor",
 		"effects", "exec", "grants", "handoff", "interpreter", "kb", "mcp", "memory",
 		"models", "owner", "pairing", "persona", "plugin", "principal", "profile", "reply",
-		"server", "skills", "status", "storage", "sync", "usage", "version", "workflow",
+		"server", "skills", "status", "storage", "sync", "usage", "version", "workflow", "workspace",
 	}
 
 	gotByName := map[string]*cobra.Command{}
@@ -58,6 +58,7 @@ func TestRootCommandMountsEverySubcommand(t *testing.T) {
 		"sync":        {"doctor", "reconcile", "run", "status"},
 		"usage":       {"entries", "prices", "reconcile", "status"},
 		"workflow":    {"approve", "cancel", "definitions", "inspect", "proposal", "proposals", "runs", "signal", "start", "validate"},
+		"workspace":   {"untaint"},
 	}
 
 	for parentName, wantChildren := range wantSubs {

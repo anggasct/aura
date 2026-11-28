@@ -61,7 +61,7 @@ func TestDurableToolCallKeysFollowTheCall(t *testing.T) {
 	want := []string{
 		"call-1-0/authorization", "call-1-0/budget", "call-1-0/execution", "call-1-0/policy", "call-1-0/taint",
 		"call-1-1/authorization", "call-1-1/budget", "call-1-1/execution", "call-1-1/policy", "call-1-1/taint",
-		"delivery", "final-message", "model-1", "model-2", "release", "turn-start",
+		"delivery", "final-message", "model-1", "model-2", "release", "taint-admission", "turn-start",
 	}
 	if !slices.Equal(keys, want) {
 		t.Errorf("action keys = %q, want %q", keys, want)

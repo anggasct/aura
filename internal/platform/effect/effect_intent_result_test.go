@@ -31,8 +31,8 @@ func TestEffectIntentBaselineSchemaAndResultConstraints(t *testing.T) {
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
-	if err != nil || applied != leaseStepVersion || latest != leaseStepVersion {
-		t.Fatalf("schema = applied %d latest %d %v, want %d", applied, latest, err, leaseStepVersion)
+	if err != nil || applied != latest || latest < leaseStepVersion {
+		t.Fatalf("schema = applied %d latest %d %v, want >= %d", applied, latest, err, leaseStepVersion)
 	}
 	seedEffectSession(t, db, "sess-1", "owner-1")
 	intents := []intentRow{

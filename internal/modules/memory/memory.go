@@ -146,6 +146,10 @@ type RecallRequest struct {
 	Before       time.Time
 }
 
+type TaintMarksReader interface {
+	SessionMarks(ctx context.Context, sessionIDs []string) (map[string]uint64, error)
+}
+
 type RecallDocument struct {
 	ID            string
 	SessionID     string
@@ -153,6 +157,7 @@ type RecallDocument struct {
 	ToSequence    uint64
 	Content       string
 	Trust         approval.TrustLabel
+	Tainted       bool
 	PromptVersion string
 	ModelProtocol string
 	ModelName     string
@@ -174,6 +179,7 @@ type RecallContext struct {
 	Summary    string
 	Provenance []ProvenanceRef
 	Trust      approval.TrustLabel
+	Tainted    bool
 }
 
 type SummaryModel struct {
@@ -935,6 +941,7 @@ func (c *RecallContext) Evidence() *turn.UntrustedRecall {
 			FromSequence: c.Documents[i].FromSequence,
 			ToSequence:   c.Documents[i].ToSequence,
 			Trust:        c.Documents[i].Trust,
+			Tainted:      c.Documents[i].Tainted,
 			Content:      c.Documents[i].Content,
 		})
 	}
@@ -942,6 +949,7 @@ func (c *RecallContext) Evidence() *turn.UntrustedRecall {
 		Query:     c.Query,
 		Summary:   c.Summary,
 		Trust:     c.Trust,
+		Tainted:   c.Tainted,
 		Documents: documents,
 	}
 }

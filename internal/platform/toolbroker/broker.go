@@ -69,13 +69,14 @@ type ToolRequest struct {
 }
 
 type ToolResult struct {
-	ToolName    string          `json:"tool_name"`
-	ToolVersion string          `json:"tool_version"`
-	Class       ResultClass     `json:"class"`
-	Untrusted   bool            `json:"untrusted"`
-	Output      json.RawMessage `json:"output"`
-	Truncated   bool            `json:"truncated"`
-	Audit       json.RawMessage `json:"-"`
+	ToolName         string          `json:"tool_name"`
+	ToolVersion      string          `json:"tool_version"`
+	Class            ResultClass     `json:"class"`
+	Untrusted        bool            `json:"untrusted"`
+	WorkspaceTainted bool            `json:"workspace_tainted,omitempty"`
+	Output           json.RawMessage `json:"output"`
+	Truncated        bool            `json:"truncated"`
+	Audit            json.RawMessage `json:"-"`
 }
 
 type Adapter func(context.Context, *ToolRequest, approval.Constraints) (ToolResult, error)
@@ -555,7 +556,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 			return ToolResult{}, err
 		}
 		if admitted.finished {
-			return b.finalize(ctx, &canonical, &pendingResult{result: admitted.result, limit: b.outputLimit(decision.Constraints)})
+			return b.finalize(ctx, &canonical, definition, &pendingResult{result: admitted.result, limit: b.outputLimit(decision.Constraints)})
 		}
 		previewLines = admitted.lines
 	}
@@ -580,7 +581,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		}
 		approvalState = ApprovalAuto
 		executorClass = ExecutorDirect
-		return b.finalize(ctx, &canonical, &pendingResult{
+		return b.finalize(ctx, &canonical, definition, &pendingResult{
 			result: ToolResult{Class: ResultOK, Output: output},
 			limit:  b.outputLimit(decision.Constraints),
 		})
@@ -679,7 +680,7 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 	if err != nil {
 		return ToolResult{}, err
 	}
-	return b.finalize(ctx, &canonical, &pendingResult{result: result, limit: b.outputLimit(decision.Constraints)})
+	return b.finalize(ctx, &canonical, definition, &pendingResult{result: result, limit: b.outputLimit(decision.Constraints)})
 }
 
 type pendingResult struct {
@@ -696,7 +697,14 @@ func (b *Broker) outputLimit(constraints approval.Constraints) int64 {
 	return limit
 }
 
-func (b *Broker) finalize(ctx context.Context, canonical *ToolRequest, pending *pendingResult) (ToolResult, error) {
+func definitionResultTaints(definition *tools.Definition, output json.RawMessage) bool {
+	if definition == nil {
+		return true
+	}
+	return definition.Server != "" || definition.Plugin != nil || definition.UntrustedOutput || (definition.OutputTaint != nil && definition.OutputTaint(output))
+}
+
+func (b *Broker) finalize(ctx context.Context, canonical *ToolRequest, definition *tools.Definition, pending *pendingResult) (ToolResult, error) {
 	if canonical == nil {
 		return ToolResult{}, errorf(ResultInvalidArgument, "tool request must not be nil")
 	}
@@ -706,7 +714,7 @@ func (b *Broker) finalize(ctx context.Context, canonical *ToolRequest, pending *
 	result := pending.result
 	result.ToolName = canonical.ToolName
 	result.ToolVersion = canonical.ToolVersion
-	result.Untrusted = true
+	result.Untrusted = result.Untrusted || result.WorkspaceTainted || definitionResultTaints(definition, result.Output)
 	result.Output = redactOutput(result.Output, b.secretValues())
 	if result.Class == "" {
 		result.Class = ResultOK
@@ -930,7 +938,11 @@ func (b *Broker) executeEffect(ctx context.Context, call *journaledTool) (ToolRe
 		adapter: call.adapter, request: request, constraints: call.constraints, limit: b.outputLimit(call.constraints),
 		takeover: call.recovery != nil,
 		finalize: func(ctx context.Context, pending *pendingResult) (ToolResult, error) {
-			return b.finalize(ctx, request, pending)
+			var defPtr *tools.Definition
+			if def, ok := b.Definition(request.ToolName, request.ToolVersion); ok {
+				defPtr = &def
+			}
+			return b.finalize(ctx, request, defPtr, pending)
 		},
 	}
 	intent, err := b.effects.Execute(ctx, &effect.PrepareRequest{

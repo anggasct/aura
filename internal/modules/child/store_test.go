@@ -223,9 +223,10 @@ func TestChildBaselineSchemaOmitsDepthAndHasResultDefaults(t *testing.T) {
 		t.Fatalf("History: %v", err)
 	}
 	db := sqlitetest.OpenMigrations(t, migrations)
+	wantLatest := migrations[len(migrations)-1].Version
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
-	if err != nil || applied != 2 || latest != 2 {
-		t.Fatalf("schema = applied %d latest %d, %v; want 2", applied, latest, err)
+	if err != nil || applied != wantLatest || latest != wantLatest || latest < 2 {
+		t.Fatalf("schema = applied %d latest %d, %v; want %d", applied, latest, err, wantLatest)
 	}
 	var depthCol string
 	if err := db.QueryRowContext(ctx, `SELECT name FROM pragma_table_info('child_run') WHERE name = 'depth'`).Scan(&depthCol); err == nil {

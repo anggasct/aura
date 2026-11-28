@@ -210,18 +210,20 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 	if err := attachArtifacts(envelope, []media.ArtifactSummary{summary}); err != nil {
 		return err
 	}
-	var source runtimeingress.PartSource
-	var detail string
+	source := runtimeingress.PartSourceAttachment
+	detail := attachmentDetail(item.mediaType, item.kind)
 	if msg.relayed() {
 		source = runtimeingress.PartSourceRelayed
 		detail = msg.relayedDetail()
 	}
+	emitted := false
 	if media.IsTextDocument(item.mediaType) {
 		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
 			Text:   media.ReferencePart(&summary, item.mediaType),
 			Source: source,
 			Detail: detail,
 		})
+		emitted = true
 	}
 	if len(image) > 0 {
 		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
@@ -229,10 +231,35 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 			Source: source,
 			Detail: detail,
 		})
-	} else if strings.TrimSpace(envelope.Parts[0].Text) == "" {
-		envelope.Parts[0].Text = "[" + item.kind + " attachment]"
+		emitted = true
+	}
+	if !emitted {
+		if strings.TrimSpace(envelope.Parts[0].Text) == "" {
+			envelope.Parts[0].Text = "[" + item.kind + " attachment]"
+			envelope.Parts[0].Source = source
+			envelope.Parts[0].Detail = detail
+		} else {
+			envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
+				Text:   "[" + item.kind + " attachment]",
+				Source: source,
+				Detail: detail,
+			})
+		}
 	}
 	return nil
+}
+
+func attachmentDetail(mediaType, kind string) string {
+	switch {
+	case strings.HasPrefix(mediaType, "image/"), kind == kindPhoto:
+		return "image"
+	case strings.HasPrefix(mediaType, "audio/"), kind == kindAudio, kind == kindVoice:
+		return "audio"
+	case strings.HasPrefix(mediaType, "video/"), kind == kindVideo, kind == kindVideoNote, kind == kindAnimation:
+		return "video"
+	default:
+		return "document"
+	}
 }
 
 func (a *Adapter) storeAttachment(ctx context.Context, item *attachment, content *os.File, envelope *runtimeingress.IngressEnvelope, msg *message) (media.ArtifactSummary, json.RawMessage, error) {

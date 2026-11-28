@@ -23,6 +23,7 @@ type UntrustedDocument struct {
 	FromSequence uint64 `json:"from_sequence"`
 	ToSequence   uint64 `json:"to_sequence"`
 	Trust        string `json:"trust"`
+	Tainted      bool   `json:"tainted,omitempty"`
 	Content      string `json:"content"`
 }
 
@@ -30,6 +31,7 @@ type UntrustedContext struct {
 	Query     string              `json:"query"`
 	Summary   string              `json:"summary"`
 	Trust     string              `json:"trust"`
+	Tainted   bool                `json:"tainted,omitempty"`
 	Documents []UntrustedDocument `json:"documents,omitempty"`
 }
 

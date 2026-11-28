@@ -42,9 +42,9 @@ func (r *recordingBuiltins) Definitions() []runtimeadk.BuiltinToolDefinition {
 	return r.definitions
 }
 
-func (r *recordingBuiltins) Execute(_ context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
+func (r *recordingBuiltins) Execute(_ context.Context, request *runtimeadk.BuiltinToolRequest) (runtimeadk.BuiltinToolResult, error) {
 	r.forwarded = append(r.forwarded, *request)
-	return json.RawMessage(`{}`), nil
+	return runtimeadk.BuiltinToolResult{Output: json.RawMessage(`{}`)}, nil
 }
 
 func definitionsNamed(names ...string) []runtimeadk.BuiltinToolDefinition {

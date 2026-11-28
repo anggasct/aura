@@ -94,9 +94,9 @@ func TestCompositionServerStartsAndStopsInOrder(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 	requireNames(t, "lifecycle started", lifecycleNames(t, logs.String(), "lifecycle started"),
-		[]string{"memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels", "durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules"})
+		[]string{"legacy_taint", "memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels", "durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules"})
 	requireNames(t, "lifecycle stopped", lifecycleNames(t, logs.String(), "lifecycle stopped"),
-		[]string{"persona_eval_schedules", "workflow_completion", "run_retention", "retention_sweeps", "workflow_proposal_cards", "turn_recovery_pass", "turn_engine", "durable_host", "channels", "turn_recovery", "schedule_pass", "schedule_resume", "broadcast_resume", "memory_purge", "telemetry", "sqlite"})
+		[]string{"persona_eval_schedules", "workflow_completion", "run_retention", "retention_sweeps", "workflow_proposal_cards", "turn_recovery_pass", "turn_engine", "durable_host", "channels", "turn_recovery", "schedule_pass", "schedule_resume", "broadcast_resume", "memory_purge", "legacy_taint", "telemetry", "sqlite"})
 }
 
 func TestCompositionServerBuildFailureReleasesWhatWasBuilt(t *testing.T) {
@@ -119,7 +119,7 @@ func TestCompositionServerRegistersEveryConfiguredEntry(t *testing.T) {
 	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, "profile:\n  enabled: true\n"))
 	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
 	requireNames(t, "entries", app.group.Names(), []string{
-		"sqlite", "telemetry", "memory_purge", "profile_extraction", "broadcast_resume", "schedule_resume",
+		"sqlite", "telemetry", "legacy_taint", "memory_purge", "profile_extraction", "broadcast_resume", "schedule_resume",
 		"schedule_pass", "turn_recovery", "channels", "durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules",
 	})
 	if err := app.Close(t.Context()); err != nil {
@@ -261,8 +261,8 @@ func TestCompositionServerWithKnowledgeDiscoversModuleContracts(t *testing.T) {
 		t.Fatalf("kb_search via discovered ToolProvider failed: %v", err)
 	}
 	var searchOut knowledge.SearchOutput
-	if err := json.Unmarshal(output, &searchOut); err != nil {
-		t.Fatalf("decode kb_search output %s: %v", output, err)
+	if err := json.Unmarshal(output.Output, &searchOut); err != nil {
+		t.Fatalf("decode kb_search output %s: %v", output.Output, err)
 	}
 
 	checkIDs := map[string]bool{}

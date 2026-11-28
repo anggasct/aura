@@ -80,8 +80,8 @@ func TestToolExecutorRedactsTheGitHubTokens(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read_file: %v", err)
 	}
-	if strings.Contains(string(output), token) || !strings.Contains(string(output), "the token is") {
-		t.Errorf("read_file output = %s, want the note with the token redacted", output)
+	if strings.Contains(string(output.Output), token) || !strings.Contains(string(output.Output), "the token is") {
+		t.Errorf("read_file output = %s, want the note with the token redacted", output.Output)
 	}
 }
 

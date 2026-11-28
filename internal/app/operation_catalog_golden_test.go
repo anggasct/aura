@@ -46,10 +46,14 @@ func operationCatalogLine(d *operation.Descriptor) string {
 	case d.GeneratesTool():
 		tool = operation.ToolName(d.ID)
 	}
+	untrusted := strconv.FormatBool(d.UntrustedOutput)
+	if d.ResultTaint != nil {
+		untrusted = "per_result"
+	}
 	return fmt.Sprintf("%s exposure=%s risk=%s commit=%s fresh=%s notice=%s sink=%s untrusted=%s preview=%s confirm=%s network=%s grant=%s surfaces=%s secret=%s caps=%s tool=%s",
 		d.ID, d.Exposure, d.Risk, d.Commit,
 		strconv.FormatBool(d.FreshApproval), strconv.FormatBool(d.OwnerNotice), strconv.FormatBool(d.Sink),
-		strconv.FormatBool(d.UntrustedOutput), strconv.FormatBool(d.Preview), joinOrDash([]string{string(d.OwnerConfirmation())}), strconv.FormatBool(d.ReachesNetwork),
+		untrusted, strconv.FormatBool(d.Preview), joinOrDash([]string{string(d.OwnerConfirmation())}), strconv.FormatBool(d.ReachesNetwork),
 		joinOrDash([]string{string(d.TaintedGrant)}), joinOrDash(surfaces), joinOrDash(secrets), joinOrDash(d.RequiredCapabilities), tool)
 }
 

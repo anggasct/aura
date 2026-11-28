@@ -228,12 +228,43 @@ func (a *Adapter) deliverToRuntime(ctx context.Context, session Session, info Me
 		a.drop(ctx, info.UID, dropAttachmentFailed, true)
 		return nil
 	}
-	parts := []runtimeingress.InputPart{{Text: text}}
-	if text == "" {
-		parts[0].Text = attachmentOnlyText
-	}
-	for _, image := range images {
-		parts = append(parts, runtimeingress.InputPart{Image: image})
+	deliveries := a.sessionDeliveries(ctx, found.session)
+	parts := splitEmailBody(found.subject, body, deliveries)
+	if len(parts) == 0 {
+		detail := "document"
+		if len(stage.items) > 0 {
+			detail = emailAttachmentDetail(stage.items[0].mediaType)
+		}
+		parts = []runtimeingress.InputPart{{
+			Text:   attachmentOnlyText,
+			Source: runtimeingress.PartSourceAttachment,
+			Detail: detail,
+		}}
+		for _, image := range images {
+			if len(image) > 0 {
+				parts = append(parts, runtimeingress.InputPart{
+					Image:  image,
+					Source: runtimeingress.PartSourceAttachment,
+					Detail: "image",
+				})
+			}
+		}
+	} else {
+		for i := range stage.items {
+			if i < len(images) && len(images[i]) > 0 {
+				parts = append(parts, runtimeingress.InputPart{
+					Image:  images[i],
+					Source: runtimeingress.PartSourceAttachment,
+					Detail: "image",
+				})
+				continue
+			}
+			parts = append(parts, runtimeingress.InputPart{
+				Text:   attachmentOnlyText,
+				Source: runtimeingress.PartSourceAttachment,
+				Detail: emailAttachmentDetail(stage.items[i].mediaType),
+			})
+		}
 	}
 	envelope := &runtimeingress.IngressEnvelope{
 		Source:         a.source(),
@@ -283,6 +314,22 @@ func (a *Adapter) threadSession(ctx context.Context, persona, root, principalID 
 		return base, nil
 	}
 	return base + "/principal:" + digestOf(principalID), nil
+}
+
+func (a *Adapter) sessionDeliveries(ctx context.Context, sessionID string) []string {
+	local := a.sent.list(sessionID)
+	if a.deliveries == nil {
+		return local
+	}
+	stored, err := a.deliveries.SessionDeliveries(ctx, sessionID)
+	if err != nil {
+		a.logger.WarnContext(ctx, "email delivery history lookup failed", "component", "email", "account", a.account.Name)
+		return local
+	}
+	if len(local) == 0 {
+		return stored
+	}
+	return append(stored, local...)
 }
 
 func readableBody(raw []byte) (string, bool) {

@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 const HealthCheckID = "mcp"
@@ -32,6 +33,7 @@ type ModuleDeps struct {
 	Capabilities   capability.Report
 	Personas       []auraagent.Definition
 	CheckTimeout   time.Duration
+	TaintTracker   *workspace.Tracker
 	Logger         *slog.Logger
 }
 
@@ -97,6 +99,7 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 		Observer:          observer,
 		Logger:            logger,
 		CapabilityChecker: deps.Capabilities.Require,
+		TaintTracker:      deps.TaintTracker,
 	})
 	if err != nil {
 		return nil, err

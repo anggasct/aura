@@ -414,7 +414,7 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	if err != nil || len(inspected) != 1 {
 		t.Fatalf("owner inspect = %d docs, %v; want the discord-derived doc", len(inspected), err)
 	}
-	provider, err := memory.NewProvider(service, memory.ProviderConfig{Scopes: defaultRecallScopes(t)})
+	provider, err := memory.NewProvider(service, &memory.ProviderConfig{Scopes: defaultRecallScopes(t)})
 	if err != nil {
 		t.Fatalf("NewProvider(): %v", err)
 	}

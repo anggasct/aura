@@ -1,6 +1,8 @@
 package profile
 
 import (
+	"encoding/json"
+
 	"github.com/anggasct/aura/internal/platform/operation"
 )
 
@@ -88,7 +90,7 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationList, Summary: "List profile facts", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
+				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: profileListResultTaints, Needs: needs,
 				Description: "Lists the learned and owner-set facts with status, confidence, origin and the whole value. The values come from conversations, not from the owner alone.",
 				Params: []operation.Param{
 					{Name: "category", Kind: operation.KindEnum, Summary: "only facts of this category", Enum: categoryEnum()},
@@ -104,7 +106,7 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationReview, Summary: "List facts that need review, conflicts first", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
+				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: profileReviewResultTaints, Needs: needs,
 				Description: "Lists candidates and unverified active facts that wait for the owner, the ones that conflict with a verified fact first, with origin and the whole value. The values come from conversations, not from the owner alone.",
 				Output:      fieldsOutput(operation.OutputTable, "state", "id", "category", "key", "value", "origin", "confidence", "conflicts_with"),
 			},
@@ -119,7 +121,7 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationShow, Summary: "Show one profile fact with its provenance", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
+				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: profileShowResultTaints, Needs: needs,
 				Description: "Shows a fact with its status, origin, conflicts, the whole value and the evidence it was learned from. The value comes from conversations, not from the owner alone.",
 				Params:      []operation.Param{factIDParam()},
 				Output: fieldsOutput(operation.OutputRecord, "id", "category", "key", "value", "status", "origin", "verified", "confidence",
@@ -127,4 +129,41 @@ func Catalog() operation.Catalog {
 			},
 		},
 	}
+}
+
+func profileListResultTaints(raw json.RawMessage) bool {
+	var parsed struct {
+		Rows []struct {
+			Verified *bool `json:"verified"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Rows == nil {
+		return true
+	}
+	for i := range parsed.Rows {
+		if parsed.Rows[i].Verified == nil || !*parsed.Rows[i].Verified {
+			return true
+		}
+	}
+	return false
+}
+
+func profileShowResultTaints(raw json.RawMessage) bool {
+	var parsed struct {
+		Verified *bool `json:"verified"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Verified == nil {
+		return true
+	}
+	return !*parsed.Verified
+}
+
+func profileReviewResultTaints(raw json.RawMessage) bool {
+	var parsed struct {
+		Rows []json.RawMessage `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Rows == nil {
+		return true
+	}
+	return len(parsed.Rows) > 0
 }

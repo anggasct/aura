@@ -420,7 +420,7 @@ func (a *Adapter) admit(ctx context.Context, msg *messagePayload) (bool, error) 
 	if reason != "" {
 		return a.drop(ctx, msg, scope, reason)
 	}
-	envelope.Parts = []runtimeingress.InputPart{{Text: a.modelText(msg)}}
+	envelope.Parts = a.inputParts(msg)
 	persona, routed := a.routePersona(ctx, &auraagent.RouteScope{GuildID: msg.GuildID, ChannelID: msg.ChannelID, UserID: msg.Author.ID})
 	if !routed {
 		return a.drop(ctx, msg, scope, dropPersonaUnrouted)
@@ -504,7 +504,7 @@ func (a *Adapter) admitThreadMessage(ctx context.Context, msg *messagePayload, t
 	if err != nil {
 		return false, err
 	}
-	envelope.Parts = []runtimeingress.InputPart{{Text: a.modelText(msg)}}
+	envelope.Parts = a.inputParts(msg)
 	envelope.AgentID = persona
 	if inv, ok := a.commandInvocation(msg); ok {
 		if handled, err := a.runCommand(ctx, msg, &inv, envelope); handled || err != nil {
@@ -615,7 +615,8 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 	if err := a.sessions.EnsureSession(ctx, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
 	}
-	if len(msg.Attachments) > 0 && !a.intakeAttachments(ctx, msg, envelope) {
+	attachments := msg.allAttachments()
+	if len(attachments) > 0 && !a.intakeAttachments(ctx, msg, attachments, envelope) {
 		return a.drop(ctx, msg, scope, dropAttachmentFailed)
 	}
 	if _, err := a.sink.Accept(ctx, envelope); err != nil {
@@ -635,8 +636,27 @@ func (a *Adapter) acceptEnvelope(ctx context.Context, msg *messagePayload, envel
 	return true, nil
 }
 
-func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, envelope *runtimeingress.IngressEnvelope) bool {
-	summaries, images, err := a.storeAttachments(ctx, msg.Attachments, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID, msg.ID)
+func (a *Adapter) inputParts(msg *messagePayload) []runtimeingress.InputPart {
+	var parts []runtimeingress.InputPart
+	if text := a.modelText(msg); text != "" || !msg.isForward() {
+		parts = append(parts, runtimeingress.InputPart{Text: text})
+	}
+	if msg.isForward() {
+		for i := range msg.MessageSnapshots {
+			if content := msg.MessageSnapshots[i].Message.Content; strings.TrimSpace(content) != "" {
+				parts = append(parts, runtimeingress.InputPart{
+					Text:   content,
+					Source: runtimeingress.PartSourceRelayed,
+					Detail: "discord forward",
+				})
+			}
+		}
+	}
+	return parts
+}
+
+func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, attachments []attachmentPayload, envelope *runtimeingress.IngressEnvelope) bool {
+	summaries, images, err := a.storeAttachments(ctx, attachments, envelope.ConversationID, envelope.PrincipalID, envelope.AgentID, msg.ID)
 	if err != nil {
 		a.logger.WarnContext(ctx, "attachment intake failed", "component", "discord")
 		return false
@@ -645,15 +665,47 @@ func (a *Adapter) intakeAttachments(ctx context.Context, msg *messagePayload, en
 		a.logger.WarnContext(ctx, "attachment reference failed", "component", "discord")
 		return false
 	}
-	for index := range msg.Attachments {
-		if media.IsTextDocument(msg.Attachments[index].ContentType) {
-			envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Text: media.ReferencePart(&summaries[index], msg.Attachments[index].ContentType)})
+	for index := range attachments {
+		detail := discordAttachmentDetail(attachments[index].ContentType)
+		emitted := false
+		if media.IsTextDocument(attachments[index].ContentType) {
+			envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
+				Text:   media.ReferencePart(&summaries[index], attachments[index].ContentType),
+				Source: runtimeingress.PartSourceAttachment,
+				Detail: detail,
+			})
+			emitted = true
+		}
+		if index < len(images) && len(images[index]) > 0 {
+			envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
+				Image:  images[index],
+				Source: runtimeingress.PartSourceAttachment,
+				Detail: "image",
+			})
+			emitted = true
+		}
+		if !emitted {
+			envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{
+				Text:   "[attachment]",
+				Source: runtimeingress.PartSourceAttachment,
+				Detail: detail,
+			})
 		}
 	}
-	for _, raw := range images {
-		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Image: raw})
-	}
 	return true
+}
+
+func discordAttachmentDetail(contentType string) string {
+	switch {
+	case strings.HasPrefix(contentType, "image/"):
+		return "image"
+	case strings.HasPrefix(contentType, "audio/"):
+		return "audio"
+	case strings.HasPrefix(contentType, "video/"):
+		return "video"
+	default:
+		return "document"
+	}
 }
 
 func attachArtifacts(envelope *runtimeingress.IngressEnvelope, summaries []media.ArtifactSummary) error {

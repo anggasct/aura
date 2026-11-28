@@ -109,6 +109,7 @@ type Definition struct {
 	TaintedGrant         TaintedGrant
 	OwnerNotice          bool
 	UntrustedOutput      bool
+	OutputTaint          func(json.RawMessage) bool
 	SinkRelief           *SinkRelief
 	Description          string
 	Display              []string
@@ -137,6 +138,10 @@ type SinkRelief struct {
 
 func (d *Definition) IsExternalSink() bool {
 	return d.ExternalSink || d.Server != "" || d.Plugin != nil
+}
+
+func (d *Definition) ResultMayTaint() bool {
+	return d != nil && (d.Server != "" || d.Plugin != nil || d.UntrustedOutput || d.OutputTaint != nil)
 }
 
 func (d *Definition) RunsAlone() bool {

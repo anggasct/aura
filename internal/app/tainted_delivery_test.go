@@ -245,12 +245,13 @@ func TestTaintedDeliveryNeverShowsLinkPreviews(t *testing.T) {
 		{Kind: turn.EventKindMessageCompleted, Payload: json.RawMessage(`{"text":"` + linkReply + `"}`)},
 	})
 	engine, err := runtimeengine.New(&runtimeengine.Deps{
-		Events:     turnstore.NewEventStore(db),
-		Dedupe:     turnstore.NewDedupeStore(db),
-		Executor:   executor,
-		Config:     runtimeengine.Default(),
-		Channels:   []runtimechannelhost.ChannelPort{tgAdapter, dcAdapter},
-		LiveEvents: turn.NewEventBus(nil),
+		Events:      turnstore.NewEventStore(db),
+		Dedupe:      turnstore.NewDedupeStore(db),
+		TaintReader: turnstore.NewTaintReader(db),
+		Executor:    executor,
+		Config:      runtimeengine.Default(),
+		Channels:    []runtimechannelhost.ChannelPort{tgAdapter, dcAdapter},
+		LiveEvents:  turn.NewEventBus(nil),
 	})
 	if err != nil {
 		t.Fatalf("runtimeengine.New: %v", err)
@@ -263,34 +264,51 @@ func TestTaintedDeliveryNeverShowsLinkPreviews(t *testing.T) {
 		}
 	})
 
-	runTurn := func(t *testing.T, req *turn.TurnRequest) {
-		t.Helper()
-		now := time.Now().UTC()
-		if err := sessions.Create(t.Context(), &turn.Session{
-			ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
-		}); err != nil {
-			t.Fatalf("create session %s: %v", req.SessionID, err)
-		}
-		for _, err := range engine.Run(t.Context(), req) {
-			if err != nil {
-				t.Fatalf("engine.Run(%s): %v", req.SessionID, err)
-			}
-		}
-	}
-
 	tgReply := json.RawMessage(`{"chat_id":100,"message_id":1,"chat_type":"private","from_id":100}`)
 	dcReply := json.RawMessage(`{"channel_id":"333","message_id":"1","author_id":"100"}`)
 
 	cases := []struct {
 		name        string
 		mutate      func(*turn.TurnRequest)
+		seedMark    *turn.TaintMark
 		wantTainted bool
 	}{
 		{name: "clean owner turn keeps previews", wantTainted: false},
-		{name: "knowledge scope disables previews", mutate: func(r *turn.TurnRequest) { r.Knowledge = []string{"notes"} }, wantTainted: true},
+		{
+			name: "non-owner knowledge scope disables previews",
+			mutate: func(r *turn.TurnRequest) {
+				r.PrincipalID = "trusted:friend"
+				r.PrincipalClass = principal.ClassTrusted
+				r.Knowledge = []string{"notes"}
+			},
+			wantTainted: true,
+		},
+		{
+			name:        "session ledger knowledge mark disables previews",
+			seedMark:    &turn.TaintMark{Source: turn.TaintSourceKnowledge, Detail: "notes"},
+			wantTainted: true,
+		},
 		{name: "web-only turn disables previews", mutate: func(r *turn.TurnRequest) { r.WebOnly = true; r.JobID = "job-web" }, wantTainted: true},
 		{name: "tainted job turn disables previews", mutate: func(r *turn.TurnRequest) { r.JobTaint = "a webhook"; r.JobID = "job-t" }, wantTainted: true},
 		{name: "workflow tainted input disables previews", mutate: func(r *turn.TurnRequest) { r.InputTainted = true }, wantTainted: true},
+	}
+
+	seedSessionMark := func(t *testing.T, sessionID string, mark *turn.TaintMark) {
+		t.Helper()
+		if mark == nil {
+			return
+		}
+		payload, err := turn.EncodeTaintMark(*mark)
+		if err != nil {
+			t.Fatalf("EncodeTaintMark: %v", err)
+		}
+		if _, err := turnstore.NewEventStore(db).AppendSequenced(t.Context(), sessionID, &turn.Event{
+			ID: "seed-mark-" + sessionID, SessionID: sessionID, TurnID: "prior-turn",
+			Author: turn.AuthorSystem, Kind: turn.EventKindSessionTainted, SchemaVersion: 1,
+			Payload: payload, CreatedAt: time.Now().UTC(),
+		}); err != nil {
+			t.Fatalf("seed session taint mark: %v", err)
+		}
 	}
 
 	for i, tc := range cases {
@@ -308,7 +326,18 @@ func TestTaintedDeliveryNeverShowsLinkPreviews(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(req)
 			}
-			runTurn(t, req)
+			now := time.Now().UTC()
+			if err := sessions.Create(t.Context(), &turn.Session{
+				ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("create session %s: %v", req.SessionID, err)
+			}
+			seedSessionMark(t, req.SessionID, tc.seedMark)
+			for _, err := range engine.Run(t.Context(), req) {
+				if err != nil {
+					t.Fatalf("engine.Run(%s): %v", req.SessionID, err)
+				}
+			}
 			reqs := tgTransport.messages("/sendMessage")
 			if len(reqs) != 1 {
 				t.Fatalf("telegram sends = %d, want 1", len(reqs))
@@ -338,7 +367,18 @@ func TestTaintedDeliveryNeverShowsLinkPreviews(t *testing.T) {
 			if tc.mutate != nil {
 				tc.mutate(req)
 			}
-			runTurn(t, req)
+			now := time.Now().UTC()
+			if err := sessions.Create(t.Context(), &turn.Session{
+				ID: req.SessionID, OwnerID: req.PrincipalID, Metadata: json.RawMessage(`{}`), CreatedAt: now, UpdatedAt: now,
+			}); err != nil {
+				t.Fatalf("create session %s: %v", req.SessionID, err)
+			}
+			seedSessionMark(t, req.SessionID, tc.seedMark)
+			for _, err := range engine.Run(t.Context(), req) {
+				if err != nil {
+					t.Fatalf("engine.Run(%s): %v", req.SessionID, err)
+				}
+			}
 			reqs := dcTransport.messages("/messages")
 			if len(reqs) != 1 {
 				t.Fatalf("discord sends = %d, want 1", len(reqs))
@@ -568,13 +608,15 @@ func TestTaintedBroadcastNeverShowsLinkPreviews(t *testing.T) {
 			jobTaint                  string
 			withKnowledge             bool
 			withCapabilitiesAndHelper bool
+			streamTaintMark           *turn.TaintMark
 			wantTainted               bool
 		}{
 			{name: "clean full job on clean persona", jobContext: schedule.ContextFull, wantTainted: false},
 			{name: "tainted full job", jobContext: schedule.ContextFull, jobTaint: "a webhook", wantTainted: true},
 			{name: "clean web-only job", jobContext: schedule.ContextWebOnly, wantTainted: true},
-			{name: "full job on knowledge persona", jobContext: schedule.ContextFull, withKnowledge: true, wantTainted: true},
-			{name: "full job on main with capabilities and knowledge alongside clean helper", jobContext: schedule.ContextFull, withKnowledge: true, withCapabilitiesAndHelper: true, wantTainted: true},
+			{name: "full job on knowledge persona without untrusted passages stays clean", jobContext: schedule.ContextFull, withKnowledge: true, wantTainted: false},
+			{name: "full job that pulls untrusted knowledge passages disables previews", jobContext: schedule.ContextFull, withKnowledge: true, streamTaintMark: &turn.TaintMark{Source: turn.TaintSourceKnowledge, Detail: "notes"}, wantTainted: true},
+			{name: "full job on main with tool result taint alongside clean helper", jobContext: schedule.ContextFull, withKnowledge: true, withCapabilitiesAndHelper: true, streamTaintMark: &turn.TaintMark{Source: turn.TaintSourceToolResult, Detail: "web_fetch"}, wantTainted: true},
 		}
 		for i, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -594,13 +636,25 @@ func TestTaintedBroadcastNeverShowsLinkPreviews(t *testing.T) {
 					t.Fatalf("NewBroadcaster: %v", err)
 				}
 				notifier.broadcaster = itemBroadcaster
+				batch := cronCompletedBatch("turn-cron-"+strconv.Itoa(i), "https://evil.example/cron-"+strconv.Itoa(i))
+				if tc.streamTaintMark != nil {
+					markPayload, err := turn.EncodeTaintMark(*tc.streamTaintMark)
+					if err != nil {
+						t.Fatalf("EncodeTaintMark: %v", err)
+					}
+					batch = append([]turn.Event{{
+						TurnID: "turn-cron-" + strconv.Itoa(i), Author: turn.AuthorSystem,
+						Kind: turn.EventKindSessionTainted, SchemaVersion: 1, Payload: markPayload,
+					}}, batch...)
+				}
 				fakeEngine := &fakeCronEngine{
-					batches: [][]turn.Event{cronCompletedBatch("turn-cron-"+strconv.Itoa(i), "https://evil.example/cron-"+strconv.Itoa(i))},
+					batches: [][]turn.Event{batch},
 				}
 				turnRunner := &engineTurnRunner{
-					engine:   fakeEngine,
-					sessions: sessions,
-					personas: newBroadcastPreviewRegistry(t, tc.withKnowledge, tc.withCapabilitiesAndHelper),
+					engine:      fakeEngine,
+					sessions:    sessions,
+					taintReader: turnstore.NewTaintReader(db),
+					personas:    newBroadcastPreviewRegistry(t, tc.withKnowledge, tc.withCapabilitiesAndHelper),
 				}
 				schedRuntime := durabletest.NewFake()
 				t.Cleanup(schedRuntime.Close)

@@ -85,12 +85,12 @@ func (p *toolProbe) Definitions() []BuiltinToolDefinition {
 	return []BuiltinToolDefinition{{Name: "tool-a", Version: "v1", Schema: json.RawMessage(`{"type":"object"}`)}}
 }
 
-func (p *toolProbe) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (p *toolProbe) Execute(ctx context.Context, request *BuiltinToolRequest) (BuiltinToolResult, error) {
 	var arguments struct {
 		Query string `json:"query"`
 	}
 	if err := json.Unmarshal(request.Arguments, &arguments); err != nil {
-		return nil, err
+		return BuiltinToolResult{}, err
 	}
 	p.mu.Lock()
 	p.running++
@@ -104,10 +104,11 @@ func (p *toolProbe) Execute(ctx context.Context, request *BuiltinToolRequest) (j
 	}()
 	if p.hold != nil {
 		if err := p.hold(ctx, request, arguments.Query); err != nil {
-			return nil, err
+			return BuiltinToolResult{}, err
 		}
 	}
-	return json.Marshal(map[string]string{"query": arguments.Query})
+	raw, err := json.Marshal(map[string]string{"query": arguments.Query})
+	return BuiltinToolResult{Output: raw}, err
 }
 
 func (p *toolProbe) snapshot() (running, peak int, started []string) {

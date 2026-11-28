@@ -28,7 +28,7 @@ func moduleToolMismatches(d *Descriptor, definition *tools.Definition) []string 
 		}
 	}
 	var mismatches []string
-	if definition.UntrustedOutput != d.UntrustedOutput {
+	if definition.UntrustedOutput != d.UntrustedOutput || (definition.OutputTaint != nil) != (d.ResultTaint != nil) {
 		mismatches = append(mismatches, "does not agree on untrusted output")
 	}
 	params := d.paramsOn(SurfaceAgent)

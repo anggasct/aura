@@ -65,8 +65,8 @@ func (r *kbSearchRig) call(t *testing.T, agent string, class principal.Class, ar
 	if err != nil {
 		return result, err
 	}
-	if err := json.Unmarshal(output, &result); err != nil {
-		t.Fatalf("decode %s: %v", output, err)
+	if err := json.Unmarshal(output.Output, &result); err != nil {
+		t.Fatalf("decode %s: %v", output.Output, err)
 	}
 	return result, nil
 }

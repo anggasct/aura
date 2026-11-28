@@ -138,7 +138,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 		return nil, nil, err
 	}
 	summaries := make([]media.ArtifactSummary, 0, len(attachments))
-	var images []json.RawMessage
+	images := make([]json.RawMessage, len(attachments))
 	visionSvc := a.visionService()
 	for index := range attachments {
 		if visionSvc != nil && media.IsVisionImage(attachments[index].ContentType) {
@@ -147,7 +147,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, attachments []attachment
 				return nil, nil, err
 			}
 			summaries = append(summaries, summary)
-			images = append(images, raw)
+			images[index] = raw
 			continue
 		}
 		receipt, err := a.putAttachment(ctx, &attachments[index], staged[index], sessionID, messageID)

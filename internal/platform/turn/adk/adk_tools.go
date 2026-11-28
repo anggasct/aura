@@ -73,9 +73,15 @@ type BuiltinToolRequest struct {
 	ContentTaintTracked bool
 }
 
+type BuiltinToolResult struct {
+	Output           json.RawMessage
+	Untrusted        bool
+	WorkspaceTainted bool
+}
+
 type BuiltinToolExecutor interface {
 	Definitions() []BuiltinToolDefinition
-	Execute(context.Context, *BuiltinToolRequest) (json.RawMessage, error)
+	Execute(context.Context, *BuiltinToolRequest) (BuiltinToolResult, error)
 }
 
 type turnIDContextKey struct{}
@@ -92,33 +98,30 @@ func turnIDFromContext(ctx context.Context) string {
 type turnAccessContextKey struct{}
 
 type turnAccess struct {
-	principalID string
-	class       principal.Class
-	agentID     string
-	knowledge   []string
-	tainted     bool
-	taintMark   turn.TaintMark
-	taintSource string
-	origin      turn.Origin
-
+	principalID         string
+	class               principal.Class
+	agentID             string
+	knowledge           []string
+	origin              turn.Origin
 	unattended          bool
 	webOnlyRelief       bool
 	contentTaintTracked bool
 }
 
 func (x *ADKExecutor) withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
-	mark, tainted := req.AdmissionTaint()
 	knowledge := slices.Clone(req.Knowledge)
 	if req.WebOnly {
 		knowledge = nil
 	}
 	access := turnAccess{
-		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: knowledge, tainted: tainted, taintMark: mark, origin: req.Origin,
-		unattended:    x.turnKind(req.Origin) == operation.TurnUnattended,
-		webOnlyRelief: req.WebOnly && req.JobTaint == "",
-	}
-	if tainted {
-		access.taintSource = mark.Label()
+		principalID:         req.PrincipalID,
+		class:               req.PrincipalClass,
+		agentID:             agentID,
+		knowledge:           knowledge,
+		origin:              req.Origin,
+		unattended:          x.turnKind(req.Origin) == operation.TurnUnattended,
+		webOnlyRelief:       req.WebOnly && req.JobTaint == "",
+		contentTaintTracked: true,
 	}
 	return context.WithValue(ctx, turnAccessContextKey{}, access)
 }

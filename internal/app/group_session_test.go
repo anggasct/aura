@@ -48,7 +48,7 @@ func TestPublicPrincipalsInOneChannelNeverRecallEachOther(t *testing.T) {
 	project(channelSession(alice), alice, "ev-alice", "my parcel tracking number is alpha")
 	project(channelSession(bob), bob, "ev-bob", "my parcel tracking number is bravo")
 	project(thread, bob, "ev-bob-thread", "my parcel tracking number is charlie")
-	provider, err := memory.NewProvider(service, memory.ProviderConfig{Scopes: defaultRecallScopes(t)})
+	provider, err := memory.NewProvider(service, &memory.ProviderConfig{Scopes: defaultRecallScopes(t)})
 	if err != nil {
 		t.Fatalf("NewProvider(): %v", err)
 	}

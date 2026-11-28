@@ -13,6 +13,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
@@ -63,7 +64,11 @@ func TestSecondTaintedTrustGrantInATurnIsRefused(t *testing.T) {
 
 	before := len(rig.Prompts())
 	calls := sess.turn(turn.OriginTerminal, func(req *turn.TurnRequest) {
-		req.Knowledge = []string{"notes"}
+		req.Parts = []runtimeingress.InputPart{{
+			Text:   "create nightly jobs",
+			Source: runtimeingress.PartSourceRelayed,
+			Detail: "telegram forward",
+		}}
 	}, add, add)
 	prompts := rig.Prompts()[before:]
 	if len(prompts) != 1 || prompts[0].ReasonCode != approval.ReasonUntrustedTrustGrant {

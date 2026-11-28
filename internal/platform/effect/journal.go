@@ -884,3 +884,39 @@ func randomID() (string, error) {
 	}
 	return hex.EncodeToString(buf), nil
 }
+
+func ListSucceededRequests(ctx context.Context, db *sql.DB, sessionID, provider string, operations []string) ([]json.RawMessage, error) {
+	if db == nil || sessionID == "" || provider == "" || len(operations) == 0 {
+		return nil, nil
+	}
+	encodedOps, err := json.Marshal(operations)
+	if err != nil {
+		return nil, fmt.Errorf("effect: encode operations: %w", err)
+	}
+	rows, err := sqlite.Conn(ctx, db).QueryContext(ctx, `
+		SELECT request_json
+		FROM effect_intent
+		WHERE session_id = ?
+		  AND provider = ?
+		  AND operation IN (SELECT value FROM json_each(?))
+		  AND state = ?
+		ORDER BY prepared_at ASC, id ASC`,
+		sessionID, provider, string(encodedOps), string(StateSucceeded),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("effect: list succeeded requests: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var requests []json.RawMessage
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			return nil, fmt.Errorf("effect: scan succeeded request: %w", err)
+		}
+		requests = append(requests, json.RawMessage(raw))
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("effect: iterate succeeded requests: %w", err)
+	}
+	return requests, nil
+}

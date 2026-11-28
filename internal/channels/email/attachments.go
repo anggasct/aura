@@ -138,7 +138,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, stage *attachmentStage, 
 		return nil, nil, fault.New(ErrorCodeAttachmentRejected, "media storage is not configured")
 	}
 	summaries := make([]media.ArtifactSummary, 0, len(stage.items))
-	var images []json.RawMessage
+	images := make([]json.RawMessage, len(stage.items))
 	for i := range stage.items {
 		item := &stage.items[i]
 		if svc := a.images; svc != nil && media.IsVisionImage(item.mediaType) {
@@ -147,7 +147,7 @@ func (a *Adapter) storeAttachments(ctx context.Context, stage *attachmentStage, 
 				return nil, nil, err
 			}
 			summaries = append(summaries, summary)
-			images = append(images, raw)
+			images[i] = raw
 			continue
 		}
 		summary, err := a.putAttachment(ctx, item, found)

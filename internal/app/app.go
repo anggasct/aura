@@ -66,6 +66,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
+	"github.com/anggasct/aura/internal/platform/workspace"
+	workspaceops "github.com/anggasct/aura/internal/platform/workspace/ops"
 )
 
 var (
@@ -682,19 +684,21 @@ type build struct {
 	quarantined    []workflow.Quarantined
 	artifactRoot   string
 
-	registry   *auraagent.Registry
-	sessions   turnstore.SessionService
-	events     turnstore.EventStore
-	wiring     toolWiring
-	liveEvents *turn.EventBus
-	broker     *toolbroker.Broker
-	clock      durable.Clock
-	bindings   []operation.Binding
-	behaviors  []operation.Behavior
-	artifacts  storage.ArtifactStore
-	builtin    *runtimeadk.BrokerExecutor
-	routeModel func(route string) (string, error)
-	ledger     *usage.Ledger
+	registry         *auraagent.Registry
+	sessions         turnstore.SessionService
+	events           turnstore.EventStore
+	taintRecorder    *telemetry.TaintRecorder
+	workspaceTracker *workspace.Tracker
+	wiring           toolWiring
+	liveEvents       *turn.EventBus
+	broker           *toolbroker.Broker
+	clock            durable.Clock
+	bindings         []operation.Binding
+	behaviors        []operation.Behavior
+	artifacts        storage.ArtifactStore
+	builtin          *runtimeadk.BrokerExecutor
+	routeModel       func(route string) (string, error)
+	ledger           *usage.Ledger
 
 	execOpts  []runtimeadk.ExecutorOption
 	turnHooks []turn.TurnHook
@@ -1121,6 +1125,25 @@ func (b *build) buildKernel(ctx context.Context) error {
 	b.sessions = turnstore.NewSessionService(b.db)
 	b.events = turnstore.NewEventStore(b.db)
 	b.liveEvents = turn.NewEventBus(b.logger)
+	taintRecorder, err := telemetry.NewTaintRecorder(b.meters())
+	if err != nil {
+		return err
+	}
+	b.taintRecorder = taintRecorder
+	if b.cfg.Tools != nil {
+		b.workspaceTracker = workspace.NewTracker(
+			b.cfg.Tools.Workspace,
+			workspace.NewTaintStore(b.db),
+			b.cfg.Tools.WorkspaceTaintScanEntries,
+			func(ctx context.Context, kind string) {
+				taintRecorder.RecordWorkspaceRecord(ctx, kind)
+			},
+			b.logger,
+		)
+	}
+	if err := b.registerLegacyTaint(); err != nil {
+		return err
+	}
 	if b.onServer() {
 		auraagent.LogPersonas(ctx, b.logger, registry)
 		b.wiring, err = b.serverToolWiring(ctx)
@@ -1160,8 +1183,70 @@ func (b *build) buildKernel(ctx context.Context) error {
 	b.execOpts = append(b.execOpts,
 		runtimeadk.WithBudgetLedger(ledger, "primary"),
 		runtimeadk.WithAgentResolver(registry, routeModel),
+		runtimeadk.WithTaintObserver(func(ctx context.Context, source turn.TaintSource) {
+			b.taintRecorder.RecordMark(ctx, string(source))
+		}),
 		ownerContextOption(ctx, b.cfg.Owner, b.logger))
 	return nil
+}
+
+type legacyTurnEventReader struct {
+	db *sql.DB
+}
+
+func (r legacyTurnEventReader) ListSessionEventsFrom(ctx context.Context, sessionID string, fromSeq uint64) ([]workspace.LegacyEvent, error) {
+	events, err := turnstore.ListSessionEventsFrom(ctx, r.db, sessionID, fromSeq, []string{turnstore.EventKindADK, "tool.completed"})
+	if err != nil {
+		return nil, err
+	}
+	out := make([]workspace.LegacyEvent, len(events))
+	for i := range events {
+		out[i] = workspace.LegacyEvent{Kind: events[i].Kind, Payload: events[i].Payload}
+	}
+	return out, nil
+}
+
+func (b *build) registerLegacyTaint() error {
+	db, cfg, logger := b.db, b.cfg, b.logger
+	if db == nil {
+		return nil
+	}
+	workspaceRoot := ""
+	if cfg != nil && cfg.Tools != nil {
+		workspaceRoot = cfg.Tools.Workspace
+	}
+	return b.group.Add(&lifecycleStage{name: "legacy_taint", start: func(ctx context.Context) error {
+		toolMayTaint := func(name string) bool {
+			if b.broker == nil || name == "" {
+				return true
+			}
+			def, ok := b.broker.Definition(name, tools.Version)
+			if !ok {
+				return true
+			}
+			return def.ResultMayTaint()
+		}
+		marked, err := turnstore.MarkLegacySessions(ctx, db, toolMayTaint)
+		if err != nil {
+			return err
+		}
+		if len(marked) == 0 {
+			return nil
+		}
+		legacy := make([]workspace.LegacySession, 0, len(marked))
+		for _, m := range marked {
+			legacy = append(legacy, workspace.LegacySession{
+				SessionID:       m.SessionID,
+				FirstTaintedSeq: m.AtSequence,
+			})
+		}
+		recorded, err := workspace.DeriveLegacyWorkspace(ctx, db, legacyTurnEventReader{db: db}, workspaceRoot, legacy)
+		if err != nil {
+			return err
+		}
+		logger.InfoContext(ctx, "legacy taint derived", "component", "taint", "sessions", len(marked), "workspace_records", recorded)
+		return nil
+	}})
 }
 
 func toolObserver(recorder *telemetry.ToolRecorder) toolbroker.Observer {
@@ -1278,7 +1363,7 @@ func (b *build) buildServerTools(ctx context.Context) error {
 	if err := b.broker.RegisterProvider(email.NewToolProvider(s.emailMailboxes...)); err != nil {
 		return err
 	}
-	pluginMod, err := buildPluginModule(ctx, cfg, db, b.broker, b.result.CapabilityReport, b.logger)
+	pluginMod, err := buildPluginModule(ctx, cfg, db, b.broker, b.result.CapabilityReport, b.workspaceTracker, b.logger)
 	if err != nil {
 		return err
 	}
@@ -1335,6 +1420,7 @@ func (b *build) startMCPServers(ctx context.Context, plugins *plugin.Module) err
 		Capabilities: b.result.CapabilityReport,
 		Personas:     b.registry.Definitions(),
 		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		TaintTracker: b.workspaceTracker,
 		Logger:       logger,
 	})
 	if err != nil {
@@ -1406,6 +1492,7 @@ func (b *build) buildTurnRuntime() error {
 		Events:             b.events,
 		Dedupe:             turnstore.NewDedupeStore(b.db),
 		Executor:           executor,
+		TaintReader:        turnstore.NewTaintReader(b.db),
 		Logger:             b.logger,
 		Config:             b.cfg.Runtime,
 		DefaultAgentID:     auraagent.DefaultID,
@@ -1518,7 +1605,7 @@ func (b *build) buildSchedule() error {
 	s.scheduleMod, err = schedule.New(&schedule.ModuleDeps{
 		Config:   cfg.Scheduler,
 		DB:       db,
-		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows, webTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil }), personas: b.registry},
+		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, taintReader: turnstore.NewTaintReader(db), workflows: s.scheduledWorkflows, webTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil }), personas: b.registry},
 		Notify:   &cronNotifier{broadcaster: s.broadcastMod.Broadcaster()},
 		Starter:  s.broadcastRuntime,
 		Logger:   logger,
@@ -1608,15 +1695,18 @@ func (b *build) buildOperations() error {
 	if err != nil {
 		return err
 	}
-	registry, err := operation.NewRegistry(enabledOperationCatalogs(b.cfg), b.bindings, &operation.Deps{
-		Confirmer: confirmer,
-		Files:     b.operationFiles(),
-		DB:        b.db,
-		Effects:   b.broker.Effects(),
-		Tools:     b.broker,
-		Clock:     b.clock,
-		Logger:    b.logger,
-		Telemetry: recorder,
+	workspaceOperations := workspaceops.NewOperations(workspace.NewTaintStore(b.db))
+	bindings := slices.Concat(b.bindings, workspaceOperations.Bindings())
+	registry, err := operation.NewRegistry(enabledOperationCatalogs(b.cfg), bindings, &operation.Deps{
+		Confirmer:      confirmer,
+		Files:          b.operationFiles(),
+		DB:             b.db,
+		Effects:        b.broker.Effects(),
+		Tools:          b.broker,
+		Clock:          b.clock,
+		Logger:         b.logger,
+		Telemetry:      recorder,
+		TaintTelemetry: b.taintRecorder,
 	})
 	if err != nil {
 		return err

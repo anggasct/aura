@@ -105,12 +105,13 @@ func newGateFixture(t *testing.T, report capability.Report, approve bool) *gateF
 }
 
 func (f *gateFixture) call(tool, arguments string, capabilities ...string) (json.RawMessage, error) {
-	return f.executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
+	res, err := f.executor.Execute(context.Background(), &runtimeadk.BuiltinToolRequest{
 		RequestID: "call-" + tool, TurnID: "turn-1", SessionID: "session-1", PrincipalID: "owner-1",
 		ToolName: tool, ToolVersion: "v1", Arguments: json.RawMessage(arguments),
 		Capabilities: capabilities, Trust: string(approval.TrustDerivedUntrusted),
 		IdempotencyKey: "test/" + tool, EventInvocation: "inv-1", EventBranch: "main", EventAuthor: "agent",
 	})
+	return res.Output, err
 }
 
 func offered(executor *runtimeadk.BrokerExecutor) []string {
@@ -326,7 +327,7 @@ func TestBuiltinToolExecutorComposesBrokerAdapters(t *testing.T) {
 	var result struct {
 		Content string `json:"content"`
 	}
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal(output.Output, &result); err != nil {
 		t.Fatalf("decode result: %v", err)
 	}
 	if result.Content != "hello" {
@@ -394,20 +395,20 @@ func TestBuiltinToolExecutorSpillsOversizedResultsToArtifacts(t *testing.T) {
 		Truncated  bool   `json:"truncated"`
 		Body       string `json:"body"`
 	}
-	if err := json.Unmarshal(output, &envelope); err != nil {
-		t.Fatalf("decode envelope: %v (%s)", err, output)
+	if err := json.Unmarshal(output.Output, &envelope); err != nil {
+		t.Fatalf("decode envelope: %v (%s)", err, output.Output)
 	}
 	if envelope.ArtifactID == "" {
-		t.Fatalf("oversized result did not spill to an artifact: %s", output)
+		t.Fatalf("oversized result did not spill to an artifact: %s", output.Output)
 	}
 	if envelope.Truncated {
-		t.Fatalf("artifact spill must not be marked truncated: %s", output)
+		t.Fatalf("artifact spill must not be marked truncated: %s", output.Output)
 	}
 	if envelope.Digest == "" || envelope.SizeBytes == 0 {
-		t.Fatalf("envelope lacks digest/size: %s", output)
+		t.Fatalf("envelope lacks digest/size: %s", output.Output)
 	}
 	if envelope.Body != "" {
-		t.Fatalf("artifact spill must not inline the body: %s", output)
+		t.Fatalf("artifact spill must not inline the body: %s", output.Output)
 	}
 }
 
@@ -526,8 +527,8 @@ func TestBuiltinToolExecutorRedactsConfiguredSecretAcrossBoundaries(t *testing.T
 	var envelope struct {
 		ArtifactID string `json:"artifact_id"`
 	}
-	if err := json.Unmarshal(output, &envelope); err != nil || envelope.ArtifactID == "" {
-		t.Fatalf("secret read did not spill to artifact: %s (%v)", output, err)
+	if err := json.Unmarshal(output.Output, &envelope); err != nil || envelope.ArtifactID == "" {
+		t.Fatalf("secret read did not spill to artifact: %s (%v)", output.Output, err)
 	}
 	artifacts := storage.NewArtifactStore(db, dataRoot, int64(cfg.Storage.ArtifactQuota))
 	reader, _, err := artifacts.Open(t.Context(), envelope.ArtifactID)
@@ -725,8 +726,8 @@ func TestSearXNGToolsConfigReachesALoopbackServerThroughTheExecutorAdapters(t *t
 			Snippet string `json:"snippet"`
 		} `json:"results"`
 	}
-	if err := json.Unmarshal(got, &decoded); err != nil || len(decoded.Results) != 1 || decoded.Results[0].Title != "Go" || decoded.Results[0].Snippet != "[redacted]" {
-		t.Fatalf("output = %s, err = %v", got, err)
+	if err := json.Unmarshal(got.Output, &decoded); err != nil || len(decoded.Results) != 1 || decoded.Results[0].Title != "Go" || decoded.Results[0].Snippet != "[redacted]" {
+		t.Fatalf("output = %s, err = %v", got.Output, err)
 	}
 	mu.Lock()
 	defer mu.Unlock()

@@ -313,8 +313,8 @@ func TestMediaKindsLandInTheArtifactStore(t *testing.T) {
 			if len(accepted) != 1 {
 				t.Fatalf("accepted %d envelopes, want 1 (drops %v)", len(accepted), rig.dropped())
 			}
-			if accepted[0].Parts[0].Text != "see this" || len(accepted[0].Parts) != 1 {
-				t.Errorf("parts = %+v, want the caption only", accepted[0].Parts)
+			if len(accepted[0].Parts) != 2 || accepted[0].Parts[0].Text != "see this" || accepted[0].Parts[1].Source != runtimeingress.PartSourceAttachment {
+				t.Errorf("parts = %+v, want caption plus attachment part", accepted[0].Parts)
 			}
 			stored := rig.artifacts.stored()
 			if len(stored) != 1 {
@@ -456,7 +456,7 @@ func TestVisionServiceTakesImagesAndStoreTakesTheRest(t *testing.T) {
 			attach:     asDocument(mediaFile{FileID: "pf", FileSize: 3, MimeType: "application/pdf"}),
 			file:       fakeFile{id: "pf", path: "documents/file_3.pdf", contentType: "application/pdf", body: []byte("pdf")},
 			caption:    "read",
-			wantParts:  1,
+			wantParts:  2,
 			wantStored: 1,
 		},
 	}
@@ -478,7 +478,7 @@ func TestVisionServiceTakesImagesAndStoreTakesTheRest(t *testing.T) {
 			if got := len(rig.artifacts.stored()); got != tc.wantStored {
 				t.Errorf("artifact store puts = %d, want %d", got, tc.wantStored)
 			}
-			if tc.wantParts == 2 {
+			if tc.wantStored == 0 {
 				part, err := vision.UnmarshalPart(env.Parts[1].Image)
 				if err != nil {
 					t.Fatalf("UnmarshalPart: %v", err)

@@ -116,7 +116,7 @@ func TestBrokerBindsExactApprovalAndReturnsUntrustedResult(t *testing.T) {
 		HostCapabilities: capabilitytest.Host(t), Effects: newBrokerEffectExecutor(t),
 		Adapters: map[string]Adapter{
 			"exec@v1": func(_ context.Context, request *ToolRequest, _ approval.Constraints) (ToolResult, error) {
-				return ToolResult{Output: json.RawMessage(`{"command":"secret-value"}`)}, nil
+				return ToolResult{Output: json.RawMessage(`{"command":"secret-value"}`), WorkspaceTainted: true}, nil
 			},
 		},
 		Secrets:              []string{"secret-value"},

@@ -3,12 +3,15 @@ package filesystem
 import (
 	"errors"
 	"path/filepath"
+
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 type Options struct {
 	Workspace     string
 	MaxFileBytes  int64
 	MaxDirEntries int
+	TaintTracker  *workspace.Tracker
 }
 
 func validateOptions(options *Options) error {

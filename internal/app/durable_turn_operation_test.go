@@ -150,12 +150,17 @@ func requireOneCommit(t *testing.T, db *sql.DB, id string) {
 	}
 }
 
-func requireOneAppliedChange(t *testing.T, suite *killedSuite, id string) {
+func requireOneAppliedChange(t *testing.T, suite *killedSuite, id string, wantApprovals int) {
 	t.Helper()
 	requireOneCommit(t, suite.db, id)
 	requireOneOperationEffect(t, suite.db, id)
-	if questions := suite.ledger.records(t, approvalCalls); len(questions) != 1 || questions[0].Life != 1 {
-		t.Errorf("approval questions = %+v, want one, asked by the first life", questions)
+	questions := suite.ledger.records(t, approvalCalls)
+	if len(questions) != wantApprovals {
+		t.Errorf("approval questions = %+v, want %d", questions, wantApprovals)
+		return
+	}
+	if wantApprovals == 1 && questions[0].Life != 1 {
+		t.Errorf("approval questions = %+v, want asked by the first life", questions)
 	}
 }
 
@@ -173,7 +178,7 @@ func TestDurableTurnOperationCallIsReplayedOnceAfterAKilledProcess(t *testing.T)
 
 	suite.requireResumed(t, life)
 	suite.ledger.requireCount(t, handlerEntries+"."+operationtest.Change, 2)
-	requireOneAppliedChange(t, suite, operationtest.Change)
+	requireOneAppliedChange(t, suite, operationtest.Change, 0)
 }
 
 func TestDurableTurnOperationKilledBetweenCommitAndSuccessIsSettledFromItsReceipt(t *testing.T) {
@@ -188,7 +193,7 @@ func TestDurableTurnOperationKilledBetweenCommitAndSuccessIsSettledFromItsReceip
 
 	suite.requireResumed(t, life)
 	suite.ledger.requireCount(t, handlerEntries+"."+operationtest.Change, 1)
-	requireOneAppliedChange(t, suite, operationtest.Change)
+	requireOneAppliedChange(t, suite, operationtest.Change, 0)
 }
 
 func TestDurableTurnApprovedDestructiveCallSurvivesReplay(t *testing.T) {
@@ -205,7 +210,7 @@ func TestDurableTurnApprovedDestructiveCallSurvivesReplay(t *testing.T) {
 	suite.requireResumed(t, life)
 	suite.ledger.requireCount(t, previewCalls, 1)
 	suite.ledger.requireCount(t, handlerEntries+"."+operationtest.Delete, 2)
-	requireOneAppliedChange(t, suite, operationtest.Delete)
+	requireOneAppliedChange(t, suite, operationtest.Delete, 1)
 }
 
 func TestDurableTurnLoadedOperationsReplayDeterministically(t *testing.T) {
@@ -237,5 +242,5 @@ func TestDurableTurnLoadedOperationsReplayDeterministically(t *testing.T) {
 	if declared[1].Text != declared[2].Text {
 		t.Errorf("the replayed model call declares %q, want exactly what the call before the kill declared: %q", declared[2].Text, declared[1].Text)
 	}
-	requireOneAppliedChange(t, suite, operationtest.Change)
+	requireOneAppliedChange(t, suite, operationtest.Change, 0)
 }

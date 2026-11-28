@@ -97,7 +97,7 @@ func newWebTestRig(t *testing.T, tainted toolbroker.TaintedLimits, webOnly toolb
 		t.Fatalf("toolbroker.New: %v", err)
 	}
 	fetchDef := auratools.Definition{
-		Name: "web_fetch", Version: auratools.Version, ExternalSink: true,
+		Name: "web_fetch", Version: auratools.Version, ExternalSink: true, UntrustedOutput: true,
 		RequiredCapabilities: []string{"public-web"},
 		Schema:               json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"],"additionalProperties":false}`),
 		SinkRelief:           &auratools.SinkRelief{Kind: auratools.SinkReliefLinkProvenance, Argument: "url"},
@@ -123,7 +123,7 @@ func newWebTestRig(t *testing.T, tainted toolbroker.TaintedLimits, webOnly toolb
 	}
 
 	searchDef := auratools.Definition{
-		Name: "web_search", Version: auratools.Version, ExternalSink: true,
+		Name: "web_search", Version: auratools.Version, ExternalSink: true, UntrustedOutput: true,
 		RequiredCapabilities: []string{"provider-search"},
 		Schema:               json.RawMessage(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`),
 		SinkRelief:           &auratools.SinkRelief{Kind: auratools.SinkReliefBoundedQuery, Argument: "query", MaxBytes: 256},
@@ -156,6 +156,26 @@ func newWebTestRig(t *testing.T, tainted toolbroker.TaintedLimits, webOnly toolb
 	rig.broker = broker
 	rig.builtins = builtins
 	return rig
+}
+
+func (r *webTestRig) taintSession(sessionID string) {
+	r.t.Helper()
+	payload, err := turn.EncodeTaintMark(turn.TaintMark{Source: turn.TaintSourceToolResult, Detail: "web_fetch"})
+	if err != nil {
+		r.t.Fatalf("EncodeTaintMark: %v", err)
+	}
+	if _, err := r.db.AppendSequenced(r.t.Context(), sessionID, &turn.Event{
+		ID:            "seed-taint-" + sessionID,
+		SessionID:     sessionID,
+		TurnID:        "turn-seed-taint",
+		Author:        "system",
+		Kind:          turn.EventKindSessionTainted,
+		SchemaVersion: 1,
+		Payload:       payload,
+		CreatedAt:     time.Now().UTC(),
+	}); err != nil {
+		r.t.Fatalf("AppendSequenced taint mark: %v", err)
+	}
 }
 
 func (r *webTestRig) runTurn(req *turn.TurnRequest, steps ...[]*genai.Part) []turn.Event {
@@ -243,7 +263,7 @@ func TestCallTaintRecordIsJournaledInCallOrder(t *testing.T) {
 		t.Fatalf("toolbroker.New: %v", err)
 	}
 	fetchDef := auratools.Definition{
-		Name: "web_fetch", Version: auratools.Version, ExternalSink: true,
+		Name: "web_fetch", Version: auratools.Version, ExternalSink: true, UntrustedOutput: true,
 		RequiredCapabilities: []string{"public-web"},
 		Schema:               json.RawMessage(`{"type":"object","properties":{"url":{"type":"string"}},"required":["url"],"additionalProperties":false}`),
 		SinkRelief:           &auratools.SinkRelief{Kind: auratools.SinkReliefLinkProvenance, Argument: "url"},
@@ -262,13 +282,23 @@ func TestCallTaintRecordIsJournaledInCallOrder(t *testing.T) {
 	rig.tools = builtins
 	rig.startLife(t)
 
+	seedPayload, err := turn.EncodeTaintMark(turn.TaintMark{Source: turn.TaintSourceToolResult, Detail: "web_fetch"})
+	if err != nil {
+		t.Fatalf("EncodeTaintMark: %v", err)
+	}
+	if _, err := turnstore.NewEventStore(rig.db).AppendSequenced(t.Context(), "session-1", &turn.Event{
+		ID: "seed-taint-1", SessionID: "session-1", TurnID: "turn-prior", Author: "system",
+		Kind: turn.EventKindSessionTainted, SchemaVersion: 1, Payload: seedPayload, CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("seed taint mark: %v", err)
+	}
+
 	for _, err := range rig.engine.Run(context.WithoutCancel(t.Context()), &turn.TurnRequest{
 		TurnID:         "turn-1",
 		SessionID:      "session-1",
 		PrincipalID:    principal.OwnerID,
 		PrincipalClass: principal.ClassOwner,
 		Origin:         turn.OriginTerminal,
-		Knowledge:      []string{"notes"},
 		Parts:          []runtimeingress.InputPart{{Text: "read https://owner.example/one and https://owner.example/two"}},
 	}) {
 		if err != nil {
@@ -291,10 +321,10 @@ func TestCallTaintRecordIsJournaledInCallOrder(t *testing.T) {
 	}
 	r0 := readRecord("call-1-0/taint")
 	r1 := readRecord("call-1-1/taint")
-	if !r0.Tainted || r0.Source != string(turn.TaintSourceKnowledgeScope) || r0.Link != string(auratools.LinkProvenanceOwnerMessage) || r0.FetchCount != 0 {
+	if !r0.Tainted || r0.Source != string(turn.TaintSourceSession) || r0.Link != string(auratools.LinkProvenanceOwnerMessage) || r0.FetchCount != 0 {
 		t.Errorf("call-1-0/taint = %+v", r0)
 	}
-	if !r1.Tainted || r1.Source != string(turn.TaintSourceKnowledgeScope) || r1.Link != string(auratools.LinkProvenanceOwnerMessage) || r1.FetchCount != 1 {
+	if !r1.Tainted || r1.Source != string(turn.TaintSourceSession) || r1.Link != string(auratools.LinkProvenanceOwnerMessage) || r1.FetchCount != 1 {
 		t.Errorf("call-1-1/taint = %+v, want fetch_count 1 after call 0", r1)
 	}
 
@@ -504,6 +534,7 @@ func TestLinksInsideFetchedPagesAsk(t *testing.T) {
 
 func TestEveryRelievedFetchCountsTowardTheCap(t *testing.T) {
 	rig := newWebTestRig(t, toolbroker.TaintedLimits{Fetches: 2}, toolbroker.WebOnlyLimits{})
+	rig.taintSession("session-1")
 	rig.fetchOut = func(rawURL string) (toolbroker.ToolResult, error) {
 		if strings.HasSuffix(rawURL, "/fail") {
 			return toolbroker.ToolResult{}, errors.New("upstream 500")
@@ -516,9 +547,8 @@ func TestEveryRelievedFetchCountsTowardTheCap(t *testing.T) {
 	}
 	rig.runTurn(
 		&turn.TurnRequest{
-			TurnID:    "turn-cap",
-			Knowledge: []string{"notes"},
-			Parts:     []runtimeingress.InputPart{{Text: "read https://owner.example/ok https://owner.example/fail https://owner.example/third"}},
+			TurnID: "turn-cap",
+			Parts:  []runtimeingress.InputPart{{Text: "read https://owner.example/ok https://owner.example/fail https://owner.example/third"}},
 		},
 		[]*genai.Part{callPart("f1", "web_fetch", map[string]any{"url": "https://owner.example/ok"})},
 		[]*genai.Part{callPart("f2", "web_fetch", map[string]any{"url": "https://owner.example/fail"})},
@@ -600,8 +630,8 @@ func TestStepOneOwnerAuthoredTextByTurnOrigin(t *testing.T) {
 		{"terminal owner", turn.OriginTerminal, principal.OwnerID, "", false, true, true},
 		{"telegram owner", "telegram:main", principal.OwnerID, "", false, true, true},
 		{"discord owner", "discord:main", principal.OwnerID, "", false, true, true},
-		{"http excluded", turn.OriginHTTP, principal.OwnerID, "", false, true, false},
-		{"email excluded", "email:main", principal.OwnerID, "", false, true, false},
+		{"http clean owner counts", turn.OriginHTTP, principal.OwnerID, "", false, true, true},
+		{"email clean owner counts", "email:main", principal.OwnerID, "", false, true, true},
 		{"webhook excluded", turn.OriginWebhook, principal.OwnerID, "", false, true, false},
 		{"child excluded", turn.OriginChild, principal.OwnerID, "", false, true, false},
 		{"internal excluded", turn.OriginInternal, principal.OwnerID, "", false, true, false},
@@ -626,24 +656,26 @@ func TestStepOneOwnerAuthoredTextByTurnOrigin(t *testing.T) {
 					},
 					[]*genai.Part{{Text: "ok"}},
 				)
+				rig.taintSession("session-1")
 				rig.runTurn(
 					&turn.TurnRequest{
-						TurnID:    "turn-check",
-						Origin:    turn.OriginTerminal,
-						Knowledge: []string{"notes"},
-						Parts:     []runtimeingress.InputPart{{Text: "fetch it now"}},
+						TurnID: "turn-check",
+						Origin: turn.OriginTerminal,
+						Parts:  []runtimeingress.InputPart{{Text: "fetch it now"}},
 					},
 					[]*genai.Part{callPart("f1", "web_fetch", map[string]any{"url": targetURL})},
 					[]*genai.Part{{Text: "done"}},
 				)
 			} else {
 				req := &turn.TurnRequest{
-					TurnID:    "turn-sched",
-					Origin:    tc.origin,
-					Knowledge: []string{"notes"},
-					JobTaint:  tc.jobTaint,
-					WebOnly:   tc.webOnly,
-					Parts:     []runtimeingress.InputPart{{Text: "read " + targetURL}},
+					TurnID:         "turn-sched",
+					Origin:         tc.origin,
+					PrincipalID:    tc.principal,
+					PrincipalClass: principal.ClassOwner,
+					Knowledge:      []string{"notes"},
+					JobTaint:       tc.jobTaint,
+					WebOnly:        tc.webOnly,
+					Parts:          []runtimeingress.InputPart{{Text: "read " + targetURL}},
 				}
 				tracker := &turnTaintTracker{searchURLBatch: map[string]string{}}
 				tracker.ingestCurrentTurnInput(req)
@@ -758,11 +790,11 @@ func TestBatchCardPreviousTurnStaysInTheSession(t *testing.T) {
 	if err := rig.sessions.Create(t.Context(), &turn.Session{ID: "session-new", OwnerID: principal.OwnerID, CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatalf("create session-new: %v", err)
 	}
+	rig.taintSession("session-new")
 	rig.runTurn(
 		&turn.TurnRequest{
 			TurnID:    "turn-3",
 			SessionID: "session-new",
-			Knowledge: []string{"notes"},
 			Parts:     []runtimeingress.InputPart{{Text: "open it"}},
 		},
 		[]*genai.Part{callPart("f2", "web_fetch", map[string]any{"url": "https://prev.example/item"})},

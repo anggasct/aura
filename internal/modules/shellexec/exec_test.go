@@ -19,15 +19,15 @@ func TestNewRejectsUnsafeOptions(t *testing.T) {
 		{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1},
 		{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1, MaxStderrBytes: 1, Environment: []string{"BAD-KEY=value"}},
 	}
-	for _, options := range cases {
-		if _, err := NewAdapter(options); err == nil {
-			t.Errorf("NewAdapter(%+v) accepted invalid options", options)
+	for i := range cases {
+		if _, err := NewAdapter(&cases[i]); err == nil {
+			t.Errorf("NewAdapter(%+v) accepted invalid options", cases[i])
 		}
 	}
 }
 
 func TestAdapterRejectsRemoteCommandsBeforeSandbox(t *testing.T) {
-	adapter, err := NewAdapter(Options{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1024, MaxStderrBytes: 1024})
+	adapter, err := NewAdapter(&Options{Workspace: t.TempDir(), Timeout: time.Second, MaxStdoutBytes: 1024, MaxStderrBytes: 1024})
 	if err != nil {
 		t.Fatalf("NewAdapter: %v", err)
 	}

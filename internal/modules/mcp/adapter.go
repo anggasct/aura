@@ -12,6 +12,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 func FormatToolName(serverName, toolName string) string {
@@ -74,6 +75,10 @@ func MakeValidator(schema json.RawMessage, maxMsgSize int64) func(json.RawMessag
 }
 
 func NewAdapter(client *Client, toolName string, maxMessageSize int64) toolbroker.Adapter {
+	return NewAdapterWithTracker(client, toolName, maxMessageSize, nil)
+}
+
+func NewAdapterWithTracker(client *Client, toolName string, maxMessageSize int64, tracker *workspace.Tracker) toolbroker.Adapter {
 	return func(ctx context.Context, request *toolbroker.ToolRequest, constraints approval.Constraints) (toolbroker.ToolResult, error) {
 		if client == nil {
 			return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultCapabilityUnavailable, "client is not available")
@@ -89,7 +94,9 @@ func NewAdapter(client *Client, toolName string, maxMessageSize int64) toolbroke
 			defer cancel()
 		}
 
+		effectScope := tracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
 		res, err := client.CallTool(callCtx, toolName, request.Arguments)
+		tracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultDeadlineExceeded, "tool call timed out")

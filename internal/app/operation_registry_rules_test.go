@@ -23,6 +23,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
+	"github.com/anggasct/aura/internal/platform/workspace"
+	workspaceops "github.com/anggasct/aura/internal/platform/workspace/ops"
 )
 
 const rulesAgentID = "team"
@@ -88,7 +90,7 @@ type registryRig struct {
 
 func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.ApprovalPrompt) (bool, error)) *registryRig {
 	t.Helper()
-	db := operationtest.OpenDatabase(t, schedule.Schema(), knowledge.Schema(), memory.Schema(), profile.Schema())
+	db := operationtest.OpenDatabase(t, schedule.Schema(), knowledge.Schema(), memory.Schema(), profile.Schema(), workspace.Schema())
 	kb := knowledgetest.NewRig(t, db)
 	seedKnowledgeSource := func(ctx context.Context) error {
 		prepared, err := kb.Service.PrepareURL(ctx, knowledgetest.Collection, knowledgetest.PageURL)
@@ -150,7 +152,8 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 		DB:       db,
 		Catalogs: operationCatalogs(),
 		Bindings: func(*operationtest.Stubs) []operation.Binding {
-			bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings())
+			workspaceOperations := workspaceops.NewOperations(workspace.NewTaintStore(db))
+			bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings(), workspaceOperations.Bindings())
 			seedEmbedded := func(ctx context.Context) error {
 				_, err := kb.Service.Embed(ctx, knowledgetest.Collection)
 				return err

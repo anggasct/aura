@@ -19,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 const (
@@ -41,6 +42,7 @@ type ModuleDeps struct {
 	AuthHTTPClient      *http.Client
 	ConnectorHTTPClient *http.Client
 	Starter             connector.Starter
+	TaintTracker        *workspace.Tracker
 	Logger              *slog.Logger
 }
 
@@ -153,6 +155,7 @@ func New(ctx context.Context, deps *ModuleDeps) (*Module, error) {
 			HTTPClient:        connectorClient,
 			Validator:         deps.Validator,
 			CapabilityChecker: deps.Capabilities.Require,
+			TaintTracker:      deps.TaintTracker,
 			Logger:            logger,
 		})
 		if err != nil {

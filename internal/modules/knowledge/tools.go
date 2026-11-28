@@ -25,11 +25,29 @@ var emptyKnowledgeSearch = json.RawMessage(`{"results":[],"truncated":false,"mod
 
 func SearchToolDefinition() tools.Definition {
 	return tools.Definition{
-		Name:      tools.KBSearchToolName,
-		Version:   tools.Version,
-		Schema:    []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/kb_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["query"],"additionalProperties":false}`),
-		Validator: validateSearchArguments,
+		Name:        tools.KBSearchToolName,
+		Version:     tools.Version,
+		Schema:      []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/kb_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":500},"limit":{"type":"integer","minimum":1,"maximum":10}},"required":["query"],"additionalProperties":false}`),
+		OutputTaint: searchOutputTaints,
+		Validator:   validateSearchArguments,
 	}
+}
+
+func searchOutputTaints(raw json.RawMessage) bool {
+	var parsed struct {
+		Results []struct {
+			Trusted *bool `json:"trusted"`
+		} `json:"results"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Results == nil {
+		return true
+	}
+	for i := range parsed.Results {
+		if parsed.Results[i].Trusted == nil || !*parsed.Results[i].Trusted {
+			return true
+		}
+	}
+	return false
 }
 
 func SearchToolRule() approval.Rule {

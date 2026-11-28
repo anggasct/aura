@@ -69,6 +69,9 @@ func (d *Definition) ValidateOperation() error {
 	if err := d.validateSinkRelief(); err != nil {
 		return err
 	}
+	if err := d.validateOutputTaint(); err != nil {
+		return err
+	}
 	if d.Operation == "" {
 		return d.validateWithoutOperation()
 	}
@@ -150,6 +153,19 @@ func (d *Definition) validateSinkRelief() error {
 		return reject("sets a byte bound for link provenance")
 	case relief.Kind != SinkReliefBoundedQuery && relief.Kind != SinkReliefLinkProvenance:
 		return reject("names an unknown kind")
+	}
+	return nil
+}
+
+func (d *Definition) validateOutputTaint() error {
+	if d.OutputTaint == nil {
+		return nil
+	}
+	if d.UntrustedOutput {
+		return errorf(ErrorCodeDefinitionInvalid, "tool %q sets both UntrustedOutput and OutputTaint", d.Name)
+	}
+	if d.Server != "" || d.Plugin != nil {
+		return errorf(ErrorCodeDefinitionInvalid, "server or plugin tool %q cannot declare OutputTaint", d.Name)
 	}
 	return nil
 }

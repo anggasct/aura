@@ -52,11 +52,8 @@ type turnProjection struct {
 
 func projectTurn(ctx context.Context, p *turnProjection) (BatchResult, error) {
 	service, req, events := p.service, p.req, p.events
-	switch {
-	case req.Origin != turn.OriginSchedule:
+	if req.Origin != turn.OriginSchedule {
 		return service.ProjectBatch(ctx, req.PrincipalID, events)
-	case req.WebOnly || req.JobTaint != "":
-		return BatchResult{Skipped: len(events)}, nil
 	}
 	return service.ProjectRunOutput(ctx, req.PrincipalID, events)
 }

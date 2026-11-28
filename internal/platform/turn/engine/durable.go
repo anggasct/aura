@@ -126,6 +126,7 @@ func untrustedContextFromRecall(recall *turn.UntrustedRecall) *runtimesessions.U
 			FromSequence: document.FromSequence,
 			ToSequence:   document.ToSequence,
 			Trust:        string(document.Trust),
+			Tainted:      document.Tainted,
 			Content:      document.Content,
 		})
 	}
@@ -133,6 +134,7 @@ func untrustedContextFromRecall(recall *turn.UntrustedRecall) *runtimesessions.U
 		Query:     recall.Query,
 		Summary:   recall.Summary,
 		Trust:     string(recall.Trust),
+		Tainted:   recall.Tainted,
 		Documents: documents,
 	}
 }
@@ -150,6 +152,7 @@ func untrustedRecallFromContext(stored *runtimesessions.UntrustedContext) *turn.
 			FromSequence: document.FromSequence,
 			ToSequence:   document.ToSequence,
 			Trust:        approval.TrustLabel(document.Trust),
+			Tainted:      document.Tainted,
 			Content:      document.Content,
 		})
 	}
@@ -157,6 +160,7 @@ func untrustedRecallFromContext(stored *runtimesessions.UntrustedContext) *turn.
 		Query:     stored.Query,
 		Summary:   stored.Summary,
 		Trust:     approval.TrustLabel(stored.Trust),
+		Tainted:   stored.Tainted,
 		Documents: documents,
 	}
 }
@@ -1059,7 +1063,7 @@ func (e *Engine) failDurableStart(ctx context.Context, t *turnState, cause error
 		e.logger.ErrorContext(ctx, "runtime failed to persist turn start failure", "error", err, "turn_id", t.turnID)
 	}
 	if !ended {
-		failure := e.startFailureMessage(&t.req, turn.ErrorCodeStorageUnavailable, "durable turn did not start")
+		failure := e.startFailureMessage(context.WithoutCancel(ctx), &t.req, turn.ErrorCodeStorageUnavailable, "durable turn did not start")
 		e.deliverOnce(context.WithoutCancel(ctx), &t.req, &failure)
 	}
 	e.broadcast(t, &t.accepted)

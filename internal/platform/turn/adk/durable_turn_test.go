@@ -152,14 +152,14 @@ func (g *gatedBrokerTools) Evaluate(ctx context.Context, request *approval.ToolR
 	return evaluateThrough(ctx, g.broker, request)
 }
 
-func (g *gatedBrokerTools) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (g *gatedBrokerTools) Execute(ctx context.Context, request *BuiltinToolRequest) (BuiltinToolResult, error) {
 	g.mu.Lock()
 	g.keys = append(g.keys, request.IdempotencyKey)
 	g.mu.Unlock()
 	select {
 	case <-g.release:
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return BuiltinToolResult{}, ctx.Err()
 	}
 	result, err := g.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID:      request.RequestID,
@@ -175,9 +175,9 @@ func (g *gatedBrokerTools) Execute(ctx context.Context, request *BuiltinToolRequ
 		IdempotencyKey: request.IdempotencyKey,
 	})
 	if err != nil {
-		return nil, err
+		return BuiltinToolResult{}, err
 	}
-	return result.Output, nil
+	return BuiltinToolResult{Output: result.Output, Untrusted: result.Untrusted, WorkspaceTainted: result.WorkspaceTainted}, nil
 }
 
 func (g *gatedBrokerTools) execute(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {

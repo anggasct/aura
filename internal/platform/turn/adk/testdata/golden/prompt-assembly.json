@@ -40,6 +40,7 @@
     }
   ],
   "pre_model_events": [
+    "session.tainted.v1",
     "kb.retrieved.v1"
   ]
 }

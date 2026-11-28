@@ -325,10 +325,10 @@ func (l *ledgerTools) Evaluate(ctx context.Context, request *approval.ToolReques
 	})
 }
 
-func (l *ledgerTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
+func (l *ledgerTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (runtimeadk.BuiltinToolResult, error) {
 	if request.ToolName == l.gated {
 		if err := l.ledger.gate(ctx, request.ToolName); err != nil {
-			return nil, err
+			return runtimeadk.BuiltinToolResult{}, err
 		}
 	}
 	result, err := l.broker.Execute(ctx, &toolbroker.ToolRequest{
@@ -348,15 +348,16 @@ func (l *ledgerTools) Execute(ctx context.Context, request *runtimeadk.BuiltinTo
 		Knowledge:             request.Knowledge,
 		Tainted:               request.Tainted,
 		Origin:                request.Origin,
+		ContentTaintTracked:   request.ContentTaintTracked,
 		AllocateEventSequence: true,
 		EventInvocation:       request.EventInvocation,
 		EventBranch:           request.EventBranch,
 		EventAuthor:           request.EventAuthor,
 	})
 	if err != nil {
-		return nil, err
+		return runtimeadk.BuiltinToolResult{}, err
 	}
-	return result.Output, nil
+	return runtimeadk.BuiltinToolResult{Output: result.Output, Untrusted: result.Untrusted, WorkspaceTainted: result.WorkspaceTainted}, nil
 }
 
 type turnLife struct {

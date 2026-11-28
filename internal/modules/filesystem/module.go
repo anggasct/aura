@@ -3,12 +3,14 @@ package filesystem
 import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 type Deps struct {
 	Workspace     string
 	MaxFileBytes  int64
 	MaxDirEntries int
+	TaintTracker  *workspace.Tracker
 }
 
 type Module struct {
@@ -25,6 +27,7 @@ func New(deps *Deps) (*Module, error) {
 		Workspace:     deps.Workspace,
 		MaxFileBytes:  deps.MaxFileBytes,
 		MaxDirEntries: deps.MaxDirEntries,
+		TaintTracker:  deps.TaintTracker,
 	})
 	if err != nil {
 		return nil, err

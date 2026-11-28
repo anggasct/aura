@@ -404,12 +404,12 @@ func TestFreshDatabaseStructuralParity(t *testing.T) {
 
 	gotTables := listSchemaObjectsByType(t, gotDB, "table")
 	wantTables := listSchemaObjectsByType(t, wantDB, "table")
-	if len(gotTables) != 55 || !slices.Equal(gotTables, wantTables) {
+	if len(gotTables) != 56 || !slices.Equal(gotTables, wantTables) {
 		t.Fatalf("tables (%d vs %d): got=%v want=%v", len(gotTables), len(wantTables), gotTables, wantTables)
 	}
 	gotIndexes := listSchemaObjectsByType(t, gotDB, "index")
 	wantIndexes := listSchemaObjectsByType(t, wantDB, "index")
-	if len(gotIndexes) != 32 || !slices.Equal(gotIndexes, wantIndexes) {
+	if len(gotIndexes) != 36 || !slices.Equal(gotIndexes, wantIndexes) {
 		t.Fatalf("indexes (%d vs %d): got=%v want=%v", len(gotIndexes), len(wantIndexes), gotIndexes, wantIndexes)
 	}
 	gotTriggers := listSchemaObjectsByType(t, gotDB, "trigger")
@@ -491,7 +491,7 @@ func TestSchemaOwnersRegisteredAndForeignKeysValid(t *testing.T) {
 	owners := Schemas()
 	wantOwners := []string{
 		"turn", "durable", "effect", "usage", "principal", "model", "storage", "webhook", "knowledge", "memory", "profile",
-		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email", "operation",
+		"schedule", "broadcast", "workflow", "handoff", "skills", "plugin", "child", "persona_eval", "channel_resume", "telegram", "email", "operation", "workspace",
 	}
 	gotOwners := make([]string, 0, len(owners))
 	for _, owner := range owners {
@@ -538,8 +538,8 @@ func TestSchemaOwnersRegisteredAndForeignKeysValid(t *testing.T) {
 			}
 		}
 	}
-	if len(tableOwners) != 55 {
-		t.Fatalf("owned tables = %d, want 55", len(tableOwners))
+	if len(tableOwners) != 56 {
+		t.Fatalf("owned tables = %d, want 56", len(tableOwners))
 	}
 	finalTables := listSchemaObjectsByType(t, db, "table")
 	for _, tbl := range finalTables {

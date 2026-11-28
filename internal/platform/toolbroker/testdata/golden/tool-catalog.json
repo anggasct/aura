@@ -819,7 +819,7 @@
       "operation": "memory.inspect",
       "fresh_approval": false,
       "owner_notice": false,
-      "untrusted_output": true
+      "untrusted_output": false
     },
     {
       "key": "aura_memory_purge@v1",
@@ -1008,7 +1008,7 @@
       "operation": "profile.list",
       "fresh_approval": false,
       "owner_notice": false,
-      "untrusted_output": true
+      "untrusted_output": false
     },
     {
       "key": "aura_profile_reject@v1",
@@ -1082,7 +1082,7 @@
       "operation": "profile.review",
       "fresh_approval": false,
       "owner_notice": false,
-      "untrusted_output": true
+      "untrusted_output": false
     },
     {
       "key": "aura_profile_set@v1",
@@ -1197,7 +1197,7 @@
       "operation": "profile.show",
       "fresh_approval": false,
       "owner_notice": false,
-      "untrusted_output": true
+      "untrusted_output": false
     },
     {
       "key": "code_execute@v1",
@@ -1572,7 +1572,7 @@
       "operation": "",
       "fresh_approval": false,
       "owner_notice": false,
-      "untrusted_output": false
+      "untrusted_output": true
     },
     {
       "key": "web_search@v1",
@@ -1616,7 +1616,7 @@
       "operation": "",
       "fresh_approval": false,
       "owner_notice": false,
-      "untrusted_output": false
+      "untrusted_output": true
     },
     {
       "key": "workflow_cancel@v1",

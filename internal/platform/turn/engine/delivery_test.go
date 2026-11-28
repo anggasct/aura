@@ -496,7 +496,7 @@ func TestDeliveryLeavesThroughTheOriginAccountAdapter(t *testing.T) {
 }
 
 func completedMessage(engine *Engine, req *turn.TurnRequest, events []turn.Event) *finalMessage {
-	final := engine.planFinalMessage(req, events, turnEnd{})
+	final := engine.planFinalMessage(context.Background(), req, events, turnEnd{})
 	return &final
 }
 

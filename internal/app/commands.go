@@ -46,6 +46,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/tools"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
+	"github.com/anggasct/aura/internal/platform/workspace"
+	workspaceops "github.com/anggasct/aura/internal/platform/workspace/ops"
 )
 
 const (
@@ -514,7 +516,7 @@ func broadcastOpener(gf *GlobalFlags) broadcast.Opener {
 }
 
 func operationCatalogs() []operation.Catalog {
-	return []operation.Catalog{schedule.Catalog(), knowledge.Catalog(), memory.Catalog(), profile.Catalog()}
+	return []operation.Catalog{schedule.Catalog(), knowledge.Catalog(), memory.Catalog(), profile.Catalog(), workspaceops.Catalog()}
 }
 
 func operationGroupEnabled(cfg *appconfig.Config, group string) bool {
@@ -633,7 +635,11 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	}
 	memoryOperations := memory.UnavailableOperations()
 	if a.memory != nil {
-		memoryOperations, err = memory.NewOperations(&memory.OperationDeps{Service: a.memory, Logger: a.logger})
+		memoryOperations, err = memory.NewOperations(&memory.OperationDeps{
+			Service:    a.memory,
+			TaintMarks: turnstore.NewTaintReader(a.db),
+			Logger:     a.logger,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -661,7 +667,8 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings())
+	workspaceOperations := workspaceops.NewOperations(workspace.NewTaintStore(a.db))
+	bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings(), workspaceOperations.Bindings())
 	return operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{
 		DB:        a.db,
 		Effects:   effects,

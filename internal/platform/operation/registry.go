@@ -15,14 +15,15 @@ import (
 )
 
 type Deps struct {
-	DB        *sql.DB
-	Effects   *effect.Executor
-	Tools     ToolLookup
-	Clock     durable.Clock
-	Logger    *slog.Logger
-	Telemetry *telemetry.OperationRecorder
-	Files     *FileDeps
-	Confirmer *Confirmer
+	DB             *sql.DB
+	Effects        *effect.Executor
+	Tools          ToolLookup
+	Clock          durable.Clock
+	Logger         *slog.Logger
+	Telemetry      *telemetry.OperationRecorder
+	TaintTelemetry *telemetry.TaintRecorder
+	Files          *FileDeps
+	Confirmer      *Confirmer
 }
 
 type entry struct {
@@ -43,6 +44,7 @@ type Registry struct {
 	clock         durable.Clock
 	logger        *slog.Logger
 	recorder      *telemetry.OperationRecorder
+	taintRecorder *telemetry.TaintRecorder
 	files         *FileDeps
 	confirmer     *Confirmer
 }
@@ -72,16 +74,17 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 		return nil, err
 	}
 	registry := &Registry{
-		entries:   map[string]*entry{},
-		byTool:    map[string]*entry{},
-		members:   map[string][]string{},
-		receipts:  receiptStore{db: deps.DB},
-		effects:   deps.Effects,
-		clock:     deps.Clock,
-		logger:    deps.Logger,
-		recorder:  deps.Telemetry,
-		files:     deps.Files,
-		confirmer: deps.Confirmer,
+		entries:       map[string]*entry{},
+		byTool:        map[string]*entry{},
+		members:       map[string][]string{},
+		receipts:      receiptStore{db: deps.DB},
+		effects:       deps.Effects,
+		clock:         deps.Clock,
+		logger:        deps.Logger,
+		recorder:      deps.Telemetry,
+		taintRecorder: deps.TaintTelemetry,
+		files:         deps.Files,
+		confirmer:     deps.Confirmer,
 	}
 	if registry.clock == nil {
 		registry.clock = durable.RealClock()

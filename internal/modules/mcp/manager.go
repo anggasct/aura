@@ -18,6 +18,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/workspace"
 	sdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -36,6 +37,7 @@ type ManagerOptions struct {
 	Logger            *slog.Logger
 	CapabilityChecker func([]string) error
 	Plugins           []PluginServer
+	TaintTracker      *workspace.Tracker
 }
 
 type Manager struct {
@@ -56,6 +58,7 @@ type Manager struct {
 	customTransports  map[string]sdk.Transport
 	plugins           []PluginServer
 	pluginDrift       map[string][]string
+	taintTracker      *workspace.Tracker
 	mu                sync.Mutex
 	closed            bool
 }
@@ -114,6 +117,7 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 		observer:          opts.Observer,
 		logger:            opts.Logger,
 		capabilityChecker: opts.CapabilityChecker,
+		taintTracker:      opts.TaintTracker,
 		clients:           make(map[string]*Client),
 		registeredTools:   make(map[string][]string),
 		toolOwners:        make(map[string]string),
@@ -436,7 +440,7 @@ func (m *Manager) registerTools(ctx context.Context, client *Client, target *sta
 				Timeout:        time.Duration(serverCfg.RequestTimeout),
 			},
 		}
-		adapter := NewAdapter(client, tool.Name, int64(serverCfg.MaxMessageSize))
+		adapter := NewAdapterWithTracker(client, tool.Name, int64(serverCfg.MaxMessageSize), m.taintTracker)
 		if err := m.broker.RegisterTool(&def, adapter, &rule); err != nil {
 			m.releaseToolName(namespaced)
 			m.unregister(registered)

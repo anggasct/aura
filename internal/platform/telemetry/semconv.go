@@ -48,6 +48,9 @@ const (
 
 	MetricToolBrokerTaintReliefTotal       = "toolbroker.taint_relief.total"
 	MetricToolBrokerTaintedTrustGrantTotal = "toolbroker.tainted_trust_grant.total"
+	MetricTurnTaintMarksTotal              = "turn.taint.marks.total"
+	MetricWorkspaceTaintRecordsTotal       = "workspace.taint.records.total"
+	MetricOperationConfirmationTotal       = "operation.confirmation.total"
 )
 
 const (
@@ -123,9 +126,12 @@ const (
 	AttrCodeResultClass = "code.result_class"
 	AttrCodePhase       = "code.phase"
 
-	AttrAuraToolName = "aura.tool.name"
-	AttrTaintRelief  = "aura.taint.relief"
-	AttrOutcome      = "outcome"
+	AttrAuraToolName       = "aura.tool.name"
+	AttrTaintRelief        = "aura.taint.relief"
+	AttrOutcome            = "outcome"
+	AttrTurnTainted        = "aura.turn.tainted"
+	AttrTaintSource        = "aura.taint.source"
+	AttrWorkspaceTaintKind = "kind"
 )
 
 var turnSpanAttrs = []string{
@@ -135,6 +141,8 @@ var turnSpanAttrs = []string{
 	AttrTerminalKind,
 	AttrAgentID,
 	AttrSemconvVersion,
+	AttrTurnTainted,
+	AttrTaintSource,
 }
 
 var modelSpanAttrs = []string{
@@ -201,6 +209,9 @@ var metricLabelAttrs = map[string][]string{
 	MetricVisionOperationDuration:          {AttrVisionOperation, AttrVisionResult, AttrVisionMIME, AttrVisionVersion, AttrVisionProtocol, AttrVisionImages, AttrVisionSizeBucket, AttrVisionPixelsBucket, AttrVisionDimensionBucket},
 	MetricToolBrokerTaintReliefTotal:       {AttrAuraToolName, AttrTaintRelief, AttrOutcome},
 	MetricToolBrokerTaintedTrustGrantTotal: {AttrOutcome},
+	MetricTurnTaintMarksTotal:              {AttrTaintSource},
+	MetricWorkspaceTaintRecordsTotal:       {AttrWorkspaceTaintKind},
+	MetricOperationConfirmationTotal:       {AttrOutcome},
 }
 
 func AllowedSpanAttrs(spanName string) []string {

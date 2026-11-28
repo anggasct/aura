@@ -162,6 +162,8 @@ func TestTurnSpanAllowedAttrs(t *testing.T) {
 		AttrTerminalKind,
 		AttrAgentID,
 		AttrSemconvVersion,
+		AttrTurnTainted,
+		AttrTaintSource,
 	}
 	assertAttrSet(t, "turn span", allowed, want)
 }

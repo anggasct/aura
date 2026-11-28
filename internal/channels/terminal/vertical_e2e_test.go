@@ -104,7 +104,7 @@ func (b e2eBuiltinTools) Evaluate(ctx context.Context, request *approval.ToolReq
 	})
 }
 
-func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
+func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (runtimeadk.BuiltinToolResult, error) {
 	result, err := b.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,
 		PrincipalID: request.PrincipalID, ToolName: request.ToolName, ToolVersion: request.ToolVersion,
@@ -114,9 +114,9 @@ func (b e2eBuiltinTools) Execute(ctx context.Context, request *runtimeadk.Builti
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
 	})
 	if err != nil {
-		return nil, err
+		return runtimeadk.BuiltinToolResult{}, err
 	}
-	return result.Output, nil
+	return runtimeadk.BuiltinToolResult{Output: result.Output, Untrusted: result.Untrusted, WorkspaceTainted: result.WorkspaceTainted}, nil
 }
 
 type approvalE2EStack struct {
