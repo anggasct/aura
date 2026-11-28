@@ -419,10 +419,45 @@ func safeText(err error) string {
 	if interrupted(err) || !errors.As(err, &failure) {
 		return string(ErrorCodeFailed)
 	}
-	if (failure.Code == ErrorCodeInputInvalid || failure.Code == ErrorCodeFailed) && failure.Detail != "" {
+	if safeDetail(failure.Code) && failure.Detail != "" {
 		return string(failure.Code) + ": " + failure.Detail
 	}
 	return string(failure.Code)
+}
+
+func safeDetail(code ErrorCode) bool {
+	switch code {
+	case ErrorCodeInputInvalid, ErrorCodeFailed, ErrorCodePolicyDenied, ErrorCodeSourceUnavailable:
+		return true
+	}
+	return false
+}
+
+type detailedError interface {
+	SafeDetail() string
+}
+
+type cliError struct {
+	text  string
+	cause error
+}
+
+func (e *cliError) Error() string { return e.text }
+
+func (e *cliError) Unwrap() error { return e.cause }
+
+func cliFailure(err error) error {
+	if err == nil || interrupted(err) {
+		return err
+	}
+	text := safeText(err)
+	var detailed detailedError
+	if errors.As(err, &detailed) {
+		if detail := detailed.SafeDetail(); detail != "" {
+			text += ": " + detail
+		}
+	}
+	return &cliError{text: text, cause: err}
 }
 
 func (d *Descriptor) renderedLines(surface Surface, data json.RawMessage) ([]string, error) {

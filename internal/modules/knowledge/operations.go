@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -101,8 +102,14 @@ type renderedOnce struct {
 	cause error
 }
 
-func (e *renderedOnce) Error() string {
-	return strings.Replace(e.cause.Error(), string(e.code)+": ", "", 1)
+func (e *renderedOnce) Error() string { return e.SafeDetail() }
+
+func (e *renderedOnce) SafeDetail() string {
+	var coded *fault.Error[ErrorCode]
+	if errors.As(e.cause, &coded) {
+		return coded.Detail
+	}
+	return ""
 }
 
 func (e *renderedOnce) Unwrap() error { return e.cause }
@@ -485,11 +492,11 @@ func embeddingLines(collection string, embedded embeddedAs) []string {
 	case EmbedOutcomeEmbedded:
 		return []string{fmt.Sprintf("embedding: %d chunks sent for vectors", embedded.sent)}
 	case EmbedOutcomeReembedRequired:
-		return []string{fmt.Sprintf("embedding: skipped (%s): the collection was embedded under another configuration; nothing was sent, run aura kb embed %s", ErrorCodeReembedRequired, collection)}
+		return []string{fmt.Sprintf("embedding: skipped (%s): the collection was embedded under another configuration; nothing was sent, run aura kb embed %s --apply", ErrorCodeReembedRequired, collection)}
 	case EmbedOutcomeUnavailable:
 		return []string{fmt.Sprintf("embedding: skipped (%s): embedding is not configured or its credential could not be resolved; nothing was sent", ErrorCodeEmbeddingUnavailable)}
 	case embeddingStateFailed:
-		return []string{fmt.Sprintf("embedding: failed (%s) after %d chunks; the source is stored, run aura kb embed %s to resume", embedded.code, embedded.sent, collection)}
+		return []string{fmt.Sprintf("embedding: failed (%s) after %d chunks; the source is stored, run aura kb embed %s --apply to resume", embedded.code, embedded.sent, collection)}
 	}
 	return nil
 }
@@ -659,20 +666,28 @@ func (o *Operations) embed(ctx context.Context, call *operation.Call) (operation
 		if result.Batches == 0 {
 			return operation.Result{}, refusedBeforeSend(err)
 		}
-		return operation.Result{}, moduleFailure(fmt.Errorf("%w; %d chunks were sent, rerun aura kb embed %s to resume", err, result.Sent, in.Collection))
+		return operation.Result{}, moduleFailure(withHint(err, fmt.Sprintf("%d chunks were sent, rerun aura kb embed %s --apply to resume", result.Sent, in.Collection)))
 	}
 	o.logger.InfoContext(ctx, "knowledge collection embedded",
 		"component", "knowledge", "operation", "embed", "collection", in.Collection,
-		"chunks", result.Sent, "batches", result.Batches, "completed", result.Completed)
+		"sent", result.Sent, "batches", result.Batches, "completed", result.Completed)
 	lines := []string{fmt.Sprintf("embedded: %d chunks in %d batches sent to %s", result.Sent, result.Batches, result.Destination)}
 	if result.Completed {
 		lines = append(lines, "complete: every chunk has a vector")
 	} else {
-		lines = append(lines, fmt.Sprintf("partial: rerun aura kb embed %s to resume", in.Collection))
+		lines = append(lines, fmt.Sprintf("partial: rerun aura kb embed %s --apply to resume", in.Collection))
 	}
 	return linesResult(lines, map[string]any{
 		"sent": result.Sent, "batches": result.Batches, "destination": result.Destination, "completed": result.Completed,
 	})
+}
+
+func withHint(err error, hint string) error {
+	var coded *fault.Error[ErrorCode]
+	if !errors.As(err, &coded) {
+		return err
+	}
+	return fault.Wrap(coded.Code, coded.Detail+"; "+hint, err)
 }
 
 var refusalsBeforeSend = []ErrorCode{

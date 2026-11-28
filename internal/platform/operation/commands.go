@@ -330,7 +330,7 @@ func (l *leafCommand) invoke(ctx context.Context, run *commandRun) error {
 	if l.previewing {
 		preview, err := run.invoker.Preview(ctx, l.descriptor.ID, call)
 		if err != nil {
-			return usageOr(err)
+			return usageOr(cliFailure(err))
 		}
 		if !run.apply || preview.Empty {
 			return renderPreview(run.cmd.OutOrStdout(), &preview, run.asJSON)
@@ -339,7 +339,7 @@ func (l *leafCommand) invoke(ctx context.Context, run *commandRun) error {
 	}
 	result, err := run.invoker.Invoke(ctx, l.descriptor.ID, call)
 	if err != nil {
-		return usageOr(err)
+		return usageOr(cliFailure(err))
 	}
 	if run.asJSON {
 		return writeIndented(run.cmd.OutOrStdout(), result.Data)

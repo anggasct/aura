@@ -3,6 +3,7 @@ package operation_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"slices"
 	"strings"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/platform/clikit"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
@@ -159,5 +161,33 @@ func TestTrustGrantCommandRunsDirectly(t *testing.T) {
 	}
 	if cli.rig.Stubs.Previews() != 0 {
 		t.Fatalf("a trust grant on the CLI ran its previewer %d times", cli.rig.Stubs.Previews())
+	}
+}
+
+func TestACommandFailurePrintsItsCodeAndOneSafeSentence(t *testing.T) {
+	cases := []struct {
+		name string
+		fail error
+		want string
+	}{
+		{name: "a refused path with an OS error underneath", fail: fault.Wrap(operation.ErrorCodePolicyDenied, "the path is a symbolic link", fault.Wrap(operation.ErrorCodeFailed, "inner", errors.New("too many levels of symbolic links"))), want: "policy_denied: the path is a symbolic link"},
+		{name: "an unavailable source with a driver error underneath", fail: fault.Wrap(operation.ErrorCodeSourceUnavailable, "the attachment is not available", errors.New("open artifact art-nope: sql: no rows in result set")), want: "source_unavailable: the attachment is not available"},
+		{name: "a raw error", fail: errors.New("open /etc/shadow: permission denied sk-live-secret"), want: "operation_failed"},
+		{name: "a module code", fail: operation.Fail(command.ErrorCodeFailed, errors.New("database path /var/lib/aura/x.db is locked")), want: "operation_failed: command_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cli := newCLIRig(t)
+			cli.rig.Stubs.FailWith(operationtest.Read, tc.fail)
+
+			_, err := cli.run(t, "stub", "read", "alpha")
+
+			if err == nil || err.Error() != tc.want {
+				t.Fatalf("error = %v, want exactly %q", err, tc.want)
+			}
+			if !fault.HasCode(err, operation.ErrorCodeFailed) && !fault.HasCode(err, operation.ErrorCodePolicyDenied) && !fault.HasCode(err, operation.ErrorCodeSourceUnavailable) {
+				t.Errorf("error %v no longer carries its code for a caller", err)
+			}
+		})
 	}
 }

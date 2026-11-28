@@ -327,12 +327,23 @@ func TestKBAddRefusesHostFilesTheKernelCannotOpen(t *testing.T) {
 		{"symlink", link, operation.ErrorCodePolicyDenied},
 		{"directory", t.TempDir(), operation.ErrorCodeSourceUnavailable},
 		{"missing", filepath.Join(t.TempDir(), "missing.md"), operation.ErrorCodeSourceUnavailable},
+		{"an attachment that does not exist", "artifact:art-nope", operation.ErrorCodeSourceUnavailable},
+	}
+	wantText := map[string]string{
+		"symlink":                           "policy_denied: the path is a symbolic link",
+		"an attachment that does not exist": "source_unavailable: the attachment is not available",
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := runKBCommand(t, cfg, "add", "support", tc.source)
 
 			requireOperationCode(t, err, tc.want)
+			if want, pinned := wantText[tc.name]; pinned && err.Error() != want {
+				t.Errorf("error = %q, want exactly %q", err.Error(), want)
+			}
+			if strings.Contains(err.Error(), "sql:") || strings.Contains(err.Error(), "too many levels") || strings.Contains(err.Error(), "workspace_") {
+				t.Errorf("error %q carries an internal cause", err.Error())
+			}
 			if strings.Contains(out, "added") || strings.Contains(err.Error(), filepath.Dir(tc.source)) {
 				t.Errorf("out %q, error %q: a refused source was reported added or the error carries the host path", out, err)
 			}

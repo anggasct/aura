@@ -325,7 +325,7 @@ func TestKBEmbedResumesAfterAProviderFailureAndSkipsStoredVectors(t *testing.T) 
 
 	out, err := rig.run(t, "embed", "support", "--apply")
 	requireKBCode(t, err, knowledge.ErrorCodeEmbeddingFailed)
-	if !strings.Contains(err.Error(), "1 chunks were sent, rerun aura kb embed support to resume") {
+	if !strings.Contains(err.Error(), "1 chunks were sent, rerun aura kb embed support --apply to resume") {
 		t.Errorf("error %q lacks the resume hint", err)
 	}
 	if strings.Count(err.Error(), string(knowledge.ErrorCodeEmbeddingFailed)) != 1 {
