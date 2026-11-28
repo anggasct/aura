@@ -44,6 +44,8 @@ type ADKExecutor struct {
 	sessions          SessionPort
 	broker            turn.ToolBroker
 	tools             []tool.Tool
+	toolIndex         map[string]tool.Tool
+	operations        OperationSurface
 	optIn             map[string]bool
 	ownerOptIn        map[string]bool
 	operationTools    map[string]bool
@@ -60,6 +62,8 @@ type ADKExecutor struct {
 	providers         []turn.ContextProvider
 	toolBudget        ToolBudget
 	clock             func() time.Time
+
+	unattendedTerminal bool
 }
 
 type AgentResolver interface {
@@ -131,44 +135,71 @@ func WithBudgetLedger(ledger *usage.Ledger, modelDefinitionID string) ExecutorOp
 
 func WithBuiltinToolExecutor(executor BuiltinToolExecutor) ExecutorOption {
 	return func(e *ADKExecutor) error {
-		if executor == nil {
-			return invalidArgument("builtin tool executor must not be nil")
-		}
-		definitions := cloneBuiltinDefinitions(executor.Definitions())
-		tools, err := buildBuiltinTools(definitions)
-		if err != nil {
-			return err
-		}
-		e.builtins = executor
-		e.tools = tools
-		e.optIn = map[string]bool{}
-		e.ownerOptIn = map[string]bool{}
-		e.operationTools = map[string]bool{}
-		e.channelTools = map[string]string{}
-		e.externalServers = map[string]string{}
-		e.pluginTools = map[string]string{}
-		for i := range definitions {
-			if definitions[i].OptIn {
-				e.optIn[definitions[i].Name] = true
-			}
-			if definitions[i].OwnerOptIn {
-				e.ownerOptIn[definitions[i].Name] = true
-			}
-			if definitions[i].Operation != "" {
-				e.operationTools[definitions[i].Name] = true
-			}
-			if definitions[i].Channel != "" {
-				e.channelTools[definitions[i].Name] = definitions[i].Channel
-			}
-			if definitions[i].Server != "" {
-				e.externalServers[definitions[i].Name] = definitions[i].Server
-			}
-			if definitions[i].Plugin != "" {
-				e.pluginTools[definitions[i].Name] = definitions[i].Plugin
-			}
-		}
+		return e.loadBuiltins(executor)
+	}
+}
+
+func WithUnattendedTerminal() ExecutorOption {
+	return func(e *ADKExecutor) error {
+		e.unattendedTerminal = true
 		return nil
 	}
+}
+
+func (x *ADKExecutor) BindOperations(surface OperationSurface) error {
+	if surface == nil {
+		return invalidArgument("operation surface must not be nil")
+	}
+	if x.builtins == nil {
+		return invalidArgument("operations need the builtin tool executor")
+	}
+	if err := x.loadBuiltins(x.builtins); err != nil {
+		return err
+	}
+	x.operations = surface
+	return nil
+}
+
+func (x *ADKExecutor) loadBuiltins(executor BuiltinToolExecutor) error {
+	if executor == nil {
+		return invalidArgument("builtin tool executor must not be nil")
+	}
+	definitions := cloneBuiltinDefinitions(executor.Definitions())
+	tools, err := buildBuiltinTools(definitions)
+	if err != nil {
+		return err
+	}
+	x.builtins = executor
+	x.tools = tools
+	x.toolIndex = make(map[string]tool.Tool, len(tools))
+	x.optIn = map[string]bool{}
+	x.ownerOptIn = map[string]bool{}
+	x.operationTools = map[string]bool{}
+	x.channelTools = map[string]string{}
+	x.externalServers = map[string]string{}
+	x.pluginTools = map[string]string{}
+	for i := range definitions {
+		x.toolIndex[definitions[i].Name] = tools[i]
+		if definitions[i].OptIn {
+			x.optIn[definitions[i].Name] = true
+		}
+		if definitions[i].OwnerOptIn {
+			x.ownerOptIn[definitions[i].Name] = true
+		}
+		if definitions[i].Operation != "" {
+			x.operationTools[definitions[i].Name] = true
+		}
+		if definitions[i].Channel != "" {
+			x.channelTools[definitions[i].Name] = definitions[i].Channel
+		}
+		if definitions[i].Server != "" {
+			x.externalServers[definitions[i].Name] = definitions[i].Server
+		}
+		if definitions[i].Plugin != "" {
+			x.pluginTools[definitions[i].Name] = definitions[i].Plugin
+		}
+	}
+	return nil
 }
 
 func WithOwnerContext(block string) ExecutorOption {
@@ -210,7 +241,7 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			yield(turn.Event{}, err)
 			return
 		}
-		runCtx := withTurnAccess(withTurnID(ctx, req.TurnID), req, definition.ID)
+		runCtx := x.withTurnAccess(withTurnID(ctx, req.TurnID), req, definition.ID)
 		if req.SessionID != "" {
 			runCtx = auramodel.WithSessionID(runCtx, req.SessionID)
 		}
@@ -237,11 +268,15 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			yield(turn.Event{}, err)
 			return
 		}
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, req.PrincipalClass, req.Origin, recallAttached, x.ownerContextFor(req), turnContext{
+		extra := turnContext{
 			blocks:         blocks,
 			knowledgeScope: req.Knowledge,
 			restriction:    req.ToolRestriction,
-		})
+			history:        sessionService,
+		}
+		extra.plan = x.planOperations(runCtx, &planInput{definition: &definition, req: req, extra: &extra})
+		runCtx = withOperationPlan(runCtx, extra.plan)
+		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached, x.ownerContextFor(req), &extra)
 		if err != nil {
 			yield(turn.Event{}, err)
 			return
@@ -341,6 +376,8 @@ type turnContext struct {
 	blocks         []turn.ContextBlock
 	knowledgeScope []string
 	restriction    *turn.ToolRestriction
+	history        historyReader
+	plan           *operationPlan
 }
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
@@ -368,7 +405,7 @@ func (x *ADKExecutor) agentName(definition *auraagent.Definition) string {
 	return cmp.Or(definition.Name, x.appName)
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, class principal.Class, origin turn.Origin, recallAttached bool, ownerContext string, extra turnContext) (*runner.Runner, error) {
+func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext string, extra *turnContext) (*runner.Runner, error) {
 	model, err := x.resolveModel(ctx, definition)
 	if err != nil {
 		return nil, err
@@ -389,7 +426,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.agentName(definition), definition, model, x.toolsFor(definition, class, origin, extra), x.beforeTool, recallAttached, ownerContext, extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, extra.plan.core, x.beforeTool, recallAttached, ownerContext, *extra)
 	if err != nil {
 		return nil, err
 	}
@@ -468,6 +505,13 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		deadline, _ = callCtx.Deadline()
 	}
 	access := turnAccessFromContext(callCtx)
+	if toolName == auratools.OperationSearchToolName {
+		scoped, err := x.withSearchScope(callCtx, actx.SessionID(), &access)
+		if err != nil {
+			return nil, err
+		}
+		callCtx = scoped
+	}
 	request := &BuiltinToolRequest{
 		RequestID:       requestID,
 		TurnID:          turnID,
@@ -478,6 +522,7 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		Knowledge:       slices.Clone(access.knowledge),
 		Tainted:         access.tainted,
 		Origin:          access.origin,
+		Unattended:      access.unattended && x.operationTools[definition.Name],
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,
@@ -488,6 +533,8 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		EventInvocation: actx.InvocationID(),
 		EventBranch:     actx.Branch(),
 		EventAuthor:     actx.AgentName(),
+
+		ContentTaintTracked: access.contentTaintTracked,
 	}
 	output, err := x.builtins.Execute(callCtx, request)
 	if err != nil {
@@ -585,20 +632,17 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 }
 
 func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra turnContext) []tool.Tool {
-	allowed := definition.Tools
-	if class != "" {
-		ceiling, restricted := definition.ToolCeiling(class)
-		if restricted {
-			allowed = ceiling
-			if len(allowed) == 0 {
-				return nil
-			}
-		}
+	allowed, ok := x.allowedTools(definition, class)
+	if !ok {
+		return nil
 	}
 	listed := len(allowed) > 0
 	filtered := make([]tool.Tool, 0, len(x.tools))
 	for _, t := range x.tools {
-		if x.operationTools[t.Name()] {
+		if x.isOperationTool(t.Name()) {
+			if x.operations != nil && extra.restriction == nil && x.ownerTurn(definition, class, origin) && slices.Contains(allowed, t.Name()) {
+				filtered = append(filtered, t)
+			}
 			continue
 		}
 		if extra.restriction != nil && !slices.Contains(extra.restriction.Allowed, t.Name()) {
@@ -684,8 +728,15 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 			instruction += "\n\n" + soul
 		}
 	}
+	if extra.plan != nil && extra.plan.description != "" {
+		instruction = strings.TrimSpace(instruction + "\n\n" + extra.plan.description)
+	}
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + turn.RecallEvidenceCaveat
+	}
+	var toolsets []tool.Toolset
+	if extra.plan != nil && extra.plan.toolset != nil {
+		toolsets = append(toolsets, extra.plan.toolset)
 	}
 	var beforeModel []llmagent.BeforeModelCallback
 	for i := range extra.blocks {
@@ -705,6 +756,7 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 		Instruction:          instruction,
 		Model:                model,
 		Tools:                tools,
+		Toolsets:             toolsets,
 		BeforeModelCallbacks: beforeModel,
 		BeforeToolCallbacks: []llmagent.BeforeToolCallback{
 			gate,

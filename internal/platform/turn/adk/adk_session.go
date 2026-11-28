@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"iter"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -22,6 +23,7 @@ type ADKSessionService struct {
 	sessions      SessionPort
 	historyAuthor string
 	leaveOutTurn  string
+	current       atomic.Pointer[adkSession]
 }
 
 type SessionPort interface {
@@ -61,36 +63,37 @@ func (s *adkSession) State() session.State {
 }
 
 func (s *adkSession) Events() session.Events {
-	base := s.events
-	return &adkEvents{load: func() ([]*session.Event, error) {
-		stored, err := base()
-		if err != nil {
-			return nil, err
-		}
-		extra := s.appendedSnapshot()
-		if len(extra) == 0 {
-			return stored, nil
-		}
-		seen := make(map[string]struct{}, len(stored)+len(extra))
-		for _, ev := range stored {
-			if ev != nil {
-				seen[ev.ID] = struct{}{}
-			}
-		}
-		out := make([]*session.Event, 0, len(stored)+len(extra))
-		out = append(out, stored...)
-		for _, ev := range extra {
-			if ev == nil {
-				continue
-			}
-			if _, ok := seen[ev.ID]; ok {
-				continue
-			}
+	return &adkEvents{load: s.merged}
+}
+
+func (s *adkSession) merged() ([]*session.Event, error) {
+	stored, err := s.events()
+	if err != nil {
+		return nil, err
+	}
+	extra := s.appendedSnapshot()
+	if len(extra) == 0 {
+		return stored, nil
+	}
+	seen := make(map[string]struct{}, len(stored)+len(extra))
+	for _, ev := range stored {
+		if ev != nil {
 			seen[ev.ID] = struct{}{}
-			out = append(out, ev)
 		}
-		return out, nil
-	}}
+	}
+	out := make([]*session.Event, 0, len(stored)+len(extra))
+	out = append(out, stored...)
+	for _, ev := range extra {
+		if ev == nil {
+			continue
+		}
+		if _, ok := seen[ev.ID]; ok {
+			continue
+		}
+		seen[ev.ID] = struct{}{}
+		out = append(out, ev)
+	}
+	return out, nil
 }
 
 func (s *adkSession) appendInMemory(ev *session.Event) {
@@ -227,14 +230,22 @@ func (s *ADKSessionService) Get(ctx context.Context, req *session.GetRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	return &session.GetResponse{
-		Session: &adkSession{
-			id:       stored.ID,
-			userID:   stored.OwnerID,
-			metadata: stored.Metadata,
-			events:   func() ([]*session.Event, error) { return s.loadEvents(ctx, stored.ID) },
-		},
-	}, nil
+	loaded := &adkSession{
+		id:       stored.ID,
+		userID:   stored.OwnerID,
+		metadata: stored.Metadata,
+		events:   func() ([]*session.Event, error) { return s.loadEvents(ctx, stored.ID) },
+	}
+	s.current.Store(loaded)
+	return &session.GetResponse{Session: loaded}, nil
+}
+
+func (s *ADKSessionService) CurrentEvents(sessionID string) ([]*session.Event, error) {
+	current := s.current.Load()
+	if current == nil || current.ID() != sessionID {
+		return nil, invalidArgument("the session has not been opened for this turn")
+	}
+	return current.merged()
 }
 
 func (s *ADKSessionService) List(ctx context.Context, req *session.ListRequest) (*session.ListResponse, error) {

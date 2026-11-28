@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/jsonschema-go/jsonschema"
 
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 
@@ -53,6 +54,8 @@ type BuiltinToolRequest struct {
 	Tainted         bool
 	Unattended      bool
 	Origin          turn.Origin
+
+	ContentTaintTracked bool
 }
 
 type BuiltinToolExecutor interface {
@@ -80,10 +83,16 @@ type turnAccess struct {
 	knowledge   []string
 	tainted     bool
 	origin      turn.Origin
+
+	unattended          bool
+	contentTaintTracked bool
 }
 
-func withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
-	access := turnAccess{principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: req.Tainted(), origin: req.Origin}
+func (x *ADKExecutor) withTurnAccess(ctx context.Context, req *turn.TurnRequest, agentID string) context.Context {
+	access := turnAccess{
+		principalID: req.PrincipalID, class: req.PrincipalClass, agentID: agentID, knowledge: slices.Clone(req.Knowledge), tainted: req.Tainted(), origin: req.Origin,
+		unattended: x.turnKind(req.Origin) == operation.TurnUnattended,
+	}
 	return context.WithValue(ctx, turnAccessContextKey{}, access)
 }
 
