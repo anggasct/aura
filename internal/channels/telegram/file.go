@@ -64,7 +64,7 @@ func servedTypeAcceptable(contentType string) bool {
 	case "", "application/octet-stream":
 		return true
 	default:
-		return media.Eligible(contentType)
+		return media.Attachable(contentType)
 	}
 }
 

@@ -77,7 +77,7 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 	if attachment.Size <= 0 || attachment.Size > limit {
 		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment size is outside the allowed bound")
 	}
-	if !media.Eligible(attachment.ContentType) {
+	if !media.Attachable(attachment.ContentType) {
 		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
 	}
 	call, cancel := context.WithTimeout(ctx, mediaDownloadTimeout)
@@ -95,7 +95,7 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment download did not succeed")
 	}
 	actual := resp.Header.Get("Content-Type")
-	if actual != "" && !media.Eligible(actual) {
+	if actual != "" && !media.Attachable(actual) {
 		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
 	}
 	tmp, err := media.Spool(resp.Body, limit)

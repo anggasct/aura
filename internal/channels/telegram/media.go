@@ -39,6 +39,9 @@ var mediaExtensions = map[string]string{
 	"audio/mp4":       ".m4a",
 	"video/mp4":       ".mp4",
 	"application/pdf": ".pdf",
+	"text/markdown":   ".md",
+	"text/plain":      ".txt",
+	"text/html":       ".html",
 }
 
 type MediaStore interface {
@@ -167,7 +170,7 @@ func (a *Adapter) stageMedia(ctx context.Context, msg *message, envelope *runtim
 func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runtimeingress.IngressEnvelope) error {
 	limit := a.cfg.MaxAttachmentBytes
 	item, ok := msg.attachment(limit)
-	if !ok || item.fileID == "" || item.declared > limit || !media.Eligible(item.mediaType) {
+	if !ok || item.fileID == "" || item.declared > limit || !media.Attachable(item.mediaType) {
 		return fault.New(ErrorCodeAttachmentRejected, "attachment is not eligible")
 	}
 	if a.artifacts == nil {
@@ -197,6 +200,9 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 	}
 	if err := attachArtifacts(envelope, []media.ArtifactSummary{summary}); err != nil {
 		return err
+	}
+	if media.IsTextDocument(item.mediaType) {
+		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Text: media.ReferencePart(&summary, item.mediaType)})
 	}
 	if len(image) > 0 {
 		envelope.Parts = append(envelope.Parts, runtimeingress.InputPart{Image: image})
