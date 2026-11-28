@@ -266,3 +266,21 @@ func TestTheAddCardForAnAddressNeedsNoAttachmentDetail(t *testing.T) {
 		t.Errorf("the card lacks the address:\n%s", rig.Prompts()[0].Arguments)
 	}
 }
+
+func TestOnlyTheOperationsThatReachTheNetworkSayTheirCardUsesIt(t *testing.T) {
+	rig := newOpsRig(t)
+	want := map[string]bool{"aura_kb_add": true, "aura_kb_refresh": true, "aura_kb_embed": true}
+	seen := 0
+	for _, definition := range rig.Broker.Definitions() {
+		if !strings.HasPrefix(definition.Name, "aura_kb_") {
+			continue
+		}
+		seen++
+		if definition.ReachesNetwork != want[definition.Name] {
+			t.Errorf("%s reaches the network = %v, want %v", definition.Name, definition.ReachesNetwork, want[definition.Name])
+		}
+	}
+	if seen != 8 {
+		t.Errorf("checked %d knowledge tools, want 8", seen)
+	}
+}

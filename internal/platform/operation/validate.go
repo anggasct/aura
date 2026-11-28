@@ -211,6 +211,23 @@ func (v *validation) surfaces(d *Descriptor) {
 	}
 }
 
+func (v *validation) confirmation(d *Descriptor) {
+	id := d.ID
+	valid := d.Confirmation == ConfirmPreviewUntilApply || d.Confirmation == ConfirmRunDirectly
+	switch {
+	case d.Confirmation != "" && !d.Preview:
+		v.reject(id, "an owner confirmation needs a preview")
+	case d.Confirmation != "" && d.Risk == RiskRead:
+		v.reject(id, "a read has no owner confirmation")
+	case d.Confirmation != "" && !valid:
+		v.reject(id, "the owner confirmation %q is unknown", d.Confirmation)
+	case d.Preview && d.Risk == RiskDestructive && d.Confirmation == ConfirmRunDirectly:
+		v.reject(id, "a destructive operation always previews until --apply")
+	case d.Preview && d.Risk != RiskDestructive && d.Risk != RiskRead && d.Confirmation == "":
+		v.reject(id, "a preview on a non-destructive operation needs an owner confirmation")
+	}
+}
+
 func (v *validation) preview(d *Descriptor) {
 	id := d.ID
 	needs := d.Exposure == ExposureAgent && (d.Risk == RiskTrustGrant || d.Risk == RiskDestructive)
@@ -220,12 +237,7 @@ func (v *validation) preview(d *Descriptor) {
 	if d.Risk == RiskRead && d.Preview {
 		v.reject(id, "a read has no preview")
 	}
-	if d.PreviewFirst && !d.Preview {
-		v.reject(id, "preview-first needs a preview")
-	}
-	if d.PreviewFirst && d.Risk == RiskRead {
-		v.reject(id, "a read cannot be preview-first")
-	}
+	v.confirmation(d)
 	if v.checked && v.bindings[id] != nil {
 		bound := v.bindings[id].Preview != nil
 		if d.Preview && !bound {

@@ -66,6 +66,7 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 		Schema:               schema,
 		RequiredCapabilities: append([]string(nil), descriptor.RequiredCapabilities...),
 		ExternalSink:         descriptor.Sink,
+		ReachesNetwork:       descriptor.ReachesNetwork,
 		Risk:                 tools.Risk(descriptor.Risk),
 		Operation:            descriptor.ID,
 		FreshApproval:        descriptor.FreshApproval,

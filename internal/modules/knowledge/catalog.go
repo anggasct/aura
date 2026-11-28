@@ -81,7 +81,7 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationAdd, Summary: "Ingest a document into a collection", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Sink: true, Preview: true, Needs: needs,
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Sink: true, Preview: true, Confirmation: operation.ConfirmRunDirectly, ReachesNetwork: true, Needs: needs,
 				Description: "Reads Markdown, plain text or HTML from an https URL and stores its text as searchable chunks. An address you choose is fetched from this host.",
 				Texts: []operation.SurfaceText{
 					{Surface: operation.SurfaceCLI, Text: "Reads Markdown, plain text or HTML from an https URL or a file on this host and stores its text as searchable chunks. An address you choose is fetched from this host."},
@@ -91,7 +91,7 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationRefresh, Summary: "Re-read the stored sources of a collection", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Needs: needs,
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, ReachesNetwork: true, Needs: needs,
 				Description: "Reads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a file on the host is refreshed only from the host.",
 				Params:      []operation.Param{collectionParam(), storedSourceParam(false)}, Output: textOutput(),
 			},
@@ -102,13 +102,13 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationEmbed, Summary: "Send a collection's chunks to the embedding provider for vectors", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskTrustGrant, Commit: operation.CommitExternal, Preview: true, PreviewFirst: true, Needs: needs,
+				Risk: operation.RiskTrustGrant, Commit: operation.CommitExternal, Preview: true, Confirmation: operation.ConfirmPreviewUntilApply, ReachesNetwork: true, Needs: needs,
 				Description: "Opts the collection in to sending its chunk text to the configured embedding provider and stores the vectors; it also rebuilds vectors after the model or destination changed.",
 				Params:      []operation.Param{collectionParam()}, Output: textOutput(),
 			},
 			{
 				ID: operationUnembed, Summary: "Clear a collection's embedding opt-in and erase its vectors", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Preview: true, PreviewFirst: true, Needs: needs,
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Preview: true, Confirmation: operation.ConfirmPreviewUntilApply, Needs: needs,
 				Params: []operation.Param{collectionParam()}, Output: textOutput(),
 			},
 		},

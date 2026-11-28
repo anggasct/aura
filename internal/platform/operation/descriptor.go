@@ -73,9 +73,17 @@ type Descriptor struct {
 	Needs                []string
 	Interactive          bool
 	Preview              bool
-	PreviewFirst         bool
+	Confirmation         OwnerConfirmation
+	ReachesNetwork       bool
 	Texts                []SurfaceText
 }
+
+type OwnerConfirmation string
+
+const (
+	ConfirmPreviewUntilApply OwnerConfirmation = "preview_until_apply"
+	ConfirmRunDirectly       OwnerConfirmation = "run_directly"
+)
 
 type ParamKind string
 

@@ -462,6 +462,9 @@ func TestKnowledgeOperationCards(t *testing.T) {
 		if rig.kb.Provider.Sent() != 2 {
 			t.Errorf("chunks sent = %d, want 2", rig.kb.Provider.Sent())
 		}
+		if !cards[0].Network {
+			t.Error("the embed card says no network although the chunks go to the provider")
+		}
 	})
 	t.Run("remove lists what it deletes", func(t *testing.T) {
 		rig := newOpsRig(t)

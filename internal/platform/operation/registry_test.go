@@ -100,10 +100,26 @@ func TestRegistryRejectsInvalidDescriptors(t *testing.T) {
 			descriptorNamed(c, operationtest.Read).Output.Fields[0].Secret = true
 		}, want: 1},
 		{name: "an interactive operation that is not host", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Read).Interactive = true }, want: 1},
-		{name: "an agent trust grant without a preview", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Grant).Preview = false }, want: 1},
+		{name: "an agent trust grant without a preview", mutate: func(c *operation.Catalog) {
+			d := descriptorNamed(c, operationtest.Grant)
+			d.Preview, d.Confirmation = false, ""
+		}, want: 1},
 		{name: "a read with a preview", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Read).Preview = true }, want: 1},
-		{name: "a preview-first operation without a preview", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Change).PreviewFirst = true }, want: 1},
-		{name: "a read that is preview-first", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Read).PreviewFirst = true }, want: 2},
+		{name: "an owner confirmation without a preview", mutate: func(c *operation.Catalog) {
+			descriptorNamed(c, operationtest.Change).Confirmation = operation.ConfirmRunDirectly
+		}, want: 1},
+		{name: "an owner confirmation on a read", mutate: func(c *operation.Catalog) {
+			descriptorNamed(c, operationtest.Read).Confirmation = operation.ConfirmPreviewUntilApply
+		}, want: 1},
+		{name: "an unknown owner confirmation", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Grant).Confirmation = "sometimes" }, want: 1},
+		{name: "a preview on a trust grant with no owner confirmation", mutate: func(c *operation.Catalog) { descriptorNamed(c, operationtest.Grant).Confirmation = "" }, want: 1},
+		{name: "a preview on a change with no owner confirmation", mutate: func(c *operation.Catalog) {
+			d := descriptorNamed(c, operationtest.Change)
+			d.Preview = true
+		}, want: 1},
+		{name: "a destructive operation that runs directly", mutate: func(c *operation.Catalog) {
+			descriptorNamed(c, operationtest.Delete).Confirmation = operation.ConfirmRunDirectly
+		}, want: 1},
 		{name: "a URL parameter on a parameter that is not a path", mutate: func(c *operation.Catalog) {
 			d := descriptorNamed(c, operationtest.Read)
 			d.Params[0].URLParam = "address"
