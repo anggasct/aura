@@ -14,6 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
 
@@ -87,7 +88,7 @@ func (s *attachmentStage) walk(entity *message.Entity, depth int) {
 	if err != nil || !media.Eligible(mediaType) {
 		return
 	}
-	mediaType = media.BaseType(mediaType)
+	mediaType = storage.BaseMediaType(mediaType)
 	if len(s.items) >= maxAttachmentsPerMessage {
 		s.err = fault.New(ErrorCodeAttachmentRejected, "message carries more attachments than supported")
 		return

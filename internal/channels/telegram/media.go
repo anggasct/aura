@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/storage"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	"github.com/anggasct/aura/internal/platform/vision"
 )
@@ -103,7 +104,7 @@ func (m *message) attachment(limit int64) (attachment, bool) {
 		if strings.TrimSpace(mediaType) == "" {
 			mediaType = candidate.fallback
 		}
-		return newAttachment(candidate.kind, candidate.file, media.BaseType(mediaType)), true
+		return newAttachment(candidate.kind, candidate.file, storage.BaseMediaType(mediaType)), true
 	}
 	if photo, ok := largestPhoto(m.Photo, limit); ok {
 		return newAttachment(kindPhoto, &photo, photoMediaType), true
@@ -170,9 +171,14 @@ func (a *Adapter) stageMedia(ctx context.Context, msg *message, envelope *runtim
 func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runtimeingress.IngressEnvelope) error {
 	limit := a.cfg.MaxAttachmentBytes
 	item, ok := msg.attachment(limit)
-	if !ok || item.fileID == "" || item.declared > limit || !media.Attachable(item.mediaType) {
+	if !ok || item.fileID == "" || item.declared > limit {
 		return fault.New(ErrorCodeAttachmentRejected, "attachment is not eligible")
 	}
+	intake, ok := media.NewIntake(item.filename, item.mediaType)
+	if !ok {
+		return fault.New(ErrorCodeAttachmentRejected, "attachment is not eligible")
+	}
+	item.mediaType = intake.MediaType
 	if a.artifacts == nil {
 		return fault.New(ErrorCodeAttachmentRejected, "media storage is not configured")
 	}
@@ -189,11 +195,14 @@ func (a *Adapter) intakeMedia(ctx context.Context, msg *message, envelope *runti
 	if info.FileSize > limit {
 		return fault.New(ErrorCodeAttachmentRejected, "attachment exceeds the size bound")
 	}
-	file, err := a.bot.download(call, token, info.FilePath, limit)
+	file, err := a.bot.download(call, token, info.FilePath, limit, intake)
 	if err != nil {
 		return err
 	}
 	defer media.Discard(file)
+	if err := intake.Verify(file); err != nil {
+		return fault.Wrap(ErrorCodeAttachmentRejected, "attachment is not text", err)
+	}
 	summary, image, err := a.storeAttachment(call, &item, file, envelope, msg)
 	if err != nil {
 		return err

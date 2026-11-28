@@ -1007,3 +1007,82 @@ func TestTelegramOtherDocumentsAreStillDropped(t *testing.T) {
 		})
 	}
 }
+
+func TestTelegramTextDocumentsWithAGenericOrMissingTypeAreStoredByTheirExtension(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string
+		served   string
+		fileName string
+		body     string
+		wantType string
+	}{
+		{name: "no declared type", declared: "", served: "", fileName: "notes.md", body: "# Notes\n", wantType: "text/markdown"},
+		{name: "a generic declared type", declared: "application/octet-stream", served: "application/octet-stream", fileName: "notes.md", body: "# Notes\n", wantType: "text/markdown"},
+		{name: "a markdown alias", declared: "text/x-markdown", served: "text/x-markdown", fileName: "notes.md", body: "# Notes\n", wantType: "text/markdown"},
+		{name: "a declared markdown type served as generic bytes", declared: "text/markdown", served: "application/octet-stream", fileName: "notes.md", body: "# Notes\n", wantType: "text/markdown"},
+		{name: "a markdown extension spelled in full", declared: "", served: "", fileName: "Notes.MARKDOWN", body: "# Notes\n", wantType: "text/markdown"},
+		{name: "plain text", declared: "application/octet-stream", served: "", fileName: "notes.txt", body: "plain", wantType: "text/plain"},
+		{name: "html with the short extension", declared: "", served: "application/octet-stream", fileName: "page.htm", body: "<p>page</p>", wantType: "text/html"},
+		{name: "multi-byte text across the read boundary", declared: "", served: "", fileName: "long.md", body: strings.Repeat("é", 40000), wantType: "text/markdown"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newMediaRig(t, accessOpts{})
+			size := int64(len(tc.body))
+			rig.h.api.addFile(&fakeFile{id: "d", path: "documents/file_9.bin", declared: size, contentType: tc.served, body: []byte(tc.body)})
+			rig.run(t, privateMedia(10, ownerUserID, "", asDocument(mediaFile{FileID: "d", FileSize: size, MimeType: tc.declared, FileName: tc.fileName})))
+
+			accepted := rig.sink.accepted()
+			if len(accepted) != 1 {
+				t.Fatalf("accepted %d envelopes, want 1 (drops %v)", len(accepted), rig.dropped())
+			}
+			summaries := artifactsOf(t, accepted[0])
+			stored := rig.artifacts.stored()
+			if len(summaries) != 1 || len(stored) != 1 || stored[0].meta.MediaType != tc.wantType || string(stored[0].body) != tc.body {
+				t.Fatalf("summaries %+v stored %+v, want one %s document with the body", summaries, stored, tc.wantType)
+			}
+			wantReference := "[attachment " + strconv.Quote(tc.fileName) + " " + tc.wantType + " " + strconv.FormatInt(size, 10) + " bytes artifact:" + summaries[0].RefID + "]"
+			if parts := accepted[0].Parts; len(parts) != 2 || parts[1].Text != wantReference {
+				t.Errorf("parts = %+v, want the reference %q", parts, wantReference)
+			}
+		})
+	}
+}
+
+func TestTelegramARefusedTextCandidateDropsTheWholeMessageLikeAnyOtherRefusedAttachment(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string
+		served   string
+		fileName string
+		body     []byte
+	}{
+		{name: "a NUL byte", declared: "application/octet-stream", fileName: "binary.md", body: []byte("ab\x00cd")},
+		{name: "bytes that are not UTF-8", declared: "", fileName: "latin.txt", body: []byte{0x63, 0x61, 0x66, 0xE9}},
+		{name: "a truncated multi-byte character", declared: "", fileName: "cut.md", body: []byte{0x61, 0xE2, 0x82}},
+		{name: "an extension outside the text set", declared: "application/octet-stream", fileName: "archive.zip", body: []byte("text")},
+		{name: "no extension", declared: "", fileName: "README", body: []byte("text")},
+		{name: "a csv extension", declared: "", fileName: "table.csv", body: []byte("a,b")},
+		{name: "a served type outside the text set", declared: "", served: "image/png", fileName: "notes.md", body: []byte("text")},
+		{name: "an unrelated declared type", declared: "application/zip", fileName: "notes.md", body: []byte("text")},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newMediaRig(t, accessOpts{})
+			size := int64(len(tc.body))
+			rig.h.api.addFile(&fakeFile{id: "d", path: "documents/file_9.bin", declared: size, contentType: tc.served, body: tc.body})
+			rig.run(t, privateMedia(10, ownerUserID, "please read this", asDocument(mediaFile{FileID: "d", FileSize: size, MimeType: tc.declared, FileName: tc.fileName})))
+
+			if accepted := rig.sink.accepted(); len(accepted) != 0 {
+				t.Fatalf("accepted %d envelopes, want none", len(accepted))
+			}
+			if drops := rig.dropped(); len(drops) != 1 {
+				t.Errorf("drops = %v, want one attachment drop", drops)
+			}
+			if stored := rig.artifacts.stored(); len(stored) != 0 {
+				t.Errorf("stored %d artifacts, want none", len(stored))
+			}
+		})
+	}
+}

@@ -19,7 +19,7 @@ func (c *botClient) getFile(ctx context.Context, token, fileID string) (fileInfo
 	return info, nil
 }
 
-func (c *botClient) download(ctx context.Context, token, filePath string, limit int64) (*os.File, error) {
+func (c *botClient) download(ctx context.Context, token, filePath string, limit int64, intake media.Intake) (*os.File, error) {
 	if !safeFilePath(filePath) {
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file path is not acceptable")
 	}
@@ -35,7 +35,7 @@ func (c *botClient) download(ctx context.Context, token, filePath string, limit 
 	switch {
 	case resp.StatusCode != http.StatusOK:
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file download did not succeed")
-	case !servedTypeAcceptable(resp.Header.Get("Content-Type")):
+	case !intake.Served(resp.Header.Get("Content-Type")):
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file media type is not eligible")
 	case resp.ContentLength > limit:
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file exceeds the size bound")
@@ -56,16 +56,6 @@ func scrub(err error, secret string) error {
 		return err
 	}
 	return &redactedError{text: strings.ReplaceAll(wrapped.text, secret, "[redacted]"), cause: wrapped.cause}
-}
-
-func servedTypeAcceptable(contentType string) bool {
-	served, _, _ := strings.Cut(contentType, ";")
-	switch strings.ToLower(strings.TrimSpace(served)) {
-	case "", "application/octet-stream":
-		return true
-	default:
-		return media.Attachable(contentType)
-	}
 }
 
 func safeFilePath(filePath string) bool {
