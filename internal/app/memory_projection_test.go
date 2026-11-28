@@ -410,7 +410,7 @@ func TestOwnerDiscordMemoryIsOwnerKeyedAndHiddenFromTrusted(t *testing.T) {
 	}}); err != nil {
 		t.Fatalf("hook(): %v", err)
 	}
-	inspected, err := service.Inspect(ctx, principal.OwnerID, "", "nightly backup", 10)
+	inspected, err := service.Inspect(ctx, &memory.DocumentQuery{OwnerID: principal.OwnerID, Terms: "nightly backup", Limit: 10})
 	if err != nil || len(inspected) != 1 {
 		t.Fatalf("owner inspect = %d docs, %v; want the discord-derived doc", len(inspected), err)
 	}

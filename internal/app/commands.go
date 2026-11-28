@@ -112,8 +112,6 @@ func MountCommands(root *cobra.Command, gf *GlobalFlags) {
 	root.AddCommand(model.Commands(modelOpener(gf))...)
 	root.AddCommand(shellexec.Commands(NewUsageError)...)
 	root.AddCommand(gitsync.Commands(syncOpener(gf))...)
-	root.AddCommand(memory.Commands(memoryOpener(gf))...)
-	root.AddCommand(profile.Commands(profileOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
 	root.AddCommand(plugin.Commands(pluginOpener(gf))...)
@@ -449,33 +447,6 @@ func skillsOpener(gf *GlobalFlags) skills.Opener {
 	}
 }
 
-func memoryOpener(gf *GlobalFlags) memory.Opener {
-	return func(cmd *cobra.Command, fn func(ctx context.Context, logger *slog.Logger, service *memory.Service) error) error {
-		result, err := appconfig.Load(gf.ConfigPath)
-		if err != nil {
-			return err
-		}
-		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartMemory}}, func(ctx context.Context, app *App) error {
-			return fn(ctx, app.logger, app.memory)
-		})
-	}
-}
-
-func profileOpener(gf *GlobalFlags) profile.Opener {
-	return func(cmd *cobra.Command, fn func(ctx context.Context, service *profile.Service) error) error {
-		result, err := appconfig.Load(gf.ConfigPath)
-		if err != nil {
-			return err
-		}
-		if result.Config.Profile == nil || !result.Config.Profile.Enabled {
-			return errors.New("user profiling is not enabled")
-		}
-		return withApp(cmd, &commandInput{result: &result, parts: []Part{PartProfile}}, func(ctx context.Context, app *App) error {
-			return fn(ctx, app.profile)
-		})
-	}
-}
-
 func pluginOpener(gf *GlobalFlags) plugin.Opener {
 	return func(cmd *cobra.Command, fn func(ctx context.Context, service *plugin.Service, audit plugin.AuditRecorder) error) error {
 		result, err := appconfig.Load(gf.ConfigPath)
@@ -543,7 +514,24 @@ func broadcastOpener(gf *GlobalFlags) broadcast.Opener {
 }
 
 func operationCatalogs() []operation.Catalog {
-	return []operation.Catalog{schedule.Catalog(), knowledge.Catalog()}
+	return []operation.Catalog{schedule.Catalog(), knowledge.Catalog(), memory.Catalog(), profile.Catalog()}
+}
+
+func operationGroupEnabled(cfg *appconfig.Config, group string) bool {
+	switch group {
+	case memory.GroupName:
+		return cfg.Memory.Enabled
+	case profile.GroupName:
+		return cfg.Profile != nil && cfg.Profile.Enabled
+	}
+	return true
+}
+
+func enabledOperationCatalogs(cfg *appconfig.Config) []operation.Catalog {
+	catalogs := operationCatalogs()
+	return slices.DeleteFunc(catalogs, func(catalog operation.Catalog) bool {
+		return !operationGroupEnabled(cfg, catalog.Group.Name)
+	})
 }
 
 func operationToolNames() []string {
@@ -599,6 +587,9 @@ func operationOpener(gf *GlobalFlags) operation.Opener {
 			return err
 		}
 		input := &commandInput{result: &result, parts: commandParts(descriptor.Needs)}
+		if slices.Contains(input.parts, PartProfile) && (result.Config.Profile == nil || !result.Config.Profile.Enabled) {
+			return errors.New("user profiling is not enabled")
+		}
 		return withApp(cmd, input, func(ctx context.Context, app *App) error {
 			registry, err := app.commandOperations()
 			if err != nil {
@@ -639,6 +630,20 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 			return nil, err
 		}
 	}
+	memoryOperations := memory.UnavailableOperations()
+	if a.memory != nil {
+		memoryOperations, err = memory.NewOperations(&memory.OperationDeps{Service: a.memory, Logger: a.logger})
+		if err != nil {
+			return nil, err
+		}
+	}
+	profileOperations := profile.UnavailableOperations()
+	if a.profile != nil {
+		profileOperations, err = profile.NewOperations(&profile.OperationDeps{Service: a.profile})
+		if err != nil {
+			return nil, err
+		}
+	}
 	effects, err := newChannelEffects(a.db, a.logger)
 	if err != nil {
 		return nil, err
@@ -651,7 +656,7 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	bindings := append(operations.Bindings(), knowledgeOperations.Bindings()...)
+	bindings := slices.Concat(operations.Bindings(), knowledgeOperations.Bindings(), memoryOperations.Bindings(), profileOperations.Bindings())
 	return operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{
 		DB:      a.db,
 		Effects: effects,

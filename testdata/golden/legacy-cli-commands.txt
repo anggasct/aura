@@ -30,9 +30,6 @@ interpreter remove
 mcp list
 mcp trust approve
 mcp trust revoke
-memory forget
-memory inspect
-memory purge
 models circuit-reset
 models circuits
 models routes
@@ -56,13 +53,6 @@ plugin review
 principal forget
 principal list
 principal show
-profile accept
-profile delete
-profile list
-profile reject
-profile review
-profile set
-profile show
 reply
 server
 skills accept

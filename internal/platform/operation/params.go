@@ -115,7 +115,7 @@ func (p *Param) propertyJSON(surface Surface) (json.RawMessage, error) {
 	var err error
 	switch p.Kind {
 	case KindString, KindPath:
-		err = firstError(put("type", "string"), p.putLengths(put))
+		err = firstError(put("type", "string"), p.putLengths(put, surface))
 	case KindInteger:
 		err = firstError(put("type", "integer"), putBound(put, "minimum", p.Minimum), putBound(put, "maximum", p.Maximum))
 	case KindBoolean:
@@ -128,7 +128,7 @@ func (p *Param) propertyJSON(surface Surface) (json.RawMessage, error) {
 		items := newObjectWriter()
 		err = items.putValue("type", "string")
 		if err == nil {
-			err = putLengthsTo(items, p)
+			err = p.putLengths(items.putValue, surface)
 		}
 		if err == nil {
 			err = firstError(put("type", "array"), writer.put("items", items.bytes()), put("maxItems", maxStringsItems))
@@ -160,8 +160,17 @@ func firstError(errs ...error) error {
 	return nil
 }
 
-func (p *Param) putLengths(put func(key string, value any) error) error {
-	minimum, maximum := p.MinLength, p.MaxLength
+func (p *Param) maxLengthOn(surface Surface) int {
+	for i := range p.Bounds {
+		if p.Bounds[i].Surface == surface {
+			return p.Bounds[i].MaxLength
+		}
+	}
+	return p.MaxLength
+}
+
+func (p *Param) putLengths(put func(key string, value any) error, surface Surface) error {
+	minimum, maximum := p.MinLength, p.maxLengthOn(surface)
 	if p.Kind == KindPath {
 		minimum, maximum = 1, maxPathLength
 	}
@@ -174,10 +183,6 @@ func (p *Param) putLengths(put func(key string, value any) error) error {
 		return put("maxLength", maximum)
 	}
 	return nil
-}
-
-func putLengthsTo(writer *objectWriter, p *Param) error {
-	return p.putLengths(writer.putValue)
 }
 
 func putBound(put func(key string, value any) error, key string, bound *int64) error {
@@ -281,7 +286,7 @@ func (p *Param) refusal(detail string) error {
 func (p *Param) canonicalValue(surface Surface, value any) ([]byte, error) {
 	switch p.Kind {
 	case KindString:
-		return p.canonicalString(value, p.MinLength, p.MaxLength)
+		return p.canonicalString(value, p.MinLength, p.maxLengthOn(surface))
 	case KindPath:
 		return p.canonicalString(value, 1, maxPathLength)
 	case KindInteger:
@@ -301,7 +306,7 @@ func (p *Param) canonicalValue(surface Surface, value any) ([]byte, error) {
 		}
 		return encodeJSON(text)
 	case KindStrings:
-		return p.canonicalStrings(value)
+		return p.canonicalStrings(value, surface)
 	case KindJSON:
 		return p.canonicalJSON(value)
 	}
@@ -352,14 +357,14 @@ func (p *Param) canonicalDuration(value any) ([]byte, error) {
 	return encodeJSON(text)
 }
 
-func (p *Param) canonicalStrings(value any) ([]byte, error) {
+func (p *Param) canonicalStrings(value any, surface Surface) ([]byte, error) {
 	items, ok := value.([]any)
 	if !ok || len(items) > maxStringsItems {
 		return nil, p.refusal("must be a list of strings within its limit")
 	}
 	normalized := make([]json.RawMessage, 0, len(items))
 	for _, item := range items {
-		encoded, err := p.canonicalString(item, p.MinLength, p.MaxLength)
+		encoded, err := p.canonicalString(item, p.MinLength, p.maxLengthOn(surface))
 		if err != nil {
 			return nil, err
 		}

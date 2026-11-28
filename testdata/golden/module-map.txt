@@ -75,12 +75,14 @@ internal/modules/
   internal/modules/knowledge/knowledgetest
   internal/modules/mcp
   internal/modules/memory
+  internal/modules/memory/memorytest
   internal/modules/plugin
   internal/modules/plugin/auth
   internal/modules/plugin/auth/authtest
   internal/modules/plugin/connector
   internal/modules/plugin/wire
   internal/modules/profile
+  internal/modules/profile/profiletest
   internal/modules/schedule
   internal/modules/search
   internal/modules/shellexec

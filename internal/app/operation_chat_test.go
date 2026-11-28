@@ -11,6 +11,9 @@ import (
 	"github.com/anggasct/aura/internal/channels/discord"
 	"github.com/anggasct/aura/internal/channels/kit/chatcommand"
 	"github.com/anggasct/aura/internal/channels/telegram"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
+	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
 	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/operation"
@@ -36,7 +39,7 @@ func newChatRigE2E(t *testing.T) *chatRigE2E {
 	if err := operations.bind(chat); err != nil {
 		t.Fatalf("bind: %v", err)
 	}
-	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{turns: &deferredCommandTurns{}, skills: &deferredCommandSkills{}, operations: operations, recorder: wireRecorder{}})
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{turns: &deferredCommandTurns{}, skills: &deferredCommandSkills{}, operations: operations, recorder: wireRecorder{}, catalogs: operationCatalogs()})
 	if err != nil {
 		t.Fatalf("newChatCommandDispatcher: %v", err)
 	}
@@ -188,7 +191,7 @@ func TestDeferredCommandOperationsFailClosedUntilBoundAndBindOnce(t *testing.T) 
 }
 
 func TestChatCommandRegistryListsEveryOperationGroupOnBothMessengers(t *testing.T) {
-	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{turns: &deferredCommandTurns{}, skills: &deferredCommandSkills{}, operations: &deferredCommandOperations{}, recorder: wireRecorder{}})
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{turns: &deferredCommandTurns{}, skills: &deferredCommandSkills{}, operations: &deferredCommandOperations{}, recorder: wireRecorder{}, catalogs: operationCatalogs()})
 	if err != nil {
 		t.Fatalf("newChatCommandDispatcher: %v", err)
 	}
@@ -269,6 +272,36 @@ func TestOperationDescriptionOnAMessengerTurnNamesTheChatCommandsAndNew(t *testi
 					t.Errorf("%s %s description lacks %q:\n%s", origin, kind, want, text)
 				}
 			}
+		}
+	}
+}
+
+func TestChatCommandRegistryAndHelpOfferOnlyTheEnabledGroups(t *testing.T) {
+	cfg := appconfig.Default()
+	cfg.Memory.Enabled = false
+	cfg.Profile = nil
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{
+		turns: &deferredCommandTurns{}, skills: &deferredCommandSkills{}, operations: &deferredCommandOperations{},
+		recorder: wireRecorder{}, catalogs: enabledOperationCatalogs(&cfg),
+	})
+	if err != nil {
+		t.Fatalf("newChatCommandDispatcher: %v", err)
+	}
+	disabled := []string{memory.GroupName, profile.GroupName}
+	for _, channel := range []string{principal.ChannelTelegram, principal.ChannelDiscord} {
+		for _, definition := range dispatcher.Registry().Definitions(channel) {
+			if slices.Contains(disabled, definition.Name) {
+				t.Errorf("%s binds the disabled group %s", channel, definition.Name)
+			}
+		}
+		help := strings.Join(dispatcher.Registry().Help(channel, principal.ClassOwner, true), "\n")
+		for _, name := range disabled {
+			if strings.Contains(help, "/"+name+" ") || strings.Contains(help, "/"+name+"\n") {
+				t.Errorf("%s help offers the disabled group %s:\n%s", channel, name, help)
+			}
+		}
+		if !strings.Contains(help, "/"+schedule.GroupName) {
+			t.Errorf("%s help lacks the always-on %s group:\n%s", channel, schedule.GroupName, help)
 		}
 	}
 }

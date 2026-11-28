@@ -135,39 +135,16 @@ func (s *fakeDocumentStore) GetDocument(_ context.Context, id string) (StoredDoc
 	return record, true, nil
 }
 
-func (s *fakeDocumentStore) ListSessionDocuments(_ context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error) {
+func (s *fakeDocumentStore) ListDocuments(_ context.Context, filter *DocumentFilter) ([]StoredDocument, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []StoredDocument
 	for id := range s.records {
 		record := s.records[id]
-		if record.OwnerID != ownerID || record.SessionID != sessionID {
+		if record.OwnerID != filter.OwnerID || filter.SessionID != "" && record.SessionID != filter.SessionID {
 			continue
 		}
-		out = append(out, record)
-	}
-	slices.SortFunc(out, func(a, b StoredDocument) int {
-		if a.FromSequence != b.FromSequence {
-			if a.FromSequence < b.FromSequence {
-				return -1
-			}
-			return 1
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
-	if len(out) > limit {
-		out = out[:limit]
-	}
-	return out, nil
-}
-
-func (s *fakeDocumentStore) ListOwnerDocuments(_ context.Context, ownerID string, limit int) ([]StoredDocument, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []StoredDocument
-	for id := range s.records {
-		record := s.records[id]
-		if record.OwnerID != ownerID {
+		if len(filter.AgentIDs) > 0 && !slices.Contains(filter.AgentIDs, record.AgentID) {
 			continue
 		}
 		out = append(out, record)
@@ -184,8 +161,8 @@ func (s *fakeDocumentStore) ListOwnerDocuments(_ context.Context, ownerID string
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	if len(out) > limit {
-		out = out[:limit]
+	if len(out) > filter.Limit {
+		out = out[:filter.Limit]
 	}
 	return out, nil
 }
@@ -219,6 +196,25 @@ func (s *fakeDocumentStore) DeleteDocumentsByIDsOwned(_ context.Context, ownerID
 		deleted++
 	}
 	return deleted, nil
+}
+
+func (s *fakeDocumentStore) ListExpiredSummaries(_ context.Context, now time.Time, limit int) ([]StoredDocument, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var expired []StoredDocument
+	for id := range s.records {
+		record := s.records[id]
+		if record.Kind == KindSummary && record.ExpiresAt != nil && record.ExpiresAt.Before(now) {
+			expired = append(expired, record)
+		}
+	}
+	slices.SortFunc(expired, func(a, b StoredDocument) int {
+		if byExpiry := a.ExpiresAt.Compare(*b.ExpiresAt); byExpiry != 0 {
+			return byExpiry
+		}
+		return strings.Compare(a.ID, b.ID)
+	})
+	return expired[:min(len(expired), limit)], nil
 }
 
 func (s *fakeDocumentStore) DeleteExpiredSummaries(_ context.Context, now time.Time, limit int) (int, error) {

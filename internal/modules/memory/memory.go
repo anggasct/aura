@@ -87,13 +87,13 @@ type DocumentStore interface {
 	Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error)
 	DeleteSessionDocuments(ctx context.Context, sessionID string) error
 	DeleteExpiredSummaries(ctx context.Context, now time.Time, limit int) (int, error)
-	ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error)
+	ListExpiredSummaries(ctx context.Context, now time.Time, limit int) ([]StoredDocument, error)
+	ListDocuments(ctx context.Context, filter *DocumentFilter) ([]StoredDocument, error)
 	ListSessionDocumentsByKind(ctx context.Context, ownerID, sessionID, kind string, limit int) ([]StoredDocument, error)
 	ListSessionDocumentsByKindInRange(ctx context.Context, ownerID, sessionID, kind string, from, to int64, limit int) ([]StoredDocument, error)
 	DeleteSessionSummaries(ctx context.Context, ownerID, sessionID string) (int, error)
 	DeleteOtherSummaries(ctx context.Context, ownerID, sessionID, keepID string) (int, error)
 	GetDocument(ctx context.Context, id string) (StoredDocument, bool, error)
-	ListOwnerDocuments(ctx context.Context, ownerID string, limit int) ([]StoredDocument, error)
 	CountSessionDocuments(ctx context.Context, sessionID string) (int, error)
 	DeleteDocumentsByIDsOwned(ctx context.Context, ownerID string, ids []string) (int, error)
 }
@@ -113,6 +113,13 @@ type StoredDocument struct {
 	AgentID       string
 	CreatedAt     time.Time
 	ExpiresAt     *time.Time
+}
+
+type DocumentFilter struct {
+	OwnerID   string
+	SessionID string
+	AgentIDs  []string
+	Limit     int
 }
 
 type StoredQuery struct {

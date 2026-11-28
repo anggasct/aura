@@ -696,6 +696,164 @@
       "untrusted_output": false
     },
     {
+      "key": "aura_memory_forget@v1",
+      "name": "aura_memory_forget",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Preview or delete recall documents\n\nDeletes recall documents of your own persona: of one session, one document by id, or the ones a query finds; exactly one of session, id and query is required. The owner sees the documents that would be deleted on a card and the delete removes exactly those. The card lists up to 20 documents with their session and persona, and a card that cannot list every document is refused instead of shortened: set limit to a smaller number and delete in batches. Memory of another persona is out of reach and conversation history is not touched.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/memory.forget/v1",
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "forget every document of this session id"
+          },
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "forget this document id"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "forget the documents this text finds"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "maximum documents in the preview and the delete",
+            "default": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": true,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "session",
+        "id",
+        "query",
+        "limit"
+      ],
+      "has_validator": false,
+      "risk": "destructive",
+      "operation": "memory.forget",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_memory_inspect@v1",
+      "name": "aura_memory_inspect",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "List recall documents with their provenance\n\nLists what your persona remembers from past conversations, with session, range, trust label and expiry; memory of another persona is never listed. The content comes from conversations and tool results, not from the owner alone.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/memory.inspect/v1",
+        "type": "object",
+        "properties": {
+          "session": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "only the documents of this session id"
+          },
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "only the documents this text finds"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 200,
+            "description": "maximum documents to list",
+            "default": 50
+          }
+        },
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": [
+        "session",
+        "query",
+        "limit"
+      ],
+      "has_validator": false,
+      "risk": "read",
+      "operation": "memory.inspect",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": true
+    },
+    {
+      "key": "aura_memory_purge@v1",
+      "name": "aura_memory_purge",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Preview or delete expired summary documents\n\nDeletes summary documents whose retention period has already ended, for every persona; recall no longer returns them and the server runs the same cleanup on a timer. It deletes nothing that is still within its retention. The preview lists the documents that would be deleted and the delete removes exactly those.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/memory.purge/v1",
+        "type": "object",
+        "properties": {
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "description": "maximum expired documents to delete",
+            "default": 100
+          }
+        },
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": true,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "limit"
+      ],
+      "has_validator": false,
+      "risk": "destructive",
+      "operation": "memory.purge",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
       "key": "aura_operation_search@v1",
       "name": "aura_operation_search",
       "version": "v1",
@@ -741,6 +899,296 @@
       "fresh_approval": false,
       "owner_notice": false,
       "untrusted_output": false
+    },
+    {
+      "key": "aura_profile_delete@v1",
+      "name": "aura_profile_delete",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Preview or delete a profile fact\n\nDeletes a profile fact so it is never injected again and keeps a tombstone of the deletion. The preview shows the whole fact, key and value, and the delete removes exactly that fact; a fact too long to show whole is deleted from the CLI or chat command instead. A fact that is already deleted needs nothing.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/profile.delete/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "fact id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": true,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "destructive",
+      "operation": "profile.delete",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_profile_list@v1",
+      "name": "aura_profile_list",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "List profile facts\n\nLists the learned and owner-set facts with status, confidence, origin and the whole value. The values come from conversations, not from the owner alone.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/profile.list/v1",
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "preference",
+              "tool",
+              "language",
+              "timezone",
+              "project",
+              "habit"
+            ],
+            "description": "only facts of this category"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "candidate",
+              "active",
+              "rejected",
+              "expired",
+              "deleted"
+            ],
+            "description": "only facts in this status"
+          }
+        },
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": [
+        "category",
+        "status"
+      ],
+      "has_validator": false,
+      "risk": "read",
+      "operation": "profile.list",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": true
+    },
+    {
+      "key": "aura_profile_reject@v1",
+      "name": "aura_profile_reject",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Reject a profile fact\n\nRejects a fact so it is no longer injected into owner turns.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/profile.reject/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "fact id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "profile.reject",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_profile_review@v1",
+      "name": "aura_profile_review",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "List facts that need review, conflicts first\n\nLists candidates and unverified active facts that wait for the owner, the ones that conflict with a verified fact first, with origin and the whole value. The values come from conversations, not from the owner alone.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/profile.review/v1",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": null,
+      "has_validator": false,
+      "risk": "read",
+      "operation": "profile.review",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": true
+    },
+    {
+      "key": "aura_profile_set@v1",
+      "name": "aura_profile_set",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Set a profile fact\n\nRecords a fact with origin agent. It is not verified and is not injected into owner turns: it waits in the owner's review with the learned facts until the owner accepts it. You cannot verify a fact yourself. The key takes up to 32 and the value up to 200 printable characters on one line, with no control, direction or prompt-marker characters, so the owner can read the whole fact on the review screen.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/profile.set/v1",
+        "type": "object",
+        "properties": {
+          "category": {
+            "type": "string",
+            "enum": [
+              "preference",
+              "tool",
+              "language",
+              "timezone",
+              "project",
+              "habit"
+            ],
+            "description": "fact category"
+          },
+          "key": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32,
+            "description": "fact key"
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "description": "fact value"
+          },
+          "expires_at": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "RFC3339 expiry in the future"
+          }
+        },
+        "required": [
+          "category",
+          "key",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "category",
+        "key",
+        "value",
+        "expires_at"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "profile.set",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_profile_show@v1",
+      "name": "aura_profile_show",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Show one profile fact with its provenance\n\nShows a fact with its status, origin, conflicts, the whole value and the evidence it was learned from. The value comes from conversations, not from the owner alone.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/profile.show/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "fact id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "read",
+      "operation": "profile.show",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": true
     },
     {
       "key": "code_execute@v1",
@@ -1867,7 +2315,151 @@
       }
     },
     {
+      "tool_name": "aura_memory_forget",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_memory_inspect",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_memory_purge",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
       "tool_name": "aura_operation_search",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_profile_delete",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_profile_list",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_profile_reject",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_profile_review",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_profile_set",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_profile_show",
       "tool_version": "v1",
       "requires_approval": false,
       "required_capabilities": null,

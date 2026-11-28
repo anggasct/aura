@@ -9,7 +9,6 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/profile"
-	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
@@ -47,8 +46,7 @@ func writeFileForTest(path, content string) error {
 func runProfileCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &GlobalFlags{ConfigPath: cfg}
-	cmd := profile.Commands(profileOpener(gf))[0]
+	cmd := operationGroupCommand(&GlobalFlags{ConfigPath: cfg}, "profile")
 	out := &bytes.Buffer{}
 	errOut := &bytes.Buffer{}
 	cmd.SetOut(out)
@@ -63,8 +61,8 @@ func TestProfileCLIListEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	if strings.TrimSpace(out) != "no facts" {
-		t.Errorf("out = %q", out)
+	if lines := strings.Split(strings.TrimSpace(out), "\n"); len(lines) != 1 || !strings.HasPrefix(lines[0], "ID\t") {
+		t.Errorf("out = %q, want only the table header", out)
 	}
 }
 
@@ -82,7 +80,7 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("show: %v", err)
 	}
-	for _, want := range []string{"category: language", "key: backend", "origin: owner", "verified"} {
+	for _, want := range []string{"category: language", "key: backend", "value: Go", "origin: owner", "verified: true"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("show missing %q:\n%s", want, out)
 		}
@@ -92,6 +90,10 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 		t.Errorf("list active = %q, %v", out, err)
 	}
 	candidate := seedProfileCandidate(t, cfg)
+	out, err = runProfileCommand(t, cfg, "show", candidate)
+	if err != nil || !strings.Contains(out, "evidence:\n  - event=evt-prof-1 model=p/m prompt=v1\n") {
+		t.Errorf("show of a learned fact = %q, %v, want one evidence item per line", out, err)
+	}
 	out, err = runProfileCommand(t, cfg, "review")
 	if err != nil || !strings.Contains(out, candidate) {
 		t.Errorf("review = %q, %v", out, err)
@@ -100,26 +102,26 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 		t.Errorf("review missing candidate")
 	}
 	out, err = runProfileCommand(t, cfg, "accept", candidate)
-	if err != nil || strings.TrimSpace(out) != "accepted: "+candidate {
+	if err != nil || !strings.HasPrefix(out, "accepted: "+candidate+"\n") || !strings.Contains(out, "value: neovim") {
 		t.Errorf("accept = %q, %v", out, err)
 	}
 	rival := seedProfileConflictingCandidate(t, cfg)
 	out, err = runProfileCommand(t, cfg, "review")
-	if err != nil || !strings.Contains(out, "conflicts-with="+id) {
+	if err != nil || !strings.Contains(out, "conflict\t"+rival) || !strings.Contains(out, id) {
 		t.Errorf("review conflict = %q, %v", out, err)
 	}
-	_ = rival
 	out, err = runProfileCommand(t, cfg, "reject", rival)
 	if err != nil || strings.TrimSpace(out) != "rejected: "+rival {
 		t.Errorf("reject = %q, %v", out, err)
 	}
 	out, err = runProfileCommand(t, cfg, "delete", id)
-	if err == nil {
-		t.Errorf("delete guard = %q, want usage error", out)
-	} else if !command.IsUsageError(err) {
-		t.Errorf("delete guard err = %v (%q), want usage error", err, out)
+	if err != nil || !strings.Contains(out, "dry-run: would delete") || !strings.Contains(out, id) {
+		t.Errorf("delete without --apply = %q, %v, want a preview", out, err)
 	}
-	out, err = runProfileCommand(t, cfg, "delete", id, "--force")
+	if shown, err := runProfileCommand(t, cfg, "show", id); err != nil || !strings.Contains(shown, "status: active") {
+		t.Errorf("the preview changed the fact: %q, %v", shown, err)
+	}
+	out, err = runProfileCommand(t, cfg, "delete", id, "--apply")
 	if err != nil || strings.TrimSpace(out) != "deleted: "+id {
 		t.Errorf("delete = %q, %v", out, err)
 	}

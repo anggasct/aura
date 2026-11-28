@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/telemetry"
 )
@@ -30,8 +31,11 @@ type Deps struct {
 	Logger       *slog.Logger
 }
 
+var _ operation.Provider = (*Module)(nil)
+
 type Module struct {
 	service      *Service
+	operations   *Operations
 	extractor    *Extractor
 	health       *profileHealth
 	checkTimeout time.Duration
@@ -96,6 +100,10 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
+	mod.operations, err = NewOperations(&OperationDeps{Service: mod.service})
+	if err != nil {
+		return nil, err
+	}
 	llm, producer, err := resolveProfilingLLM(ctx, deps.ModelConfig, deps.ModelRoutes, deps.Models)
 	if err != nil {
 		logger.WarnContext(ctx, "profile extraction unavailable", "component", "profile", "error", err)
@@ -134,6 +142,13 @@ func resolveProfilingLLM(ctx context.Context, models model.Config, routes model.
 		return nil, ModelProducer{}, err
 	}
 	return llm, producer, nil
+}
+
+func (m *Module) Bindings() []operation.Binding {
+	if m == nil || m.operations == nil {
+		return nil
+	}
+	return m.operations.Bindings()
 }
 
 func (m *Module) Service() *Service {

@@ -146,10 +146,18 @@ func (d *Descriptor) paramsOn(surface Surface) []*Param {
 }
 
 func (d *Descriptor) OutputFieldsOn(surface Surface) []string {
+	return fieldNamesOn(d.Output.Fields, surface)
+}
+
+func (d *Descriptor) OutputHeaderOn(surface Surface) []string {
+	return fieldNamesOn(d.Output.Header, surface)
+}
+
+func fieldNamesOn(fields []OutputField, surface Surface) []string {
 	var names []string
-	for i := range d.Output.Fields {
-		if d.Output.Fields[i].on(surface) {
-			names = append(names, d.Output.Fields[i].Name)
+	for i := range fields {
+		if fields[i].on(surface) {
+			names = append(names, fields[i].Name)
 		}
 	}
 	return names

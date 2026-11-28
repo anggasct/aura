@@ -39,6 +39,39 @@ func Fail[C fault.Code](code C, cause error) error {
 	return fault.Wrap(ErrorCodeFailed, string(code), cause)
 }
 
+type renderedOnce[C fault.Code] struct {
+	cause error
+}
+
+func (e *renderedOnce[C]) Error() string { return e.SafeDetail() }
+
+func (e *renderedOnce[C]) SafeDetail() string {
+	var coded *fault.Error[C]
+	if errors.As(e.cause, &coded) {
+		return coded.Detail
+	}
+	return ""
+}
+
+func (e *renderedOnce[C]) Unwrap() error { return e.cause }
+
+func RenderedOnce[C fault.Code](cause error) error {
+	return &renderedOnce[C]{cause: cause}
+}
+
+func ModuleFailure[C fault.Code](err error) error {
+	if err == nil {
+		return nil
+	}
+	if _, coded := fault.CodeOf[ErrorCode](err); coded {
+		return err
+	}
+	if code, coded := fault.CodeOf[C](err); coded {
+		return Fail(code, RenderedOnce[C](err))
+	}
+	return err
+}
+
 type notPerformedError struct {
 	code  string
 	cause error

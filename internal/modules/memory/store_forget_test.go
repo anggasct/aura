@@ -25,14 +25,14 @@ func TestMemoryStore_OwnedDeletesAreFTSConsistent(t *testing.T) {
 	seedOwnedDocument(t, s, "mem-b1", "owner-1", "sess-b", "beta recording one", 1)
 	seedOwnedDocument(t, s, "mem-c1", "owner-2", "sess-c", "alpha recording foreign", 1)
 
-	owned, err := s.ListSessionDocuments(ctx, "owner-1", "sess-a", 10)
+	owned, err := s.ListDocuments(ctx, &DocumentFilter{OwnerID: "owner-1", SessionID: "sess-a", Limit: 10})
 	if err != nil || len(owned) != 2 {
 		t.Fatalf("list sess-a = %d, %v; want 2", len(owned), err)
 	}
 	if total, err := s.CountSessionDocuments(ctx, "sess-a"); err != nil || total != 2 {
 		t.Fatalf("count sess-a = %d, %v; want 2", total, err)
 	}
-	owned, err = s.ListSessionDocuments(ctx, "owner-1", "sess-a", 10)
+	owned, err = s.ListDocuments(ctx, &DocumentFilter{OwnerID: "owner-1", SessionID: "sess-a", Limit: 10})
 	if err != nil || len(owned) != 2 {
 		t.Fatalf("list sess-a = %d, %v; want 2", len(owned), err)
 	}
@@ -68,7 +68,7 @@ func TestMemoryStore_OwnedDeletesLeaveForeignInSameSession(t *testing.T) {
 	seedOwnedDocument(t, s, "mem-own", "owner-1", "sess-mixed", "alpha owned recording", 1)
 	seedOwnedDocument(t, s, "mem-foreign", "owner-2", "sess-mixed", "alpha foreign recording", 2)
 
-	owned, err := s.ListSessionDocuments(ctx, "owner-1", "sess-mixed", 10)
+	owned, err := s.ListDocuments(ctx, &DocumentFilter{OwnerID: "owner-1", SessionID: "sess-mixed", Limit: 10})
 	if err != nil || len(owned) != 1 {
 		t.Fatalf("list owned = %d, %v; want 1", len(owned), err)
 	}
@@ -107,7 +107,7 @@ func TestMemoryStore_GetListOwnerAndDeleteByIDs(t *testing.T) {
 	if _, found, err := s.GetDocument(ctx, "mem-missing"); err != nil || found {
 		t.Errorf("missing doc = %v, %v; want absent", found, err)
 	}
-	owned, err := s.ListOwnerDocuments(ctx, "owner-1", 10)
+	owned, err := s.ListDocuments(ctx, &DocumentFilter{OwnerID: "owner-1", Limit: 10})
 	if err != nil || len(owned) != 2 {
 		t.Fatalf("list owner = %d, %v; want 2", len(owned), err)
 	}
@@ -131,13 +131,13 @@ func TestMemoryStore_GetListOwnerAndDeleteByIDs(t *testing.T) {
 func TestMemoryStore_RejectsBadOwnedArguments(t *testing.T) {
 	_, s := newTestSQLiteStore(t)
 	ctx := t.Context()
-	if _, err := s.ListSessionDocuments(ctx, "", "sess-a", 10); err == nil {
+	if _, err := s.ListDocuments(ctx, &DocumentFilter{SessionID: "sess-a", Limit: 10}); err == nil {
 		t.Error("empty owner accepted")
 	}
-	if _, err := s.ListSessionDocuments(ctx, "owner-1", "sess-a", 0); err == nil {
+	if _, err := s.ListDocuments(ctx, &DocumentFilter{OwnerID: "owner-1", SessionID: "sess-a"}); err == nil {
 		t.Error("non-positive limit accepted")
 	}
-	if _, err := s.ListOwnerDocuments(ctx, "", 10); err == nil {
+	if _, err := s.ListDocuments(ctx, nil); err == nil {
 		t.Error("empty owner accepted")
 	}
 	if _, err := s.DeleteDocumentsByIDsOwned(ctx, "owner-1", []string{""}); err == nil {

@@ -305,26 +305,70 @@ func (s *SQLiteStore) DeleteExpiredSummaries(ctx context.Context, now time.Time,
 	return int(affected), nil
 }
 
-func (s *SQLiteStore) ListSessionDocuments(ctx context.Context, ownerID, sessionID string, limit int) ([]StoredDocument, error) {
+func (s *SQLiteStore) ListExpiredSummaries(ctx context.Context, now time.Time, limit int) ([]StoredDocument, error) {
 	if s == nil || s.db == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
 	}
-	if ownerID == "" || sessionID == "" {
-		return nil, fault.New(ErrorCodeInvalidArgument, "memory owner and session must not be empty")
-	}
-	if limit <= 0 || limit > maxMemoryListLimit {
-		return nil, fault.New(ErrorCodeInvalidArgument, "memory list limit is out of bounds")
+	if limit <= 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "list limit must be positive")
 	}
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
 		`SELECT `+selectMemoryDocumentColumns+` FROM memory_document d
-		 WHERE d.owner_id = ? AND d.session_id = ?
-		 ORDER BY d.source_from_sequence, d.id LIMIT ?`,
-		ownerID, sessionID, limit)
+		WHERE d.kind = ? AND d.expires_at IS NOT NULL AND d.expires_at <= ?
+		ORDER BY d.expires_at, d.id LIMIT ?`, KindSummary, sqlite.FormatTime(now.UTC()), limit)
 	if err != nil {
-		return nil, sqlite.Classify(fmt.Errorf("list session documents: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("list expired summaries: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
-	documents := make([]StoredDocument, 0, limit)
+	var documents []StoredDocument
+	for rows.Next() {
+		document, err := scanMemoryDocument(rows)
+		if err != nil {
+			return nil, err
+		}
+		documents = append(documents, document)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, sqlite.Classify(fmt.Errorf("list expired summaries: %w", err))
+	}
+	return documents, nil
+}
+
+func (s *SQLiteStore) ListDocuments(ctx context.Context, filter *DocumentFilter) ([]StoredDocument, error) {
+	if s == nil || s.db == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
+	}
+	if filter == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "document filter must not be nil")
+	}
+	if filter.OwnerID == "" {
+		return nil, fault.New(ErrorCodeInvalidArgument, "memory owner must not be empty")
+	}
+	if filter.Limit <= 0 || filter.Limit > maxMemoryListLimit {
+		return nil, fault.New(ErrorCodeInvalidArgument, "memory list limit is out of bounds")
+	}
+	query := `SELECT ` + selectMemoryDocumentColumns + ` FROM memory_document d WHERE d.owner_id = ?`
+	args := []any{filter.OwnerID}
+	if filter.SessionID != "" {
+		query += ` AND d.session_id = ?`
+		args = append(args, filter.SessionID)
+	}
+	if len(filter.AgentIDs) > 0 {
+		readable, err := json.Marshal(filter.AgentIDs)
+		if err != nil {
+			return nil, fault.New(ErrorCodeInvalidArgument, "list personas are not encodable")
+		}
+		query += ` AND d.agent_id IN (SELECT value FROM json_each(?))`
+		args = append(args, string(readable))
+	}
+	query += ` ORDER BY d.session_id, d.source_from_sequence, d.id LIMIT ?`
+	args = append(args, filter.Limit)
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, sqlite.Classify(fmt.Errorf("list documents: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	documents := make([]StoredDocument, 0, filter.Limit)
 	for rows.Next() {
 		document, err := scanMemoryDocument(rows)
 		if err != nil {
@@ -334,7 +378,7 @@ func (s *SQLiteStore) ListSessionDocuments(ctx context.Context, ownerID, session
 		documents = append(documents, document)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, sqlite.Classify(fmt.Errorf("list session documents: %w", err))
+		return nil, sqlite.Classify(fmt.Errorf("list documents: %w", err))
 	}
 	return documents, nil
 }
@@ -518,40 +562,6 @@ func (s *SQLiteStore) GetDocument(ctx context.Context, id string) (StoredDocumen
 		return StoredDocument{}, false, err
 	}
 	return document, true, nil
-}
-
-func (s *SQLiteStore) ListOwnerDocuments(ctx context.Context, ownerID string, limit int) ([]StoredDocument, error) {
-	if s == nil || s.db == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
-	}
-	if ownerID == "" {
-		return nil, fault.New(ErrorCodeInvalidArgument, "memory owner must not be empty")
-	}
-	if limit <= 0 || limit > maxMemoryListLimit {
-		return nil, fault.New(ErrorCodeInvalidArgument, "memory list limit is out of bounds")
-	}
-	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx,
-		`SELECT `+selectMemoryDocumentColumns+` FROM memory_document d
-		 WHERE d.owner_id = ?
-		 ORDER BY d.session_id, d.source_from_sequence, d.id LIMIT ?`,
-		ownerID, limit)
-	if err != nil {
-		return nil, sqlite.Classify(fmt.Errorf("list owner documents: %w", err))
-	}
-	defer func() { _ = rows.Close() }()
-	documents := make([]StoredDocument, 0, limit)
-	for rows.Next() {
-		document, err := scanMemoryDocument(rows)
-		if err != nil {
-			_ = rows.Close()
-			return nil, err
-		}
-		documents = append(documents, document)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, sqlite.Classify(fmt.Errorf("list owner documents: %w", err))
-	}
-	return documents, nil
 }
 
 func (s *SQLiteStore) CountSessionDocuments(ctx context.Context, sessionID string) (int, error) {

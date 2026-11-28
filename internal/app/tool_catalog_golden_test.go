@@ -18,6 +18,8 @@ import (
 	"github.com/anggasct/aura/internal/modules/filesystem"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/memory"
+	"github.com/anggasct/aura/internal/modules/profile"
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/modules/shellexec"
@@ -154,7 +156,7 @@ func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
 	if err != nil {
 		t.Fatalf("schedule.NewOperations: %v", err)
 	}
-	bindings := append(operations.Bindings(), knowledge.UnavailableOperations().Bindings()...)
+	bindings := slices.Concat(operations.Bindings(), knowledge.UnavailableOperations().Bindings(), memory.UnavailableOperations().Bindings(), profile.UnavailableOperations().Bindings())
 	registry, err := operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{DB: db, Effects: effects, Tools: broker})
 	if err != nil {
 		t.Fatalf("operation.NewRegistry: %v", err)
@@ -183,8 +185,8 @@ func TestToolCatalogGolden(t *testing.T) {
 	registerOperationToolProvider(t, broker)
 
 	definitions := broker.Definitions()
-	if len(definitions) != 32 {
-		t.Fatalf("registered definitions = %d, want 32", len(definitions))
+	if len(definitions) != 41 {
+		t.Fatalf("registered definitions = %d, want 41", len(definitions))
 	}
 
 	catalog := toolCatalog{}

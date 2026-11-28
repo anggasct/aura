@@ -10,6 +10,34 @@ import (
 	"time"
 )
 
+type forgetScope struct {
+	owner   string
+	session string
+	id      string
+	query   string
+	limit   int
+	apply   bool
+}
+
+func forgetWith(ctx context.Context, service *Service, scope *forgetScope) ([]StoredDocument, int, error) {
+	query := &DocumentQuery{OwnerID: scope.owner, SessionID: scope.session, DocumentID: scope.id, Terms: scope.query, Limit: scope.limit}
+	var preview []StoredDocument
+	var err error
+	switch {
+	case scope.id != "":
+		preview, err = service.PreviewForgetByID(ctx, query)
+	case scope.query != "":
+		preview, err = service.PreviewForgetByQuery(ctx, query)
+	default:
+		preview, err = service.PreviewForgetBySession(ctx, query)
+	}
+	if err != nil || !scope.apply {
+		return preview, 0, err
+	}
+	deleted, err := service.Forget(ctx, scope.owner, preview)
+	return preview, deleted, err
+}
+
 func seedStoredDocument(t *testing.T, s *Service, id, owner, session, content string, seq int64) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -30,7 +58,7 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	seedStoredDocument(t, service, "mem-b1", "owner-1", "sess-b", "beta recording one", 1)
 	seedStoredDocument(t, service, "mem-c1", "owner-2", "sess-c", "alpha foreign recording", 1)
 
-	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, false)
+	preview, deleted, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-a", limit: 10, apply: false})
 	if err != nil {
 		t.Fatalf("dry-run: %v", err)
 	}
@@ -41,7 +69,7 @@ func TestForgetBySessionDeletesRowsAndFTS(t *testing.T) {
 	if err != nil || len(afterDry) != 2 {
 		t.Fatalf("dry-run wrote: %d, %v", len(afterDry), err)
 	}
-	preview, deleted, err = service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, true)
+	preview, deleted, err = forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-a", limit: 10, apply: true})
 	if err != nil || deleted != 2 || len(preview) != 2 {
 		t.Fatalf("apply = %d, %d, %v; want 2, 2", deleted, len(preview), err)
 	}
@@ -64,7 +92,7 @@ func TestForgetBySessionApplyMatchesPreviewedSet(t *testing.T) {
 	for seq := int64(1); seq <= 12; seq++ {
 		seedStoredDocument(t, service, fmt.Sprintf("mem-a%02d", seq), "owner-1", "sess-a", "alpha recording", seq)
 	}
-	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-a", 10, true)
+	preview, deleted, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-a", limit: 10, apply: true})
 	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
@@ -93,11 +121,11 @@ func TestForgetByIDAndQueryScoped(t *testing.T) {
 	seedStoredDocument(t, service, "mem-a1", "owner-1", "sess-a", "alpha recording one", 1)
 	seedStoredDocument(t, service, "mem-a2", "owner-1", "sess-a", "alpha recording two", 2)
 
-	preview, deleted, err := service.ForgetByID(t.Context(), "owner-1", "mem-a1", false)
+	preview, deleted, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", id: "mem-a1", apply: false})
 	if err != nil || deleted != 0 || len(preview) != 1 {
 		t.Fatalf("id dry-run = %d, %d, %v", deleted, len(preview), err)
 	}
-	_, deleted, err = service.ForgetByID(t.Context(), "owner-1", "mem-a1", true)
+	_, deleted, err = forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", id: "mem-a1", apply: true})
 	if err != nil || deleted != 1 {
 		t.Fatalf("id apply = %d, %v", deleted, err)
 	}
@@ -105,11 +133,11 @@ func TestForgetByIDAndQueryScoped(t *testing.T) {
 	if err != nil || len(remaining) != 1 || remaining[0].ID != "mem-a2" {
 		t.Errorf("remaining = %+v, %v; want mem-a2", remaining, err)
 	}
-	preview, deleted, err = service.ForgetByQuery(t.Context(), "owner-1", "sess-a", "alpha", 10, false)
+	preview, deleted, err = forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-a", query: "alpha", limit: 10, apply: false})
 	if err != nil || deleted != 0 || len(preview) != 1 {
 		t.Fatalf("query dry-run = %d, %d, %v", deleted, len(preview), err)
 	}
-	_, deleted, err = service.ForgetByQuery(t.Context(), "owner-1", "sess-a", "alpha", 10, true)
+	_, deleted, err = forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-a", query: "alpha", limit: 10, apply: true})
 	if err != nil || deleted != 1 {
 		t.Fatalf("query apply = %d, %v", deleted, err)
 	}
@@ -124,17 +152,17 @@ func TestForgetCrossOwnerRejectedWithZeroWrites(t *testing.T) {
 	seedStoredDocument(t, service, "mem-a1", "owner-1", "sess-a", "alpha recording one", 1)
 	seedStoredDocument(t, service, "mem-c1", "owner-2", "sess-c", "alpha foreign recording", 1)
 
-	if _, _, err := service.ForgetBySession(t.Context(), "owner-2", "sess-a", 10, false); err == nil {
+	if _, _, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-2", session: "sess-a", limit: 10, apply: false}); err == nil {
 		t.Error("cross-owner session preview accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("session code = %v, %v; want forbidden", code, ok)
 	}
-	if _, _, err := service.ForgetBySession(t.Context(), "owner-2", "sess-a", 10, true); err == nil {
+	if _, _, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-2", session: "sess-a", limit: 10, apply: true}); err == nil {
 		t.Error("cross-owner session apply accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("session apply code = %v, %v", code, ok)
 	}
-	if _, _, err := service.ForgetByID(t.Context(), "owner-2", "mem-a1", true); err == nil {
+	if _, _, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-2", id: "mem-a1", apply: true}); err == nil {
 		t.Error("cross-owner id accepted")
 	} else if code, ok := fault.CodeOf[ErrorCode](err); !ok || code != ErrorCodeForbidden {
 		t.Errorf("id code = %v, %v", code, ok)
@@ -149,15 +177,15 @@ func TestForgetNonexistentIsEmptyWithoutError(t *testing.T) {
 	service := testService()
 	seedStoredDocument(t, service, "mem-a1", "owner-1", "sess-a", "alpha recording one", 1)
 
-	preview, deleted, err := service.ForgetBySession(t.Context(), "owner-1", "sess-missing", 10, true)
+	preview, deleted, err := forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-missing", limit: 10, apply: true})
 	if err != nil || deleted != 0 || len(preview) != 0 {
 		t.Errorf("missing session = %d, %d, %v; want empty", deleted, len(preview), err)
 	}
-	preview, deleted, err = service.ForgetByID(t.Context(), "owner-1", "mem-missing", true)
+	preview, deleted, err = forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", id: "mem-missing", apply: true})
 	if err != nil || deleted != 0 || len(preview) != 0 {
 		t.Errorf("missing id = %d, %d, %v", deleted, len(preview), err)
 	}
-	preview, deleted, err = service.ForgetByQuery(t.Context(), "owner-1", "sess-a", "zebra", 10, true)
+	preview, deleted, err = forgetWith(t.Context(), service, &forgetScope{owner: "owner-1", session: "sess-a", query: "zebra", limit: 10, apply: true})
 	if err != nil || deleted != 0 || len(preview) != 0 {
 		t.Errorf("missing query = %d, %d, %v", deleted, len(preview), err)
 	}
@@ -184,7 +212,7 @@ func TestInspectProvenanceAndScreening(t *testing.T) {
 	if _, err := service.documents.UpsertDocument(t.Context(), leaky); err != nil {
 		t.Fatalf("seed leaky: %v", err)
 	}
-	documents, err := service.Inspect(t.Context(), "owner-1", "sess-a", "", 10)
+	documents, err := service.Inspect(t.Context(), &DocumentQuery{OwnerID: "owner-1", SessionID: "sess-a", Terms: "", Limit: 10})
 	if err != nil {
 		t.Fatalf("Inspect(): %v", err)
 	}
@@ -212,11 +240,11 @@ func TestInspectProvenanceAndScreening(t *testing.T) {
 	if found.ExpiresAt == nil || !found.ExpiresAt.After(now) {
 		t.Errorf("expiry = %+v", found.ExpiresAt)
 	}
-	queried, err := service.Inspect(t.Context(), "owner-1", "sess-a", "alpha", 10)
+	queried, err := service.Inspect(t.Context(), &DocumentQuery{OwnerID: "owner-1", SessionID: "sess-a", Terms: "alpha", Limit: 10})
 	if err != nil || len(queried) != 1 || queried[0].ID != "mem-a1" {
 		t.Errorf("query inspect = %+v, %v", queried, err)
 	}
-	foreign, err := service.Inspect(t.Context(), "owner-2", "sess-a", "", 10)
+	foreign, err := service.Inspect(t.Context(), &DocumentQuery{OwnerID: "owner-2", SessionID: "sess-a", Terms: "", Limit: 10})
 	if err != nil || len(foreign) != 0 {
 		t.Errorf("cross-owner inspect = %d, %v; want none", len(foreign), err)
 	}

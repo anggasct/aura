@@ -9,7 +9,7 @@ import (
 
 	appconfig "github.com/anggasct/aura/internal/app/config"
 	"github.com/anggasct/aura/internal/modules/memory"
-	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/turn"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
@@ -45,8 +45,7 @@ children:
 func runMemoryCommand(t *testing.T, cfg string, args ...string) (string, error) {
 	t.Helper()
 	restoreDefaultLogger(t)
-	gf := &GlobalFlags{ConfigPath: cfg}
-	cmd := memory.Commands(memoryOpener(gf))[0]
+	cmd := operationGroupCommand(&GlobalFlags{ConfigPath: cfg}, "memory")
 	out := &bytes.Buffer{}
 	cmd.SetOut(out)
 	cmd.SetErr(&bytes.Buffer{})
@@ -127,7 +126,7 @@ func TestMemoryCLIForgetSessionDryRunThenApply(t *testing.T) {
 		t.Fatalf("apply = %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
-	if err != nil || !strings.Contains(out, "no documents") {
+	if err != nil || strings.Contains(out, "mem-a") {
 		t.Errorf("sess-a survives: %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-b")
@@ -155,12 +154,12 @@ func TestMemoryCLIForgetSessionApplyMatchesPreview(t *testing.T) {
 		t.Fatalf("inspect: %v", err)
 	}
 	for _, gone := range []string{"mem-a01", "mem-a05", "mem-a10"} {
-		if strings.Contains(out, gone+" ") {
+		if strings.Contains(out, gone+"\t") {
 			t.Errorf("prepared doc %s still present: %q", gone, out)
 		}
 	}
 	for _, kept := range []string{"mem-a11", "mem-a12"} {
-		if !strings.Contains(out, kept+" ") {
+		if !strings.Contains(out, kept+"\t") {
 			t.Errorf("unpreviewed doc %s missing: %q", kept, out)
 		}
 	}
@@ -201,7 +200,7 @@ func TestMemoryCLIForgetByIDAndQuery(t *testing.T) {
 		t.Fatalf("query apply = %q, %v", out, err)
 	}
 	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
-	if err != nil || !strings.Contains(out, "no documents") {
+	if err != nil || strings.Contains(out, "mem-a") {
 		t.Errorf("sess-a not empty: %q, %v", out, err)
 	}
 }
@@ -214,7 +213,7 @@ func TestMemoryCLIInspectProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("inspect: %v", err)
 	}
-	for _, want := range []string{"mem-a1", "session=sess-a", "kind=event_text", "range=", "trust=", "prompt=", "expires="} {
+	for _, want := range []string{"mem-a1", "SESSION", "sess-a", "event_text", "FROM", "TO", "TRUST", "owner_input", "PROMPT", "EXPIRES", "never"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("inspect missing %q in %q", want, out)
 		}
@@ -231,24 +230,47 @@ func TestMemoryCLIPurgeBounded(t *testing.T) {
 	seedMemorySummary(t, cfg, "mem-s1", principal.OwnerID, "sess-a", past, 1)
 	seedMemorySummary(t, cfg, "mem-s2", principal.OwnerID, "sess-a", past, 2)
 
-	out, err := runMemoryCommand(t, cfg, "purge", "--limit", "1")
+	out, err := runMemoryCommand(t, cfg, "purge", "--limit", "1", "--apply")
 	if err != nil || strings.TrimSpace(out) != "purged: 1" {
 		t.Fatalf("purge 1 = %q, %v", out, err)
 	}
-	out, err = runMemoryCommand(t, cfg, "purge", "--limit", "10")
+	out, err = runMemoryCommand(t, cfg, "purge", "--limit", "10", "--apply")
 	if err != nil || strings.TrimSpace(out) != "purged: 1" {
 		t.Fatalf("purge rest = %q, %v", out, err)
+	}
+}
+
+func TestMemoryCLIPurgeListsWhatItWouldDeleteUntilApplied(t *testing.T) {
+	cfg := writeMemoryCLIConfig(t)
+	past := time.Now().UTC().Add(-time.Hour)
+	seedMemorySummary(t, cfg, "mem-s1", principal.OwnerID, "sess-a", past, 1)
+
+	out, err := runMemoryCommand(t, cfg, "purge")
+	if err != nil || !strings.Contains(out, "dry-run: 1 would be deleted") || !strings.Contains(out, "mem-s1") {
+		t.Fatalf("purge without --apply = %q, %v, want a dry-run that names the summary", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
+	if err != nil || !strings.Contains(out, "mem-s1") {
+		t.Errorf("the dry-run deleted the summary: %q, %v", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "purge", "--apply")
+	if err != nil || strings.TrimSpace(out) != "purged: 1" {
+		t.Fatalf("purge --apply = %q, %v", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "purge")
+	if err != nil || strings.TrimSpace(out) != "nothing to delete" {
+		t.Errorf("a purge with nothing expired = %q, %v", out, err)
 	}
 }
 
 func TestMemoryCLIForgetRequiresScope(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	_, err := runMemoryCommand(t, cfg, "forget", "--apply")
-	if !command.IsUsageError(err) {
+	if !clikit.IsUsageError(err) {
 		t.Errorf("scope-less forget = %v, want usage error", err)
 	}
 	_, err = runMemoryCommand(t, cfg, "forget", "--session", "sess-a", "--id", "mem-a1")
-	if !command.IsUsageError(err) {
+	if !clikit.IsUsageError(err) {
 		t.Errorf("dual-scope forget = %v, want usage error", err)
 	}
 }
