@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -227,6 +228,9 @@ profile:
 }
 
 func TestDaemonEmbeddingBackgroundRegistrationAndStrictSecrets(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the server workspace adapter needs Linux: the filesystem adapters refuse other systems")
+	}
 	restoreDefaultLogger(t)
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	t.Setenv("AURA_TEST_TELEMETRY_SECRET", "daemon-vault-secret-888")
