@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/textsearch"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -59,6 +60,7 @@ func UnavailableOperations() *Operations {
 func (o *Operations) Bindings() []operation.Binding {
 	return []operation.Binding{
 		{ID: operationInspect, Handle: o.inspect},
+		{ID: operationSearch, Handle: o.search},
 		{ID: operationForget, Handle: o.forget, Preview: o.previewForget},
 		{ID: operationPurge, Handle: o.purge, Preview: o.previewPurge},
 	}
@@ -235,6 +237,85 @@ func (o *Operations) inspect(ctx context.Context, call *operation.Call) (operati
 			From: document.FromSequence, To: document.ToSequence, Trust: document.TrustLabel, Tainted: document.IsTainted(),
 			Prompt: promptText(document.PromptVersion), Expires: expiresText(document.ExpiresAt),
 			Content: oneLine(truncateRunes(document.Content, inspectContentRunes)),
+		})
+	}
+	return operation.JSONResult(map[string]any{"rows": rows})
+}
+
+type searchInput struct {
+	Query   string `json:"query"`
+	Session string `json:"session"`
+	After   string `json:"after"`
+	Before  string `json:"before"`
+	Limit   int    `json:"limit"`
+}
+
+type searchRow struct {
+	ID        string  `json:"id"`
+	Agent     string  `json:"agent"`
+	Session   string  `json:"session"`
+	Kind      string  `json:"kind"`
+	CreatedAt string  `json:"created_at"`
+	Score     float64 `json:"score"`
+	Tainted   bool    `json:"tainted"`
+	Content   string  `json:"content"`
+}
+
+func (o *Operations) search(ctx context.Context, call *operation.Call) (operation.Result, error) {
+	var in searchInput
+	if err := o.ready(call, &in); err != nil {
+		return operation.Result{}, err
+	}
+	if len(textsearch.Tokenize(in.Query)) == 0 {
+		return operation.Result{}, usage("search query must contain searchable terms")
+	}
+	var after, before time.Time
+	if in.After != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, in.After)
+		if err != nil {
+			return operation.Result{}, usage("after must be an RFC3339 timestamp")
+		}
+		after = parsed.UTC()
+	}
+	if in.Before != "" {
+		parsed, err := time.Parse(time.RFC3339Nano, in.Before)
+		if err != nil {
+			return operation.Result{}, usage("before must be an RFC3339 timestamp")
+		}
+		before = parsed.UTC()
+	}
+	if !after.IsZero() && !before.IsZero() && after.After(before) {
+		return operation.Result{}, usage("after must not be after before")
+	}
+	readable, err := o.readable(call)
+	if err != nil {
+		return operation.Result{}, moduleFailure(err)
+	}
+	hits, err := o.service.Search(ctx, &SearchRequest{
+		OwnerID:   principal.OwnerID,
+		AgentIDs:  readable,
+		SessionID: in.Session,
+		Query:     in.Query,
+		After:     after,
+		Before:    before,
+		Now:       o.now().UTC(),
+		Limit:     in.Limit,
+	})
+	if err != nil {
+		return operation.Result{}, moduleFailure(err)
+	}
+	rows := make([]searchRow, 0, len(hits))
+	for i := range hits {
+		hit := &hits[i]
+		rows = append(rows, searchRow{
+			ID:        hit.ID,
+			Agent:     hit.AgentID,
+			Session:   hit.SessionID,
+			Kind:      hit.Kind,
+			CreatedAt: hit.CreatedAt.UTC().Format(time.RFC3339Nano),
+			Score:     hit.Score,
+			Tainted:   hit.IsTainted(),
+			Content:   hit.Content,
 		})
 	}
 	return operation.JSONResult(map[string]any{"rows": rows})

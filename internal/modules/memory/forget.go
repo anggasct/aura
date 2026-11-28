@@ -128,7 +128,7 @@ func (s *Service) PreviewForgetByQuery(ctx context.Context, query *DocumentQuery
 		return nil, fault.New(ErrorCodeInvalidArgument, "owner and query must not be empty")
 	}
 	hits, err := s.documents.Search(ctx, &StoredQuery{
-		OwnerID: query.OwnerID, AgentIDs: query.AgentIDs, SessionID: query.SessionID, Terms: query.Terms, Limit: limit,
+		OwnerID: query.OwnerID, AgentIDs: query.AgentIDs, SessionID: query.SessionID, Terms: query.Terms, Mode: MatchStrict, Limit: limit,
 	})
 	if err != nil {
 		return nil, err
@@ -179,7 +179,7 @@ func (s *Service) Inspect(ctx context.Context, query *DocumentQuery) ([]StoredDo
 	}
 	if strings.TrimSpace(query.Terms) != "" {
 		hits, err := s.documents.Search(ctx, &StoredQuery{
-			OwnerID: query.OwnerID, AgentIDs: query.AgentIDs, SessionID: query.SessionID, Terms: query.Terms, Limit: limit,
+			OwnerID: query.OwnerID, AgentIDs: query.AgentIDs, SessionID: query.SessionID, Terms: query.Terms, Mode: MatchStrict, Limit: limit,
 		})
 		if err != nil {
 			return nil, err

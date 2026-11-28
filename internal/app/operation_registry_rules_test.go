@@ -244,6 +244,7 @@ var registrySampleInput = map[string]string{
 	"aura_memory_forget":  `{"id":"mem-a1"}`,
 	"aura_memory_inspect": `{}`,
 	"aura_memory_purge":   `{}`,
+	"aura_memory_search":  `{"query":"alpha"}`,
 
 	"aura_profile_delete": `{"id":"` + profileSampleFactID + `"}`,
 	"aura_profile_list":   `{}`,

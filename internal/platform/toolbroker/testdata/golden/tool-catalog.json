@@ -863,6 +863,78 @@
       "untrusted_output": false
     },
     {
+      "key": "aura_memory_search@v1",
+      "name": "aura_memory_search",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Search recall memory by query and time range\n\nSearches projected session memory within your persona's readable memory scope using ranked lexical recall with recency weighting and optional time bounds. Memory of private other personas is never returned.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/memory.search/v1",
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 500,
+            "description": "search terms to match in memory"
+          },
+          "session": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512,
+            "description": "only search documents of this session id"
+          },
+          "after": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "only documents created at or after this RFC3339 timestamp"
+          },
+          "before": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64,
+            "description": "only documents created at or before this RFC3339 timestamp"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 20,
+            "description": "maximum matching documents to return",
+            "default": 10
+          }
+        },
+        "required": [
+          "query"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": [
+        "query",
+        "session",
+        "after",
+        "before",
+        "limit"
+      ],
+      "has_validator": false,
+      "risk": "read",
+      "operation": "memory.search",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
       "key": "aura_operation_search@v1",
       "name": "aura_operation_search",
       "version": "v1",
@@ -2359,6 +2431,22 @@
       "tool_name": "aura_memory_purge",
       "tool_version": "v1",
       "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_memory_search",
+      "tool_version": "v1",
+      "requires_approval": false,
       "required_capabilities": null,
       "allowed_trust": [
         "owner_input",

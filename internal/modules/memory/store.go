@@ -1,23 +1,28 @@
 package memory
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
-	"strings"
+	"slices"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/textsearch"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const (
-	maxSessionListLimit = 500
-	maxMemoryListLimit  = 500
+	maxSessionListLimit    = 500
+	maxMemoryListLimit     = 500
+	minSearchCandidateRows = 40
+	maxSearchCandidateRows = 200
 )
 
 const selectMemoryHitColumns = `
@@ -59,30 +64,15 @@ func validMemoryKind(kind string) bool {
 	return kind == KindEventText || kind == KindSummary
 }
 
-func isFTSWordChar(r rune) bool {
-	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r > 127
-}
-
-func sanitizeFTSQuery(raw string) (string, error) {
-	if len([]rune(raw)) > 500 {
-		return "", fault.New(ErrorCodeInvalidArgument, "search query exceeds length bounds")
+func tokenizeMemoryQuery(raw string) ([]string, error) {
+	if utf8.RuneCountInString(raw) > maxQueryRunes {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search query exceeds length bounds")
 	}
-	terms := strings.FieldsFunc(raw, func(r rune) bool { return !isFTSWordChar(r) })
-	cleaned := make([]string, 0, len(terms))
-	for _, term := range terms {
-		term = strings.TrimSpace(term)
-		if term == "" || len([]rune(term)) > 64 {
-			continue
-		}
-		cleaned = append(cleaned, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
-		if len(cleaned) >= 32 {
-			break
-		}
+	tokens := textsearch.Tokenize(raw)
+	if len(tokens) == 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search query carries no searchable terms")
 	}
-	if len(cleaned) == 0 {
-		return "", fault.New(ErrorCodeInvalidArgument, "search query carries no searchable terms")
-	}
-	return strings.Join(cleaned, " "), nil
+	return tokens, nil
 }
 
 func nullMemoryText(value string) sql.NullString {
@@ -204,23 +194,30 @@ func (s *SQLiteStore) ProjectionWatermark(ctx context.Context, sessionID string)
 	return watermark.Int64, true, nil
 }
 
-func (s *SQLiteStore) Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error) {
-	if s == nil || s.db == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
+func rankMemoryTier(hits []StoredHit, now time.Time) {
+	if len(hits) == 0 {
+		return
 	}
-	if query == nil {
-		return nil, fault.New(ErrorCodeInvalidArgument, "query must not be nil")
+	maxMag := 0.0
+	for i := range hits {
+		if mag := textsearch.BM25Magnitude(hits[i].Rank); mag > maxMag {
+			maxMag = mag
+		}
 	}
-	if query.OwnerID == "" {
-		return nil, fault.New(ErrorCodeInvalidArgument, "search owner must not be empty")
+	for i := range hits {
+		bm25Norm := textsearch.NormalizeBM25(hits[i].Rank, maxMag)
+		recency := textsearch.RecencyScore(now, hits[i].CreatedAt, textsearch.DefaultHalfLifeDays)
+		hits[i].Score = textsearch.CombineScore(bm25Norm, recency)
 	}
-	if query.Limit <= 0 {
-		return nil, fault.New(ErrorCodeInvalidArgument, "search limit must be positive")
-	}
-	match, err := sanitizeFTSQuery(query.Terms)
-	if err != nil {
-		return nil, err
-	}
+	slices.SortFunc(hits, func(a, b StoredHit) int {
+		if c := cmp.Compare(b.Score, a.Score); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ID, b.ID)
+	})
+}
+
+func (s *SQLiteStore) searchFTS(ctx context.Context, query *StoredQuery, match string, now time.Time, want int) ([]StoredHit, error) {
 	sqlQuery := `SELECT ` + selectMemoryHitColumns + ` FROM memory_document_fts
 		JOIN memory_document d ON d.rowid = memory_document_fts.rowid
 		WHERE memory_document_fts MATCH ? AND d.owner_id = ?`
@@ -237,15 +234,17 @@ func (s *SQLiteStore) Search(ctx context.Context, query *StoredQuery) ([]StoredH
 		sqlQuery += ` AND d.session_id = ?`
 		args = append(args, query.SessionID)
 	}
+	if !query.After.IsZero() {
+		sqlQuery += ` AND d.created_at >= ?`
+		args = append(args, sqlite.FormatTime(query.After.UTC().Add(-time.Second)))
+	}
 	if !query.Before.IsZero() {
 		sqlQuery += ` AND d.created_at <= ?`
-		args = append(args, sqlite.FormatTime(query.Before.UTC()))
+		args = append(args, sqlite.FormatTime(query.Before.UTC().Add(time.Second)))
 	}
-	now := time.Now().UTC()
 	sqlQuery += ` AND (d.expires_at IS NULL OR d.expires_at > ?)`
-	args = append(args, sqlite.FormatTime(now))
-	sqlQuery += ` ORDER BY bm25(memory_document_fts), d.id LIMIT ?`
-	args = append(args, query.Limit)
+	args = append(args, sqlite.FormatTime(now.Add(-time.Second)))
+	sqlQuery += ` ORDER BY bm25(memory_document_fts), d.id`
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search memory documents: %w", err))
@@ -258,12 +257,90 @@ func (s *SQLiteStore) Search(ctx context.Context, query *StoredQuery) ([]StoredH
 			_ = rows.Close()
 			return nil, err
 		}
+		if hit.ExpiresAt != nil && !hit.ExpiresAt.After(now) {
+			continue
+		}
+		if !query.After.IsZero() && hit.CreatedAt.Before(query.After) {
+			continue
+		}
+		if !query.Before.IsZero() && hit.CreatedAt.After(query.Before) {
+			continue
+		}
 		hits = append(hits, hit)
+		if len(hits) >= want {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search memory documents: %w", err))
 	}
 	return hits, nil
+}
+
+func (s *SQLiteStore) Search(ctx context.Context, query *StoredQuery) ([]StoredHit, error) {
+	if s == nil || s.db == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "db must not be nil")
+	}
+	if query == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "query must not be nil")
+	}
+	if query.OwnerID == "" {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search owner must not be empty")
+	}
+	if query.Limit <= 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search limit must be positive")
+	}
+	if query.Mode != MatchStrict && query.Mode != MatchFallbackOR {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search match mode is not valid")
+	}
+	if !query.After.IsZero() && !query.Before.IsZero() && query.After.After(query.Before) {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search after timestamp must not be after before timestamp")
+	}
+	rawTokens, err := tokenizeMemoryQuery(query.Terms)
+	if err != nil {
+		return nil, err
+	}
+	now := query.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if query.Mode == MatchStrict {
+		return s.searchFTS(ctx, query, textsearch.FTSAndQuery(rawTokens), now, query.Limit)
+	}
+	meaningful := textsearch.FilterStopwords(rawTokens)
+	candidateLimit := max(query.Limit, min(max(query.Limit*4, minSearchCandidateRows), maxSearchCandidateRows))
+	stage1, err := s.searchFTS(ctx, query, textsearch.FTSAndQuery(meaningful), now, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	rankMemoryTier(stage1, now)
+	if len(stage1) >= query.Limit {
+		return stage1[:query.Limit], nil
+	}
+	if len(meaningful) < 2 {
+		return stage1, nil
+	}
+	stage2Raw, err := s.searchFTS(ctx, query, textsearch.FTSOrQuery(meaningful), now, candidateLimit)
+	if err != nil {
+		return nil, err
+	}
+	seen := make(map[string]struct{}, len(stage1))
+	for i := range stage1 {
+		seen[stage1[i].ID] = struct{}{}
+	}
+	stage2 := make([]StoredHit, 0, len(stage2Raw))
+	for i := range stage2Raw {
+		if _, exists := seen[stage2Raw[i].ID]; exists {
+			continue
+		}
+		stage2 = append(stage2, stage2Raw[i])
+	}
+	rankMemoryTier(stage2, now)
+	stage1 = append(stage1, stage2...)
+	if len(stage1) > query.Limit {
+		stage1 = stage1[:query.Limit]
+	}
+	return stage1, nil
 }
 
 func scanMemoryHit(rows *sql.Rows) (StoredHit, error) {

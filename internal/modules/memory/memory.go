@@ -17,6 +17,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/textsearch"
 	"github.com/anggasct/aura/internal/platform/turn"
 	"github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -27,12 +28,13 @@ const (
 )
 
 const (
-	defaultMaxDocuments = 10
-	defaultTokenBudget  = 2000
-	hardMaxDocuments    = 50
-	hardMaxTokenBudget  = 8000
-	maxQueryRunes       = runtimeingress.MaxQueryRunes
-	maxContentBytes     = 1 << 16
+	defaultMaxDocuments      = 10
+	defaultTokenBudget       = 2000
+	hardMaxDocuments         = 50
+	hardMaxTokenBudget       = 8000
+	maxQueryRunes            = runtimeingress.MaxQueryRunes
+	maxContentBytes          = 1 << 16
+	maxSearchRowContentBytes = 2048
 )
 
 const (
@@ -128,18 +130,29 @@ type DocumentFilter struct {
 	Limit     int
 }
 
+type MatchMode int
+
+const (
+	MatchStrict MatchMode = iota
+	MatchFallbackOR
+)
+
 type StoredQuery struct {
 	OwnerID   string
 	AgentIDs  []string
 	SessionID string
 	Terms     string
+	Mode      MatchMode
+	After     time.Time
 	Before    time.Time
+	Now       time.Time
 	Limit     int
 }
 
 type StoredHit struct {
 	StoredDocument
-	Rank float64
+	Rank  float64
+	Score float64
 }
 
 type RecallRequest struct {
@@ -150,6 +163,18 @@ type RecallRequest struct {
 	MaxDocuments int
 	TokenBudget  int
 	Before       time.Time
+	Now          time.Time
+}
+
+type SearchRequest struct {
+	OwnerID   string
+	AgentIDs  []string
+	SessionID string
+	Query     string
+	After     time.Time
+	Before    time.Time
+	Now       time.Time
+	Limit     int
 }
 
 type TaintMarksReader interface {
@@ -628,7 +653,9 @@ func (s *Service) Recall(ctx context.Context, req *RecallRequest) ([]RecallDocum
 		AgentIDs:  req.AgentIDs,
 		SessionID: req.SessionID,
 		Terms:     req.Query,
+		Mode:      MatchFallbackOR,
 		Before:    req.Before,
+		Now:       req.Now,
 		Limit:     maxDocs,
 	})
 	if err != nil {
@@ -706,6 +733,10 @@ func recallDocumentFromHit(hit *StoredHit) (RecallDocument, error) {
 	if err != nil {
 		return RecallDocument{}, fault.New(ErrorCodeProjectionCorrupt, "projected document carries an invalid sequence")
 	}
+	score := hit.Rank
+	if hit.Score > 0 {
+		score = hit.Score
+	}
 	return RecallDocument{
 		ID:            hit.ID,
 		SessionID:     hit.SessionID,
@@ -717,10 +748,98 @@ func recallDocumentFromHit(hit *StoredHit) (RecallDocument, error) {
 		PromptVersion: hit.PromptVersion,
 		ModelProtocol: hit.ModelProtocol,
 		ModelName:     hit.ModelName,
-		Score:         hit.Rank,
+		Score:         score,
 		CreatedAt:     hit.CreatedAt,
 		ExpiresAt:     hit.ExpiresAt,
 	}, nil
+}
+
+func truncateUTF8Bytes(text string, maxBytes int) string {
+	if len(text) <= maxBytes {
+		return text
+	}
+	const ellipsis = "…"
+	if maxBytes <= len(ellipsis) {
+		return ""
+	}
+	budget := maxBytes - len(ellipsis)
+	cut := 0
+	for i := range text {
+		if i > budget {
+			break
+		}
+		cut = i
+	}
+	return text[:cut] + ellipsis
+}
+
+func (s *Service) Search(ctx context.Context, req *SearchRequest) ([]StoredHit, error) {
+	if ctx == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if req == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search request must not be nil")
+	}
+	if strings.TrimSpace(req.OwnerID) == "" {
+		return nil, fault.New(ErrorCodeQueryInvalid, "search owner must not be empty")
+	}
+	if slices.Contains(req.AgentIDs, "") {
+		return nil, fault.New(ErrorCodeQueryInvalid, "search readable personas must not contain empty ids")
+	}
+	if utf8.RuneCountInString(req.Query) == 0 || utf8.RuneCountInString(req.Query) > maxQueryRunes {
+		return nil, fault.New(ErrorCodeQueryInvalid, "search query is not within bounds")
+	}
+	if len(textsearch.Tokenize(req.Query)) == 0 {
+		return nil, fault.New(ErrorCodeQueryInvalid, "search query carries no searchable terms")
+	}
+	if !req.After.IsZero() && !req.Before.IsZero() && req.After.After(req.Before) {
+		return nil, fault.New(ErrorCodeQueryInvalid, "search after timestamp must not be after before timestamp")
+	}
+	limit := req.Limit
+	if limit <= 0 || limit > maxSearchLimit {
+		return nil, fault.New(ErrorCodeInvalidArgument, "search limit is out of bounds")
+	}
+	fetchLimit := limit
+	if s.secrets != nil {
+		fetchLimit = min(limit*2, maxSearchLimit*2)
+	}
+	hits, err := s.documents.Search(ctx, &StoredQuery{
+		OwnerID:   req.OwnerID,
+		AgentIDs:  req.AgentIDs,
+		SessionID: strings.TrimSpace(req.SessionID),
+		Terms:     req.Query,
+		Mode:      MatchFallbackOR,
+		After:     req.After,
+		Before:    req.Before,
+		Now:       req.Now,
+		Limit:     fetchLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	budget := s.tokens
+	used := 0
+	results := make([]StoredHit, 0, min(len(hits), limit))
+	for i := range hits {
+		if len(results) >= limit {
+			break
+		}
+		if s.secrets != nil && s.secrets.Contains(hits[i].Content) {
+			continue
+		}
+		hit := hits[i]
+		hit.Content = truncateUTF8Bytes(hit.Content, maxSearchRowContentBytes)
+		estimate := estimateTokens(hit.Content)
+		if len(results) > 0 && budget > 0 && used+estimate > budget {
+			break
+		}
+		used += estimate
+		results = append(results, hit)
+	}
+	return results, nil
 }
 
 func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDocs int, primary []RecallDocument) []RecallDocument {
@@ -732,7 +851,9 @@ func (s *Service) recallFallback(ctx context.Context, req *RecallRequest, maxDoc
 		OwnerID:  req.OwnerID,
 		AgentIDs: req.AgentIDs,
 		Terms:    req.Query,
+		Mode:     MatchFallbackOR,
 		Before:   req.Before,
+		Now:      req.Now,
 		Limit:    maxDocs + s.fallbackDocs,
 	})
 	if err != nil {

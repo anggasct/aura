@@ -1,15 +1,19 @@
 package profile
 
 import (
+	"cmp"
 	"context"
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/textsearch"
 )
 
 type FactCount struct {
@@ -115,30 +119,21 @@ func nullProfileTime(value *time.Time) sql.NullString {
 	return sql.NullString{String: sqlite.FormatTime(value.UTC()), Valid: true}
 }
 
-func isFTSWordChar(r rune) bool {
-	return r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r >= '0' && r <= '9' || r > 127
-}
+const (
+	maxProfileQueryRunes       = 500
+	minProfileSearchCandidates = 40
+	maxProfileSearchCandidates = 200
+)
 
-func sanitizeFTSQuery(raw string) (string, error) {
-	if len([]rune(raw)) > 500 {
-		return "", fault.New(ErrorCodeInvalidArgument, "profile search carries no searchable terms")
+func tokenizeProfileQuery(raw string) ([]string, error) {
+	if utf8.RuneCountInString(raw) > maxProfileQueryRunes {
+		return nil, fault.New(ErrorCodeInvalidArgument, "profile search query exceeds length bounds")
 	}
-	terms := strings.FieldsFunc(raw, func(r rune) bool { return !isFTSWordChar(r) })
-	cleaned := make([]string, 0, len(terms))
-	for _, term := range terms {
-		term = strings.TrimSpace(term)
-		if term == "" || len([]rune(term)) > 64 {
-			continue
-		}
-		cleaned = append(cleaned, `"`+strings.ReplaceAll(term, `"`, `""`)+`"`)
-		if len(cleaned) >= 32 {
-			break
-		}
+	tokens := textsearch.Tokenize(raw)
+	if len(tokens) == 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "profile search carries no searchable terms")
 	}
-	if len(cleaned) == 0 {
-		return "", fault.New(ErrorCodeInvalidArgument, "profile search carries no searchable terms")
-	}
-	return strings.Join(cleaned, " "), nil
+	return tokens, nil
 }
 
 const selectProfileFactColumns = `
@@ -441,6 +436,113 @@ func (s *SQLiteStore) ListFacts(ctx context.Context, ownerID, status, category s
 	return out, nil
 }
 
+type scoredProfileFact struct {
+	fact  Fact
+	rank  float64
+	score float64
+}
+
+func scanScoredProfileFact(rows *sql.Rows) (scoredProfileFact, error) {
+	var hit scoredProfileFact
+	var verified int64
+	var conflicts sql.NullString
+	var expires sql.NullString
+	var taintSource sql.NullString
+	var created, updated string
+	if err := rows.Scan(
+		&hit.fact.ID, &hit.fact.OwnerID, &hit.fact.Category, &hit.fact.Key, &hit.fact.Value, &hit.fact.ValueDigest,
+		&hit.fact.Status, &hit.fact.Origin, &verified, &hit.fact.Confidence, &hit.fact.ConfidencePolicy,
+		&conflicts, &expires, &created, &updated, &taintSource, &hit.rank,
+	); err != nil {
+		return scoredProfileFact{}, sqlite.Classify(fmt.Errorf("scan profile fact: %w", err))
+	}
+	hit.fact.OwnerVerified = verified == 1
+	hit.fact.ConflictsWithID = conflicts.String
+	hit.fact.TaintSource = taintSource.String
+	createdAt, err := sqlite.ParseTime(created)
+	if err != nil {
+		return scoredProfileFact{}, fmt.Errorf("parse profile fact timestamps: %w", err)
+	}
+	updatedAt, err := sqlite.ParseTime(updated)
+	if err != nil {
+		return scoredProfileFact{}, fmt.Errorf("parse profile fact timestamps: %w", err)
+	}
+	hit.fact.CreatedAt, hit.fact.UpdatedAt = createdAt, updatedAt
+	if expires.Valid {
+		expiresAt, err := sqlite.ParseTime(expires.String)
+		if err != nil {
+			return scoredProfileFact{}, fmt.Errorf("parse profile fact expiry: %w", err)
+		}
+		hit.fact.ExpiresAt = &expiresAt
+	}
+	return hit, nil
+}
+
+func rankProfileTier(hits []scoredProfileFact, now time.Time) {
+	if len(hits) == 0 {
+		return
+	}
+	maxMag := 0.0
+	for i := range hits {
+		if mag := textsearch.BM25Magnitude(hits[i].rank); mag > maxMag {
+			maxMag = mag
+		}
+	}
+	for i := range hits {
+		bm25Norm := textsearch.NormalizeBM25(hits[i].rank, maxMag)
+		recency := textsearch.RecencyScore(now, hits[i].fact.UpdatedAt, textsearch.DefaultHalfLifeDays)
+		hits[i].score = textsearch.CombineScore(bm25Norm, recency)
+	}
+	slices.SortFunc(hits, func(a, b scoredProfileFact) int {
+		if c := cmp.Compare(b.score, a.score); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.fact.ID, b.fact.ID)
+	})
+}
+
+func (s *SQLiteStore) searchFactTier(ctx context.Context, ownerID, category, match string, verifiedOnly bool, want int, now time.Time) ([]scoredProfileFact, error) {
+	sqlQuery := `SELECT f.id, f.owner_id, f.category, f.fact_key, f.fact_value, f.value_digest, f.status, f.origin,
+		f.owner_verified, f.confidence, f.confidence_policy_version, f.conflicts_with_id,
+		f.expires_at, f.created_at, f.updated_at, f.taint_source, bm25(profile_fact_fts) FROM profile_fact_fts
+		JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
+		WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
+		AND (f.expires_at IS NULL OR f.expires_at > ?)`
+	nowUTC := now.UTC()
+	args := []any{match, ownerID, sqlite.FormatTime(nowUTC.Add(-time.Second))}
+	if verifiedOnly {
+		sqlQuery += ` AND f.owner_verified = 1`
+	}
+	if category != "" {
+		sqlQuery += ` AND f.category = ?`
+		args = append(args, category)
+	}
+	sqlQuery += ` ORDER BY bm25(profile_fact_fts), f.confidence DESC, f.id ASC`
+	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
+	if err != nil {
+		return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
+	}
+	defer func() { _ = rows.Close() }()
+	var out []scoredProfileFact
+	for rows.Next() {
+		hit, err := scanScoredProfileFact(rows)
+		if err != nil {
+			return nil, err
+		}
+		if hit.fact.ExpiresAt != nil && !hit.fact.ExpiresAt.After(nowUTC) {
+			continue
+		}
+		out = append(out, hit)
+		if len(out) >= want {
+			break
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
+	}
+	return out, nil
+}
+
 func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query string, verifiedOnly bool, limit int, now time.Time) ([]Fact, error) {
 	if s == nil || s.db == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "database must not be nil")
@@ -454,61 +556,84 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 	if now.IsZero() {
 		return nil, fault.New(ErrorCodeInvalidArgument, "profile search timestamp must not be zero")
 	}
+	if category != "" && !profileCategories[category] {
+		return nil, fault.New(ErrorCodeProfileInvalid, "profile fact category is not valid")
+	}
+	nowUTC := now.UTC()
 	match := strings.TrimSpace(query)
-	sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
-		AND (expires_at IS NULL OR expires_at > ?)`
-	args := []any{ownerID, sqlite.FormatTime(now.UTC())}
-	if verifiedOnly {
-		sqlQuery += ` AND owner_verified = 1`
-	}
-	if category != "" {
-		if !profileCategories[category] {
-			return nil, fault.New(ErrorCodeProfileInvalid, "profile fact category is not valid")
-		}
-		sqlQuery += ` AND category = ?`
-		args = append(args, category)
-	}
 	if match == "" {
-		sqlQuery += ` ORDER BY confidence DESC, id ASC LIMIT ?`
-		args = append(args, limit)
-	} else {
-		sanitized, err := sanitizeFTSQuery(match)
-		if err != nil {
-			return nil, err
-		}
-		sqlQuery = `SELECT f.id, f.owner_id, f.category, f.fact_key, f.fact_value, f.value_digest, f.status, f.origin,
-			f.owner_verified, f.confidence, f.confidence_policy_version, f.conflicts_with_id,
-			f.expires_at, f.created_at, f.updated_at, f.taint_source FROM profile_fact_fts
-			JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
-			WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
-			AND (f.expires_at IS NULL OR f.expires_at > ?)`
-		args = []any{sanitized, ownerID, sqlite.FormatTime(now.UTC())}
+		sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
+			AND (expires_at IS NULL OR expires_at > ?)`
+		args := []any{ownerID, sqlite.FormatTime(nowUTC.Add(-time.Second))}
 		if verifiedOnly {
-			sqlQuery += ` AND f.owner_verified = 1`
+			sqlQuery += ` AND owner_verified = 1`
 		}
 		if category != "" {
-			sqlQuery += ` AND f.category = ?`
+			sqlQuery += ` AND category = ?`
 			args = append(args, category)
 		}
-		sqlQuery += ` ORDER BY bm25(profile_fact_fts), f.confidence DESC, f.id ASC LIMIT ?`
-		args = append(args, limit)
+		sqlQuery += ` ORDER BY confidence DESC, id ASC`
+		rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
+		if err != nil {
+			return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
+		}
+		defer func() { _ = rows.Close() }()
+		var out []Fact
+		for rows.Next() {
+			fact, err := scanProfileFact(rows)
+			if err != nil {
+				return nil, err
+			}
+			if fact.ExpiresAt != nil && !fact.ExpiresAt.After(nowUTC) {
+				continue
+			}
+			out = append(out, fact)
+			if len(out) >= limit {
+				break
+			}
+		}
+		if err := rows.Err(); err != nil {
+			return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
+		}
+		return out, nil
 	}
-	conn := sqlite.Conn(ctx, s.db)
-	rows, err := conn.QueryContext(ctx, sqlQuery, args...)
+	rawTokens, err := tokenizeProfileQuery(match)
 	if err != nil {
-		return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
+		return nil, err
 	}
-	defer func() { _ = rows.Close() }()
-	var out []Fact
-	for rows.Next() {
-		fact, err := scanProfileFact(rows)
+	meaningful := textsearch.FilterStopwords(rawTokens)
+	candidateLimit := max(limit, min(max(limit*4, minProfileSearchCandidates), maxProfileSearchCandidates))
+	stage1, err := s.searchFactTier(ctx, ownerID, category, textsearch.FTSAndQuery(meaningful), verifiedOnly, candidateLimit, nowUTC)
+	if err != nil {
+		return nil, err
+	}
+	rankProfileTier(stage1, nowUTC)
+	combined := stage1
+	if len(stage1) < limit && len(meaningful) >= 2 {
+		stage2Raw, err := s.searchFactTier(ctx, ownerID, category, textsearch.FTSOrQuery(meaningful), verifiedOnly, candidateLimit, nowUTC)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, fact)
+		seen := make(map[string]struct{}, len(stage1))
+		for i := range stage1 {
+			seen[stage1[i].fact.ID] = struct{}{}
+		}
+		stage2 := make([]scoredProfileFact, 0, len(stage2Raw))
+		for i := range stage2Raw {
+			if _, exists := seen[stage2Raw[i].fact.ID]; exists {
+				continue
+			}
+			stage2 = append(stage2, stage2Raw[i])
+		}
+		rankProfileTier(stage2, nowUTC)
+		combined = append(combined, stage2...)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
+	if len(combined) > limit {
+		combined = combined[:limit]
+	}
+	out := make([]Fact, 0, len(combined))
+	for i := range combined {
+		out = append(out, combined[i].fact)
 	}
 	return out, nil
 }

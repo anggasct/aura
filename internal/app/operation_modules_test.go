@@ -129,7 +129,7 @@ func TestAPersonaMayListAModuleToolWhileTheModuleIsDisabled(t *testing.T) {
 
 	names := personaToolNames(&cfg)
 
-	for _, want := range []string{"aura_profile_list", "aura_profile_set", "aura_memory_inspect", "aura_memory_forget"} {
+	for _, want := range []string{"aura_profile_list", "aura_profile_set", "aura_memory_inspect", "aura_memory_search", "aura_memory_forget"} {
 		if !slices.Contains(names, want) {
 			t.Errorf("the persona tool names lack %s, so a persona that lists it would stop validating when the module is switched off", want)
 		}

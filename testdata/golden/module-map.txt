@@ -38,6 +38,7 @@ internal/platform/
   internal/platform/sqlite/sqlitetest
   internal/platform/storage
   internal/platform/telemetry
+  internal/platform/textsearch
   internal/platform/toolbroker
   internal/platform/toolbroker/toolbrokertest
   internal/platform/toolcall
