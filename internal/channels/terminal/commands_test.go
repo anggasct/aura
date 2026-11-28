@@ -61,7 +61,7 @@ func TestTerminalHelpMatchesTheRegistryGolden(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if got := strings.Join(registry.Help(command.ChannelTerminal, principal.ClassOwner), "\n") + "\n"; got != out {
+	if got := strings.Join(registry.Help(command.ChannelTerminal, principal.ClassOwner, true), "\n") + "\n"; got != out {
 		t.Errorf("terminal help is not the registry help:\n%s", got)
 	}
 }
@@ -132,5 +132,20 @@ func TestTerminalNewSessionNotesOnStderr(t *testing.T) {
 	}
 	if len(runner.calls) != 1 || runner.calls[0].SessionID != "sess_2" || runner.calls[0].AgentID != "aura" {
 		t.Errorf("turn = %+v, want sess_2 as aura", runner.calls)
+	}
+}
+
+func TestTheConsoleCallerIsTheOwnerInADirectChat(t *testing.T) {
+	console, _, _, cancel := newConsoleForTestWithDeps(t, &Deps{
+		Runner:   &fakeRunner{eventsFor: func(string) []Event { return nil }},
+		Sessions: newFakeSessions(),
+		AgentID:  "aura",
+	}, "")
+	defer cancel()
+
+	caller := console.caller()
+
+	if !caller.Direct || caller.Class != principal.ClassOwner || caller.Channel != command.ChannelTerminal {
+		t.Errorf("caller = %+v, want the owner in a direct terminal chat", caller)
 	}
 }

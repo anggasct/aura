@@ -28,6 +28,7 @@ const (
 	ReplyNotSwitchable = "That session can't be used in this conversation."
 	ReplyGuestsOnly    = "That command is not available to the owner."
 	ReplyForgetMe      = "Send /forgetme confirm to erase everything you shared with this bot."
+	ReplyConflict      = "An earlier message with this id was already handled differently, so nothing was run."
 )
 
 type Dispatcher struct {
@@ -94,7 +95,7 @@ func (d *Dispatcher) Replayed(ctx context.Context, caller *Caller, inv *Invocati
 }
 
 func (d *Dispatcher) start(ctx context.Context, name string, caller *Caller) (spanCtx context.Context, finish func(string)) {
-	if d.recorder == nil {
+	if recorded, _ := ctx.Value(recordedKey{}).(bool); d.recorder == nil || recorded {
 		return ctx, func(string) {}
 	}
 	return d.recorder.Start(ctx, name, caller.Channel, string(caller.Class))
@@ -106,6 +107,9 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 			return failure(ErrorCodeDenied, ReplyGuestsOnly)
 		}
 		return failure(ErrorCodeDenied, ReplyDenied)
+	}
+	if def.Kind == KindOperation {
+		return d.runOperation(ctx, &operationCall{caller: caller, inv: inv, def: def, binding: b})
 	}
 	if def.Session && def.Kind == KindLocal && caller.SessionID == "" {
 		return failure(ErrorCodeScope, "Use /"+def.Name+" inside an Aura thread or a DM.")
@@ -126,7 +130,7 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 	h := handler{ports: d.ports, caller: caller, style: b.Style, args: inv.Args, text: inv.Text}
 	switch def.Name {
 	case "help":
-		return Result{Lines: d.registry.Help(caller.Channel, caller.Class)}
+		return Result{Lines: d.registry.Help(caller.Channel, caller.Class, caller.Direct)}
 	case "status":
 		return h.status(ctx)
 	case "session":

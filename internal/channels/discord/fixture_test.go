@@ -22,6 +22,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/kit/media"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
 	"github.com/anggasct/aura/internal/platform/effect"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -394,7 +395,7 @@ func (f *fakeEffectRunner) Execute(ctx context.Context, req *effect.PrepareReque
 	existing, ok := f.intents[key]
 	if ok && existing.digest != string(digest[:]) {
 		f.mu.Unlock()
-		return nil, errors.New("idempotency conflict")
+		return nil, fault.New(effect.ErrorCodeIdempotencyConflict, "idempotency conflict")
 	}
 	if ok {
 		intent := &effect.Intent{ID: "intent-" + key, SessionID: req.SessionID, State: existing.state, ProviderReceipt: existing.receipt}

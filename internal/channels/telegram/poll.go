@@ -119,7 +119,7 @@ func (a *Adapter) handleUpdate(ctx context.Context, item *update) error {
 	if !ok {
 		return nil
 	}
-	if inv, isCommand := a.commandInvocation(envelope.Parts[0].Text); isCommand {
+	if inv, isCommand := a.commandInvocation(envelope.Parts[0].Text); isCommand && !msg.relayed() {
 		handled, err := a.runCommand(ctx, msg, &inv, envelope)
 		if err != nil {
 			return err

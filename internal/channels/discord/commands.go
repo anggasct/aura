@@ -28,7 +28,7 @@ type commandScope struct {
 }
 
 func (a *Adapter) commandInvocation(msg *messagePayload) (command.Invocation, bool) {
-	if a.commands == nil || msg == nil {
+	if a.commands == nil || msg == nil || (msg.MessageReference != nil && msg.MessageReference.Type == referenceTypeForward) {
 		return command.Invocation{}, false
 	}
 	inv, ok := command.Parse(stripLeadingMentions(msg.Content, a.selfID))
@@ -88,6 +88,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *comm
 		ConversationKey: scope.conversationKey,
 		SessionID:       scope.sessionID,
 		AgentID:         envelope.AgentID,
+		Direct:          msg.GuildID == "",
 	}
 	if err := a.sessions.EnsureSession(ctx, scope.effectSession, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)

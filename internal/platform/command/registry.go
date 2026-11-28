@@ -78,9 +78,12 @@ func validateDefinition(def *Definition) error {
 		return fmt.Errorf("command: %q has unknown audience %q", def.Name, def.Audience)
 	}
 	switch def.Kind {
-	case KindLocal, KindTurn:
+	case KindLocal, KindTurn, KindOperation:
 		if def.Control != ControlNone {
 			return fmt.Errorf("command: %q is not terminal-only and must not carry a control", def.Name)
+		}
+		if def.Kind == KindOperation && def.Audience != AudienceOwner {
+			return fmt.Errorf("command: operation command %q must be owner-only", def.Name)
 		}
 	case KindTerminalOnly:
 		if def.Control == ControlNone {
@@ -172,7 +175,23 @@ func (r *Registry) MetricName(channel, name string) string {
 	return def.Name
 }
 
-func (r *Registry) Help(channel string, class principal.Class) []string {
+func (r *Registry) Definitions(channel string) []Definition {
+	b, ok := r.bindings[channel]
+	if !ok {
+		return nil
+	}
+	var bound []Definition
+	for i := range r.defs {
+		if b.names[r.defs[i].Name] {
+			copied := r.defs[i]
+			copied.Aliases = append([]string(nil), r.defs[i].Aliases...)
+			bound = append(bound, copied)
+		}
+	}
+	return bound
+}
+
+func (r *Registry) Help(channel string, class principal.Class, direct bool) []string {
 	b, ok := r.bindings[channel]
 	if !ok {
 		return []string{"commands:"}
@@ -180,7 +199,7 @@ func (r *Registry) Help(channel string, class principal.Class) []string {
 	var rows []Note
 	for i := range r.defs {
 		def := &r.defs[i]
-		if !b.names[def.Name] || !permits(def.Audience, class) {
+		if !b.names[def.Name] || !permits(def.Audience, class) || (def.Kind == KindOperation && !direct) {
 			continue
 		}
 		rows = append(rows, Note{Syntax: syntax(def), Summary: def.Summary})

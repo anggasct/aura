@@ -44,6 +44,7 @@ func (c *Console) caller() *command.Caller {
 		Class:       principal.ClassOwner,
 		SessionID:   c.sessionID,
 		AgentID:     c.agentID,
+		Direct:      true,
 	}
 }
 

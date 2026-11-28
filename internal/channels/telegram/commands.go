@@ -70,6 +70,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *message, inv *command.Inv
 		ConversationKey: conversation,
 		SessionID:       active,
 		AgentID:         envelope.AgentID,
+		Direct:          msg.Chat.Type == chatTypePrivate,
 	}
 	if err := a.sessions.EnsureSession(ctx, active, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fault.Wrap(ErrorCodeIntakeFailed, "session is not ensurable", err)

@@ -137,6 +137,9 @@ func (r *Registry) admit(found *entry, call *Call) (*Call, error) {
 	if surface != SurfaceCLI && call.Caller.Class != principal.ClassOwner {
 		return nil, NewError(ErrorCodeDenied, "operation: the caller is not the owner")
 	}
+	if surface == SurfaceChat && !call.Caller.Direct {
+		return nil, NewError(ErrorCodeDenied, "operation: chat operations run only in a direct chat")
+	}
 	canonical, err := descriptor.Validate(surface, call.Input)
 	if err != nil {
 		return nil, err

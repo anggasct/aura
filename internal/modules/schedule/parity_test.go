@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/anggasct/aura/internal/platform/capability/capabilitytest"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -80,7 +82,31 @@ func normalizedCell(value any) string {
 type paritySteps struct {
 	agent *scheduleRig
 	cli   *scheduleRig
+	chat  *scheduleRig
 	calls int
+}
+
+func (p *paritySteps) viaChat(t *testing.T, text string) string {
+	t.Helper()
+	p.calls++
+	chat, err := operation.NewChat(&operation.ChatDeps{Registry: p.chat.Registry, Capabilities: capabilitytest.Host(t)})
+	if err != nil {
+		t.Fatalf("NewChat: %v", err)
+	}
+	tokens, err := command.Tokenize(text)
+	if err != nil {
+		t.Fatalf("Tokenize(%q): %v", text, err)
+	}
+	plan := chat.Plan(GroupName, tokens)
+	if plan.Refusal != nil || plan.Missing != nil {
+		t.Fatalf("Plan(%q) = %+v, want an executable plan", text, plan)
+	}
+	caller := &command.Caller{Channel: "telegram", PrincipalID: principal.OwnerID, Class: principal.ClassOwner, SessionID: "chat-session", AgentID: "main", Direct: true}
+	reply := chat.Run(t.Context(), &command.OperationRun{Caller: caller, Plan: &plan, IdempotencyKey: fmt.Sprintf("telegram:parity-%d", p.calls)})
+	if reply.Code != command.ErrorCodeOK {
+		t.Fatalf("%q in chat = %+v, want ok", text, reply)
+	}
+	return strings.Join(reply.Lines, "\n")
 }
 
 func (p *paritySteps) viaTool(t *testing.T, id, arguments string) string {
@@ -123,16 +149,19 @@ func TestCronOperationsParity(t *testing.T) {
 		name string
 		add  string
 		cli  string
+		chat string
 	}{
 		{
 			name: "a prompt job",
 			add:  `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","overlap":"queue_one","grace":"30m"}`,
 			cli:  `{"name":"nightly","schedule":"0 21 * * *","timezone":"UTC","prompt":"summarize","overlap":"queue_one","grace":"30m","channel":"telegram","destination":"me"}`,
+			chat: `add --name nightly --schedule "0 21 * * *" --timezone UTC --prompt summarize --overlap queue_one --grace 30m --channel telegram --destination me`,
 		},
 		{
 			name: "a workflow job with input",
 			add:  `{"name":"weekly","schedule":"30 8 * * 1","timezone":"Asia/Jakarta","workflow":"wf1","input":{"objective":"report"}}`,
 			cli:  `{"name":"weekly","schedule":"30 8 * * 1","timezone":"Asia/Jakarta","workflow":"wf1","input":{"objective":"report"},"channel":"telegram","destination":"me"}`,
+			chat: `add --name weekly --schedule "30 8 * * 1" --timezone Asia/Jakarta --workflow wf1 --input '{"objective":"report"}' --channel telegram --destination me`,
 		},
 	}
 	for _, tc := range cases {
@@ -140,13 +169,19 @@ func TestCronOperationsParity(t *testing.T) {
 			steps := &paritySteps{
 				agent: newConfiguredScheduleRig(t, &rigOptions{owner: owner, durable: true}),
 				cli:   newConfiguredScheduleRig(t, &rigOptions{owner: owner, durable: true}),
+				chat:  newConfiguredScheduleRig(t, &rigOptions{owner: owner, durable: true}),
 			}
 			agentID := jobIDOf(t, steps.viaTool(t, "cron.add", tc.add))
 			cliID := jobIDOf(t, steps.viaCLI(t, "cron.add", tc.cli))
+			chatID := strings.TrimPrefix(steps.viaChat(t, tc.chat), "id: ")
+			if !identityPattern.MatchString(chatID) {
+				t.Fatalf("the chat add replied %q, want the job id", chatID)
+			}
 			requireSameState(t, steps, "add")
 			for _, verb := range []string{"cron.pause", "cron.resume", "cron.run-now", "cron.delete"} {
 				steps.viaTool(t, verb, `{"id":"`+agentID+`"}`)
 				steps.viaCLI(t, verb, `{"id":"`+cliID+`"}`)
+				steps.viaChat(t, strings.TrimPrefix(verb, "cron.")+" "+chatID)
 				requireSameState(t, steps, verb)
 			}
 			if !strings.Contains(scheduleState(t, steps.agent.db), "state=deleted") {
@@ -158,9 +193,9 @@ func TestCronOperationsParity(t *testing.T) {
 
 func requireSameState(t *testing.T, steps *paritySteps, after string) {
 	t.Helper()
-	fromTool, fromCLI := scheduleState(t, steps.agent.db), scheduleState(t, steps.cli.db)
-	if fromTool != fromCLI {
-		t.Fatalf("after %s the tool and the CLI left different state\ntool:\n%s\ncli:\n%s", after, fromTool, fromCLI)
+	fromTool, fromCLI, fromChat := scheduleState(t, steps.agent.db), scheduleState(t, steps.cli.db), scheduleState(t, steps.chat.db)
+	if fromTool != fromCLI || fromTool != fromChat {
+		t.Fatalf("after %s the tool, the CLI and the chat left different state\ntool:\n%s\ncli:\n%s\nchat:\n%s", after, fromTool, fromCLI, fromChat)
 	}
 }
 

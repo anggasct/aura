@@ -99,7 +99,7 @@ func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 	tb.Helper()
 	newCall := func() *operation.Call {
 		return &operation.Call{
-			Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: OwnerID, Class: principal.ClassOwner, SessionID: SessionID},
+			Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: OwnerID, Class: principal.ClassOwner, SessionID: SessionID, Direct: true},
 			Input:          probe.Input,
 			IdempotencyKey: "write-probe-" + probe.ID,
 			RequestDigest:  operation.Digest(probe.Input),

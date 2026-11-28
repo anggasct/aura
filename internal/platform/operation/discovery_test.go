@@ -567,6 +567,12 @@ func TestOperationSearchGivesTheChatFormOnlyWhenChatCommandsExist(t *testing.T) 
 	if got := byID[operationtest.OwnerOnly].Chat; got != "/stub owner-only <subject>" {
 		t.Errorf("stub.owner-only chat = %q, want %q", got, "/stub owner-only <subject>")
 	}
+	if got := byID[operationtest.Delete].Chat; got != "/stub delete <subject> [--apply]" {
+		t.Errorf("stub.delete chat = %q, want %q", got, "/stub delete <subject> [--apply]")
+	}
+	if got := byID[operationtest.Delete].Command; got != "aura stub delete <subject> [--apply]" {
+		t.Errorf("stub.delete command = %q, want %q", got, "aura stub delete <subject> [--apply]")
+	}
 	if got := byID[operationtest.Host].Chat; got != "" {
 		t.Errorf("stub.host chat = %q, want none: a host operation has no chat command", got)
 	}

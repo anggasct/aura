@@ -160,13 +160,10 @@ func mapToBroker(err error) error {
 	if !errors.As(err, &failure) {
 		return toolbroker.Errorf(toolbroker.ResultExecutionFailed, "%s", string(ErrorCodeFailed))
 	}
-	detail := string(failure.Code)
-	if failure.Code == ErrorCodeFailed && failure.Detail != "" {
-		detail += ": " + failure.Detail
-	}
+	detail := safeText(err)
 	switch {
 	case failure.Code == ErrorCodeInputInvalid:
-		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "%s: %s", failure.Code, failure.Detail)
+		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "%s", detail)
 	case deniedAtTier(failure.Code):
 		return toolbroker.Errorf(toolbroker.ResultToolTierDenied, "%s", detail)
 	}

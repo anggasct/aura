@@ -2,8 +2,10 @@ package command
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
+	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
@@ -29,6 +31,7 @@ const (
 	KindLocal        Kind = "local"
 	KindTurn         Kind = "turn"
 	KindTerminalOnly Kind = "terminal_only"
+	KindOperation    Kind = "operation"
 )
 
 type Control string
@@ -87,7 +90,14 @@ const (
 	ErrorCodeNotSwitchable    ErrorCode = "session_not_switchable"
 	ErrorCodeSkillUnavailable ErrorCode = "skill_unavailable"
 	ErrorCodeFailed           ErrorCode = "command_failed"
+	ErrorCodeConflict         ErrorCode = "command_conflict"
 	ErrorCodeInvalidArgument  ErrorCode = "invalid_argument"
+
+	ErrorCodeTooLong          ErrorCode = "command_too_long"
+	ErrorCodeTooManyArguments ErrorCode = "command_too_many_arguments"
+	ErrorCodeOpenQuote        ErrorCode = "command_open_quote"
+	ErrorCodeDanglingEscape   ErrorCode = "command_dangling_escape"
+	ErrorCodeMissingToken     ErrorCode = "command_missing_token"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {
@@ -101,13 +111,15 @@ type Caller struct {
 	ConversationKey string
 	SessionID       string
 	AgentID         string
+	Direct          bool
 }
 
 type Invocation struct {
-	Name  string
-	Token string
-	Args  []string
-	Text  string
+	Name           string
+	Token          string
+	Args           []string
+	Text           string
+	IdempotencyKey string
 }
 
 type Session struct {
@@ -124,6 +136,8 @@ type Result struct {
 	Session    *Session
 	Pending    *Invocation
 	Turn       *TurnStart
+	Record     json.RawMessage
+	Fate       OperationFate
 }
 
 type SkillPin = runtimeingress.SkillPin
@@ -155,10 +169,71 @@ type Skills interface {
 	StageDraft(ctx context.Context, name, description string) (Draft, error)
 }
 
+type OperationPrompt struct {
+	Text  string
+	Flag  string
+	Usage string
+}
+
+type OperationPlan struct {
+	Operation string
+	Input     json.RawMessage
+	Apply     bool
+	Missing   *OperationPrompt
+	Refusal   *Result
+}
+
+type OperationRef struct {
+	ID    string
+	Input json.RawMessage
+}
+
+type OperationRecovery struct {
+	Provider effect.TakeoverProvider
+	Settle   func(lines []string, record json.RawMessage) (effect.Outcome, error)
+}
+
+type ResumeRequest struct {
+	Caller     *Caller
+	Invocation *Invocation
+	Intent     *effect.Intent
+	Recovery   *OperationRecovery
+}
+
+type OperationRun struct {
+	Caller         *Caller
+	Plan           *OperationPlan
+	IdempotencyKey string
+	Intent         *effect.Intent
+	Recovery       *OperationRecovery
+}
+
+type OperationFate string
+
+const (
+	FatePerformed    OperationFate = ""
+	FateNotPerformed OperationFate = "not_performed"
+	FateAmbiguous    OperationFate = "ambiguous"
+)
+
+type OperationReply struct {
+	Lines      []string
+	Code       ErrorCode
+	Fate       OperationFate
+	Record     json.RawMessage
+	InProgress bool
+}
+
+type Operations interface {
+	Plan(group string, tokens []string) OperationPlan
+	Run(ctx context.Context, run *OperationRun) OperationReply
+}
+
 type Ports struct {
-	Sessions Sessions
-	Turns    Turns
-	Skills   Skills
+	Sessions   Sessions
+	Turns      Turns
+	Skills     Skills
+	Operations Operations
 }
 
 type Recorder interface {

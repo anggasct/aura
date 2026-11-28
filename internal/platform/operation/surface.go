@@ -82,6 +82,10 @@ func (d *Descriptor) Projects(surface Surface) bool {
 	return onSurface(d.Surfaces, surface)
 }
 
+func (d *Descriptor) previews() bool {
+	return d.Preview && (d.Risk == RiskDestructive || d.Risk == RiskChange)
+}
+
 func (d *Descriptor) GeneratesTool() bool {
 	return d != nil && d.Exposure == ExposureAgent && d.ModuleTool == "" && d.Projects(SurfaceAgent)
 }

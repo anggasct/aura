@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"strconv"
+	"sync"
 	"testing"
 	"time"
 
@@ -50,11 +51,32 @@ type fixedOwner struct{}
 
 func (fixedOwner) OwnerRoute() (alias, route string) { return "me", "telegram:owner" }
 
+type handlerCounts struct {
+	mu   sync.Mutex
+	runs map[string]int
+}
+
+func (c *handlerCounts) count(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.runs == nil {
+		c.runs = map[string]int{}
+	}
+	c.runs[id]++
+}
+
+func (c *handlerCounts) handled(id string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.runs[id]
+}
+
 type registryRig struct {
 	*operationtest.Rig
-	access *ceilingAccess
-	starts *recordedStarts
-	calls  int
+	access   *ceilingAccess
+	starts   *recordedStarts
+	handlers *handlerCounts
+	calls    int
 }
 
 func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.ApprovalPrompt) (bool, error)) *registryRig {
@@ -77,10 +99,21 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 		t.Fatalf("schedule.NewOperations: %v", err)
 	}
 	access := &ceilingAccess{}
+	handlers := &handlerCounts{}
 	rig := operationtest.NewRig(t, &operationtest.Options{
-		DB:          db,
-		Catalogs:    operationCatalogs(),
-		Bindings:    func(*operationtest.Stubs) []operation.Binding { return operations.Bindings() },
+		DB:       db,
+		Catalogs: operationCatalogs(),
+		Bindings: func(*operationtest.Stubs) []operation.Binding {
+			bindings := operations.Bindings()
+			for i := range bindings {
+				id, handle := bindings[i].ID, bindings[i].Handle
+				bindings[i].Handle = func(ctx context.Context, call *operation.Call) (operation.Result, error) {
+					handlers.count(id)
+					return handle(ctx, call)
+				}
+			}
+			return bindings
+		},
 		Access:      access,
 		AnswerCards: answer,
 
@@ -91,7 +124,7 @@ func newRegistryRig(t *testing.T, answer func(context.Context, *toolbroker.Appro
 	for i := range registrations {
 		access.tools = append(access.tools, registrations[i].Definition.Name)
 	}
-	return &registryRig{Rig: rig, access: access, starts: starts}
+	return &registryRig{Rig: rig, access: access, starts: starts, handlers: handlers}
 }
 
 func (r *registryRig) request(name string, input json.RawMessage) *toolbroker.ToolRequest {

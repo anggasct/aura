@@ -61,8 +61,7 @@ func adapterForOrigin(origin turn.Origin, adapters []runtimechannelhost.ChannelP
 	for _, adapter := range adapters {
 		identity, named := adapter.(runtimechannelhost.ChannelIdentity)
 		if named && identity.ChannelName() != "" {
-			name := identity.ChannelName()
-			if string(origin) == name || strings.HasPrefix(string(origin), name+":") {
+			if origin.OnChannel(identity.ChannelName()) {
 				return adapter, true
 			}
 			continue
