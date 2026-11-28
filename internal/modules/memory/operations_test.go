@@ -8,17 +8,23 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
+	"unicode/utf8"
 
 	"github.com/spf13/cobra"
 
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/memory/memorytest"
+	"github.com/anggasct/aura/internal/platform/clikit"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/secret"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 const defaultPersona = memorytest.MainPersona
@@ -41,7 +47,11 @@ func newOpsRigAnswering(t *testing.T, answer func(ctx context.Context, prompt *t
 	if err := mem.Seed(t.Context()); err != nil {
 		t.Fatalf("seed the documents: %v", err)
 	}
-	operations, err := memory.NewOperations(&memory.OperationDeps{Service: mem.Service, Scopes: memorytest.PersonaScopes()})
+	operations, err := memory.NewOperations(&memory.OperationDeps{
+		Service: mem.Service,
+		Scopes:  memorytest.PersonaScopes(),
+		Now:     func() time.Time { return time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC) },
+	})
 	if err != nil {
 		t.Fatalf("NewOperations: %v", err)
 	}
@@ -408,6 +418,7 @@ func TestMemoryOperationsWriteOnlyInsideCommit(t *testing.T) {
 		{name: "forget by query", id: "memory.forget", input: `{"query":"alpha"}`, previewed: true},
 		{name: "purge", id: "memory.purge", input: `{}`, previewed: true},
 		{name: "inspect", id: "memory.inspect", input: `{}`},
+		{name: "search", id: "memory.search", input: `{"query":"alpha"}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -648,4 +659,257 @@ func TestTheAgentDescriptionOfForgetTellsHowToAvoidARefusedCard(t *testing.T) {
 		return
 	}
 	t.Fatal("the memory.forget tool is not registered")
+}
+
+func (r *opsRig) cliRun(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	open := func(_ *cobra.Command, _ *operation.Descriptor, run func(context.Context, operation.Invoker) error) error {
+		return run(t.Context(), r.Registry)
+	}
+	roots, err := operation.Commands([]operation.Catalog{memory.Catalog()}, open)
+	if err != nil {
+		t.Fatalf("Commands: %v", err)
+	}
+	var out bytes.Buffer
+	root := &cobra.Command{Use: "aura", SilenceUsage: true, SilenceErrors: true}
+	root.AddCommand(roots...)
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs(args)
+	err = root.ExecuteContext(t.Context())
+	return out.String(), err
+}
+
+func TestMemorySearchOperationFiltersByTimeScopeAndTaint(t *testing.T) {
+	ctx := t.Context()
+	now := time.Date(2026, 9, 12, 12, 5, 0, 0, time.UTC)
+	db := operationtest.OpenDatabase(t, memory.Schema())
+	store, err := memory.NewSQLiteStore(db, turnstore.NewSessionService(db))
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	vault := secret.New()
+	vault.Set("api_key", "sk-canary-secret-token-999")
+	service, err := memory.NewService(store, vault, &memory.ServiceOptions{TokenBudget: 600})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+	scopes := memorytest.Scopes{
+		memorytest.MainPersona:  {memorytest.MainPersona},
+		memorytest.AlphaPersona: {memorytest.AlphaPersona},
+		memorytest.BetaPersona:  {memorytest.BetaPersona},
+		"shared-a":              {"shared-a", "shared-b"},
+		"shared-b":              {"shared-a", "shared-b"},
+	}
+	operations, err := memory.NewOperations(&memory.OperationDeps{
+		Service: service,
+		Scopes:  scopes,
+		Now:     func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("NewOperations: %v", err)
+	}
+	rig := &opsRig{
+		Rig: operationtest.NewRig(t, &operationtest.Options{
+			DB:       db,
+			Catalogs: []operation.Catalog{memory.Catalog()},
+			Bindings: func(*operationtest.Stubs) []operation.Binding { return operations.Bindings() },
+		}),
+	}
+	sessions := turnstore.NewSessionService(db)
+	for _, s := range []struct{ id, agent string }{
+		{"sess-alpha", memorytest.AlphaPersona},
+		{"sess-beta", memorytest.BetaPersona},
+		{"sess-shared-a", "shared-a"},
+		{"sess-shared-b", "shared-b"},
+	} {
+		if err := sessions.Create(ctx, &turn.Session{
+			ID: s.id, OwnerID: principal.OwnerID, AgentID: s.agent,
+			CreatedAt: now, UpdatedAt: now, Metadata: []byte(`{}`),
+		}); err != nil {
+			t.Fatalf("create session %s: %v", s.id, err)
+		}
+	}
+	seedDoc := func(id, sessionID, content string, seq int64, tainted bool, createdAt time.Time) {
+		t.Helper()
+		taintVal := tainted
+		if _, err := store.UpsertDocument(ctx, &memory.StoredDocument{
+			ID: id, OwnerID: principal.OwnerID, SessionID: sessionID, Kind: memory.KindEventText,
+			FromSequence: seq, ToSequence: seq, Content: content,
+			TrustLabel: "owner_input", Tainted: &taintVal, CreatedAt: createdAt,
+		}); err != nil {
+			t.Fatalf("UpsertDocument(%s): %v", id, err)
+		}
+	}
+
+	t0 := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	t500 := time.Date(2026, 9, 12, 12, 0, 0, 500_000_000, time.UTC)
+	t1000 := time.Date(2026, 9, 12, 12, 0, 1, 0, time.UTC)
+	seedDoc("mem-t0", "sess-alpha", "alpha deploy timeline zero", 1, false, t0)
+	seedDoc("mem-t500", "sess-alpha", "alpha deploy timeline half", 2, false, t500)
+	seedDoc("mem-t1000", "sess-alpha", "alpha deploy timeline one", 3, true, t1000)
+	seedDoc("mem-beta-priv", "sess-beta", "beta secret deploy timeline", 1, false, t500)
+	seedDoc("mem-shared-a", "sess-shared-a", "shared roadmap milestone alpha", 1, false, t0)
+	seedDoc("mem-shared-b", "sess-shared-b", "shared roadmap milestone bravo", 1, false, t500)
+	seedDoc("mem-secret-row", "sess-alpha", "canarytoken sk-canary-secret-token-999", 4, false, t500)
+	seedDoc("mem-hostile", "sess-alpha", "hostile\u001b[31m \u202egnp.exe\a alert", 5, true, t500)
+	longContent := "longbound " + strings.Repeat("é", 1500)
+	seedDoc("mem-long-1", "sess-alpha", longContent, 6, false, t500)
+	seedDoc("mem-long-2", "sess-alpha", longContent, 7, false, t0)
+
+	t.Run("exact sub-second after and before bounds", func(t *testing.T) {
+		exactHalf, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"deploy timeline","session":"sess-alpha","after":"2026-09-12T12:00:00.5Z","before":"2026-09-12T12:00:00.5Z"}`)
+		if err != nil {
+			t.Fatalf("exact half-second search: %v", err)
+		}
+		if got := rowIDs(t, string(exactHalf.Data)); strings.Join(got, ",") != "mem-t500" {
+			t.Errorf("exact .5Z search = %v, want [mem-t500]", got)
+		}
+
+		beforeWhole, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"deploy timeline","session":"sess-alpha","before":"2026-09-12T12:00:00Z"}`)
+		if err != nil {
+			t.Fatalf("before whole-second search: %v", err)
+		}
+		if got := rowIDs(t, string(beforeWhole.Data)); strings.Join(got, ",") != "mem-t0" {
+			t.Errorf("before Z search = %v, want [mem-t0] without .5Z", got)
+		}
+
+		limited, err := rig.invoke(t, operation.SurfaceChat, "memory.search", `{"query":"deploy timeline","session":"sess-alpha","limit":1}`)
+		if err != nil {
+			t.Fatalf("chat limited search: %v", err)
+		}
+		if got := len(resultRows(t, limited.Data)); got != 1 {
+			t.Errorf("chat limit=1 rows = %d, want 1", got)
+		}
+	})
+
+	t.Run("invalid inputs return operation_input_invalid and exit usage", func(t *testing.T) {
+		cases := []struct {
+			name string
+			in   string
+			cli  []string
+		}{
+			{name: "bad after", in: `{"query":"deploy","after":"not-a-timestamp"}`, cli: []string{"memory", "search", "deploy", "--after", "not-a-timestamp"}},
+			{name: "bad before", in: `{"query":"deploy","before":"2026-13-99"}`, cli: []string{"memory", "search", "deploy", "--before", "2026-13-99"}},
+			{name: "after greater than before", in: `{"query":"deploy","after":"2026-09-12T12:00:02Z","before":"2026-09-12T12:00:01Z"}`, cli: []string{"memory", "search", "deploy", "--after", "2026-09-12T12:00:02Z", "--before", "2026-09-12T12:00:01Z"}},
+			{name: "punctuation only query", in: `{"query":"!!! ((("}`, cli: []string{"memory", "search", "!!! ((("}},
+		}
+		for _, tc := range cases {
+			t.Run(tc.name, func(t *testing.T) {
+				if _, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", tc.in); !fault.HasCode(err, operation.ErrorCodeInputInvalid) {
+					t.Errorf("Invoke(%s) = %v, want %s", tc.name, err, operation.ErrorCodeInputInvalid)
+				}
+				if _, err := rig.cliRun(t, tc.cli...); !clikit.IsUsageError(err) || !fault.HasCode(err, operation.ErrorCodeInputInvalid) {
+					t.Errorf("CLI(%s) err = %v, want usage error with %s", tc.name, err, operation.ErrorCodeInputInvalid)
+				}
+			})
+		}
+	})
+
+	t.Run("agent scope isolates private personas and honors shared scope while owner sees all", func(t *testing.T) {
+		alphaOut := rig.toolAs(memorytest.AlphaPersona, "memory.search", `{"query":"deploy timeline"}`)
+		requireOK(t, alphaOut)
+		alphaIDs := rowIDs(t, alphaOut.Output)
+		for _, id := range alphaIDs {
+			if id == "mem-beta-priv" {
+				t.Fatalf("alpha agent received beta private memory: %v", alphaIDs)
+			}
+		}
+		if len(alphaIDs) != 3 {
+			t.Errorf("alpha agent saw %v, want its 3 deploy timeline docs", alphaIDs)
+		}
+
+		sharedOut := rig.toolAs("shared-a", "memory.search", `{"query":"roadmap milestone"}`)
+		requireOK(t, sharedOut)
+		sharedIDs := rowIDs(t, sharedOut.Output)
+		if len(sharedIDs) != 2 {
+			t.Errorf("shared-a saw %v, want both shared-a and shared-b docs", sharedIDs)
+		}
+		sharedPrivate := rig.toolAs("shared-a", "memory.search", `{"query":"beta secret deploy"}`)
+		requireOK(t, sharedPrivate)
+		if got := rowIDs(t, sharedPrivate.Output); len(got) != 0 {
+			t.Errorf("shared-a leaked private beta doc: %v", got)
+		}
+
+		ownerCLI, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"deploy timeline"}`)
+		if err != nil {
+			t.Fatalf("owner CLI search: %v", err)
+		}
+		ownerIDs := rowIDs(t, string(ownerCLI.Data))
+		if !strings.Contains(strings.Join(ownerIDs, ","), "mem-beta-priv") {
+			t.Errorf("owner CLI search = %v, want cross-persona results including mem-beta-priv", ownerIDs)
+		}
+	})
+
+	t.Run("secret rows are dropped and long rows are UTF-8 bounded within token budget", func(t *testing.T) {
+		secretRes, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"canarytoken"}`)
+		if err != nil {
+			t.Fatalf("secret query search: %v", err)
+		}
+		if got := resultRows(t, secretRes.Data); len(got) != 0 {
+			t.Errorf("secret-bearing row leaked: %+v", got)
+		}
+
+		longRes, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"longbound","session":"sess-alpha","limit":10}`)
+		if err != nil {
+			t.Fatalf("long query search: %v", err)
+		}
+		rows := resultRows(t, longRes.Data)
+		if len(rows) != 1 {
+			t.Fatalf("budgeted long rows = %d, want 1 (at least 1 fits, second exceeds 600 token budget)", len(rows))
+		}
+		content := fmt.Sprint(rows[0]["content"])
+		if len(content) > 2048 || !utf8.ValidString(content) || !strings.HasSuffix(content, "…") {
+			t.Errorf("bounded content invalid: bytes=%d valid=%t suffix=%t", len(content), utf8.ValidString(content), strings.HasSuffix(content, "…"))
+		}
+	})
+
+	t.Run("cli and chat escape control characters", func(t *testing.T) {
+		out := rig.cli(t, "memory", "search", "alert", "--session", "sess-alpha")
+		for _, raw := range []string{"\u001b", "\u202e", "\a"} {
+			if strings.Contains(out, raw) {
+				t.Errorf("CLI search printed raw %q:\n%s", raw, out)
+			}
+		}
+		if !strings.Contains(out, `\u{202e}`) {
+			t.Errorf("CLI search did not escape bidi control:\n%s", out)
+		}
+	})
+
+	t.Run("result taint evaluates per row and fails closed on invalid json", func(t *testing.T) {
+		desc, ok := rig.Registry.Descriptor("memory.search")
+		if !ok || desc.ResultTaint == nil {
+			t.Fatalf("memory.search descriptor missing ResultTaint")
+		}
+		cleanRes, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"deploy timeline","session":"sess-alpha","before":"2026-09-12T12:00:00.5Z"}`)
+		if err != nil {
+			t.Fatalf("clean search: %v", err)
+		}
+		if desc.ResultTaint(cleanRes.Data) {
+			t.Errorf("clean rows reported tainted: %s", cleanRes.Data)
+		}
+
+		emptyRes, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"nonexistenttermxyz"}`)
+		if err != nil {
+			t.Fatalf("empty search: %v", err)
+		}
+		if desc.ResultTaint(emptyRes.Data) {
+			t.Errorf("empty rows reported tainted: %s", emptyRes.Data)
+		}
+
+		taintedRes, err := rig.invoke(t, operation.SurfaceCLI, "memory.search", `{"query":"deploy timeline","session":"sess-alpha","after":"2026-09-12T12:00:01Z"}`)
+		if err != nil {
+			t.Fatalf("tainted search: %v", err)
+		}
+		if !desc.ResultTaint(taintedRes.Data) {
+			t.Errorf("tainted row reported clean: %s", taintedRes.Data)
+		}
+
+		if !desc.ResultTaint(json.RawMessage(`not json`)) {
+			t.Error("unparsable JSON did not fail closed to tainted")
+		}
+		if !desc.ResultTaint(json.RawMessage(`{"rows":null}`)) {
+			t.Error("null rows did not fail closed to tainted")
+		}
+	})
 }

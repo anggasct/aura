@@ -192,8 +192,8 @@ func TestToolCatalogGolden(t *testing.T) {
 	registerOperationToolProvider(t, broker)
 
 	definitions := broker.Definitions()
-	if len(definitions) != 41 {
-		t.Fatalf("registered definitions = %d, want 41", len(definitions))
+	if len(definitions) != 42 {
+		t.Fatalf("registered definitions = %d, want 42", len(definitions))
 	}
 
 	catalog := toolCatalog{}

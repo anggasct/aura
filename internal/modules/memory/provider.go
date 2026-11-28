@@ -137,12 +137,14 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 		observation.Outcome = string(ErrorCodeQueryInvalid)
 		return nil, observation, fault.New(ErrorCodeQueryInvalid, "recall persona is not registered")
 	}
+	now := p.now().UTC()
 	result, err := p.service.RecallWithSummary(ctx, &RecallRequest{
 		OwnerID:   req.PrincipalID,
 		AgentIDs:  readable,
 		SessionID: req.SessionID,
 		Query:     query,
-		Before:    p.now().UTC(),
+		Before:    now,
+		Now:       now,
 	}, p.model, p.summarizer)
 	if err != nil {
 		observation.Outcome = string(ErrorCodeUnavailable)

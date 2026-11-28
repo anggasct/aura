@@ -11,12 +11,16 @@ const (
 	GroupName = "memory"
 
 	operationInspect = "memory.inspect"
+	operationSearch  = "memory.search"
 	operationForget  = "memory.forget"
 	operationPurge   = "memory.purge"
 
 	maxSessionIDBytes   = 512
 	maxDocumentIDBytes  = 128
+	maxTimestampBytes   = 64
+	maxSearchLimit      = 20
 	defaultInspectLimit = "50"
+	defaultSearchLimit  = "10"
 	defaultForgetLimit  = "100"
 	defaultPurgeLimit   = "100"
 )
@@ -50,7 +54,16 @@ func inspectOutput() operation.Output {
 	return operation.Output{Kind: operation.OutputTable, Fields: fields}
 }
 
-func inspectResultTaints(raw json.RawMessage) bool {
+func searchOutput() operation.Output {
+	names := []string{"id", "agent", "session", "kind", "created_at", "score", "tainted", "content"}
+	fields := make([]operation.OutputField, 0, len(names))
+	for _, name := range names {
+		fields = append(fields, operation.OutputField{Name: name})
+	}
+	return operation.Output{Kind: operation.OutputTable, Fields: fields}
+}
+
+func memoryRowsTaint(raw json.RawMessage) bool {
 	var parsed struct {
 		Rows []struct {
 			Tainted *bool `json:"tainted"`
@@ -74,7 +87,7 @@ func Catalog() operation.Catalog {
 		Descriptors: []operation.Descriptor{
 			{
 				ID: operationInspect, Summary: "List recall documents with their provenance", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: inspectResultTaints, Needs: needs,
+				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: memoryRowsTaint, Needs: needs,
 				Description: "Lists what Aura remembers from past conversations across every persona, with session, range, trust label and expiry. The content comes from conversations and tool results, not from the owner alone.",
 				Texts: []operation.SurfaceText{
 					{Surface: operation.SurfaceAgent, Text: "Lists what your persona remembers from past conversations, with session, range, trust label and expiry; memory of another persona is never listed. The content comes from conversations and tool results, not from the owner alone."},
@@ -85,6 +98,22 @@ func Catalog() operation.Catalog {
 					limitParam("maximum documents to list", maxInspectLimit, defaultInspectLimit),
 				},
 				Output: inspectOutput(),
+			},
+			{
+				ID: operationSearch, Summary: "Search recall memory by query and time range", Exposure: operation.ExposureAgent,
+				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: memoryRowsTaint, Needs: needs,
+				Description: "Searches projected session memory across every persona using ranked lexical recall with recency weighting and optional time bounds. Results come from past conversations and tool outputs.",
+				Texts: []operation.SurfaceText{
+					{Surface: operation.SurfaceAgent, Text: "Searches projected session memory within your persona's readable memory scope using ranked lexical recall with recency weighting and optional time bounds. Memory of private other personas is never returned."},
+				},
+				Params: []operation.Param{
+					{Name: "query", Kind: operation.KindString, Summary: "search terms to match in memory", Required: true, Position: 1, MinLength: 1, MaxLength: runtimeingress.MaxQueryRunes},
+					sessionParam("only search documents of this session id"),
+					{Name: "after", Kind: operation.KindString, Summary: "only documents created at or after this RFC3339 timestamp", MinLength: 1, MaxLength: maxTimestampBytes},
+					{Name: "before", Kind: operation.KindString, Summary: "only documents created at or before this RFC3339 timestamp", MinLength: 1, MaxLength: maxTimestampBytes},
+					limitParam("maximum matching documents to return", maxSearchLimit, defaultSearchLimit),
+				},
+				Output: searchOutput(),
 			},
 			{
 				ID: operationForget, Summary: "Preview or delete recall documents", Exposure: operation.ExposureAgent,

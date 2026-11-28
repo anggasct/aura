@@ -45,7 +45,7 @@ func TestRootCommandMountsEverySubcommand(t *testing.T) {
 		"interpreter": {"install", "list", "remove"},
 		"kb":          {"add", "check", "embed", "list", "refresh", "remove", "show", "trust", "unembed", "untrust"},
 		"mcp":         {"list", "trust"},
-		"memory":      {"forget", "inspect", "purge"},
+		"memory":      {"forget", "inspect", "purge", "search"},
 		"models":      {"circuit-reset", "circuits", "routes"},
 		"owner":       {"rekey", "whoami"},
 		"pairing":     {"approve", "clear-pending", "list", "revoke"},
