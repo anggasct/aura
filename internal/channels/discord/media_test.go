@@ -334,3 +334,40 @@ func TestDiscordARefusedTextCandidateIsNotAdmittedLikeAnyOtherRefusedAttachment(
 		})
 	}
 }
+
+func TestDiscordServedTypesOfNonTextAttachmentsKeepTheirRules(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string
+		filename string
+		served   string
+		want     bool
+	}{
+		{name: "an image served as generic bytes", declared: "image/png", filename: "a.png", served: "application/octet-stream"},
+		{name: "a PDF served as generic bytes", declared: "application/pdf", filename: "a.pdf", served: "application/octet-stream"},
+		{name: "audio served as generic bytes", declared: "audio/mpeg", filename: "a.mp3", served: "application/octet-stream"},
+		{name: "video served as generic bytes", declared: "video/mp4", filename: "a.mp4", served: "application/octet-stream"},
+		{name: "a PDF served as itself", declared: "application/pdf", filename: "a.pdf", served: "application/pdf", want: true},
+		{name: "audio served as itself", declared: "audio/mpeg", filename: "a.mp3", served: "audio/mpeg", want: true},
+		{name: "a PDF served as an archive", declared: "application/pdf", filename: "a.pdf", served: "application/zip"},
+	}
+	for index, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gateway := newFakeGateway(t, true)
+			stub := newMediaStub(t, "body", tc.served, http.StatusOK)
+			ws, sink, tc2 := startMediaSession(t, gateway)
+			defer tc2.stop(t)
+			id := "360" + string(rune('0'+index))
+
+			gateway.send(ws, opDispatch, messageWithAttachments(id, "read this", []attachmentPayload{
+				{URL: stub.URL + "/doc", Filename: tc.filename, Size: 4, ContentType: tc.declared},
+			}), seqPtr(1), eventMessageCreate)
+			sendAndWait(t, gateway, ws, messageWithAttachments(id+"1", "plain follow-up", nil), 2, sink)
+
+			calls, _ := sink.stats("message:" + id)
+			if got := calls == 1; got != tc.want {
+				t.Errorf("admitted = %v (calls %d), want %v", got, calls, tc.want)
+			}
+		})
+	}
+}

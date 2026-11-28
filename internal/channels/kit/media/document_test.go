@@ -80,6 +80,7 @@ func TestNewIntakeResolvesTheStoredTypeOfADocument(t *testing.T) {
 		wantOK   bool
 	}{
 		{name: "a declared text type", filename: "x.bin", declared: "text/plain; charset=utf-8", want: Intake{MediaType: "text/plain"}, wantOK: true},
+		{name: "a declared text type and a text name", filename: "notes.md", declared: "text/plain", want: Intake{MediaType: "text/plain", Sniff: true}, wantOK: true},
 		{name: "a declared image", filename: "photo", declared: "image/png", want: Intake{MediaType: "image/png"}, wantOK: true},
 		{name: "no type and a markdown name", filename: "notes.md", want: Intake{MediaType: "text/markdown", Sniff: true}, wantOK: true},
 		{name: "a generic type and a long markdown name", filename: "notes.MARKDOWN", declared: "application/octet-stream", want: Intake{MediaType: "text/markdown", Sniff: true}, wantOK: true},
@@ -107,28 +108,36 @@ func TestNewIntakeResolvesTheStoredTypeOfADocument(t *testing.T) {
 
 func TestIntakeAcceptsOnlyTheServedTypesOfItsKind(t *testing.T) {
 	text := Intake{MediaType: "text/markdown", Sniff: true}
+	unverifiedText := Intake{MediaType: "text/plain"}
 	declared := Intake{MediaType: "image/png"}
 	cases := []struct {
-		name   string
-		intake Intake
-		served string
-		want   bool
+		name        string
+		intake      Intake
+		served      string
+		wantStrict  bool
+		wantGeneric bool
 	}{
-		{name: "text served without a type", intake: text, want: true},
-		{name: "text served as generic bytes", intake: text, served: "application/octet-stream", want: true},
-		{name: "text served as its alias", intake: text, served: "text/x-markdown; charset=utf-8", want: true},
-		{name: "text served as html", intake: text, served: "text/html", want: true},
+		{name: "text served without a type", intake: text, wantStrict: true, wantGeneric: true},
+		{name: "text served as generic bytes", intake: text, served: "application/octet-stream", wantStrict: true, wantGeneric: true},
+		{name: "text served as its alias", intake: text, served: "text/x-markdown; charset=utf-8", wantStrict: true, wantGeneric: true},
+		{name: "text served as html", intake: text, served: "text/html", wantStrict: true, wantGeneric: true},
 		{name: "text served as an image", intake: text, served: "image/png"},
 		{name: "text served as a script", intake: text, served: "text/x-shellscript"},
-		{name: "a declared image served without a type", intake: declared, want: true},
-		{name: "a declared image served as generic bytes", intake: declared, served: "application/octet-stream", want: true},
-		{name: "a declared image served as an image", intake: declared, served: "image/png", want: true},
+		{name: "text without a checked name served as generic bytes", intake: unverifiedText, served: "application/octet-stream", wantGeneric: true},
+		{name: "text without a checked name served as text", intake: unverifiedText, served: "text/plain", wantStrict: true, wantGeneric: true},
+		{name: "a declared image served as text", intake: declared, served: "text/plain"},
+		{name: "a declared image served without a type", intake: declared, wantStrict: true, wantGeneric: true},
+		{name: "a declared image served as generic bytes", intake: declared, served: "application/octet-stream", wantGeneric: true},
+		{name: "a declared image served as an image", intake: declared, served: "image/png", wantStrict: true, wantGeneric: true},
 		{name: "a declared image served as an archive", intake: declared, served: "application/zip"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := tc.intake.Served(tc.served); got != tc.want {
-				t.Errorf("Served(%q) = %v, want %v", tc.served, got, tc.want)
+			if got := tc.intake.Served(tc.served, false); got != tc.wantStrict {
+				t.Errorf("Served(%q, strict) = %v, want %v", tc.served, got, tc.wantStrict)
+			}
+			if got := tc.intake.Served(tc.served, true); got != tc.wantGeneric {
+				t.Errorf("Served(%q, generic for any) = %v, want %v", tc.served, got, tc.wantGeneric)
 			}
 		})
 	}

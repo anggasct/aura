@@ -35,7 +35,7 @@ func (c *botClient) download(ctx context.Context, token, filePath string, limit 
 	switch {
 	case resp.StatusCode != http.StatusOK:
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file download did not succeed")
-	case !intake.Served(resp.Header.Get("Content-Type")):
+	case !intake.Served(resp.Header.Get("Content-Type"), true):
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file media type is not eligible")
 	case resp.ContentLength > limit:
 		return nil, fault.New(ErrorCodeAttachmentRejected, "file exceeds the size bound")

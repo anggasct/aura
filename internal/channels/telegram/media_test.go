@@ -1086,3 +1086,32 @@ func TestTelegramARefusedTextCandidateDropsTheWholeMessageLikeAnyOtherRefusedAtt
 		})
 	}
 }
+
+func TestTelegramServedTypesOfNonTextAttachmentsKeepTheirRules(t *testing.T) {
+	cases := []struct {
+		name     string
+		declared string
+		fileName string
+		served   string
+		want     bool
+	}{
+		{name: "an image served as generic bytes", declared: "image/png", fileName: "a.png", served: "application/octet-stream", want: true},
+		{name: "a PDF served as generic bytes", declared: "application/pdf", fileName: "a.pdf", served: "application/octet-stream", want: true},
+		{name: "audio served as generic bytes", declared: "audio/mpeg", fileName: "a.mp3", served: "application/octet-stream", want: true},
+		{name: "a PDF served without a type", declared: "application/pdf", fileName: "a.pdf", served: "", want: true},
+		{name: "a PDF served as itself", declared: "application/pdf", fileName: "a.pdf", served: "application/pdf", want: true},
+		{name: "a PDF served as an archive", declared: "application/pdf", fileName: "a.pdf", served: "application/zip"},
+		{name: "audio served as text", declared: "audio/mpeg", fileName: "a.mp3", served: "text/plain"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newMediaRig(t, accessOpts{})
+			rig.h.api.addFile(&fakeFile{id: "d", path: "documents/file_9.bin", declared: 4, contentType: tc.served, body: []byte("body")})
+			rig.run(t, privateMedia(10, ownerUserID, "", asDocument(mediaFile{FileID: "d", FileSize: 4, MimeType: tc.declared, FileName: tc.fileName})))
+
+			if got := len(rig.sink.accepted()) == 1; got != tc.want {
+				t.Fatalf("accepted = %v, want %v (drops %v)", got, tc.want, rig.dropped())
+			}
+		})
+	}
+}

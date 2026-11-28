@@ -95,7 +95,7 @@ func (a *Adapter) downloadAttachment(ctx context.Context, attachment *attachment
 	if resp.StatusCode != http.StatusOK {
 		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment download did not succeed")
 	}
-	if !intake.Served(resp.Header.Get("Content-Type")) {
+	if !intake.Served(resp.Header.Get("Content-Type"), false) {
 		return nil, fault.New(ErrorCodeAttachmentRejected, "attachment media type is not eligible")
 	}
 	tmp, err := media.Spool(resp.Body, limit)

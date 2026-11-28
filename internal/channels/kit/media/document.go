@@ -55,28 +55,30 @@ type Intake struct {
 
 func NewIntake(filename, declared string) (Intake, bool) {
 	base := storage.BaseMediaType(declared)
+	canonical, textName := textExtensions[strings.ToLower(path.Ext(SanitizeFilename(filename)))]
 	if Attachable(base) {
-		return Intake{MediaType: base}, true
+		return Intake{MediaType: base, Sniff: IsTextDocument(base) && textName}, true
 	}
 	if base != "" && base != genericMediaType && !slices.Contains(textAliases, base) {
 		return Intake{}, false
 	}
-	canonical, known := textExtensions[strings.ToLower(path.Ext(SanitizeFilename(filename)))]
-	if !known {
+	if !textName {
 		return Intake{}, false
 	}
 	return Intake{MediaType: canonical, Sniff: true}, true
 }
 
-func (i Intake) Served(contentType string) bool {
+func (i Intake) Served(contentType string, genericForAny bool) bool {
 	served := storage.BaseMediaType(contentType)
 	switch {
-	case served == "" || served == genericMediaType:
+	case served == "":
 		return true
-	case i.Sniff:
+	case served == genericMediaType:
+		return i.Sniff || genericForAny
+	case IsTextDocument(i.MediaType):
 		return IsTextDocument(served) || slices.Contains(textAliases, served)
 	}
-	return Attachable(served)
+	return Eligible(served)
 }
 
 func (i Intake) Verify(content *os.File) error {
