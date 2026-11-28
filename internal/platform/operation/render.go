@@ -15,13 +15,13 @@ const (
 	nullCell     = "-"
 )
 
-func renderOutput(out io.Writer, descriptor *Descriptor, data json.RawMessage) error {
+func (d *Descriptor) renderOn(surface Surface, out io.Writer, data json.RawMessage) error {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(data, &object); err != nil {
 		return wrapError(ErrorCodeFailed, "the result is not a JSON object", err)
 	}
-	fields := descriptor.OutputFieldsOn(SurfaceCLI)
-	switch descriptor.Output.Kind {
+	fields := d.OutputFieldsOn(surface)
+	switch d.Output.Kind {
 	case OutputTable:
 		return renderTable(out, object, fields)
 	case OutputText:

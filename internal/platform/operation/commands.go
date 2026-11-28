@@ -134,7 +134,7 @@ func (t *commandTree) leaf(descriptor *Descriptor, name string) *cobra.Command {
 		open:        t.open,
 		flags:       descriptor.Flags(SurfaceCLI),
 		positionals: descriptor.Positionals(SurfaceCLI),
-		previewing:  descriptor.Preview && (descriptor.Risk == RiskDestructive || descriptor.Risk == RiskChange),
+		previewing:  descriptor.previews(),
 	}
 	command := &cobra.Command{
 		Use:         leaf.usage(name),
@@ -344,5 +344,5 @@ func (l *leafCommand) invoke(ctx context.Context, run *commandRun) error {
 	if run.asJSON {
 		return writeIndented(run.cmd.OutOrStdout(), result.Data)
 	}
-	return renderOutput(run.cmd.OutOrStdout(), l.descriptor, result.Data)
+	return l.descriptor.renderOn(SurfaceCLI, run.cmd.OutOrStdout(), result.Data)
 }

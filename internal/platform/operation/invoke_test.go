@@ -20,7 +20,7 @@ var errBoom = errors.New("boom")
 
 func call(surface operation.Surface, key, digest, subject string) *operation.Call {
 	return &operation.Call{
-		Caller:         operation.Caller{Surface: surface, Class: principal.ClassOwner, PrincipalID: operationtest.OwnerID, SessionID: operationtest.SessionID},
+		Caller:         operation.Caller{Surface: surface, Class: principal.ClassOwner, PrincipalID: operationtest.OwnerID, SessionID: operationtest.SessionID, Direct: true},
 		Input:          json.RawMessage(`{"subject":"` + subject + `"}`),
 		IdempotencyKey: key,
 		RequestDigest:  digest,

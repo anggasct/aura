@@ -105,10 +105,5 @@ func (d *Discovery) validateBehaviors() error {
 }
 
 func (d *Discovery) available(descriptor *Descriptor) bool {
-	for _, required := range descriptor.RequiredCapabilities {
-		if !slices.Contains(d.capabilities, required) {
-			return false
-		}
-	}
-	return true
+	return capabilitiesMet(descriptor, d.capabilities)
 }
