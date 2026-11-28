@@ -135,8 +135,9 @@ func TestDurableTurnOperationCallIsReplayedOnceAfterAKilledProcess(t *testing.T)
 		t.Fatalf("changes applied at the kill = %d, want none", n)
 	}
 
+	suite.child.kill(t)
 	expireEffectLeases(t, suite.db)
-	life := suite.resume(t)
+	life := suite.openSecondLife(t)
 	suite.release(t, beforeCommitGate)
 
 	suite.requireResumed(t, life)
@@ -149,8 +150,9 @@ func TestDurableTurnOperationKilledBetweenCommitAndSuccessIsSettledFromItsReceip
 	suite.child.waitKillPoint(t, "the handler committed", suite.ledger.exists(t, afterCommitGate+".entered"))
 	requireOneCommit(t, suite.db, operationtest.Change)
 
+	suite.child.kill(t)
 	expireEffectLeases(t, suite.db)
-	life := suite.resume(t)
+	life := suite.openSecondLife(t)
 	suite.release(t, afterCommitGate)
 
 	suite.requireResumed(t, life)
@@ -164,8 +166,9 @@ func TestDurableTurnApprovedDestructiveCallSurvivesReplay(t *testing.T) {
 	suite.ledger.requireCount(t, approvalCalls, 1)
 	suite.ledger.requireCount(t, previewCalls, 1)
 
+	suite.child.kill(t)
 	expireEffectLeases(t, suite.db)
-	life := suite.resume(t)
+	life := suite.openSecondLife(t)
 	suite.release(t, beforeCommitGate)
 
 	suite.requireResumed(t, life)

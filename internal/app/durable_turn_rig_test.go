@@ -711,6 +711,11 @@ func startKilledSuite(t *testing.T, scenario string) *killedSuite {
 func (s *killedSuite) resume(t *testing.T) *turnLife {
 	t.Helper()
 	s.child.kill(t)
+	return s.openSecondLife(t)
+}
+
+func (s *killedSuite) openSecondLife(t *testing.T) *turnLife {
+	t.Helper()
 	plan := s.plan
 	plan.Life = 2
 	life := openLife(t, plan)
