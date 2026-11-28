@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -23,6 +24,8 @@ type Deps struct {
 	Observer    Observer
 	Logger      *slog.Logger
 }
+
+var _ operation.BehaviorProvider = (*Module)(nil)
 
 type Module struct {
 	cfg          Config
@@ -78,6 +81,13 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 		summarizer:   summarizer,
 		logger:       deps.Logger,
 	}, nil
+}
+
+func (m *Module) Behaviors() []operation.Behavior {
+	if m == nil {
+		return nil
+	}
+	return []operation.Behavior{{ID: "memory", Group: "memory", Summary: "past conversations are recalled into your context when they match"}}
 }
 
 func (m *Module) Service() *Service {
