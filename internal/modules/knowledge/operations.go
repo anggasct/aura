@@ -416,13 +416,7 @@ func (o *Operations) prepareStored(ctx context.Context, call *operation.Call, co
 }
 
 func canOpenStored(surface operation.Surface, uri string) bool {
-	switch surface {
-	case operation.SurfaceCLI:
-		return true
-	case operation.SurfaceAgent:
-		return !filepath.IsAbs(uri)
-	}
-	return false
+	return surface == operation.SurfaceCLI || surface == operation.SurfaceAgent && !filepath.IsAbs(uri)
 }
 
 func (o *Operations) settled(ctx context.Context, record *SourceRecord, prepare func() (*Prepared, error)) (*Prepared, *refreshNote, error) {
