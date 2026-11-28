@@ -48,6 +48,10 @@ func requestWithEveryFieldSet() *turn.TurnRequest {
 		Knowledge:        []string{"support", "hr-docs"},
 		InputTainted:     true,
 		ToolRestriction:  &turn.ToolRestriction{Allowed: []string{"read_file"}},
+		JobTaint:         "a schedule created in a conversation with untrusted content",
+		JobID:            "job-7",
+		WebOnly:          true,
+		Timezone:         "Asia/Jakarta",
 	}
 }
 
@@ -133,6 +137,31 @@ func TestTurnDescriptorCarriesEveryRequestField(t *testing.T) {
 			t.Fatalf("restored context = %+v, require recall = %v; want none", restored.UntrustedContext, restored.RequireRecall)
 		}
 	})
+}
+
+func TestDurableDescriptorKeepsJobTaintAndWebOnly(t *testing.T) {
+	req := &turn.TurnRequest{Origin: turn.OriginSchedule, JobTaint: "label", JobID: "job-1", WebOnly: true, Timezone: "UTC"}
+	stored, keys := descriptorThroughJSON(t, req)
+	for _, key := range []string{"job_taint", "job_id", "web_only", "timezone"} {
+		if _, present := keys[key]; !present {
+			t.Errorf("descriptor JSON lacks the key %q", key)
+		}
+	}
+	restored := turnRequestFromDescriptor(&stored)
+	if restored.JobTaint != "label" || restored.JobID != "job-1" || !restored.WebOnly || restored.Timezone != "UTC" {
+		t.Fatalf("restored request = %+v, want the job taint, id, web-only flag and timezone", restored)
+	}
+	mark, tainted := restored.AdmissionTaint()
+	if !tainted || mark.Source != turn.TaintSourceScheduleOrigin || mark.Detail != "job-1" {
+		t.Fatalf("restored admission = %+v %v, want schedule_origin for job-1", mark, tainted)
+	}
+	clean := &turn.TurnRequest{Origin: turn.OriginSchedule}
+	_, keys = descriptorThroughJSON(t, clean)
+	for _, key := range []string{"job_taint", "job_id", "web_only", "timezone"} {
+		if _, present := keys[key]; present {
+			t.Errorf("a clean request stores the key %q", key)
+		}
+	}
 }
 
 func TestDurableTurnExecutesWithTheCallersContext(t *testing.T) {

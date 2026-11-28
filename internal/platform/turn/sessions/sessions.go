@@ -53,6 +53,10 @@ type Descriptor struct {
 	Knowledge        []string                 `json:"knowledge,omitempty"`
 	InputTainted     bool                     `json:"input_tainted,omitempty"`
 	ToolRestriction  *turn.ToolRestriction    `json:"tool_restriction,omitempty"`
+	JobTaint         string                   `json:"job_taint,omitempty"`
+	JobID            string                   `json:"job_id,omitempty"`
+	WebOnly          bool                     `json:"web_only,omitempty"`
+	Timezone         string                   `json:"timezone,omitempty"`
 }
 
 type QueuedTurn struct {
