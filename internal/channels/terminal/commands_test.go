@@ -134,3 +134,18 @@ func TestTerminalNewSessionNotesOnStderr(t *testing.T) {
 		t.Errorf("turn = %+v, want sess_2 as aura", runner.calls)
 	}
 }
+
+func TestTheConsoleCallerIsTheOwnerInADirectChat(t *testing.T) {
+	console, _, _, cancel := newConsoleForTestWithDeps(t, &Deps{
+		Runner:   &fakeRunner{eventsFor: func(string) []Event { return nil }},
+		Sessions: newFakeSessions(),
+		AgentID:  "aura",
+	}, "")
+	defer cancel()
+
+	caller := console.caller()
+
+	if !caller.Direct || caller.Class != principal.ClassOwner || caller.Channel != command.ChannelTerminal {
+		t.Errorf("caller = %+v, want the owner in a direct terminal chat", caller)
+	}
+}

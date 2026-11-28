@@ -6,11 +6,14 @@ import (
 	"strings"
 
 	"github.com/anggasct/aura/internal/platform/command"
+	"github.com/anggasct/aura/internal/platform/principal"
 )
 
 const (
 	menuScopeDefault = "default"
 	menuScopeChat    = "chat"
+
+	maxMenuCommands = 100
 )
 
 func wireCommandName(name string) string {
@@ -32,17 +35,15 @@ func restoreCommandName(text string) string {
 	return text
 }
 
-func menuCommands(audiences ...command.Audience) []botCommand {
-	bound := command.MessengerNames()
+func menuCommands(bound []command.Definition, audiences ...command.Audience) []botCommand {
 	var menu []botCommand
-	catalog := command.Catalog()
-	for i := range catalog {
-		def := &catalog[i]
-		if slices.Contains(bound, def.Name) && slices.Contains(audiences, def.Audience) {
+	for i := range bound {
+		def := &bound[i]
+		if def.Kind != command.KindTerminalOnly && slices.Contains(audiences, def.Audience) {
 			menu = append(menu, botCommand{Command: wireCommandName(def.Name), Description: def.Summary})
 		}
 	}
-	return menu
+	return menu[:min(len(menu), maxMenuCommands)]
 }
 
 func (a *Adapter) publishCommandMenu(ctx context.Context) {
@@ -54,13 +55,14 @@ func (a *Adapter) publishCommandMenu(ctx context.Context) {
 		a.logger.WarnContext(ctx, "telegram command menu token unavailable", "component", "telegram", "account", a.account.Name)
 		return
 	}
+	bound := a.commands.Registry().Definitions(principal.ChannelTelegram)
 	requests := []setMyCommandsRequest{{
-		Commands: menuCommands(command.AudienceAny, command.AudienceGuests),
+		Commands: menuCommands(bound, command.AudienceAny, command.AudienceGuests),
 		Scope:    botCommandScope{Type: menuScopeDefault},
 	}}
 	if ownerChat, known := a.ownerChatID(); known {
 		requests = append(requests, setMyCommandsRequest{
-			Commands: menuCommands(command.AudienceOwner, command.AudienceAny),
+			Commands: menuCommands(bound, command.AudienceOwner, command.AudienceAny),
 			Scope:    botCommandScope{Type: menuScopeChat, ChatID: ownerChat},
 		})
 	}

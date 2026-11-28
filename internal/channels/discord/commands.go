@@ -88,6 +88,7 @@ func (a *Adapter) runCommand(ctx context.Context, msg *messagePayload, inv *comm
 		ConversationKey: scope.conversationKey,
 		SessionID:       scope.sessionID,
 		AgentID:         envelope.AgentID,
+		Direct:          msg.GuildID == "",
 	}
 	if err := a.sessions.EnsureSession(ctx, scope.effectSession, envelope.PrincipalID, envelope.AgentID); err != nil {
 		return false, fmt.Errorf("ensure session: %w", err)
