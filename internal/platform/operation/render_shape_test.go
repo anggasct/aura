@@ -42,7 +42,7 @@ func shapeBindings(*operationtest.Stubs) []operation.Binding {
 	}
 	return []operation.Binding{
 		{ID: "shape.table", Handle: data(map[string]any{"name": "docs", "total": 2, "rows": []map[string]any{{"name": "a", "size": 1}, {"name": "b", "size": 2}}})},
-		{ID: "shape.record", Handle: data(map[string]any{"name": "docs", "items": []string{"first ‮ item", "second"}, "none": []string{}})},
+		{ID: "shape.record", Handle: data(map[string]any{"name": "docs", "items": []string{"first \u202e item", "second"}, "none": []string{}})},
 	}
 }
 
