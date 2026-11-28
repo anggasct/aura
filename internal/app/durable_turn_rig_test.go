@@ -58,7 +58,7 @@ const (
 	suiteHostTTL       = 2 * time.Second
 	stubToolVersion    = "v1"
 	modelCalls         = "model"
-	modelDeclarations      = "declared"
+	modelDeclarations  = "declared"
 	scriptedModelName  = "scripted-model"
 	scriptedAnswerText = "done"
 	textStep           = ""
