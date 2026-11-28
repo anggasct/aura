@@ -285,3 +285,20 @@ func TestChatOperationRefusalsAreJournaledWithoutTheOperation(t *testing.T) {
 		})
 	}
 }
+
+func TestChatOperationConflictingRedeliveryIsAHandledOutcome(t *testing.T) {
+	rig := newOperationRig(t)
+	rig.run(t, "/stub change first", "testchat:1")
+
+	outcome, err := rig.execute(t, rig.Executor, &sentMessage{caller: ownerCaller(), text: "/stub change second", key: "testchat:1"})
+
+	if err != nil || outcome.Receipt == nil || !slices.Equal(outcome.Receipt.Lines, []string{command.ReplyConflict}) || outcome.Receipt.Code != string(command.ErrorCodeConflict) {
+		t.Fatalf("outcome = %+v, %v; want the conflict reply and no error", outcome, err)
+	}
+	if outcome.IntentID == "" {
+		t.Error("the conflict reply has no id to deliver under")
+	}
+	if rig.Stubs.Handled(operationtest.Change) != 1 {
+		t.Errorf("the handler ran %d times, want only the first message", rig.Stubs.Handled(operationtest.Change))
+	}
+}

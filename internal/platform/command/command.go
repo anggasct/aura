@@ -90,6 +90,7 @@ const (
 	ErrorCodeNotSwitchable    ErrorCode = "session_not_switchable"
 	ErrorCodeSkillUnavailable ErrorCode = "skill_unavailable"
 	ErrorCodeFailed           ErrorCode = "command_failed"
+	ErrorCodeConflict         ErrorCode = "command_conflict"
 	ErrorCodeInvalidArgument  ErrorCode = "invalid_argument"
 )
 

@@ -28,6 +28,7 @@ const (
 	ReplyNotSwitchable = "That session can't be used in this conversation."
 	ReplyGuestsOnly    = "That command is not available to the owner."
 	ReplyForgetMe      = "Send /forgetme confirm to erase everything you shared with this bot."
+	ReplyConflict      = "An earlier message with this id was already handled differently, so nothing was run."
 )
 
 type Dispatcher struct {

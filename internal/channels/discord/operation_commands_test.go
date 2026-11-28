@@ -21,7 +21,8 @@ func (s *operationSpy) Plan(_ string, tokens []string) command.OperationPlan {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.planned = append(s.planned, slices.Clone(tokens))
-	return command.OperationPlan{Operation: "cron.list", Input: json.RawMessage(`{}`)}
+	input, _ := json.Marshal(map[string][]string{"tokens": tokens})
+	return command.OperationPlan{Operation: "cron.list", Input: input}
 }
 
 func (s *operationSpy) Run(_ context.Context, run *command.OperationRun) command.OperationReply {
@@ -182,4 +183,27 @@ func TestRelayedAndApplicationMessagesAreNeverRunAsCommands(t *testing.T) {
 			t.Errorf("ran %d, want the typed command to run once", ran)
 		}
 	})
+}
+
+func TestAConflictingRedeliveryIsAnsweredAndAcknowledgedWithoutRunningAnything(t *testing.T) {
+	spy := &operationSpy{}
+	f := newCommandFixture(t)
+	f.withOperations(t, spy)
+
+	f.admit(t, dmMessage("8201", "111", "/cron list a"))
+	f.admit(t, dmMessage("8201", "111", "/cron list b"))
+
+	replies := f.replies(t)
+	if len(replies) != 2 || replies[0].content != "ID\tNAME\nj1\tnightly" || replies[1].content != command.ReplyConflict {
+		t.Fatalf("replies = %+v, want the first answer and the conflict reply", replies)
+	}
+	if _, ran := spy.counts(); ran != 1 {
+		t.Errorf("ran %d, want only the first message", ran)
+	}
+	if got := strings.Count(f.logs.String(), "chat command conflicts with its earlier request"); got != 1 {
+		t.Errorf("conflict warnings = %d, want one", got)
+	}
+	if calls, _ := f.sink.stats("message:8201"); calls != 0 {
+		t.Errorf("the conflicting message reached the model %d times", calls)
+	}
 }

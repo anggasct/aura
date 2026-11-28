@@ -12,7 +12,10 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
-const Provider = "command"
+const (
+	Provider            = "command"
+	conflictReplyPrefix = "conflict:"
+)
 
 type ErrorCode string
 
@@ -90,6 +93,10 @@ func Execute(ctx context.Context, run *Run) (Outcome, error) {
 		Request:        raw,
 		EventKind:      effect.EventKindChannelRequested,
 	}, provider)
+	if fault.HasCode(err, effect.ErrorCodeIdempotencyConflict) {
+		run.Logger.WarnContext(ctx, "chat command conflicts with its earlier request", "component", "command", "session_id", run.EffectSession)
+		return Outcome{IntentID: conflictReplyPrefix + run.IdempotencyKey, Receipt: &Receipt{Lines: []string{command.ReplyConflict}, Code: string(command.ErrorCodeConflict)}}, nil
+	}
 	if err != nil {
 		return Outcome{}, fmt.Errorf("command effect: %w", err)
 	}
