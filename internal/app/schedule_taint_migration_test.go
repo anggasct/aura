@@ -62,6 +62,15 @@ func seedFunctionResponse(t *testing.T, db *sql.DB, sequence int, name string, r
 	}
 }
 
+func seedRawEvent(t *testing.T, db *sql.DB, sequence int, payload string) {
+	t.Helper()
+	if _, err := db.ExecContext(t.Context(), `INSERT INTO runtime_event (id, session_id, sequence, turn_id, invocation_id, branch, author, kind, schema_version, payload_json, created_at)
+		VALUES (?, ?, ?, 'turn-1', '', '', 'user', 'adk_event', 1, ?, '2026-09-12T12:00:00Z')`,
+		"raw-"+string(rune('a'+sequence)), legacyJobSession, sequence, payload); err != nil {
+		t.Fatalf("seed raw event: %v", err)
+	}
+}
+
 type markedJob struct {
 	tainted bool
 	source  sql.NullString
@@ -121,6 +130,8 @@ func TestAgentCreatedJobsAreTaintedOnUpgrade(t *testing.T) {
 	seedFunctionResponse(t, db, 2, "aura_cron_add", map[string]any{"id": "from-both"})
 	seedFunctionResponse(t, db, 3, "aura_cron_add", map[string]any{"error": "the preview is stale", "id": "failed-add"})
 	seedFunctionResponse(t, db, 4, "aura_cron_pause", map[string]any{"id": "other-tool-reply"})
+	seedRawEvent(t, db, 5, `{"content":{"parts":[{"functionResponse":{"name":"aura_cron_add","response":{"id":"truncated`)
+	seedRawEvent(t, db, 6, `{"content":{"parts":["aura_cron_add", 7, null]}}`)
 	var before int
 	if err := db.QueryRowContext(ctx, `SELECT count(*) FROM scheduled_job`).Scan(&before); err != nil {
 		t.Fatal(err)

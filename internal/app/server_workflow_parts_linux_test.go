@@ -237,8 +237,8 @@ func TestServerStartsScheduledWorkflowsOnTheDefaultConfiguration(t *testing.T) {
 	if err != nil || second.TurnID != first.TurnID {
 		t.Fatalf("a repeated occurrence started %+v, %v instead of reusing %s", second, err, first.TurnID)
 	}
-	if n := countRows(t, b.db, `SELECT COUNT(*) FROM workflow_run WHERE durable_key = ?`, "sched-occ-1"); n != 1 {
-		t.Fatalf("workflow runs with the durable key sched-occ-1 = %d, want 1", n)
+	if n := countRows(t, b.db, `SELECT COUNT(*) FROM workflow_run WHERE durable_key = ?`, workflow.ScheduledKeyPrefix+"occ-1"); n != 1 {
+		t.Fatalf("workflow runs with the durable key scheduled/occ-1 = %d, want 1", n)
 	}
 }
 

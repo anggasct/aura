@@ -54,12 +54,14 @@ WHERE id IN (
     SELECT json_extract(result_json, '$.id') FROM operation_receipt
     WHERE operation_id = 'cron.add' AND surface = 'agent' AND json_type(result_json, '$.id') = 'text'
     UNION
-    SELECT json_extract(part.value, '$.functionResponse.response.id')
-    FROM runtime_event AS event, json_each(event.payload_json, '$.content.parts') AS part
-    WHERE event.kind = 'adk_event' AND instr(event.payload_json, 'aura_cron_add') > 0
-      AND json_extract(part.value, '$.functionResponse.name') = 'aura_cron_add'
-      AND json_type(part.value, '$.functionResponse.response.id') = 'text'
-      AND json_type(part.value, '$.functionResponse.response.error') IS NULL
+    SELECT json_extract(event.payload_json, part.fullkey || '.functionResponse.response.id')
+    FROM (
+        SELECT payload_json FROM runtime_event
+        WHERE kind = 'adk_event' AND json_valid(payload_json) AND instr(payload_json, 'aura_cron_add') > 0
+    ) AS event, json_each(event.payload_json, '$.content.parts') AS part
+    WHERE json_extract(event.payload_json, part.fullkey || '.functionResponse.name') = 'aura_cron_add'
+      AND json_type(event.payload_json, part.fullkey || '.functionResponse.response.id') = 'text'
+      AND json_type(event.payload_json, part.fullkey || '.functionResponse.response.error') IS NULL
 );
 `
 
