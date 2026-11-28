@@ -470,8 +470,8 @@ func TestInspectLabelsItsOutputUntrusted(t *testing.T) {
 		t.Fatal("memory.inspect is not registered")
 	}
 
-	if !descriptor.UntrustedOutput {
-		t.Error("memory.inspect does not mark its output untrusted")
+	if descriptor.ResultTaint == nil {
+		t.Error("memory.inspect does not evaluate result taint per row")
 	}
 }
 

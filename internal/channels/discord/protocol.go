@@ -69,6 +69,15 @@ type messageReferencePayload struct {
 	GuildID   string `json:"guild_id,omitempty"`
 }
 
+type messageSnapshotPayload struct {
+	Message snapshotMessagePayload `json:"message"`
+}
+
+type snapshotMessagePayload struct {
+	Content     string              `json:"content"`
+	Attachments []attachmentPayload `json:"attachments"`
+}
+
 type messagePayload struct {
 	ID               string                   `json:"id"`
 	ChannelID        string                   `json:"channel_id"`
@@ -79,7 +88,36 @@ type messagePayload struct {
 	Attachments      []attachmentPayload      `json:"attachments"`
 	Type             int                      `json:"type"`
 	MessageReference *messageReferencePayload `json:"message_reference,omitempty"`
+	MessageSnapshots []messageSnapshotPayload `json:"message_snapshots,omitempty"`
 	ChannelType      *int                     `json:"channel_type,omitempty"`
+}
+
+func (m *messagePayload) isForward() bool {
+	return m != nil && m.MessageReference != nil && m.MessageReference.Type == referenceTypeForward
+}
+
+func (m *messagePayload) hasForwardContent() bool {
+	if !m.isForward() {
+		return false
+	}
+	for i := range m.MessageSnapshots {
+		if m.MessageSnapshots[i].Message.Content != "" || len(m.MessageSnapshots[i].Message.Attachments) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *messagePayload) allAttachments() []attachmentPayload {
+	if !m.isForward() || len(m.MessageSnapshots) == 0 {
+		return m.Attachments
+	}
+	all := make([]attachmentPayload, 0, len(m.Attachments))
+	all = append(all, m.Attachments...)
+	for i := range m.MessageSnapshots {
+		all = append(all, m.MessageSnapshots[i].Message.Attachments...)
+	}
+	return all
 }
 
 type identifyPayload struct {

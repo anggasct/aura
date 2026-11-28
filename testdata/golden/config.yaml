@@ -13,6 +13,7 @@ capabilities:
 tools:
   workspace: /srv/aura/workspace
   max_inline_result_bytes: 65536
+  workspace_taint_scan_entries: 50000
   exec:
     timeout: 30s
     max_stdout_bytes: 65536

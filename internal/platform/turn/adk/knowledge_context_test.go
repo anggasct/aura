@@ -84,8 +84,8 @@ func TestBuiltinToolRequestCarriesTheStampedKnowledgeList(t *testing.T) {
 			t.Fatalf("Execute: %v", err)
 		}
 	}
-	if len(builtin.requests) != 1 || !slices.Equal(builtin.requests[0].Knowledge, []string{"faq", "support"}) || !builtin.requests[0].Tainted {
-		t.Fatalf("builtin requests = %+v, want the stamped list and the taint flag on the tool call", builtin.requests)
+	if len(builtin.requests) != 1 || !slices.Equal(builtin.requests[0].Knowledge, []string{"faq", "support"}) || builtin.requests[0].Tainted {
+		t.Fatalf("builtin requests = %+v, want the stamped list without owner admission taint", builtin.requests)
 	}
 }
 

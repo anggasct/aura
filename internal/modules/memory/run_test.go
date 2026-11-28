@@ -111,8 +111,9 @@ func TestTaintedRunsAreNotProjectedBeforeTheLedger(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			request := scheduledRequest()
 			mark(request)
-			if documents := projectedRun(t, request); len(documents) != 0 {
-				t.Errorf("documents = %+v, want none", documents)
+			documents := projectedRun(t, request)
+			if len(documents) != 1 || documents[0].Content != finalAnswer {
+				t.Errorf("documents = %+v, want final output projected once the ledger is active", documents)
 			}
 		})
 	}

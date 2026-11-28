@@ -57,7 +57,7 @@ func TestPersonaScopedRecallIsolatesPersonasForTheSamePrincipal(t *testing.T) {
 	seedPersonaDocument(t, service, store, "solo/discord:home/dm:1", "solo", "the nightly backup finished for solo")
 	seedPersonaDocument(t, service, store, "kuma/discord:home/dm:1", "kuma", "the nightly backup finished for kuma")
 	seedPersonaDocument(t, service, store, "nara/discord:home/dm:1", "nara", "the nightly backup finished for nara")
-	provider, err := NewProvider(service, ProviderConfig{Scopes: staticScopes{
+	provider, err := NewProvider(service, &ProviderConfig{Scopes: staticScopes{
 		"solo":   {"solo"},
 		"kuma":   {"kuma", "nara"},
 		"nara":   {"kuma", "nara"},
@@ -95,7 +95,7 @@ func TestRecallFailsClosedForUnregisteredPersona(t *testing.T) {
 	store := newFakeDocumentStore()
 	service := providerService(t, store, &observationSink{})
 	seedPersonaDocument(t, service, store, "main/discord:home/dm:1", "main", "the nightly backup finished")
-	provider, err := NewProvider(service, ProviderConfig{Scopes: testScopes})
+	provider, err := NewProvider(service, &ProviderConfig{Scopes: testScopes})
 	if err != nil {
 		t.Fatalf("NewProvider(): %v", err)
 	}
@@ -108,7 +108,7 @@ func TestRecallFailsClosedForUnregisteredPersona(t *testing.T) {
 	if _, err := service.Recall(t.Context(), &RecallRequest{OwnerID: principal.OwnerID, SessionID: "main/discord:home/dm:1", Query: "nightly backup"}); err == nil {
 		t.Fatal("recall without readable personas searched owner-wide")
 	}
-	if _, err := NewProvider(service, ProviderConfig{}); err == nil {
+	if _, err := NewProvider(service, &ProviderConfig{}); err == nil {
 		t.Fatal("provider without recall scopes accepted")
 	}
 }

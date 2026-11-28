@@ -111,16 +111,16 @@ func (f *fakeBuiltinExecutor) Definitions() []BuiltinToolDefinition {
 	return cloneBuiltinDefinitions(f.definitions)
 }
 
-func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolRequest) (BuiltinToolResult, error) {
 	f.requests = append(f.requests, request)
 	if f.events != nil {
 		payload, err := json.Marshal(map[string]string{"operation": request.ToolName})
 		if err != nil {
-			return nil, err
+			return BuiltinToolResult{}, err
 		}
 		last, err := f.events.LastSequence(ctx, request.SessionID)
 		if err != nil {
-			return nil, err
+			return BuiltinToolResult{}, err
 		}
 		event := &turn.Event{
 			ID: request.RequestID + "-requested", SessionID: request.SessionID, Sequence: last + 1,
@@ -128,7 +128,7 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 			Kind: turn.EventKindToolRequested, SchemaVersion: 1, Payload: payload, CreatedAt: time.Now().UTC(),
 		}
 		if err := f.events.Append(ctx, event); err != nil {
-			return nil, err
+			return BuiltinToolResult{}, err
 		}
 		if f.live != nil {
 			f.live.Publish(event)
@@ -138,13 +138,13 @@ func (f *fakeBuiltinExecutor) Execute(ctx context.Context, request *BuiltinToolR
 		select {
 		case <-f.block:
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return BuiltinToolResult{}, ctx.Err()
 		}
 	}
 	if f.err != nil {
-		return nil, f.err
+		return BuiltinToolResult{}, f.err
 	}
-	return f.output, nil
+	return BuiltinToolResult{Output: f.output}, nil
 }
 
 func (b *fakeBroker) Evaluate(ctx context.Context, req *approval.ToolRequest) (approval.PolicyDecision, error) {

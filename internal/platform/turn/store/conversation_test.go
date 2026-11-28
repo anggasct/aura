@@ -85,8 +85,8 @@ func TestConversationSessionBaselineSchemaAndForeignKeys(t *testing.T) {
 	db := sqlitetest.OpenMigrations(t, migrations)
 	seedPersonaSession(t, db, "main/discord:owner/dm:111", "local-owner", "main")
 	applied, latest, err := sqlite.SchemaVersions(ctx, db, migrations)
-	if err != nil || applied != 1 || latest != 1 {
-		t.Fatalf("schema = applied %d latest %d %v, want 1", applied, latest, err)
+	if err != nil || applied != 31 || latest != 31 {
+		t.Fatalf("schema = applied %d latest %d %v, want 31", applied, latest, err)
 	}
 	if _, found, err := NewConversationSessionStore(db).Resolve(ctx, "main/discord:owner/dm:111"); err != nil || found {
 		t.Fatalf("existing conversation resolved to a pointer: %v %v", found, err)

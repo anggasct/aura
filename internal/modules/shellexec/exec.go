@@ -14,6 +14,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 type Options struct {
@@ -22,6 +23,8 @@ type Options struct {
 	MaxStdoutBytes int64
 	MaxStderrBytes int64
 	Environment    []string
+	TaintTracker   *workspace.Tracker
+	runner         func(context.Context, *sandbox.Spec, string, ...string) (sandbox.Result, error)
 }
 
 type arguments struct {
@@ -38,17 +41,21 @@ type result struct {
 	Truncated  bool   `json:"truncated"`
 }
 
-func NewAdapter(options Options) (toolbroker.Adapter, error) {
-	if !filepath.IsAbs(options.Workspace) {
+func NewAdapter(options *Options) (toolbroker.Adapter, error) {
+	if options == nil {
+		return nil, errors.New("exec: options must not be nil")
+	}
+	opts := *options
+	if !filepath.IsAbs(opts.Workspace) {
 		return nil, errors.New("exec: workspace must be an absolute path")
 	}
-	if options.Timeout <= 0 {
+	if opts.Timeout <= 0 {
 		return nil, errors.New("exec: timeout must be positive")
 	}
-	if options.MaxStdoutBytes <= 0 || options.MaxStderrBytes <= 0 {
+	if opts.MaxStdoutBytes <= 0 || opts.MaxStderrBytes <= 0 {
 		return nil, errors.New("exec: output limits must be positive")
 	}
-	environment := slices.Clone(options.Environment)
+	environment := slices.Clone(opts.Environment)
 	if len(environment) == 0 {
 		path := os.Getenv("PATH")
 		if path == "" {
@@ -62,11 +69,11 @@ func NewAdapter(options Options) (toolbroker.Adapter, error) {
 		}
 	}
 	return func(ctx context.Context, request *toolbroker.ToolRequest, constraints approval.Constraints) (toolbroker.ToolResult, error) {
-		return run(ctx, request, constraints, options, environment)
+		return run(ctx, request, constraints, &opts, environment)
 	}, nil
 }
 
-func run(ctx context.Context, request *toolbroker.ToolRequest, constraints approval.Constraints, options Options, environment []string) (toolbroker.ToolResult, error) {
+func run(ctx context.Context, request *toolbroker.ToolRequest, constraints approval.Constraints, options *Options, environment []string) (toolbroker.ToolResult, error) {
 	if request == nil {
 		return toolbroker.ToolResult{}, errors.New("exec: request must not be nil")
 	}
@@ -114,8 +121,14 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 			MaxOutputBytes: maxOutput,
 		},
 	}
+	runCmd := options.runner
+	if runCmd == nil {
+		runCmd = sandbox.Run
+	}
+	effectScope, _ := options.TaintTracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
 	started := time.Now()
-	sandboxResult, err := sandbox.Run(runCtx, spec, command, commandArgs...)
+	sandboxResult, err := runCmd(runCtx, spec, command, commandArgs...)
+	outputTainted, _ := options.TaintTracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
 	if err != nil {
 		return toolbroker.ToolResult{}, err
 	}
@@ -136,7 +149,12 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	} else if sandboxResult.ExitCode != 0 {
 		class = toolbroker.ResultExecutionFailed
 	}
-	return toolbroker.ToolResult{Class: class, Output: output}, nil
+	return toolbroker.ToolResult{
+		Class:            class,
+		Output:           output,
+		Untrusted:        outputTainted,
+		WorkspaceTainted: outputTainted,
+	}, nil
 }
 
 func capOutput(value string, limit int64) string {

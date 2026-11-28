@@ -24,7 +24,7 @@ func (d *Descriptor) renderOn(surface Surface, out io.Writer, data json.RawMessa
 		return wrapError(ErrorCodeFailed, "the result is not a JSON object", err)
 	}
 	fields := d.OutputFieldsOn(surface)
-	escape := d.UntrustedOutput && surface != SurfaceAgent
+	escape := (d.UntrustedOutput || d.ResultTaint != nil) && surface != SurfaceAgent
 	switch d.Output.Kind {
 	case OutputTable:
 		if header := d.OutputHeaderOn(surface); len(header) > 0 {

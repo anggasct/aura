@@ -29,6 +29,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/workspace"
+	workspaceops "github.com/anggasct/aura/internal/platform/workspace/ops"
 )
 
 type goldenWorkflowController struct{}
@@ -156,7 +158,8 @@ func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
 	if err != nil {
 		t.Fatalf("schedule.NewOperations: %v", err)
 	}
-	bindings := slices.Concat(operations.Bindings(), knowledge.UnavailableOperations().Bindings(), memory.UnavailableOperations().Bindings(), profile.UnavailableOperations().Bindings())
+	workspaceOperations := workspaceops.NewOperations(workspace.NewTaintStore(db))
+	bindings := slices.Concat(operations.Bindings(), knowledge.UnavailableOperations().Bindings(), memory.UnavailableOperations().Bindings(), profile.UnavailableOperations().Bindings(), workspaceOperations.Bindings())
 	confirmer, err := operation.NewConfirmer(t.TempDir())
 	if err != nil {
 		t.Fatalf("operation.NewConfirmer: %v", err)

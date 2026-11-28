@@ -2,7 +2,6 @@ package runtimeadk
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -371,7 +370,7 @@ type recordingBuiltins struct {
 	requests []BuiltinToolRequest
 }
 
-func (r *recordingBuiltins) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (r *recordingBuiltins) Execute(ctx context.Context, request *BuiltinToolRequest) (BuiltinToolResult, error) {
 	r.mu.Lock()
 	r.requests = append(r.requests, *request)
 	r.mu.Unlock()

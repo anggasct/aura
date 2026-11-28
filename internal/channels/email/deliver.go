@@ -71,6 +71,7 @@ func (a *Adapter) Deliver(ctx context.Context, req *runtimechannelhost.DeliveryR
 	if err != nil {
 		return runtimechannelhost.ProviderReceipt{}, err
 	}
+	a.sent.record(req.ConversationID, body)
 	return runtimechannelhost.ProviderReceipt{ProviderID: ProviderName, ExternalID: messageID, At: a.now().UTC()}, nil
 }
 

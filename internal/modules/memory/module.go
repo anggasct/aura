@@ -10,12 +10,14 @@ import (
 	"github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
 
 type Deps struct {
 	Config      Config
 	DB          *sql.DB
 	Sessions    SessionReader
+	TaintMarks  TaintMarksReader
 	Scopes      RecallScopes
 	Secrets     Secrets
 	Models      ModelSource
@@ -72,12 +74,16 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
+	taintMarks := deps.TaintMarks
+	if taintMarks == nil {
+		taintMarks = turnstore.NewTaintReader(deps.DB)
+	}
 	summaryModel, summarizer := BuildSummary(ctx, deps.ModelConfig, deps.ModelRoutes, deps.Models, deps.Logger, deps.Observer)
-	provider, err := NewProvider(service, ProviderConfig{Scopes: deps.Scopes})
+	provider, err := NewProvider(service, &ProviderConfig{Scopes: deps.Scopes, TaintMarks: taintMarks})
 	if err != nil {
 		return nil, err
 	}
-	operations, err := NewOperations(&OperationDeps{Service: service, Scopes: deps.Scopes, Logger: deps.Logger})
+	operations, err := NewOperations(&OperationDeps{Service: service, Scopes: deps.Scopes, TaintMarks: taintMarks, Logger: deps.Logger})
 	if err != nil {
 		return nil, err
 	}

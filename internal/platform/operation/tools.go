@@ -74,6 +74,7 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 		TaintedGrant:         tools.TaintedGrant(descriptor.TaintedGrant),
 		OwnerNotice:          descriptor.OwnerNotice,
 		UntrustedOutput:      descriptor.UntrustedOutput,
+		OutputTaint:          descriptor.ResultTaint,
 		Description:          description,
 		Display:              append([]string(nil), display...),
 		Validator: func(raw json.RawMessage) (json.RawMessage, error) {

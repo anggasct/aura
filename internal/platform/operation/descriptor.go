@@ -62,6 +62,7 @@ type Descriptor struct {
 	FreshApproval        bool
 	Sink                 bool
 	UntrustedOutput      bool
+	ResultTaint          func(json.RawMessage) bool
 	OwnerNotice          bool
 	ModuleTool           string
 	Surfaces             []Surface

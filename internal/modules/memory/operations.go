@@ -24,17 +24,19 @@ const (
 )
 
 type OperationDeps struct {
-	Service *Service
-	Scopes  RecallScopes
-	Logger  *slog.Logger
-	Now     func() time.Time
+	Service    *Service
+	Scopes     RecallScopes
+	TaintMarks TaintMarksReader
+	Logger     *slog.Logger
+	Now        func() time.Time
 }
 
 type Operations struct {
-	service *Service
-	scopes  RecallScopes
-	logger  *slog.Logger
-	now     func() time.Time
+	service    *Service
+	scopes     RecallScopes
+	taintMarks TaintMarksReader
+	logger     *slog.Logger
+	now        func() time.Time
 }
 
 func NewOperations(deps *OperationDeps) (*Operations, error) {
@@ -49,7 +51,7 @@ func NewOperations(deps *OperationDeps) (*Operations, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Operations{service: deps.Service, scopes: deps.Scopes, logger: logger, now: now}, nil
+	return &Operations{service: deps.Service, scopes: deps.Scopes, taintMarks: deps.TaintMarks, logger: logger, now: now}, nil
 }
 
 func UnavailableOperations() *Operations {
@@ -206,6 +208,7 @@ type inspectRow struct {
 	From    int64  `json:"from"`
 	To      int64  `json:"to"`
 	Trust   string `json:"trust"`
+	Tainted bool   `json:"tainted"`
 	Prompt  string `json:"prompt"`
 	Expires string `json:"expires"`
 	Content string `json:"content"`
@@ -226,17 +229,57 @@ func (o *Operations) inspect(ctx context.Context, call *operation.Call) (operati
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
+	taintedByIndex := o.documentTaint(ctx, documents)
 	rows := make([]inspectRow, 0, len(documents))
 	for i := range documents {
 		document := &documents[i]
 		rows = append(rows, inspectRow{
 			ID: document.ID, Agent: document.AgentID, Session: document.SessionID, Kind: document.Kind,
-			From: document.FromSequence, To: document.ToSequence, Trust: document.TrustLabel,
+			From: document.FromSequence, To: document.ToSequence, Trust: document.TrustLabel, Tainted: taintedByIndex[i],
 			Prompt: promptText(document.PromptVersion), Expires: expiresText(document.ExpiresAt),
 			Content: oneLine(truncateRunes(document.Content, inspectContentRunes)),
 		})
 	}
 	return operation.JSONResult(map[string]any{"rows": rows})
+}
+
+func (o *Operations) documentTaint(ctx context.Context, documents []StoredDocument) []bool {
+	tainted := make([]bool, len(documents))
+	if len(documents) == 0 {
+		return tainted
+	}
+	if o.taintMarks == nil {
+		for i := range tainted {
+			tainted[i] = true
+		}
+		return tainted
+	}
+	seen := map[string]struct{}{}
+	sessionIDs := make([]string, 0, len(documents))
+	for i := range documents {
+		sid := documents[i].SessionID
+		if sid == "" {
+			continue
+		}
+		if _, ok := seen[sid]; !ok {
+			seen[sid] = struct{}{}
+			sessionIDs = append(sessionIDs, sid)
+		}
+	}
+	marks, err := o.taintMarks.SessionMarks(ctx, sessionIDs)
+	if err != nil {
+		for i := range tainted {
+			tainted[i] = true
+		}
+		return tainted
+	}
+	for i := range documents {
+		firstSeq, marked := marks[documents[i].SessionID]
+		if marked && documents[i].ToSequence >= 0 && firstSeq <= uint64(documents[i].ToSequence) {
+			tainted[i] = true
+		}
+	}
+	return tainted
 }
 
 type forgetInput struct {

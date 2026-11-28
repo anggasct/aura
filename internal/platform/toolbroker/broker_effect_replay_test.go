@@ -188,7 +188,7 @@ func lessThanHeavyOutput(size int) json.RawMessage {
 }
 
 func TestBrokerReplayOfASucceededEffectReturnsItsRecordedResult(t *testing.T) {
-	probe := &ToolResult{ToolName: "exec", ToolVersion: "v1", Class: ResultOK, Untrusted: true}
+	probe := &ToolResult{ToolName: "exec", ToolVersion: "v1", Class: ResultOK}
 	recordLimit, err := recordOutputLimit(probe)
 	if err != nil {
 		t.Fatalf("recordOutputLimit: %v", err)

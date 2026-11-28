@@ -63,6 +63,8 @@ func isContentKey(k string) bool {
 	return false
 }
 
+type TaintLookupFunc func(ctx context.Context, sessionID, turnID, principalID string) (turn.TaintMark, bool, error)
+
 type Instrument struct {
 	inner          turn.AgentRuntime
 	tracer         trace.Tracer
@@ -71,12 +73,17 @@ type Instrument struct {
 	modelDuration  metric.Float64Histogram
 	dropped        *atomic.Int64
 	defaultAgentID string
+	taintLookup    TaintLookupFunc
 }
 
 type InstrumentOption func(*Instrument)
 
 func WithDefaultAgentID(id string) InstrumentOption {
 	return func(i *Instrument) { i.defaultAgentID = id }
+}
+
+func WithTaintLookup(fn TaintLookupFunc) InstrumentOption {
+	return func(i *Instrument) { i.taintLookup = fn }
 }
 
 func InstrumentRuntime(inner turn.AgentRuntime, tp trace.TracerProvider, mp metric.MeterProvider, dropped *atomic.Int64, opts ...InstrumentOption) (*Instrument, error) {
@@ -138,7 +145,24 @@ func (i *Instrument) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[t
 			spanAttrs[AttrAgentID] = agentID
 		}
 		ctx, span := i.tracer.Start(ctx, SpanTurn, trace.WithAttributes(toKeyValues(spanAttrs)...))
-		defer span.End()
+		taintMark, tainted := req.AdmissionTaint()
+		if !tainted && i.taintLookup != nil && req.SessionID != "" {
+			found, ok, lookupErr := i.taintLookup(ctx, req.SessionID, req.TurnID, req.PrincipalID)
+			if lookupErr != nil {
+				tainted = true
+				taintMark = turn.TaintMark{Source: turn.TaintSourceLegacy}
+			} else if ok {
+				tainted = true
+				taintMark = turn.TaintMark{Source: turn.TaintSourceSession, Detail: string(found.Source)}
+			}
+		}
+		defer func() {
+			span.SetAttributes(attribute.Bool(AttrTurnTainted, tainted))
+			if tainted && taintMark.Source != "" {
+				span.SetAttributes(attribute.String(AttrTaintSource, string(taintMark.Source)))
+			}
+			span.End()
+		}()
 		start := time.Now()
 
 		terminal := turn.EventKindTurnFailed
@@ -149,6 +173,16 @@ func (i *Instrument) Run(ctx context.Context, req *turn.TurnRequest) iter.Seq2[t
 				i.recordTurn(ctx, start, req, turn.EventKindTurnFailed)
 				yield(ev, err)
 				return
+			}
+			if ev.Kind == turn.EventKindSessionTainted && !tainted {
+				decoded, ok := turn.DecodeTaintMark(ev.Payload)
+				if !ok {
+					tainted = true
+					taintMark = turn.TaintMark{Source: turn.TaintSourceLegacy}
+				} else if decoded.Source != turn.TaintSourceOtherPrincipal || decoded.Principal != req.PrincipalID {
+					tainted = true
+					taintMark = decoded
+				}
 			}
 			if isTerminalKind(ev.Kind) {
 				terminal = ev.Kind

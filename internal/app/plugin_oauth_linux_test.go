@@ -283,12 +283,13 @@ func (f *e2eFixture) search(t *testing.T, id, message string) (json.RawMessage, 
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	return f.h.executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
+	res, err := f.h.executor.Execute(t.Context(), &runtimeadk.BuiltinToolRequest{
 		RequestID: id, TurnID: "turn-" + id, SessionID: "session-1", PrincipalID: "owner-1", PrincipalClass: principal.ClassOwner,
 		ToolName: "plugin_mailer_search", ToolVersion: "v1", Arguments: args,
 		Trust: string(approval.TrustDerivedUntrusted), IdempotencyKey: "key-" + id,
 		EventInvocation: "inv-" + id, EventBranch: "main", EventAuthor: "agent",
 	})
+	return res.Output, err
 }
 
 func requireNoPlanted(t *testing.T, label, text string, extra ...string) {

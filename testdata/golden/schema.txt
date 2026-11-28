@@ -163,6 +163,9 @@ CREATE TABLE workflow_run ( id TEXT PRIMARY KEY, definition_id TEXT NOT NULL, de
 table workflow_step_run on workflow_step_run
 CREATE TABLE workflow_step_run ( run_id TEXT NOT NULL REFERENCES workflow_run(id) ON DELETE CASCADE, step_id TEXT NOT NULL, status TEXT NOT NULL CHECK ( status IN ('pending','ready','running','succeeded','failed','skipped') ), attempt INTEGER NOT NULL CHECK (attempt >= 0), started_at TEXT, ended_at TEXT, output_json TEXT CHECK ( output_json IS NULL OR (json_valid(output_json) AND length(output_json) <= 65536) ), output_artifact_digest TEXT, error_code TEXT, updated_at TEXT NOT NULL, tainted INTEGER NOT NULL DEFAULT 1 CHECK (tainted IN (0,1)), private INTEGER NOT NULL DEFAULT 1 CHECK (private IN (0,1)), PRIMARY KEY (run_id, step_id) )
 
+table workspace_taint on workspace_taint
+CREATE TABLE workspace_taint ( id TEXT PRIMARY KEY, scope TEXT NOT NULL CHECK (scope IN ('file','workspace')), path TEXT, content_sha256 TEXT, device INTEGER, inode INTEGER, source TEXT NOT NULL, session_id TEXT, recorded_at TEXT NOT NULL, CHECK ( (scope = 'file' AND path IS NOT NULL AND content_sha256 IS NOT NULL AND device IS NOT NULL AND inode IS NOT NULL) OR (scope = 'workspace' AND path IS NULL AND content_sha256 IS NULL AND device IS NULL AND inode IS NULL) ) )
+
 index artifact_ref_session_idx on artifact_ref
 CREATE INDEX artifact_ref_session_idx ON artifact_ref(session_id, created_at, id)
 
@@ -214,6 +217,9 @@ CREATE INDEX persona_eval_result_lookup_idx ON persona_eval_result(agent_id, fin
 index profile_fact_lookup_idx on profile_fact
 CREATE INDEX profile_fact_lookup_idx ON profile_fact(owner_id, status, category, fact_key, expires_at, confidence DESC, id)
 
+index runtime_event_session_kind_idx on runtime_event
+CREATE INDEX runtime_event_session_kind_idx ON runtime_event(session_id, kind, sequence)
+
 index runtime_event_turn_idx on runtime_event
 CREATE INDEX runtime_event_turn_idx ON runtime_event(turn_id, session_id, sequence)
 
@@ -258,6 +264,15 @@ CREATE INDEX workflow_run_principal_idx ON workflow_run(principal_id, created_at
 
 index workflow_run_status_idx on workflow_run
 CREATE INDEX workflow_run_status_idx ON workflow_run(status, created_at)
+
+index workspace_taint_digest_idx on workspace_taint
+CREATE INDEX workspace_taint_digest_idx ON workspace_taint(content_sha256)
+
+index workspace_taint_inode_idx on workspace_taint
+CREATE INDEX workspace_taint_inode_idx ON workspace_taint(device, inode)
+
+index workspace_taint_path_idx on workspace_taint
+CREATE INDEX workspace_taint_path_idx ON workspace_taint(path)
 
 trigger kb_chunk_fts_delete on kb_chunk
 CREATE TRIGGER kb_chunk_fts_delete AFTER DELETE ON kb_chunk BEGIN INSERT INTO kb_chunk_fts(kb_chunk_fts, rowid, content, heading, scope) VALUES ('delete', old.rowid, old.content, old.heading, old.scope); END

@@ -119,34 +119,37 @@ type Deps struct {
 	HandoffNotifier   HandoffNotifier
 	Media             MediaStore
 	Vision            *vision.Service
+	Deliveries        DeliveryHistory
 	OnAdmitted        func(ctx context.Context, class principal.Class)
 	OnDropped         func(ctx context.Context, reason string)
 }
 
 type Adapter struct {
-	cfg       *Config
-	account   *Account
-	connector Connector
-	mailer    Mailer
-	effects   EffectRunner
-	cursors   CursorStore
-	sessions  Sessions
-	router    PersonaRouter
-	owners    *principal.Resolver
-	admitted  func(ctx context.Context, class principal.Class)
-	dropped   func(ctx context.Context, reason string)
-	access    AccessSettings
-	approvals *approval.OwnerRoute
-	notifier  HandoffNotifier
-	artifacts MediaStore
-	images    *vision.Service
-	targets   sessionTargets
-	logger    *slog.Logger
-	sink      runtimeingress.IngressSink
-	retryBase time.Duration
-	retryCap  time.Duration
-	window    uint32
-	now       func() time.Time
+	cfg        *Config
+	account    *Account
+	connector  Connector
+	mailer     Mailer
+	effects    EffectRunner
+	cursors    CursorStore
+	sessions   Sessions
+	router     PersonaRouter
+	owners     *principal.Resolver
+	admitted   func(ctx context.Context, class principal.Class)
+	dropped    func(ctx context.Context, reason string)
+	access     AccessSettings
+	approvals  *approval.OwnerRoute
+	notifier   HandoffNotifier
+	artifacts  MediaStore
+	images     *vision.Service
+	deliveries DeliveryHistory
+	sent       recordedDeliveries
+	targets    sessionTargets
+	logger     *slog.Logger
+	sink       runtimeingress.IngressSink
+	retryBase  time.Duration
+	retryCap   time.Duration
+	window     uint32
+	now        func() time.Time
 
 	deliverSem chan struct{}
 
@@ -201,6 +204,7 @@ func New(deps *Deps) (*Adapter, error) {
 		notifier:   deps.HandoffNotifier,
 		artifacts:  deps.Media,
 		images:     deps.Vision,
+		deliveries: deps.Deliveries,
 		logger:     logger,
 		retryBase:  backoffBase,
 		retryCap:   backoffCap,

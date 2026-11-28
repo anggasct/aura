@@ -94,7 +94,7 @@ func executeWorkflowTool(t *testing.T, executor *runtimeadk.BrokerExecutor, tool
 	if err != nil {
 		t.Fatalf("%s: %v", tool, err)
 	}
-	return output
+	return output.Output
 }
 
 func TestServerWorkflowToolsStartARunOnTheDefaultConfiguration(t *testing.T) {

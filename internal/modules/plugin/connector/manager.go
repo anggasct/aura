@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 const (
@@ -34,6 +35,7 @@ type ManagerOptions struct {
 	Validator         SchemaValidator
 	CapabilityChecker func([]string) error
 	Logger            *slog.Logger
+	TaintTracker      *workspace.Tracker
 }
 
 type Status struct {
@@ -54,12 +56,13 @@ type entry struct {
 }
 
 type Manager struct {
-	broker     *toolbroker.Broker
-	starter    Starter
-	client     *http.Client
-	validator  SchemaValidator
-	capability func([]string) error
-	logger     *slog.Logger
+	broker       *toolbroker.Broker
+	starter      Starter
+	client       *http.Client
+	validator    SchemaValidator
+	capability   func([]string) error
+	logger       *slog.Logger
+	taintTracker *workspace.Tracker
 
 	mu      sync.Mutex
 	entries []*entry
@@ -76,7 +79,7 @@ func NewManager(opts *ManagerOptions) (*Manager, error) {
 	}
 	manager := &Manager{
 		broker: opts.Broker, starter: opts.Starter, client: opts.HTTPClient, validator: opts.Validator,
-		capability: opts.CapabilityChecker, logger: logger,
+		capability: opts.CapabilityChecker, logger: logger, taintTracker: opts.TaintTracker,
 	}
 	seen := make(map[string]bool, len(opts.Plugins))
 	for i := range opts.Plugins {
@@ -233,7 +236,7 @@ func (m *Manager) register(runner *host, cfg *Config, exposed []describedTool) (
 			},
 			Constraints: approval.Constraints{MaxOutputBytes: cfg.MaxMessageBytes, Timeout: cfg.RequestTimeout},
 		}
-		if err := m.broker.RegisterTool(&definition, adapter(runner, &approved), &rule); err != nil {
+		if err := m.broker.RegisterTool(&definition, adapter(runner, &approved, m.taintTracker), &rule); err != nil {
 			m.unregister(registered)
 			return nil, err
 		}
@@ -248,9 +251,16 @@ func (m *Manager) unregister(names []string) {
 	}
 }
 
-func adapter(runner *host, tool *Tool) toolbroker.Adapter {
+func adapter(runner *host, tool *Tool, tracker *workspace.Tracker) toolbroker.Adapter {
 	return func(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
+		var effectScope workspace.EffectScope
+		if tool.Effect {
+			effectScope, _ = tracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
+		}
 		output, fail := runner.invoke(ctx, &call{tool: tool, arguments: request.Arguments, idempotencyKey: request.IdempotencyKey})
+		if tool.Effect {
+			_, _ = tracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
+		}
 		if fail != nil {
 			return toolbroker.ToolResult{}, toolFailure(tool, fail)
 		}

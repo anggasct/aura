@@ -205,7 +205,7 @@ func authorDrop(account *Account, owners *principal.Resolver, selfID string, acc
 	if msg.Type != 0 && msg.Type != 19 {
 		return dropMessageType
 	}
-	if msg.Content == "" {
+	if msg.Content == "" && !msg.hasForwardContent() {
 		return dropEmptyContent
 	}
 	if _, _, admitted := resolveAuthor(account, owners, msg.Author.ID, access); !admitted {

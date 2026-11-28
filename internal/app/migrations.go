@@ -27,6 +27,7 @@ import (
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/webhook"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 func Schemas() []sqlite.SchemaOwner {
@@ -54,6 +55,7 @@ func Schemas() []sqlite.SchemaOwner {
 		telegram.Schema(),
 		email.Schema(),
 		operation.Schema(),
+		workspace.Schema(),
 	}
 }
 

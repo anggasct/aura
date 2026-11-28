@@ -110,6 +110,7 @@ type UntrustedDocument struct {
 	FromSequence uint64
 	ToSequence   uint64
 	Trust        approval.TrustLabel
+	Tainted      bool
 	Content      string
 }
 
@@ -117,6 +118,7 @@ type UntrustedRecall struct {
 	Query     string
 	Summary   string
 	Trust     approval.TrustLabel
+	Tainted   bool
 	Documents []UntrustedDocument
 }
 
@@ -133,6 +135,7 @@ const (
 	EventKindTurnFailed       = "turn.failed"
 	EventKindTurnCancelled    = "turn.cancelled"
 	EventKindSkillActivated   = "skill.activated.v1"
+	EventKindSessionTainted   = "session.tainted.v1"
 )
 
 const AuthorSystem = "system"

@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/durable"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolcall"
 	auratools "github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -23,6 +24,8 @@ import (
 	"github.com/anggasct/aura/internal/platform/usage"
 	"github.com/anggasct/aura/internal/platform/vision"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	"google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
 	adkmodel "google.golang.org/adk/v2/model"
@@ -59,6 +62,7 @@ type ADKExecutor struct {
 	ownerContext      string
 	providers         []turn.ContextProvider
 	toolBudget        ToolBudget
+	taintObserver     func(context.Context, turn.TaintSource)
 	clock             func() time.Time
 }
 
@@ -196,6 +200,13 @@ func WithContextProvider(provider turn.ContextProvider) ExecutorOption {
 	}
 }
 
+func WithTaintObserver(observer func(context.Context, turn.TaintSource)) ExecutorOption {
+	return func(e *ADKExecutor) error {
+		e.taintObserver = observer
+		return nil
+	}
+}
+
 func (x *ADKExecutor) ToolBudget() ToolBudget {
 	return x.toolBudget
 }
@@ -250,6 +261,16 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 				return
 			}
 		}
+		admittedMark, admittedTainted := taintTracker.initAdmission(runCtx, req, blocks, x.lookupSessionTaint(runCtx, req))
+		defer func() {
+			if span := trace.SpanFromContext(runCtx); span.IsRecording() {
+				mark, tainted := taintTracker.currentState()
+				span.SetAttributes(attribute.Bool(telemetry.AttrTurnTainted, tainted))
+				if tainted {
+					span.SetAttributes(attribute.String(telemetry.AttrTaintSource, string(mark.Source)))
+				}
+			}
+		}()
 		extra := turnContext{
 			blocks:         blocks,
 			knowledgeScope: req.Knowledge,
@@ -271,6 +292,32 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		if err != nil {
 			yield(turn.Event{}, err)
 			return
+		}
+		if req.PrincipalClass != "" && req.PrincipalClass != principal.ClassOwner && req.PrincipalID != "" {
+			if !x.hasOtherPrincipalMark(runCtx, req) {
+				otherMark := turn.TaintMark{Source: turn.TaintSourceOtherPrincipal, Principal: req.PrincipalID}
+				markEv, markErr := x.newTaintEvent(req, "other_principal", otherMark)
+				if markErr != nil {
+					yield(turn.Event{}, markErr)
+					return
+				}
+				x.observeTaintMark(runCtx, req.TurnID, otherMark.Source)
+				if !yield(markEv, nil) {
+					return
+				}
+			}
+		}
+		if admittedTainted && admittedMark.Source != turn.TaintSourceSession {
+			markEv, markErr := x.newTaintEvent(req, "admission", admittedMark)
+			if markErr != nil {
+				yield(turn.Event{}, markErr)
+				return
+			}
+			taintTracker.markAdmissionWritten()
+			x.observeTaintMark(runCtx, req.TurnID, admittedMark.Source)
+			if !yield(markEv, nil) {
+				return
+			}
 		}
 		for i := range blocks {
 			for j := range blocks[i].Events {
@@ -300,8 +347,23 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		if req.StreamPartial {
 			runConfig.StreamingMode = agent.StreamingModeSSE
 		}
+		flushPendingMark := func() bool {
+			mark, ok := taintTracker.takeAnyPendingMark()
+			if !ok {
+				return true
+			}
+			markEv, markErr := x.newTaintEvent(req, "result", mark)
+			if markErr != nil {
+				return true
+			}
+			x.observeTaintMark(runCtx, req.TurnID, mark.Source)
+			return yield(markEv, nil)
+		}
 		for ev, err := range adkRunner.Run(runCtx, req.PrincipalID, req.SessionID, content, runConfig, runOpts...) {
 			if err != nil {
+				if !flushPendingMark() {
+					return
+				}
 				if turnUsage.exceeded {
 					yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 					return
@@ -310,12 +372,29 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 				return
 			}
 			if exceeded := turnUsage.add(ev); exceeded {
+				if !flushPendingMark() {
+					return
+				}
 				yield(turn.Event{}, codedError(turn.ErrorCodeBudgetExhausted, "turn budget exhausted", nil))
 				return
 			}
 			if budgetErr := toolBudget.observeEvent(ev, req.Origin); budgetErr != nil {
+				if !flushPendingMark() {
+					return
+				}
 				yield(turn.Event{}, budgetErr)
 				return
+			}
+			if mark, ok := taintTracker.takePendingMark(ev); ok {
+				markEv, markErr := x.newTaintEvent(req, "result", mark)
+				if markErr != nil {
+					yield(turn.Event{}, markErr)
+					return
+				}
+				x.observeTaintMark(runCtx, req.TurnID, mark.Source)
+				if !yield(markEv, nil) {
+					return
+				}
 			}
 			re, err := turnstore.RuntimeEventFromADK(req.SessionID, req.TurnID, ev)
 			if err != nil {
@@ -418,6 +497,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
+	model = snapshotTaintModel(model, turnTaintTrackerFromContext(ctx))
 	rootAgent, err := buildAgent(x.agentName(definition), definition, model, extra.plan.core, x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
@@ -512,45 +592,141 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		callCtx = scoped
 	}
 	request := &BuiltinToolRequest{
-		RequestID:       requestID,
-		TurnID:          turnID,
-		SessionID:       actx.SessionID(),
-		PrincipalID:     actx.UserID(),
-		PrincipalClass:  access.class,
-		AgentID:         access.agentID,
-		Knowledge:       slices.Clone(access.knowledge),
-		Tainted:         access.tainted,
-		TaintSource:     access.taintSource,
-		TaintMark:       access.taintMark,
-		Origin:          access.origin,
-		Unattended:      access.unattended && x.generatesOperation(definition.Name),
-		WebOnlyRelief:   access.webOnlyRelief,
-		ToolName:        definition.Name,
-		ToolVersion:     definition.Version,
-		Arguments:       raw,
-		Capabilities:    slices.Clone(definition.RequiredCapabilities),
-		Trust:           "derived_untrusted",
-		Deadline:        deadline,
-		IdempotencyKey:  "adk/" + actx.SessionID() + "/" + turnID + "/" + slot.Key(),
-		EventInvocation: actx.InvocationID(),
-		EventBranch:     actx.Branch(),
-		EventAuthor:     actx.AgentName(),
-
+		RequestID:           requestID,
+		TurnID:              turnID,
+		SessionID:           actx.SessionID(),
+		PrincipalID:         actx.UserID(),
+		PrincipalClass:      access.class,
+		AgentID:             access.agentID,
+		Knowledge:           slices.Clone(access.knowledge),
+		Origin:              access.origin,
+		Unattended:          access.unattended && x.generatesOperation(definition.Name),
+		WebOnlyRelief:       access.webOnlyRelief,
+		ToolName:            definition.Name,
+		ToolVersion:         definition.Version,
+		Arguments:           raw,
+		Capabilities:        slices.Clone(definition.RequiredCapabilities),
+		Trust:               "derived_untrusted",
+		Deadline:            deadline,
+		IdempotencyKey:      "adk/" + actx.SessionID() + "/" + turnID + "/" + slot.Key(),
+		EventInvocation:     actx.InvocationID(),
+		EventBranch:         actx.Branch(),
+		EventAuthor:         actx.AgentName(),
 		ContentTaintTracked: access.contentTaintTracked,
 	}
 	taintTracker := turnTaintTrackerFromContext(callCtx)
 	taintTracker.prepareCall(callCtx, slot, request, definition)
 	slot.TaintRecorded()
-	output, err := builtins.Execute(callCtx, request)
+	res, err := builtins.Execute(callCtx, request)
+	taintTracker.observeResult(definition, requestID, raw, res, err)
 	if err != nil {
 		return nil, err
 	}
-	taintTracker.observeResult(definition, requestID, raw, output)
 	var result map[string]any
-	if err := json.Unmarshal(output, &result); err != nil {
+	if err := json.Unmarshal(res.Output, &result); err != nil {
 		return nil, fmt.Errorf("decode builtin tool result: %w", err)
 	}
 	return result, nil
+}
+
+func (x *ADKExecutor) newTaintEvent(req *turn.TurnRequest, suffix string, mark turn.TaintMark) (turn.Event, error) {
+	payload, err := turn.EncodeTaintMark(mark)
+	if err != nil {
+		return turn.Event{}, fmt.Errorf("encode taint mark: %w", err)
+	}
+	return turn.Event{
+		ID:            req.TurnID + ":taint:" + suffix,
+		SessionID:     req.SessionID,
+		TurnID:        req.TurnID,
+		InvocationID:  req.TurnID,
+		Author:        turn.AuthorSystem,
+		Kind:          turn.EventKindSessionTainted,
+		SchemaVersion: 1,
+		Payload:       payload,
+		CreatedAt:     x.now(),
+	}, nil
+}
+
+func (x *ADKExecutor) observeTaintMark(ctx context.Context, turnID string, source turn.TaintSource) {
+	if x.taintObserver != nil {
+		x.taintObserver(ctx, source)
+	}
+	x.logger.InfoContext(ctx, "session tainted", "component", "turn", "turn_id", turnID, "source", string(source))
+}
+
+func (x *ADKExecutor) lookupSessionTaint(ctx context.Context, req *turn.TurnRequest) func() (turn.TaintMark, bool, error) {
+	return func() (turn.TaintMark, bool, error) {
+		if x.sessions == nil || req == nil || req.SessionID == "" {
+			return turn.TaintMark{}, false, nil
+		}
+		if reader, ok := x.sessions.(turnstore.TaintReader); ok {
+			return reader.SessionTaint(ctx, req.SessionID, req.TurnID, req.PrincipalID)
+		}
+		events, err := x.sessions.ListEvents(ctx, req.SessionID, 0, maxEventLoad)
+		if err != nil {
+			return turn.TaintMark{}, false, err
+		}
+		return sessionTaintFromEvents(events, req.TurnID, req.PrincipalID)
+	}
+}
+
+func (x *ADKExecutor) hasOtherPrincipalMark(ctx context.Context, req *turn.TurnRequest) bool {
+	if x.sessions == nil || req == nil || req.SessionID == "" || req.PrincipalID == "" {
+		return false
+	}
+	if checker, ok := x.sessions.(turnstore.OtherPrincipalMarkChecker); ok {
+		found, err := checker.HasOtherPrincipalMark(ctx, req.SessionID, req.TurnID, req.PrincipalID)
+		return err == nil && found
+	}
+	events, err := x.sessions.ListEvents(ctx, req.SessionID, 0, maxEventLoad)
+	if err != nil {
+		return false
+	}
+	for i := range events {
+		ev := &events[i]
+		if ev.Kind != turn.EventKindSessionTainted || (req.TurnID != "" && ev.TurnID == req.TurnID) {
+			continue
+		}
+		mark, ok := turn.DecodeTaintMark(ev.Payload)
+		if ok && mark.Source == turn.TaintSourceOtherPrincipal && mark.Principal == req.PrincipalID {
+			return true
+		}
+	}
+	return false
+}
+
+func sessionTaintFromEvents(events []turn.Event, turnID, principalID string) (turn.TaintMark, bool, error) {
+	var best turn.TaintMark
+	var bestEff uint64
+	var bestOwn uint64
+	found := false
+	for i := range events {
+		ev := &events[i]
+		if ev.Kind != turn.EventKindSessionTainted {
+			continue
+		}
+		if turnID != "" && ev.TurnID == turnID {
+			continue
+		}
+		mark, ok := turn.DecodeTaintMark(ev.Payload)
+		if !ok {
+			mark = turn.TaintMark{Source: turn.TaintSourceLegacy}
+		}
+		if mark.Source == turn.TaintSourceOtherPrincipal && principalID != "" && mark.Principal == principalID {
+			continue
+		}
+		eff := ev.Sequence
+		if mark.AtSequence > 0 {
+			eff = uint64(mark.AtSequence)
+		}
+		if !found || eff < bestEff || (eff == bestEff && ev.Sequence < bestOwn) {
+			best = mark
+			bestEff = eff
+			bestOwn = ev.Sequence
+			found = true
+		}
+	}
+	return best, found, nil
 }
 
 func contentFromParts(req *turn.TurnRequest, extraParts ...string) (*genai.Content, error) {

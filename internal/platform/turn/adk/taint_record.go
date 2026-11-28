@@ -6,14 +6,19 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"iter"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
 	"sync"
 
+	adkmodel "google.golang.org/adk/v2/model"
+	"google.golang.org/adk/v2/session"
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/toolcall"
@@ -23,6 +28,7 @@ import (
 )
 
 const (
+	admissionTaintAction    = "taint-admission"
 	callTaintActionName     = "taint"
 	failClosedFetchCapFloor = 50
 	failClosedQueryCapFloor = 20
@@ -30,6 +36,69 @@ const (
 	webFetchToolName        = "web_fetch"
 	webSearchToolName       = "web_search"
 )
+
+type admissionTaintRecord struct {
+	Tainted bool   `json:"tainted"`
+	Source  string `json:"source"`
+	Detail  string `json:"detail"`
+}
+
+type admissionTaintRecordWire struct {
+	Tainted *bool  `json:"tainted"`
+	Source  string `json:"source"`
+	Detail  string `json:"detail"`
+}
+
+func decodeAdmissionTaintRecord(raw []byte) (admissionTaintRecord, bool) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
+		return admissionTaintRecord{}, false
+	}
+	decoder := json.NewDecoder(bytes.NewReader(trimmed))
+	decoder.DisallowUnknownFields()
+	var wire admissionTaintRecordWire
+	if err := decoder.Decode(&wire); err != nil {
+		return admissionTaintRecord{}, false
+	}
+	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
+		return admissionTaintRecord{}, false
+	}
+	if wire.Tainted == nil {
+		return admissionTaintRecord{}, false
+	}
+	rec := admissionTaintRecord{
+		Tainted: *wire.Tainted,
+		Source:  wire.Source,
+		Detail:  wire.Detail,
+	}
+	if rec.Tainted {
+		if !turn.IsValidTaintSource(turn.TaintSource(rec.Source)) {
+			return admissionTaintRecord{}, false
+		}
+	} else if rec.Source != "" || rec.Detail != "" {
+		return admissionTaintRecord{}, false
+	}
+	return rec, true
+}
+
+type taintSnapshotModel struct {
+	inner   adkmodel.LLM
+	tracker *turnTaintTracker
+}
+
+func snapshotTaintModel(inner adkmodel.LLM, tracker *turnTaintTracker) adkmodel.LLM {
+	if tracker == nil {
+		return inner
+	}
+	return &taintSnapshotModel{inner: inner, tracker: tracker}
+}
+
+func (m *taintSnapshotModel) Name() string { return m.inner.Name() }
+
+func (m *taintSnapshotModel) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
+	m.tracker.snapshotForModelCall()
+	return m.inner.GenerateContent(ctx, req, stream)
+}
 
 type reliefLimitProvider interface {
 	ReliefLimits() (toolbroker.WebOnlyLimits, toolbroker.TaintedLimits)
@@ -46,6 +115,17 @@ type callTaintRecord struct {
 	GrantOrdinal int    `json:"grant_ordinal"`
 }
 
+type callTaintRecordWire struct {
+	Tainted      *bool  `json:"tainted"`
+	Source       string `json:"source"`
+	Detail       string `json:"detail"`
+	Link         string `json:"link"`
+	Batch        string `json:"batch"`
+	FetchCount   int    `json:"fetch_count"`
+	QueryCount   int    `json:"query_count"`
+	GrantOrdinal int    `json:"grant_ordinal"`
+}
+
 func decodeCallTaintRecord(raw []byte) (callTaintRecord, bool) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || trimmed[0] != '{' {
@@ -53,12 +133,25 @@ func decodeCallTaintRecord(raw []byte) (callTaintRecord, bool) {
 	}
 	decoder := json.NewDecoder(bytes.NewReader(trimmed))
 	decoder.DisallowUnknownFields()
-	var record callTaintRecord
-	if err := decoder.Decode(&record); err != nil {
+	var wire callTaintRecordWire
+	if err := decoder.Decode(&wire); err != nil {
 		return callTaintRecord{}, false
 	}
 	if _, err := decoder.Token(); !errors.Is(err, io.EOF) {
 		return callTaintRecord{}, false
+	}
+	if wire.Tainted == nil {
+		return callTaintRecord{}, false
+	}
+	record := callTaintRecord{
+		Tainted:      *wire.Tainted,
+		Source:       wire.Source,
+		Detail:       wire.Detail,
+		Link:         wire.Link,
+		Batch:        wire.Batch,
+		FetchCount:   wire.FetchCount,
+		QueryCount:   wire.QueryCount,
+		GrantOrdinal: wire.GrantOrdinal,
 	}
 	if record.FetchCount < 0 || record.QueryCount < 0 || record.GrantOrdinal < 0 {
 		return callTaintRecord{}, false
@@ -142,8 +235,19 @@ type recordedSearch struct {
 	urls   []string
 }
 
+type pendingTaintMark struct {
+	callID string
+	mark   turn.TaintMark
+}
+
 type turnTaintTracker struct {
 	mu              sync.Mutex
+	currentTainted  bool
+	currentMark     turn.TaintMark
+	snapshotTainted bool
+	snapshotMark    turn.TaintMark
+	markWritten     bool
+	pendingMarks    []pendingTaintMark
 	ownerURLs       trackedURLSet
 	fetchedRecords  trackedRecordMap
 	searches        []recordedSearch
@@ -192,6 +296,142 @@ func (x *ADKExecutor) newTurnTaintTracker(ctx context.Context, req *turn.TurnReq
 	return tracker
 }
 
+func (t *turnTaintTracker) initAdmission(
+	ctx context.Context,
+	req *turn.TurnRequest,
+	blocks []turn.ContextBlock,
+	sessionLookup func() (turn.TaintMark, bool, error),
+) (turn.TaintMark, bool) {
+	compute := func() admissionTaintRecord {
+		if mark, tainted := req.AdmissionTaint(); tainted {
+			return admissionTaintRecord{Tainted: true, Source: string(mark.Source), Detail: mark.Detail}
+		}
+		if sessionLookup != nil {
+			found, ok, err := sessionLookup()
+			if err != nil {
+				return admissionTaintRecord{Tainted: true, Source: string(turn.TaintSourceLegacy)}
+			}
+			if ok {
+				return admissionTaintRecord{Tainted: true, Source: string(turn.TaintSourceSession), Detail: string(found.Source)}
+			}
+		}
+		for i := range blocks {
+			if blocks[i].Taint != nil {
+				return admissionTaintRecord{
+					Tainted: true,
+					Source:  string(blocks[i].Taint.Source),
+					Detail:  blocks[i].Taint.Detail,
+				}
+			}
+		}
+		return admissionTaintRecord{}
+	}
+
+	var rec admissionTaintRecord
+	valid := true
+	if scope, scoped := durable.TurnScopeFrom(ctx); scoped {
+		raw, err := scope.Invocation().RunAction(ctx, admissionTaintAction, func(context.Context) ([]byte, error) {
+			return json.Marshal(compute())
+		})
+		if err != nil {
+			valid = false
+		} else {
+			rec, valid = decodeAdmissionTaintRecord(raw)
+		}
+	} else {
+		rec = compute()
+	}
+
+	var mark turn.TaintMark
+	var tainted bool
+	if !valid {
+		tainted = true
+		mark = turn.TaintMark{Source: turn.TaintSourceLegacy}
+	} else if rec.Tainted {
+		tainted = true
+		mark = turn.TaintMark{Source: turn.TaintSource(rec.Source), Detail: rec.Detail}
+	}
+
+	t.mu.Lock()
+	t.currentTainted = tainted
+	t.currentMark = mark
+	t.snapshotTainted = tainted
+	t.snapshotMark = mark
+	if tainted {
+		t.markWritten = true
+	}
+	t.mu.Unlock()
+	return mark, tainted
+}
+
+func (t *turnTaintTracker) snapshotForModelCall() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.snapshotTainted = t.currentTainted
+	t.snapshotMark = t.currentMark
+	t.mu.Unlock()
+}
+
+func (t *turnTaintTracker) currentState() (turn.TaintMark, bool) {
+	if t == nil {
+		return turn.TaintMark{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.currentMark, t.currentTainted
+}
+
+func (t *turnTaintTracker) markAdmissionWritten() {
+	if t == nil {
+		return
+	}
+	t.mu.Lock()
+	t.markWritten = true
+	t.mu.Unlock()
+}
+
+func (t *turnTaintTracker) takePendingMark(ev *session.Event) (turn.TaintMark, bool) {
+	if t == nil || ev == nil || ev.Content == nil {
+		return turn.TaintMark{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.markWritten || len(t.pendingMarks) == 0 {
+		return turn.TaintMark{}, false
+	}
+	for _, part := range ev.Content.Parts {
+		if part == nil || part.FunctionResponse == nil {
+			continue
+		}
+		for i := range t.pendingMarks {
+			if t.pendingMarks[i].callID == part.FunctionResponse.ID {
+				mark := t.pendingMarks[i].mark
+				t.markWritten = true
+				t.pendingMarks = nil
+				return mark, true
+			}
+		}
+	}
+	return turn.TaintMark{}, false
+}
+
+func (t *turnTaintTracker) takeAnyPendingMark() (turn.TaintMark, bool) {
+	if t == nil {
+		return turn.TaintMark{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.markWritten || len(t.pendingMarks) == 0 {
+		return turn.TaintMark{}, false
+	}
+	mark := t.pendingMarks[0].mark
+	t.markWritten = true
+	t.pendingMarks = nil
+	return mark, true
+}
+
 type acceptedTurnMeta struct {
 	Origin    string `json:"origin"`
 	Principal string `json:"principal"`
@@ -203,8 +443,16 @@ func (t *turnTaintTracker) ingestSessionEvents(events []turn.Event, currentTurnI
 	var prevTurnSeq uint64
 	hasPrevTurn := false
 
+	requestTaintedTurn := map[string]bool{}
 	for i := range events {
 		ev := &events[i]
+		if ev.Kind == turn.EventKindSessionTainted {
+			mark, ok := turn.DecodeTaintMark(ev.Payload)
+			if !ok || isWholeTurnRequestSource(mark.Source) || mark.Source == turn.TaintSourceOtherPrincipal {
+				requestTaintedTurn[ev.TurnID] = true
+			}
+			continue
+		}
 		if ev.Kind != turn.EventKindTurnAccepted {
 			continue
 		}
@@ -232,7 +480,7 @@ func (t *turnTaintTracker) ingestSessionEvents(events []turn.Event, currentTurnI
 			continue
 		}
 		if adkEv.Author == userAuthor {
-			if meta, ok := acceptedByTurn[ev.TurnID]; ok && meta.Principal == principalID && isStepOneOwnerAuthoredOrigin(turn.Origin(meta.Origin)) {
+			if meta, ok := acceptedByTurn[ev.TurnID]; ok && meta.Principal == principalID && !requestTaintedTurn[ev.TurnID] && isOwnerAuthoredOrigin(turn.Origin(meta.Origin)) {
 				for _, part := range adkEv.Content.Parts {
 					if part == nil || part.Text == "" {
 						continue
@@ -368,9 +616,10 @@ func (t *turnTaintTracker) recordSearchURL(canonical, callID string) {
 }
 
 func (t *turnTaintTracker) ingestCurrentTurnInput(req *turn.TurnRequest) {
-	ownerOrigin := isStepOneOwnerAuthoredOrigin(req.Origin)
-	cleanFullJob := req.Origin == turn.OriginSchedule && req.JobTaint == "" && !req.WebOnly
-	if !ownerOrigin && !cleanFullJob {
+	if req == nil || !isOwnerAuthoredOrigin(req.Origin) {
+		return
+	}
+	if mark, tainted := req.AdmissionTaint(); tainted && isWholeTurnRequestSource(mark.Source) {
 		return
 	}
 	for i := range req.Parts {
@@ -384,15 +633,29 @@ func (t *turnTaintTracker) ingestCurrentTurnInput(req *turn.TurnRequest) {
 	}
 }
 
-func isStepOneOwnerAuthoredOrigin(origin turn.Origin) bool {
-	if origin == turn.OriginTerminal {
+func isWholeTurnRequestSource(source turn.TaintSource) bool {
+	switch source {
+	case turn.TaintSourceOrigin,
+		turn.TaintSourceClientHistory,
+		turn.TaintSourceWorkflowInput,
+		turn.TaintSourceScheduleOrigin,
+		turn.TaintSourceWebOnly,
+		turn.TaintSourceKnowledgeScope:
+		return true
+	default:
+		return false
+	}
+}
+
+func isOwnerAuthoredOrigin(origin turn.Origin) bool {
+	if origin == turn.OriginTerminal || origin == turn.OriginHTTP || origin == turn.OriginSchedule {
 		return true
 	}
 	channel, account, found := strings.Cut(string(origin), ":")
 	if !found || account == "" {
 		return false
 	}
-	return channel == principal.ChannelTelegram || channel == principal.ChannelDiscord
+	return channel == principal.ChannelTelegram || channel == principal.ChannelDiscord || channel == principal.ChannelEmail
 }
 
 var (
@@ -454,9 +717,9 @@ func (t *turnTaintTracker) prepareCall(ctx context.Context, slot *toolcall.Slot,
 
 	compute := func() callTaintRecord {
 		rec := callTaintRecord{
-			Tainted:      request.Tainted,
-			Source:       string(request.TaintMark.Source),
-			Detail:       request.TaintMark.Detail,
+			Tainted:      t.snapshotTainted,
+			Source:       string(t.snapshotMark.Source),
+			Detail:       t.snapshotMark.Detail,
 			Link:         string(auratools.LinkProvenanceNone),
 			FetchCount:   t.fetchCount,
 			QueryCount:   t.queryCount,
@@ -467,7 +730,7 @@ func (t *turnTaintTracker) prepareCall(ctx context.Context, slot *toolcall.Slot,
 			rec.Link = string(link)
 			rec.Batch = batchID
 		}
-		if request.Tainted && definition.Risk == auratools.RiskTrustGrant {
+		if t.snapshotTainted && definition.Risk == auratools.RiskTrustGrant {
 			rec.GrantOrdinal = t.grantOrdinal + 1
 		}
 		return rec
@@ -641,22 +904,74 @@ func (t *turnTaintTracker) buildResultBatchLocked(callID string) *auratools.Resu
 	}
 }
 
-func (t *turnTaintTracker) observeResult(definition *BuiltinToolDefinition, callID string, args, output json.RawMessage) {
-	if t == nil || definition == nil || len(output) == 0 {
+func (t *turnTaintTracker) observeResult(definition *BuiltinToolDefinition, callID string, args json.RawMessage, res BuiltinToolResult, callErr error) {
+	if t == nil || definition == nil {
 		return
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	switch {
-	case definition.LinkArgument != "":
-		if rawURL, ok := extractStringArg(args, definition.LinkArgument); ok {
-			t.recordFetchedOutput(rawURL, output)
-		}
-	case definition.QueryArgument != "":
-		if query, ok := extractStringArg(args, definition.QueryArgument); ok {
-			t.recordSearchOutput(callID, query, output)
+	if callErr == nil && len(res.Output) > 0 {
+		switch {
+		case definition.LinkArgument != "":
+			if rawURL, ok := extractStringArg(args, definition.LinkArgument); ok {
+				t.recordFetchedOutput(rawURL, res.Output)
+			}
+		case definition.QueryArgument != "":
+			if query, ok := extractStringArg(args, definition.QueryArgument); ok {
+				t.recordSearchOutput(callID, query, res.Output)
+			}
 		}
 	}
+	var taints bool
+	if callErr == nil {
+		taints = res.Untrusted || res.WorkspaceTainted
+	} else {
+		taints = fault.HasCode(callErr, toolbroker.ResultExecutionFailed) && definition.OutputCanTaint
+	}
+	if !taints {
+		return
+	}
+	var mark turn.TaintMark
+	if callErr == nil && res.WorkspaceTainted {
+		mark = turn.TaintMark{Source: turn.TaintSourceWorkspace}
+	} else {
+		mark = turn.TaintMark{
+			Source: turn.TaintSourceToolResult,
+			Detail: resultTaintDetail(definition.Name, args),
+		}
+	}
+	if !t.currentTainted {
+		t.currentTainted = true
+		t.currentMark = mark
+	}
+	if !t.markWritten && callID != "" {
+		updated := false
+		for i := range t.pendingMarks {
+			if t.pendingMarks[i].callID == callID {
+				t.pendingMarks[i].mark = mark
+				updated = true
+				break
+			}
+		}
+		if !updated {
+			t.pendingMarks = append(t.pendingMarks, pendingTaintMark{callID: callID, mark: mark})
+		}
+	}
+}
+
+func resultTaintDetail(toolName string, args json.RawMessage) string {
+	if toolName != webFetchToolName {
+		return toolName
+	}
+	rawURL, ok := extractStringArg(args, "url")
+	if !ok {
+		return toolName
+	}
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil || parsed.Hostname() == "" {
+		return toolName
+	}
+	return toolName + " " + parsed.Hostname()
 }
 
 func extractStringArg(args json.RawMessage, name string) (string, bool) {

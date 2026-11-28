@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -32,10 +33,11 @@ const (
 )
 
 type knowledgeEvidence struct {
-	Block     string
-	ChunkIDs  []string
-	Retrieved int
-	Mode      string
+	Block       string
+	ChunkIDs    []string
+	Collections []string
+	Retrieved   int
+	Mode        string
 }
 
 type knowledgeCounts struct {
@@ -44,12 +46,14 @@ type knowledgeCounts struct {
 }
 
 type knowledgeJournal struct {
-	Block      string          `json:"block"`
-	ChunkIDs   []string        `json:"chunk_ids"`
-	Counts     knowledgeCounts `json:"counts"`
-	DurationMS int64           `json:"duration_ms"`
-	Mode       string          `json:"mode,omitempty"`
-	Outcome    string          `json:"outcome"`
+	Block       string          `json:"block"`
+	ChunkIDs    []string        `json:"chunk_ids"`
+	Collections []string        `json:"collections,omitempty"`
+	Counts      knowledgeCounts `json:"counts"`
+	DurationMS  int64           `json:"duration_ms"`
+	Mode        string          `json:"mode,omitempty"`
+	Outcome     string          `json:"outcome"`
+	OnlyTrusted *bool           `json:"only_trusted,omitempty"`
 }
 
 type knowledgeRetrievedPayload struct {
@@ -91,12 +95,39 @@ func (p *ContextProvider) TurnContext(ctx context.Context, req *turn.TurnRequest
 	if err != nil {
 		return nil, err
 	}
-	return []turn.ContextBlock{{
+	block := turn.ContextBlock{
 		Order:   turn.ContextOrderKnowledge,
 		Content: journal.Block,
 		Caveat:  Caveat,
 		Events:  []turn.Event{ev},
-	}}, nil
+	}
+	if journal.Outcome == knowledgeOutcomeOK && journal.Counts.Rendered > 0 && (journal.OnlyTrusted == nil || !*journal.OnlyTrusted) {
+		collections := journal.Collections
+		if len(collections) == 0 {
+			collections = req.Knowledge
+		}
+		block.Taint = &turn.TaintMark{
+			Source: turn.TaintSourceKnowledge,
+			Detail: joinCollections(collections, 3),
+		}
+	}
+	return []turn.ContextBlock{block}, nil
+}
+
+func joinCollections(ids []string, limit int) string {
+	var unique []string
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" || slices.Contains(unique, id) {
+			continue
+		}
+		unique = append(unique, id)
+	}
+	slices.Sort(unique)
+	if len(unique) > limit {
+		unique = unique[:limit]
+	}
+	return strings.Join(unique, ", ")
 }
 
 func (p *ContextProvider) journalFor(ctx context.Context, req *turn.TurnRequest) knowledgeJournal {
@@ -132,11 +163,14 @@ func (p *ContextProvider) retrieve(ctx context.Context, req *turn.TurnRequest) [
 	budgeted, cancel := context.WithTimeout(ctx, RetrievalBudget)
 	defer cancel()
 	evidence, err := p.search(budgeted, req)
+	onlyTrusted := false
 	journal := knowledgeJournal{
-		Block:    strings.TrimSpace(evidence.Block),
-		ChunkIDs: evidence.ChunkIDs,
-		Counts:   knowledgeCounts{Retrieved: evidence.Retrieved, Rendered: len(evidence.ChunkIDs)},
-		Mode:     evidence.Mode,
+		Block:       strings.TrimSpace(evidence.Block),
+		ChunkIDs:    evidence.ChunkIDs,
+		Collections: evidence.Collections,
+		Counts:      knowledgeCounts{Retrieved: evidence.Retrieved, Rendered: len(evidence.ChunkIDs)},
+		Mode:        evidence.Mode,
+		OnlyTrusted: &onlyTrusted,
 	}
 	switch {
 	case err != nil && (errors.Is(err, context.DeadlineExceeded) || errors.Is(budgeted.Err(), context.DeadlineExceeded)):
@@ -175,12 +209,21 @@ func (p *ContextProvider) search(ctx context.Context, req *turn.TurnRequest) (kn
 	if err != nil {
 		return knowledgeEvidence{}, err
 	}
-	rendered := RenderContext(SelectContext(found.Hits))
+	selected := SelectContext(found.Hits)
+	rendered := RenderContext(selected)
+	var collections []string
+	for i := range selected {
+		if selected[i].Collection != "" && !slices.Contains(collections, selected[i].Collection) {
+			collections = append(collections, selected[i].Collection)
+		}
+	}
+	slices.Sort(collections)
 	return knowledgeEvidence{
-		Block:     rendered.Block,
-		ChunkIDs:  rendered.ChunkIDs,
-		Retrieved: len(found.Hits),
-		Mode:      found.Mode,
+		Block:       rendered.Block,
+		ChunkIDs:    rendered.ChunkIDs,
+		Collections: collections,
+		Retrieved:   len(found.Hits),
+		Mode:        found.Mode,
 	}, nil
 }
 

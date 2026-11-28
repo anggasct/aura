@@ -59,6 +59,9 @@
         "max_inline_result_bytes": {
           "type": "integer"
         },
+        "workspace_taint_scan_entries": {
+          "type": "integer"
+        },
         "exec": {
           "type": "object",
           "properties": {

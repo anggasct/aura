@@ -1,11 +1,14 @@
 package turn
 
 import (
+	"bytes"
+	"encoding/json"
 	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/net/idna"
 
+	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/tools"
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
@@ -130,6 +133,87 @@ func boundedDetail(detail string) string {
 	return strings.ToValidUTF8(detail[:cut], "")
 }
 
+func IsValidTaintSource(source TaintSource) bool {
+	switch source {
+	case TaintSourceOrigin,
+		TaintSourceClientHistory,
+		TaintSourceWorkflowInput,
+		TaintSourceScheduleOrigin,
+		TaintSourceWebOnly,
+		TaintSourceKnowledgeScope,
+		TaintSourceRelayedInput,
+		TaintSourceAttachment,
+		TaintSourceOtherPrincipal,
+		TaintSourceSession,
+		TaintSourceKnowledge,
+		TaintSourceRecall,
+		TaintSourceSkill,
+		TaintSourceWorkspace,
+		TaintSourceToolResult,
+		TaintSourceLegacy:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsRequestTaintSource(source TaintSource) bool {
+	switch source {
+	case TaintSourceOrigin,
+		TaintSourceClientHistory,
+		TaintSourceWorkflowInput,
+		TaintSourceScheduleOrigin,
+		TaintSourceWebOnly,
+		TaintSourceKnowledgeScope,
+		TaintSourceRelayedInput,
+		TaintSourceAttachment:
+		return true
+	default:
+		return false
+	}
+}
+
+type taintEventPayload struct {
+	Source     TaintSource `json:"source"`
+	Detail     string      `json:"detail,omitempty"`
+	Principal  string      `json:"principal,omitempty"`
+	AtSequence int64       `json:"at_sequence,omitempty"`
+}
+
+func EncodeTaintMark(mark TaintMark) (json.RawMessage, error) {
+	payload := taintEventPayload{
+		Source:     mark.Source,
+		Detail:     boundedDetail(mark.Detail),
+		Principal:  mark.Principal,
+		AtSequence: mark.AtSequence,
+	}
+	return json.Marshal(payload)
+}
+
+func DecodeTaintMark(raw json.RawMessage) (TaintMark, bool) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return TaintMark{}, false
+	}
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var payload taintEventPayload
+	if err := dec.Decode(&payload); err != nil {
+		return TaintMark{}, false
+	}
+	if !IsValidTaintSource(payload.Source) {
+		return TaintMark{}, false
+	}
+	if payload.AtSequence < 0 {
+		return TaintMark{}, false
+	}
+	return TaintMark{
+		Source:     payload.Source,
+		Detail:     boundedDetail(payload.Detail),
+		Principal:  payload.Principal,
+		AtSequence: payload.AtSequence,
+	}, true
+}
+
 func (r *TurnRequest) AdmissionTaint() (TaintMark, bool) {
 	switch {
 	case r == nil:
@@ -144,12 +228,17 @@ func (r *TurnRequest) AdmissionTaint() (TaintMark, bool) {
 		return TaintMark{Source: TaintSourceScheduleOrigin, Detail: boundedDetail(r.JobID)}, true
 	case r.WebOnly:
 		return TaintMark{Source: TaintSourceWebOnly, Detail: boundedDetail(r.JobID)}, true
-	case len(r.Knowledge) > 0:
+	case r.PrincipalClass != principal.ClassOwner && len(r.Knowledge) > 0:
 		return TaintMark{Source: TaintSourceKnowledgeScope}, true
 	}
 	for i := range r.Parts {
 		if r.Parts[i].Source == PartSourceRelayed {
 			return TaintMark{Source: TaintSourceRelayedInput, Detail: boundedDetail(r.Parts[i].Detail)}, true
+		}
+	}
+	for i := range r.Parts {
+		if r.Parts[i].Source == PartSourceAttachment {
+			return TaintMark{Source: TaintSourceAttachment, Detail: boundedDetail(r.Parts[i].Detail)}, true
 		}
 	}
 	return TaintMark{}, false

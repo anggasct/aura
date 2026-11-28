@@ -5,14 +5,17 @@ package filesystem
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -55,7 +58,7 @@ func NewAdapters(options Options) (map[string]toolbroker.Adapter, error) {
 	}, nil
 }
 
-func readFile(_ context.Context, request *toolbroker.ToolRequest, options Options, _ approval.Constraints) (toolbroker.ToolResult, error) {
+func readFile(ctx context.Context, request *toolbroker.ToolRequest, options Options, _ approval.Constraints) (toolbroker.ToolResult, error) {
 	var args fileArguments
 	if err := decodeArguments(request, &args); err != nil {
 		return toolbroker.ToolResult{}, err
@@ -72,15 +75,46 @@ func readFile(_ context.Context, request *toolbroker.ToolRequest, options Option
 		return toolbroker.ToolResult{}, pathError("read", args.Path, err)
 	}
 	defer func() { _ = file.Close() }()
-	data, err := io.ReadAll(io.LimitReader(file, limit+1))
+	hasher := sha256.New()
+	data, err := io.ReadAll(io.LimitReader(io.TeeReader(file, hasher), limit+1))
 	if err != nil {
 		return toolbroker.ToolResult{}, fmt.Errorf("filesystem: read file: %w", err)
 	}
 	truncated := int64(len(data)) > limit
 	if truncated {
 		data = data[:limit]
+		if options.TaintTracker != nil {
+			if _, err := io.Copy(hasher, file); err != nil {
+				return toolbroker.ToolResult{}, fmt.Errorf("filesystem: hash file: %w", err)
+			}
+		}
 	}
-	return encodeResult(fileResult{Content: string(data), Truncated: truncated})
+	res, err := encodeResult(fileResult{Content: string(data), Truncated: truncated})
+	if err != nil {
+		return toolbroker.ToolResult{}, err
+	}
+	if options.TaintTracker != nil {
+		var st unix.Stat_t
+		if statErr := unix.Fstat(int(file.Fd()), &st); statErr != nil {
+			res.WorkspaceTainted = true
+			res.Untrusted = true
+		} else {
+			dev := int64(math.MaxInt64)
+			if st.Dev <= math.MaxInt64 {
+				dev = int64(st.Dev)
+			}
+			ino := int64(math.MaxInt64)
+			if st.Ino <= math.MaxInt64 {
+				ino = int64(st.Ino)
+			}
+			matched, checkErr := options.TaintTracker.CheckReadFile(ctx, args.Path, hex.EncodeToString(hasher.Sum(nil)), dev, ino)
+			if checkErr != nil || matched {
+				res.WorkspaceTainted = true
+				res.Untrusted = true
+			}
+		}
+	}
+	return res, nil
 }
 
 func writeFile(ctx context.Context, request *toolbroker.ToolRequest, options Options, _ approval.Constraints) (toolbroker.ToolResult, error) {
@@ -133,6 +167,11 @@ func writeFile(ctx context.Context, request *toolbroker.ToolRequest, options Opt
 		return toolbroker.ToolResult{}, ctx.Err()
 	default:
 	}
+	if options.TaintTracker != nil {
+		if err := options.TaintTracker.OnWriteFile(ctx, args.Path, request.Tainted, request.TaintSource, request.SessionID, args.Overwrite); err != nil {
+			return toolbroker.ToolResult{}, fmt.Errorf("filesystem: record workspace taint: %w", err)
+		}
+	}
 	return encodeResult(fileResult{Content: "", Truncated: false})
 }
 
@@ -150,13 +189,25 @@ func listDir(ctx context.Context, request *toolbroker.ToolRequest, options Optio
 	}
 	defer func() { _ = unix.Close(root) }()
 	result := directoryResult{Entries: make([]directoryEntry, 0)}
-	if err := listDirectory(ctx, root, args.Path, args.Recursive, options.MaxDirEntries, &result); err != nil {
+	var stats []workspace.DirEntryStat
+	if err := listDirectory(ctx, root, args.Path, args.Recursive, options.MaxDirEntries, &result, &stats); err != nil {
 		return toolbroker.ToolResult{}, err
 	}
-	return encodeResult(result)
+	res, err := encodeResult(result)
+	if err != nil {
+		return toolbroker.ToolResult{}, err
+	}
+	if options.TaintTracker != nil {
+		matched, checkErr := options.TaintTracker.CheckListDir(ctx, stats)
+		if checkErr != nil || matched {
+			res.WorkspaceTainted = true
+			res.Untrusted = true
+		}
+	}
+	return res, nil
 }
 
-func listDirectory(ctx context.Context, root int, relative string, recursive bool, limit int, result *directoryResult) error {
+func listDirectory(ctx context.Context, root int, relative string, recursive bool, limit int, result *directoryResult, stats *[]workspace.DirEntryStat) error {
 	fd, err := workspace.OpenBeneath(root, relative, uint64(unix.O_RDONLY|unix.O_DIRECTORY|unix.O_CLOEXEC), 0)
 	if err != nil {
 		return pathError("list", relative, err)
@@ -209,8 +260,17 @@ func listDirectory(ctx context.Context, root int, relative string, recursive boo
 				kind = "symlink"
 			}
 			result.Entries = append(result.Entries, directoryEntry{Path: entryPath, Kind: kind, Size: entry.Size()})
+			if stats != nil {
+				st := workspace.DirEntryStat{Path: filepath.ToSlash(entryPath)}
+				if raw, ok := entry.Sys().(*syscall.Stat_t); ok && raw != nil && raw.Dev <= math.MaxInt64 && raw.Ino <= math.MaxInt64 {
+					st.Device = int64(raw.Dev)
+					st.Inode = int64(raw.Ino)
+					st.HasStat = true
+				}
+				*stats = append(*stats, st)
+			}
 			if recursive && entry.IsDir() {
-				if err := listDirectory(ctx, root, entryPath, true, limit, result); err != nil {
+				if err := listDirectory(ctx, root, entryPath, true, limit, result, stats); err != nil {
 					return err
 				}
 			}

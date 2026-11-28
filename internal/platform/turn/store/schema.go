@@ -50,6 +50,16 @@ CREATE INDEX runtime_event_turn_idx ON runtime_event(turn_id, session_id, sequen
 CREATE INDEX conversation_session_session_idx ON conversation_session(session_id);
 `
 
+const sessionKindIndexStepVersion = 31
+
+const sessionKindIndexStepSQL = `
+CREATE INDEX runtime_event_session_kind_idx ON runtime_event(session_id, kind, sequence);
+`
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "turn", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "turn",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: sessionKindIndexStepVersion, SQL: sessionKindIndexStepSQL}},
+	}
 }

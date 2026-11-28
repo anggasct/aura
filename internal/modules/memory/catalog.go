@@ -42,12 +42,29 @@ func textOutput() operation.Output {
 }
 
 func inspectOutput() operation.Output {
-	names := []string{"id", "agent", "session", "kind", "from", "to", "trust", "prompt", "expires", "content"}
+	names := []string{"id", "agent", "session", "kind", "from", "to", "trust", "tainted", "prompt", "expires", "content"}
 	fields := make([]operation.OutputField, 0, len(names))
 	for _, name := range names {
 		fields = append(fields, operation.OutputField{Name: name})
 	}
 	return operation.Output{Kind: operation.OutputTable, Fields: fields}
+}
+
+func inspectResultTaints(raw json.RawMessage) bool {
+	var parsed struct {
+		Rows []struct {
+			Tainted *bool `json:"tainted"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(raw, &parsed); err != nil || parsed.Rows == nil {
+		return true
+	}
+	for i := range parsed.Rows {
+		if parsed.Rows[i].Tainted == nil || *parsed.Rows[i].Tainted {
+			return true
+		}
+	}
+	return false
 }
 
 func Catalog() operation.Catalog {
@@ -57,7 +74,7 @@ func Catalog() operation.Catalog {
 		Descriptors: []operation.Descriptor{
 			{
 				ID: operationInspect, Summary: "List recall documents with their provenance", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
+				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: inspectResultTaints, Needs: needs,
 				Description: "Lists what Aura remembers from past conversations across every persona, with session, range, trust label and expiry. The content comes from conversations and tool results, not from the owner alone.",
 				Texts: []operation.SurfaceText{
 					{Surface: operation.SurfaceAgent, Text: "Lists what your persona remembers from past conversations, with session, range, trust label and expiry; memory of another persona is never listed. The content comes from conversations and tool results, not from the owner alone."},

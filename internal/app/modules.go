@@ -1,7 +1,6 @@
 package app
 
 import (
-	"cmp"
 	"context"
 	"crypto/rand"
 	"database/sql"
@@ -81,6 +80,7 @@ import (
 	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 const (
@@ -156,8 +156,9 @@ func (b *build) buildBuiltinTools(context.Context) error {
 	}
 	toolsCfg := b.cfg.Tools
 	shellMod, err := shellexec.New(&shellexec.Deps{
-		Workspace: toolsCfg.Workspace,
-		Config:    toolsCfg.Exec,
+		Workspace:    toolsCfg.Workspace,
+		Config:       toolsCfg.Exec,
+		TaintTracker: b.workspaceTracker,
 	})
 	if err != nil {
 		return err
@@ -166,7 +167,8 @@ func (b *build) buildBuiltinTools(context.Context) error {
 		return err
 	}
 	fsMod, err := filesystem.New(&filesystem.Deps{
-		Workspace: toolsCfg.Workspace,
+		Workspace:    toolsCfg.Workspace,
+		TaintTracker: b.workspaceTracker,
 	})
 	if err != nil {
 		return err
@@ -793,6 +795,7 @@ func erasureParticipants(db *sql.DB) ([]principal.Eraser, error) {
 		effect.NewEmailEffectEraser(db),
 		memoryEraser,
 		sessionApprovals,
+		workspace.NewTaintEraser(db, turns),
 		turnstore.NewSessionEraser(db, false),
 		orphanedTurns,
 		runSessionApprovals,
@@ -1437,6 +1440,7 @@ func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute
 			HandoffNotifier:   handoffs,
 			Media:             mediaStore,
 			Vision:            visionSvc,
+			Deliveries:        emailDeliveryHistory{db: bc.db},
 			OnAdmitted: func(ctx context.Context, class principal.Class) {
 				bc.principalRec.Admitted(ctx, string(class), principal.ChannelEmail)
 			},
@@ -1457,6 +1461,30 @@ func buildEmailAdapters(bc *channelBuildContext, ownerRoute *approval.OwnerRoute
 		}
 	}
 	return ports, checks, []*email.Adapter(adapters), nil
+}
+
+type emailDeliveryHistory struct {
+	db *sql.DB
+}
+
+func (h emailDeliveryHistory) SessionDeliveries(ctx context.Context, sessionID string) ([]string, error) {
+	if h.db == nil || strings.TrimSpace(sessionID) == "" {
+		return nil, nil
+	}
+	requests, err := effect.ListSucceededRequests(ctx, h.db, sessionID, "email", []string{"send_reply", "send_message"})
+	if err != nil {
+		return nil, err
+	}
+	var bodies []string
+	for _, raw := range requests {
+		var req struct {
+			Body string `json:"body"`
+		}
+		if err := json.Unmarshal(raw, &req); err == nil && req.Body != "" {
+			bodies = append(bodies, req.Body)
+		}
+	}
+	return bodies, nil
 }
 
 type emailRecoveryRetry struct {
@@ -2431,7 +2459,7 @@ func openPluginService(cfg *appconfig.Config, db *sql.DB, redactor auth.Redactor
 	return plugin.OpenService(db, dataRoot, redactor, nil)
 }
 
-func buildPluginModule(ctx context.Context, cfg *appconfig.Config, db *sql.DB, broker *toolbroker.Broker, capabilities capability.Report, logger *slog.Logger) (*plugin.Module, error) {
+func buildPluginModule(ctx context.Context, cfg *appconfig.Config, db *sql.DB, broker *toolbroker.Broker, capabilities capability.Report, tracker *workspace.Tracker, logger *slog.Logger) (*plugin.Module, error) {
 	dataRoot, err := storage.ResolveDataRoot(&cfg.Storage)
 	if err != nil {
 		return nil, err
@@ -2443,6 +2471,7 @@ func buildPluginModule(ctx context.Context, cfg *appconfig.Config, db *sql.DB, b
 		Broker:       broker,
 		Capabilities: capabilities,
 		Validator:    mcp.MakeValidator,
+		TaintTracker: tracker,
 		Logger:       logger,
 	})
 }
@@ -2607,11 +2636,12 @@ func (w *scheduleWorkflows) start(ctx context.Context, req *schedule.TurnRequest
 }
 
 type engineTurnRunner struct {
-	engine    cronTurnEngine
-	sessions  turnstore.SessionService
-	workflows *scheduleWorkflows
-	webTools  schedule.WebToolsOffered
-	personas  *auraagent.Registry
+	engine      cronTurnEngine
+	sessions    turnstore.SessionService
+	taintReader turnstore.TaintReader
+	workflows   *scheduleWorkflows
+	webTools    schedule.WebToolsOffered
+	personas    *auraagent.Registry
 }
 
 const webOnlyUnavailableCode = string(turn.ErrorCodeWebOnlyUnavailable)
@@ -2650,18 +2680,30 @@ func (r *engineTurnRunner) webOnlyRefusal(ctx context.Context, req *schedule.Tur
 	}, true
 }
 
-func (r *engineTurnRunner) isTainted(turnReq *turn.TurnRequest) bool {
+func (r *engineTurnRunner) isTainted(ctx context.Context, turnReq *turn.TurnRequest, stream []terminal.Event) bool {
 	if turnReq.Tainted() {
 		return true
 	}
-	if r.personas == nil {
-		return false
-	}
-	def, ok := r.personas.Lookup(cmp.Or(turnReq.AgentID, auraagent.DefaultID))
-	if !ok {
+	for i := range stream {
+		if stream[i].Kind != turn.EventKindSessionTainted {
+			continue
+		}
+		mark, ok := turn.DecodeTaintMark(stream[i].Payload)
+		if !ok {
+			return true
+		}
+		if mark.Source == turn.TaintSourceOtherPrincipal && mark.Principal == turnReq.PrincipalID {
+			continue
+		}
 		return true
 	}
-	return len(def.KnowledgeFor(turnReq.PrincipalClass)) > 0
+	if r.taintReader != nil && turnReq.SessionID != "" {
+		_, tainted, err := r.taintReader.SessionTaint(ctx, turnReq.SessionID, "", turnReq.PrincipalID)
+		if err != nil || tainted {
+			return true
+		}
+	}
+	return false
 }
 
 func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnRequest) (schedule.TurnResult, error) {
@@ -2707,7 +2749,7 @@ func (r *engineTurnRunner) RunTurn(ctx context.Context, req *schedule.TurnReques
 			completed = true
 		}
 	}
-	result := schedule.TurnResult{TurnID: turnID, Text: text, Succeeded: completed, Tainted: r.isTainted(turnReq)}
+	result := schedule.TurnResult{TurnID: turnID, Text: text, Succeeded: completed, Tainted: r.isTainted(ctx, turnReq, stream)}
 	if !completed {
 		result.SafeErrorCode = "turn_failed"
 	}
@@ -3104,12 +3146,12 @@ func (r *readOnlyAgentStepTools) Definitions() []runtimeadk.BuiltinToolDefinitio
 	return offered
 }
 
-func (r *readOnlyAgentStepTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
+func (r *readOnlyAgentStepTools) Execute(ctx context.Context, request *runtimeadk.BuiltinToolRequest) (runtimeadk.BuiltinToolResult, error) {
 	if request == nil {
-		return nil, invalidOptions("builtin tool request must not be nil")
+		return runtimeadk.BuiltinToolResult{}, invalidOptions("builtin tool request must not be nil")
 	}
 	if !slices.Contains(agentStepToolNames, request.ToolName) {
-		return nil, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "tool %q is not available to workflow agent steps", request.ToolName)
+		return runtimeadk.BuiltinToolResult{}, toolbroker.Errorf(toolbroker.ResultPolicyDenied, "tool %q is not available to workflow agent steps", request.ToolName)
 	}
 	forwarded := *request
 	forwarded.Unattended = true
@@ -3401,8 +3443,8 @@ func (catalogExecutor) Definitions() []runtimeadk.BuiltinToolDefinition {
 	return catalogDefinitions()
 }
 
-func (catalogExecutor) Execute(context.Context, *runtimeadk.BuiltinToolRequest) (json.RawMessage, error) {
-	return nil, errors.New("persona eval does not execute tools")
+func (catalogExecutor) Execute(context.Context, *runtimeadk.BuiltinToolRequest) (runtimeadk.BuiltinToolResult, error) {
+	return runtimeadk.BuiltinToolResult{}, errors.New("persona eval does not execute tools")
 }
 
 type personaEvalDenyAll struct{}

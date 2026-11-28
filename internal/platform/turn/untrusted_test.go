@@ -118,7 +118,7 @@ func TestStepOneAdmissionSourcesAndLabels(t *testing.T) {
 		"tainted job":          {req: &TurnRequest{Origin: OriginSchedule, JobTaint: "x", JobID: "job-1"}, wantSource: TaintSourceScheduleOrigin, wantDetail: "job-1", wantLabel: "a schedule created in a conversation with untrusted content"},
 		"web only":             {req: &TurnRequest{Origin: OriginSchedule, WebOnly: true, JobID: "job-2"}, wantSource: TaintSourceWebOnly, wantDetail: "job-2", wantLabel: "a web-only scheduled run"},
 		"knowledge":            {req: &TurnRequest{Origin: OriginTerminal, Knowledge: []string{"faq"}}, wantSource: TaintSourceKnowledgeScope, wantLabel: "knowledge attached to this persona"},
-		"knowledge for owner":  {req: &TurnRequest{Origin: OriginTerminal, PrincipalClass: principal.ClassOwner, Knowledge: []string{"faq"}}, wantSource: TaintSourceKnowledgeScope, wantLabel: "knowledge attached to this persona"},
+		"knowledge for public": {req: &TurnRequest{Origin: OriginTerminal, PrincipalClass: principal.ClassPublic, Knowledge: []string{"faq"}}, wantSource: TaintSourceKnowledgeScope, wantLabel: "knowledge attached to this persona"},
 		"origin beats history": {req: &TurnRequest{Origin: OriginWebhook, UntrustedContext: &UntrustedRecall{}, InputTainted: true, WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceOrigin, wantDetail: "webhook", wantLabel: "a webhook"},
 		"history beats input":  {req: &TurnRequest{Origin: OriginHTTP, UntrustedContext: &UntrustedRecall{}, InputTainted: true, JobTaint: "x", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceClientHistory, wantLabel: "HTTP client history"},
 		"input beats job":      {req: &TurnRequest{Origin: OriginSchedule, InputTainted: true, JobTaint: "x", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceWorkflowInput, wantLabel: "a workflow step"},
@@ -145,12 +145,13 @@ func TestStepOneAdmissionSourcesAndLabels(t *testing.T) {
 		})
 	}
 	clean := map[string]*TurnRequest{
-		"terminal":         {Origin: OriginTerminal},
-		"schedule":         {Origin: OriginSchedule},
-		"clean job":        {Origin: OriginSchedule, JobID: "job-1"},
-		"discord account":  {Origin: "discord:main"},
-		"workflow origin":  {Origin: OriginWorkflow},
-		"job id but clean": {Origin: OriginSchedule, JobID: "job-9", Timezone: "UTC"},
+		"terminal":            {Origin: OriginTerminal},
+		"schedule":            {Origin: OriginSchedule},
+		"clean job":           {Origin: OriginSchedule, JobID: "job-1"},
+		"discord account":     {Origin: "discord:main"},
+		"workflow origin":     {Origin: OriginWorkflow},
+		"job id but clean":    {Origin: OriginSchedule, JobID: "job-9", Timezone: "UTC"},
+		"knowledge for owner": {Origin: OriginTerminal, PrincipalClass: principal.ClassOwner, Knowledge: []string{"faq"}},
 	}
 	for name, req := range clean {
 		t.Run("clean "+name, func(t *testing.T) {

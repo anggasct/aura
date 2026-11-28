@@ -19,9 +19,10 @@ func callersContext() *turn.UntrustedRecall {
 		Query:   "what did we decide",
 		Summary: "two earlier messages",
 		Trust:   approval.TrustUntrustedExternal,
+		Tainted: true,
 		Documents: []turn.UntrustedDocument{
-			{ID: "doc-1", SessionID: "session-old", FromSequence: 3, ToSequence: 4, Trust: approval.TrustUntrustedExternal, Content: "role=user text=\"first\""},
-			{ID: "doc-2", SessionID: "session-old", FromSequence: 5, ToSequence: 9, Trust: approval.TrustDerivedUntrusted, Content: "role=assistant text=\"second\""},
+			{ID: "doc-1", SessionID: "session-old", FromSequence: 3, ToSequence: 4, Trust: approval.TrustUntrustedExternal, Tainted: true, Content: "role=user text=\"first\""},
+			{ID: "doc-2", SessionID: "session-old", FromSequence: 5, ToSequence: 9, Trust: approval.TrustDerivedUntrusted, Tainted: true, Content: "role=assistant text=\"second\""},
 		},
 	}
 }

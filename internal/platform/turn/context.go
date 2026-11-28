@@ -42,6 +42,7 @@ type ContextBlock struct {
 	Content   string
 	Caveat    string
 	Events    []Event
+	Taint     *TaintMark
 }
 
 type ContextProvider interface {

@@ -5,12 +5,14 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
+	"github.com/anggasct/aura/internal/platform/workspace"
 )
 
 type Deps struct {
-	Workspace   string
-	Config      Config
-	Environment []string
+	Workspace    string
+	Config       Config
+	Environment  []string
+	TaintTracker *workspace.Tracker
 }
 
 type Module struct {
@@ -23,12 +25,13 @@ func New(deps *Deps) (*Module, error) {
 	if deps == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "shellexec module dependencies must not be nil")
 	}
-	adapter, err := NewAdapter(Options{
+	adapter, err := NewAdapter(&Options{
 		Workspace:      deps.Workspace,
 		Timeout:        time.Duration(deps.Config.Timeout),
 		MaxStdoutBytes: deps.Config.MaxStdoutBytes,
 		MaxStderrBytes: deps.Config.MaxStderrBytes,
 		Environment:    deps.Environment,
+		TaintTracker:   deps.TaintTracker,
 	})
 	if err != nil {
 		return nil, err

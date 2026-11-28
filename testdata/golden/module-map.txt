@@ -57,6 +57,7 @@ internal/platform/
   internal/platform/wallclock
   internal/platform/webhook
   internal/platform/workspace
+  internal/platform/workspace/ops (package workspaceops)
 
 internal/modules/
   internal/modules/broadcast

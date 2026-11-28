@@ -121,7 +121,7 @@ func (e *effectTools) Evaluate(ctx context.Context, request *approval.ToolReques
 	return evaluateThrough(ctx, e.broker, request)
 }
 
-func (e *effectTools) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (e *effectTools) Execute(ctx context.Context, request *BuiltinToolRequest) (BuiltinToolResult, error) {
 	e.mu.Lock()
 	e.keys = append(e.keys, request.IdempotencyKey)
 	e.requestIDs = append(e.requestIDs, request.RequestID)
@@ -148,9 +148,9 @@ func (e *effectTools) Execute(ctx context.Context, request *BuiltinToolRequest) 
 		e.mu.Lock()
 		e.failures = append(e.failures, err)
 		e.mu.Unlock()
-		return nil, err
+		return BuiltinToolResult{}, err
 	}
-	return result.Output, nil
+	return BuiltinToolResult{Output: result.Output, Untrusted: result.Untrusted, WorkspaceTainted: result.WorkspaceTainted}, nil
 }
 
 func (e *effectTools) perform(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {

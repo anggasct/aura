@@ -261,8 +261,8 @@ func TestCompositionServerWithKnowledgeDiscoversModuleContracts(t *testing.T) {
 		t.Fatalf("kb_search via discovered ToolProvider failed: %v", err)
 	}
 	var searchOut knowledge.SearchOutput
-	if err := json.Unmarshal(output, &searchOut); err != nil {
-		t.Fatalf("decode kb_search output %s: %v", output, err)
+	if err := json.Unmarshal(output.Output, &searchOut); err != nil {
+		t.Fatalf("decode kb_search output %s: %v", output.Output, err)
 	}
 
 	checkIDs := map[string]bool{}

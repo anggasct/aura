@@ -3,7 +3,6 @@ package runtimeadk
 import (
 	"cmp"
 	"context"
-	"encoding/json"
 	"slices"
 
 	"github.com/anggasct/aura/internal/platform/approval"
@@ -88,7 +87,7 @@ func (e *BrokerExecutor) Definitions() []BuiltinToolDefinition {
 			OwnerOptIn:           definition.OwnerOptIn,
 			Operation:            definition.Operation,
 			Risk:                 definition.Risk,
-			OutputCanTaint:       definition.UntrustedOutput || definition.Server != "" || definition.Plugin != nil,
+			OutputCanTaint:       definition.ResultMayTaint(),
 			LinkArgument:         linkArg,
 			QueryArgument:        queryArg,
 			QueryMaxBytes:        queryMaxBytes,
@@ -121,12 +120,12 @@ func (e *BrokerExecutor) Evaluate(ctx context.Context, request *approval.ToolReq
 	})
 }
 
-func (e *BrokerExecutor) Execute(ctx context.Context, request *BuiltinToolRequest) (json.RawMessage, error) {
+func (e *BrokerExecutor) Execute(ctx context.Context, request *BuiltinToolRequest) (BuiltinToolResult, error) {
 	if e == nil || e.broker == nil {
-		return nil, invalidArgument("tool broker must not be nil")
+		return BuiltinToolResult{}, invalidArgument("tool broker must not be nil")
 	}
 	if request == nil {
-		return nil, fault.New(turn.ErrorCodeInvalidArgument, "builtin tool request must not be nil")
+		return BuiltinToolResult{}, fault.New(turn.ErrorCodeInvalidArgument, "builtin tool request must not be nil")
 	}
 	result, err := e.broker.Execute(ctx, &toolbroker.ToolRequest{
 		RequestID: request.RequestID, TurnID: request.TurnID, SessionID: request.SessionID,
@@ -143,7 +142,11 @@ func (e *BrokerExecutor) Execute(ctx context.Context, request *BuiltinToolReques
 		Origin: request.Origin, ContentTaintTracked: request.ContentTaintTracked,
 	})
 	if err != nil {
-		return nil, err
+		return BuiltinToolResult{}, err
 	}
-	return result.Output, nil
+	return BuiltinToolResult{
+		Output:           result.Output,
+		Untrusted:        result.Untrusted,
+		WorkspaceTainted: result.WorkspaceTainted,
+	}, nil
 }
