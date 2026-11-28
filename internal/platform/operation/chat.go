@@ -322,7 +322,11 @@ func previewLines(preview *Preview) []string {
 	if len(preview.Lines) == 0 {
 		return []string{chatNoChanges}
 	}
-	return slices.Clone(preview.Lines)
+	lines := make([]string, 0, len(preview.Lines))
+	for _, line := range preview.Lines {
+		lines = append(lines, displayText(line, true))
+	}
+	return lines
 }
 
 func (c *Chat) resume(ctx context.Context, pending *chatCall) command.OperationReply {

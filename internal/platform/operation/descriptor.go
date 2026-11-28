@@ -108,6 +108,7 @@ type Param struct {
 	Enum      []EnumValue
 	MinLength int
 	MaxLength int
+	Bounds    []SurfaceLength
 	Minimum   *int64
 	Maximum   *int64
 	Default   json.RawMessage
@@ -117,6 +118,11 @@ type Param struct {
 	Prompt    string
 	URLParam  string
 	Texts     []SurfaceText
+}
+
+type SurfaceLength struct {
+	Surface   Surface
+	MaxLength int
 }
 
 type SurfaceText struct {

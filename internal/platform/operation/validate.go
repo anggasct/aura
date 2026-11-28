@@ -440,6 +440,7 @@ func (v *validation) param(id string, exposure Exposure, chat bool, p *Param) {
 	if p.Prompt != "" && !p.Required {
 		v.reject(id, "the optional parameter %q has a prompt", name)
 	}
+	v.bounds(id, p)
 	v.enum(id, p)
 	if p.Kind == KindJSON {
 		var shape map[string]json.RawMessage
@@ -449,6 +450,21 @@ func (v *validation) param(id string, exposure Exposure, chat bool, p *Param) {
 	}
 	if len(p.Default) > 0 {
 		v.defaultValue(id, p)
+	}
+}
+
+func (v *validation) bounds(id string, p *Param) {
+	seen := map[Surface]bool{}
+	for _, bound := range p.Bounds {
+		switch {
+		case p.Kind != KindString && p.Kind != KindStrings:
+			v.reject(id, "the parameter %q has a surface length and is not a string", p.Name)
+		case !bound.Surface.valid() || seen[bound.Surface]:
+			v.reject(id, "the parameter %q has an unknown or repeated surface length", p.Name)
+		case bound.MaxLength <= 0 || bound.MaxLength < p.MinLength || p.MaxLength > 0 && bound.MaxLength > p.MaxLength:
+			v.reject(id, "the surface length of parameter %q is outside its length range", p.Name)
+		}
+		seen[bound.Surface] = true
 	}
 }
 

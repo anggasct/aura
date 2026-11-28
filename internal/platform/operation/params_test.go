@@ -243,3 +243,68 @@ func TestToolSchemaOmitsCLIOnlyValuesAndParameters(t *testing.T) {
 		t.Errorf("required = %v, additionalProperties = %v, want [message] and false", decoded.Required, decoded.AdditionalProperties)
 	}
 }
+
+func boundedDescriptor() operation.Descriptor {
+	return operation.Descriptor{
+		ID: "bound.set", Summary: "set a bounded value", Exposure: operation.ExposureAgent, Risk: operation.RiskChange, Commit: operation.CommitTransactional,
+		Params: []operation.Param{{
+			Name: "value", Kind: operation.KindString, Summary: "the value", Required: true, MinLength: 1, MaxLength: 50,
+			Bounds: []operation.SurfaceLength{{Surface: operation.SurfaceAgent, MaxLength: 10}},
+		}},
+		Output: operation.Output{Kind: operation.OutputText},
+	}
+}
+
+func TestASurfaceLengthBoundsTheSchemaAndTheValidationOfThatSurfaceOnly(t *testing.T) {
+	d := boundedDescriptor()
+	agentSchema, err := d.SchemaFor(operation.SurfaceAgent)
+	if err != nil {
+		t.Fatalf("SchemaFor agent: %v", err)
+	}
+	cliSchema, err := d.SchemaFor(operation.SurfaceCLI)
+	if err != nil {
+		t.Fatalf("SchemaFor cli: %v", err)
+	}
+	if !strings.Contains(string(agentSchema), `"maxLength":10`) || !strings.Contains(string(cliSchema), `"maxLength":50`) {
+		t.Errorf("schemas\nagent: %s\ncli: %s", agentSchema, cliSchema)
+	}
+	long := json.RawMessage(`{"value":"` + strings.Repeat("v", 11) + `"}`)
+	if _, err := d.Validate(operation.SurfaceAgent, long); !fault.HasCode(err, operation.ErrorCodeInputInvalid) {
+		t.Errorf("the agent surface accepted 11 characters: %v", err)
+	}
+	if _, err := d.Validate(operation.SurfaceCLI, long); err != nil {
+		t.Errorf("the CLI surface refused 11 characters: %v", err)
+	}
+}
+
+func TestACatalogRejectsASurfaceLengthOutsideTheParameterRange(t *testing.T) {
+	cases := map[string]operation.SurfaceLength{
+		"over the range":    {Surface: operation.SurfaceAgent, MaxLength: 51},
+		"zero":              {Surface: operation.SurfaceAgent, MaxLength: 0},
+		"an unknown surface": {Surface: operation.Surface("nowhere"), MaxLength: 5},
+	}
+	for name, bound := range cases {
+		t.Run(name, func(t *testing.T) {
+			d := boundedDescriptor()
+			d.Params[0].Bounds = []operation.SurfaceLength{bound}
+			err := operation.ValidateCatalogs([]operation.Catalog{{Group: operation.Group{Name: "bound", Summary: "bounds"}, Descriptors: []operation.Descriptor{d}}})
+			if err == nil {
+				t.Fatal("ValidateCatalogs accepted the surface length")
+			}
+		})
+	}
+	t.Run("a repeated surface", func(t *testing.T) {
+		d := boundedDescriptor()
+		d.Params[0].Bounds = append(d.Params[0].Bounds, d.Params[0].Bounds[0])
+		if err := operation.ValidateCatalogs([]operation.Catalog{{Group: operation.Group{Name: "bound", Summary: "bounds"}, Descriptors: []operation.Descriptor{d}}}); err == nil {
+			t.Fatal("ValidateCatalogs accepted a repeated surface")
+		}
+	})
+	t.Run("a non string parameter", func(t *testing.T) {
+		d := boundedDescriptor()
+		d.Params[0] = operation.Param{Name: "count", Kind: operation.KindInteger, Summary: "n", Bounds: []operation.SurfaceLength{{Surface: operation.SurfaceAgent, MaxLength: 5}}}
+		if err := operation.ValidateCatalogs([]operation.Catalog{{Group: operation.Group{Name: "bound", Summary: "bounds"}, Descriptors: []operation.Descriptor{d}}}); err == nil {
+			t.Fatal("ValidateCatalogs accepted a surface length on an integer")
+		}
+	})
+}
