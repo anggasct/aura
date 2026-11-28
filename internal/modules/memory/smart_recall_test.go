@@ -243,3 +243,68 @@ func TestMemoryRecallPrefersRecentDocumentsAtEqualRelevance(t *testing.T) {
 		}
 	})
 }
+
+func TestMemorySearchDoesNotStarveValidHitsBehindSameSecondOrExpiredRows(t *testing.T) {
+	_, store := newSQLiteMemoryService(t)
+	ctx := t.Context()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	afterWindow := now.Add(500 * time.Millisecond)
+	justExpired := now.Add(-500 * time.Millisecond)
+
+	for i := range 60 {
+		seedScoredDoc(t, store, fmt.Sprintf("mem-after-%02d", i), "release checklist alpha", int64(i+1), afterWindow)
+	}
+	seedScoredDoc(t, store, "mem-valid-and", "release checklist alpha", 100, now)
+	seedScoredDoc(t, store, "mem-partial-or", "release notes only", 101, now)
+
+	fallbackHits, err := store.Search(ctx, &StoredQuery{
+		OwnerID: "owner-1",
+		Terms:   "release checklist",
+		Mode:    MatchFallbackOR,
+		Before:  now,
+		Now:     now,
+		Limit:   1,
+	})
+	if err != nil {
+		t.Fatalf("Search(MatchFallbackOR): %v", err)
+	}
+	if len(fallbackHits) != 1 || fallbackHits[0].ID != "mem-valid-and" {
+		t.Fatalf("MatchFallbackOR hits = %+v, want mem-valid-and without starvation or erroneous OR fallback", fallbackHits)
+	}
+
+	for i := range 60 {
+		clean := false
+		exp := justExpired
+		doc := &StoredDocument{
+			ID:           fmt.Sprintf("mem-exp-%02d", i),
+			OwnerID:      "owner-1",
+			SessionID:    "sess-1",
+			Kind:         KindSummary,
+			FromSequence: int64(200 + i),
+			ToSequence:   int64(200 + i),
+			Content:      "strictexpire target alpha",
+			TrustLabel:   "owner_input",
+			Tainted:      &clean,
+			CreatedAt:    now.Add(-time.Hour),
+			ExpiresAt:    &exp,
+		}
+		if _, err := store.UpsertDocument(ctx, doc); err != nil {
+			t.Fatalf("UpsertDocument(%s): %v", doc.ID, err)
+		}
+	}
+	seedScoredDoc(t, store, "mem-valid-strict", "strictexpire target alpha", 300, now)
+
+	strictHits, err := store.Search(ctx, &StoredQuery{
+		OwnerID: "owner-1",
+		Terms:   "strictexpire target",
+		Mode:    MatchStrict,
+		Now:     now,
+		Limit:   1,
+	})
+	if err != nil {
+		t.Fatalf("Search(MatchStrict): %v", err)
+	}
+	if len(strictHits) != 1 || strictHits[0].ID != "mem-valid-strict" {
+		t.Fatalf("MatchStrict hits = %+v, want mem-valid-strict past 60 just-expired rows", strictHits)
+	}
+}

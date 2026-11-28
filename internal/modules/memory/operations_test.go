@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/modules/memory"
 	"github.com/anggasct/aura/internal/modules/memory/memorytest"
 	"github.com/anggasct/aura/internal/platform/clikit"
+	"github.com/anggasct/aura/internal/platform/command"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
@@ -865,14 +866,45 @@ func TestMemorySearchOperationFiltersByTimeScopeAndTaint(t *testing.T) {
 	})
 
 	t.Run("cli and chat escape control characters", func(t *testing.T) {
-		out := rig.cli(t, "memory", "search", "alert", "--session", "sess-alpha")
+		cliOut := rig.cli(t, "memory", "search", "alert", "--session", "sess-alpha")
 		for _, raw := range []string{"\u001b", "\u202e", "\a"} {
-			if strings.Contains(out, raw) {
-				t.Errorf("CLI search printed raw %q:\n%s", raw, out)
+			if strings.Contains(cliOut, raw) {
+				t.Errorf("CLI search printed raw %q:\n%s", raw, cliOut)
 			}
 		}
-		if !strings.Contains(out, `\u{202e}`) {
-			t.Errorf("CLI search did not escape bidi control:\n%s", out)
+		if !strings.Contains(cliOut, `\u{202e}`) {
+			t.Errorf("CLI search did not escape bidi control:\n%s", cliOut)
+		}
+
+		chat, err := operation.NewChat(&operation.ChatDeps{Registry: rig.Registry})
+		if err != nil {
+			t.Fatalf("NewChat: %v", err)
+		}
+		plan := chat.Plan("memory", []string{"search", "alert", "--session", "sess-alpha"})
+		if plan.Refusal != nil {
+			t.Fatalf("chat.Plan refused: %+v", plan.Refusal)
+		}
+		reply := chat.Run(t.Context(), &command.OperationRun{
+			Caller: &command.Caller{
+				PrincipalID: operationtest.OwnerID,
+				Class:       principal.ClassOwner,
+				SessionID:   operationtest.SessionID,
+				Direct:      true,
+			},
+			Plan:           &plan,
+			IdempotencyKey: rig.key("chat-escape"),
+		})
+		if reply.Code != "" {
+			t.Fatalf("chat.Run failed: %+v", reply)
+		}
+		chatOut := strings.Join(reply.Lines, "\n")
+		for _, raw := range []string{"\u001b", "\u202e", "\a"} {
+			if strings.Contains(chatOut, raw) {
+				t.Errorf("chat search printed raw %q:\n%s", raw, chatOut)
+			}
+		}
+		if !strings.Contains(chatOut, `\u{202e}`) {
+			t.Errorf("chat search did not escape bidi control:\n%s", chatOut)
 		}
 	})
 

@@ -217,7 +217,7 @@ func rankMemoryTier(hits []StoredHit, now time.Time) {
 	})
 }
 
-func (s *SQLiteStore) searchFTS(ctx context.Context, query *StoredQuery, match string, now time.Time, sqlLimit int) ([]StoredHit, error) {
+func (s *SQLiteStore) searchFTS(ctx context.Context, query *StoredQuery, match string, now time.Time, want int) ([]StoredHit, error) {
 	sqlQuery := `SELECT ` + selectMemoryHitColumns + ` FROM memory_document_fts
 		JOIN memory_document d ON d.rowid = memory_document_fts.rowid
 		WHERE memory_document_fts MATCH ? AND d.owner_id = ?`
@@ -244,8 +244,7 @@ func (s *SQLiteStore) searchFTS(ctx context.Context, query *StoredQuery, match s
 	}
 	sqlQuery += ` AND (d.expires_at IS NULL OR d.expires_at > ?)`
 	args = append(args, sqlite.FormatTime(now.Add(-time.Second)))
-	sqlQuery += ` ORDER BY bm25(memory_document_fts), d.id LIMIT ?`
-	args = append(args, sqlLimit)
+	sqlQuery += ` ORDER BY bm25(memory_document_fts), d.id`
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search memory documents: %w", err))
@@ -268,6 +267,9 @@ func (s *SQLiteStore) searchFTS(ctx context.Context, query *StoredQuery, match s
 			continue
 		}
 		hits = append(hits, hit)
+		if len(hits) >= want {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search memory documents: %w", err))
@@ -303,21 +305,10 @@ func (s *SQLiteStore) Search(ctx context.Context, query *StoredQuery) ([]StoredH
 		now = time.Now().UTC()
 	}
 	if query.Mode == MatchStrict {
-		sqlLimit := query.Limit
-		if !query.After.IsZero() || !query.Before.IsZero() {
-			sqlLimit = max(query.Limit, min(max(query.Limit*4, minSearchCandidateRows), maxMemoryListLimit))
-		}
-		hits, err := s.searchFTS(ctx, query, textsearch.FTSAndQuery(rawTokens), now, sqlLimit)
-		if err != nil {
-			return nil, err
-		}
-		if len(hits) > query.Limit {
-			hits = hits[:query.Limit]
-		}
-		return hits, nil
+		return s.searchFTS(ctx, query, textsearch.FTSAndQuery(rawTokens), now, query.Limit)
 	}
 	meaningful := textsearch.FilterStopwords(rawTokens)
-	candidateLimit := min(max(query.Limit*4, minSearchCandidateRows), maxSearchCandidateRows)
+	candidateLimit := max(query.Limit, min(max(query.Limit*4, minSearchCandidateRows), maxSearchCandidateRows))
 	stage1, err := s.searchFTS(ctx, query, textsearch.FTSAndQuery(meaningful), now, candidateLimit)
 	if err != nil {
 		return nil, err

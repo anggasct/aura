@@ -1,8 +1,12 @@
 package profile
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/anggasct/aura/internal/platform/fault"
 )
 
 func seedActiveProfileFact(t *testing.T, s *SQLiteStore, id, category, key, value string, verified bool, updatedAt time.Time) {
@@ -60,5 +64,94 @@ func TestProfileSearchUsesTwoStageFTSAndRecency(t *testing.T) {
 	}
 	if len(recency) != 2 || recency[0].ID != "pf-eq-new" || recency[1].ID != "pf-eq-old" {
 		t.Fatalf("recency verified order = %+v, want [pf-eq-new, pf-eq-old] without unverified fact", recency)
+	}
+}
+
+func TestProfileSearchExactSubsecondExpiryAndNoStarvation(t *testing.T) {
+	s, _ := newTestSQLiteStore(t)
+	ctx := t.Context()
+	now := time.Date(2026, 9, 12, 12, 0, 0, 0, time.UTC)
+	justExpired := now.Add(-500 * time.Millisecond)
+	validSubsecondExpiry := now.Add(500 * time.Millisecond)
+
+	for i := range 60 {
+		exp := justExpired
+		fact := &Fact{
+			ID:               fmt.Sprintf("pf-exp-%02d", i),
+			OwnerID:          "owner-1",
+			Category:         "project",
+			Key:              fmt.Sprintf("k-%02d", i),
+			Value:            "starvation guard alpha",
+			ValueDigest:      ValueDigest(fmt.Sprintf("starvation-%02d", i)),
+			Status:           StatusActive,
+			Origin:           OriginOwner,
+			OwnerVerified:    true,
+			Confidence:       0.99,
+			ConfidencePolicy: ConfidencePolicyV1,
+			ExpiresAt:        &exp,
+			CreatedAt:        now.Add(-time.Hour),
+			UpdatedAt:        now.Add(-time.Hour),
+		}
+		if err := s.InsertFact(ctx, fact); err != nil {
+			t.Fatalf("InsertFact(%s): %v", fact.ID, err)
+		}
+	}
+	validFact := &Fact{
+		ID:               "pf-valid-subsec",
+		OwnerID:          "owner-1",
+		Category:         "project",
+		Key:              "subsec",
+		Value:            "starvation guard alpha",
+		ValueDigest:      ValueDigest("starvation-valid"),
+		Status:           StatusActive,
+		Origin:           OriginOwner,
+		OwnerVerified:    true,
+		Confidence:       0.80,
+		ConfidencePolicy: ConfidencePolicyV1,
+		ExpiresAt:        &validSubsecondExpiry,
+		CreatedAt:        now.Add(-time.Minute),
+		UpdatedAt:        now.Add(-time.Minute),
+	}
+	if err := s.InsertFact(ctx, validFact); err != nil {
+		t.Fatalf("InsertFact(valid): %v", err)
+	}
+	partialFact := &Fact{
+		ID:               "pf-partial-or",
+		OwnerID:          "owner-1",
+		Category:         "project",
+		Key:              "partial",
+		Value:            "starvation only",
+		ValueDigest:      ValueDigest("starvation-partial"),
+		Status:           StatusActive,
+		Origin:           OriginOwner,
+		OwnerVerified:    true,
+		Confidence:       0.70,
+		ConfidencePolicy: ConfidencePolicyV1,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := s.InsertFact(ctx, partialFact); err != nil {
+		t.Fatalf("InsertFact(partial): %v", err)
+	}
+
+	emptyHits, err := s.SearchFacts(ctx, "owner-1", "project", "", false, 1, now)
+	if err != nil {
+		t.Fatalf("SearchFacts(empty): %v", err)
+	}
+	if len(emptyHits) != 1 || emptyHits[0].ID != "pf-valid-subsec" {
+		t.Fatalf("empty query SearchFacts = %+v, want pf-valid-subsec with .5Z expiry past 60 just-expired rows", emptyHits)
+	}
+
+	ftsHits, err := s.SearchFacts(ctx, "owner-1", "project", "starvation guard", false, 1, now)
+	if err != nil {
+		t.Fatalf("SearchFacts(fts): %v", err)
+	}
+	if len(ftsHits) != 1 || ftsHits[0].ID != "pf-valid-subsec" {
+		t.Fatalf("FTS SearchFacts = %+v, want Stage 1 pf-valid-subsec without starvation or OR fallback", ftsHits)
+	}
+
+	_, err = s.SearchFacts(ctx, "owner-1", "", strings.Repeat("a", 501), false, 10, now)
+	if !fault.HasCode(err, ErrorCodeInvalidArgument) || !strings.Contains(err.Error(), "exceeds length bounds") {
+		t.Fatalf("overlong query err = %v, want invalid_argument with length bounds message", err)
 	}
 }

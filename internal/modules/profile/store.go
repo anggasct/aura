@@ -127,7 +127,7 @@ const (
 
 func tokenizeProfileQuery(raw string) ([]string, error) {
 	if utf8.RuneCountInString(raw) > maxProfileQueryRunes {
-		return nil, fault.New(ErrorCodeInvalidArgument, "profile search carries no searchable terms")
+		return nil, fault.New(ErrorCodeInvalidArgument, "profile search query exceeds length bounds")
 	}
 	tokens := textsearch.Tokenize(raw)
 	if len(tokens) == 0 {
@@ -501,14 +501,15 @@ func rankProfileTier(hits []scoredProfileFact, now time.Time) {
 	})
 }
 
-func (s *SQLiteStore) searchFactTier(ctx context.Context, ownerID, category, match string, verifiedOnly bool, candidateLimit int, now time.Time) ([]scoredProfileFact, error) {
+func (s *SQLiteStore) searchFactTier(ctx context.Context, ownerID, category, match string, verifiedOnly bool, want int, now time.Time) ([]scoredProfileFact, error) {
 	sqlQuery := `SELECT f.id, f.owner_id, f.category, f.fact_key, f.fact_value, f.value_digest, f.status, f.origin,
 		f.owner_verified, f.confidence, f.confidence_policy_version, f.conflicts_with_id,
 		f.expires_at, f.created_at, f.updated_at, f.taint_source, bm25(profile_fact_fts) FROM profile_fact_fts
 		JOIN profile_fact f ON f.rowid = profile_fact_fts.rowid
 		WHERE profile_fact_fts MATCH ? AND f.owner_id = ? AND f.status = 'active'
 		AND (f.expires_at IS NULL OR f.expires_at > ?)`
-	args := []any{match, ownerID, sqlite.FormatTime(now.UTC().Add(-time.Second))}
+	nowUTC := now.UTC()
+	args := []any{match, ownerID, sqlite.FormatTime(nowUTC.Add(-time.Second))}
 	if verifiedOnly {
 		sqlQuery += ` AND f.owner_verified = 1`
 	}
@@ -516,14 +517,12 @@ func (s *SQLiteStore) searchFactTier(ctx context.Context, ownerID, category, mat
 		sqlQuery += ` AND f.category = ?`
 		args = append(args, category)
 	}
-	sqlQuery += ` ORDER BY bm25(profile_fact_fts), f.confidence DESC, f.id ASC LIMIT ?`
-	args = append(args, candidateLimit)
+	sqlQuery += ` ORDER BY bm25(profile_fact_fts), f.confidence DESC, f.id ASC`
 	rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
 	if err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
 	}
 	defer func() { _ = rows.Close() }()
-	nowUTC := now.UTC()
 	var out []scoredProfileFact
 	for rows.Next() {
 		hit, err := scanScoredProfileFact(rows)
@@ -534,6 +533,9 @@ func (s *SQLiteStore) searchFactTier(ctx context.Context, ownerID, category, mat
 			continue
 		}
 		out = append(out, hit)
+		if len(out) >= want {
+			break
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
@@ -557,11 +559,12 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 	if category != "" && !profileCategories[category] {
 		return nil, fault.New(ErrorCodeProfileInvalid, "profile fact category is not valid")
 	}
+	nowUTC := now.UTC()
 	match := strings.TrimSpace(query)
 	if match == "" {
 		sqlQuery := `SELECT ` + selectProfileFactColumns + ` FROM profile_fact WHERE owner_id = ? AND status = 'active'
 			AND (expires_at IS NULL OR expires_at > ?)`
-		args := []any{ownerID, sqlite.FormatTime(now.UTC())}
+		args := []any{ownerID, sqlite.FormatTime(nowUTC.Add(-time.Second))}
 		if verifiedOnly {
 			sqlQuery += ` AND owner_verified = 1`
 		}
@@ -569,8 +572,7 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 			sqlQuery += ` AND category = ?`
 			args = append(args, category)
 		}
-		sqlQuery += ` ORDER BY confidence DESC, id ASC LIMIT ?`
-		args = append(args, limit)
+		sqlQuery += ` ORDER BY confidence DESC, id ASC`
 		rows, err := sqlite.Conn(ctx, s.db).QueryContext(ctx, sqlQuery, args...)
 		if err != nil {
 			return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
@@ -582,7 +584,13 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 			if err != nil {
 				return nil, err
 			}
+			if fact.ExpiresAt != nil && !fact.ExpiresAt.After(nowUTC) {
+				continue
+			}
 			out = append(out, fact)
+			if len(out) >= limit {
+				break
+			}
 		}
 		if err := rows.Err(); err != nil {
 			return nil, sqlite.Classify(fmt.Errorf("search profile facts: %w", err))
@@ -595,7 +603,6 @@ func (s *SQLiteStore) SearchFacts(ctx context.Context, ownerID, category, query 
 	}
 	meaningful := textsearch.FilterStopwords(rawTokens)
 	candidateLimit := max(limit, min(max(limit*4, minProfileSearchCandidates), maxProfileSearchCandidates))
-	nowUTC := now.UTC()
 	stage1, err := s.searchFactTier(ctx, ownerID, category, textsearch.FTSAndQuery(meaningful), verifiedOnly, candidateLimit, nowUTC)
 	if err != nil {
 		return nil, err
