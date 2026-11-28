@@ -22,6 +22,9 @@ const (
 	ErrorCodeNotCommitted    ErrorCode = "operation_not_committed"
 	ErrorCodeRateLimited     ErrorCode = "operation_rate_limited"
 	ErrorCodeFailed          ErrorCode = "operation_failed"
+
+	ErrorCodePolicyDenied      ErrorCode = "policy_denied"
+	ErrorCodeSourceUnavailable ErrorCode = "source_unavailable"
 )
 
 func NewError(code ErrorCode, detail string) error {

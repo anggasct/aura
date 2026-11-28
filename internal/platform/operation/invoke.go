@@ -146,6 +146,7 @@ func (r *Registry) admit(found *entry, call *Call) (*Call, error) {
 	}
 	prepared := *call
 	prepared.Input = canonical
+	prepared.Files = r.filesFor(&prepared.Caller)
 	prepared.run = &invocation{registry: r, entry: found}
 	return &prepared, nil
 }

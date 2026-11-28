@@ -55,6 +55,8 @@ type Options struct {
 	ChatCommands  bool
 
 	WithoutRegistry bool
+
+	Files *operation.FileDeps
 }
 
 type Rig struct {
@@ -155,7 +157,7 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 		bindings = options.Bindings(rig.Stubs)
 	}
 	rig.Registry, err = operation.NewRegistry(catalogs, bindings, &operation.Deps{
-		DB: rig.DB, Effects: rig.Executor, Tools: rig.Broker, Clock: rig.Clock, Logger: logger, Telemetry: options.Telemetry,
+		DB: rig.DB, Effects: rig.Executor, Tools: rig.Broker, Clock: rig.Clock, Logger: logger, Telemetry: options.Telemetry, Files: options.Files,
 	})
 	if err != nil && options.AllowInvalid {
 		rig.RegistryErr = err

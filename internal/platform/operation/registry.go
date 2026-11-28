@@ -21,6 +21,7 @@ type Deps struct {
 	Clock     durable.Clock
 	Logger    *slog.Logger
 	Telemetry *telemetry.OperationRecorder
+	Files     *FileDeps
 }
 
 type entry struct {
@@ -41,11 +42,15 @@ type Registry struct {
 	clock         durable.Clock
 	logger        *slog.Logger
 	recorder      *telemetry.OperationRecorder
+	files         *FileDeps
 }
 
 func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry, error) {
 	if deps == nil || deps.DB == nil || deps.Effects == nil || deps.Tools == nil {
 		return nil, NewError(ErrorCodeInvalidArgument, "operation: the registry needs a database, an effect executor and the tool lookup")
+	}
+	if err := deps.Files.validate(); err != nil {
+		return nil, err
 	}
 	bound := make(map[string]*Binding, len(bindings))
 	v := &validation{tools: deps.Tools, checked: true, bindings: bound}
@@ -73,6 +78,7 @@ func NewRegistry(catalogs []Catalog, bindings []Binding, deps *Deps) (*Registry,
 		clock:    deps.Clock,
 		logger:   deps.Logger,
 		recorder: deps.Telemetry,
+		files:    deps.Files,
 	}
 	if registry.clock == nil {
 		registry.clock = durable.RealClock()

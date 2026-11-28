@@ -164,6 +164,8 @@ func mapToBroker(err error) error {
 	switch {
 	case failure.Code == ErrorCodeInputInvalid:
 		return toolbroker.Errorf(toolbroker.ResultInvalidArgument, "%s", detail)
+	case failure.Code == ErrorCodePolicyDenied:
+		return toolbroker.Errorf(toolbroker.ResultPolicyDenied, "%s", detail)
 	case deniedAtTier(failure.Code):
 		return toolbroker.Errorf(toolbroker.ResultToolTierDenied, "%s", detail)
 	}
