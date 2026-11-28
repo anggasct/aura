@@ -130,6 +130,45 @@ func (f *FallbackAdapter) Name() string {
 	return f.name
 }
 
+func (f *FallbackAdapter) Capabilities() (Capabilities, bool) {
+	if f == nil {
+		return Capabilities{}, false
+	}
+	return routeCapabilities(f.route, f.definitions)
+}
+
+func routeCapabilities(route ModelRoute, definitions map[string]Definition) (Capabilities, bool) {
+	if len(route.Candidates) == 0 {
+		return Capabilities{}, false
+	}
+	var merged Capabilities
+	for i, candidate := range route.Candidates {
+		def, ok := definitions[candidate]
+		if !ok || def.Capabilities.ContextTokens <= 0 {
+			return Capabilities{}, false
+		}
+		caps := def.Capabilities
+		tokenizer := strings.TrimSpace(caps.Tokenizer)
+		if i == 0 {
+			merged = caps
+			merged.Tokenizer = tokenizer
+			continue
+		}
+		merged.Streaming = merged.Streaming && caps.Streaming
+		merged.Tools = merged.Tools && caps.Tools
+		merged.StructuredOutput = merged.StructuredOutput && caps.StructuredOutput
+		merged.Vision = merged.Vision && caps.Vision
+		merged.Audio = merged.Audio && caps.Audio
+		merged.Reasoning = merged.Reasoning && caps.Reasoning
+		merged.UsageReporting = merged.UsageReporting && caps.UsageReporting
+		merged.ContextTokens = min(merged.ContextTokens, caps.ContextTokens)
+		if merged.Tokenizer != tokenizer {
+			merged.Tokenizer = ""
+		}
+	}
+	return merged, true
+}
+
 func (f *FallbackAdapter) GenerateContent(ctx context.Context, req *adkmodel.LLMRequest, stream bool) iter.Seq2[*adkmodel.LLMResponse, error] {
 	return func(yield func(*adkmodel.LLMResponse, error) bool) {
 		reqCtx := ctx

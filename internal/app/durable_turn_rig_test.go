@@ -457,7 +457,11 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
 	if discovery != nil {
-		opts = append(opts, runtimeadk.WithAgentResolver(ownerSearchPersona{}, nil), runtimeadk.WithOperations(port))
+		extraTools := make([]string, 0, len(parts.scenario.tools))
+		for _, stub := range parts.scenario.tools {
+			extraTools = append(extraTools, stub.name)
+		}
+		opts = append(opts, runtimeadk.WithAgentResolver(ownerSearchPersona{extraTools: extraTools}, nil), runtimeadk.WithOperations(port))
 	}
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps, args: parts.scenario.arguments}
 	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, turnstore.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
@@ -472,10 +476,13 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 	return executor
 }
 
-type ownerSearchPersona struct{}
+type ownerSearchPersona struct {
+	extraTools []string
+}
 
-func (ownerSearchPersona) Resolve([]string, *string) (auraagent.Definition, error) {
-	return auraagent.Definition{ID: "main", Name: "main", Audience: auraagent.AudienceOwner, Instructions: "SOUL", Tools: []string{tools.OperationSearchToolName}}, nil
+func (p ownerSearchPersona) Resolve([]string, *string) (auraagent.Definition, error) {
+	listed := append([]string{tools.OperationSearchToolName}, p.extraTools...)
+	return auraagent.Definition{ID: "main", Name: "main", Audience: auraagent.AudienceOwner, Instructions: "SOUL", Tools: listed}, nil
 }
 
 func openLife(t *testing.T, plan lifePlan) *turnLife {
@@ -498,7 +505,7 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	}
 	var wiring lifeWiring
 	if scenario.wiring != nil {
-		wiring = scenario.wiring(t, ledger)
+		wiring = scenario.wiring(t, db, ledger)
 	}
 	var opts []runtimeadk.ExecutorOption
 	if wiring.skillContext != nil {
@@ -506,6 +513,12 @@ func openLife(t *testing.T, plan lifePlan) *turnLife {
 	}
 	if wiring.knowledge != nil {
 		opts = append(opts, runtimeadk.WithContextProvider(wiring.knowledge))
+	}
+	if wiring.compactor != nil {
+		opts = append(opts, runtimeadk.WithHistoryCompactor(wiring.compactor))
+	}
+	if wiring.capabilities != nil {
+		opts = append(opts, runtimeadk.WithCapabilityLookup(wiring.capabilities))
 	}
 	executor := newLedgerExecutor(t, db, &ledgerTurn{scenario: scenario, ledger: ledger, options: opts})
 	events := turnstore.NewEventStore(db)
@@ -604,6 +617,9 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 	}
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
 		t.Fatalf("create %s: %v", suiteSession, err)
+	}
+	if turnScenarios[scenario].seed != nil {
+		turnScenarios[scenario].seed(t, db)
 	}
 	return plan, db
 }

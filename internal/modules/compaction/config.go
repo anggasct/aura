@@ -75,6 +75,8 @@ func (c *Config) Validate() error {
 	}
 	if strings.TrimSpace(c.Summary.PromptVersion) == "" {
 		problems = append(problems, configkit.Invalid("summary.prompt_version", "must not be empty"))
+	} else if c.Enabled && c.Summary.PromptVersion != summaryPromptV1 {
+		problems = append(problems, configkit.Invalid("summary.prompt_version", "unsupported prompt version (supported: v1)"))
 	}
 	return errors.Join(problems...)
 }

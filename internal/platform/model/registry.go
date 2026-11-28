@@ -24,8 +24,10 @@ type RegistryOptions struct {
 }
 
 type registryEntry struct {
-	shared adkmodel.LLM
-	build  func() (adkmodel.LLM, error)
+	shared          adkmodel.LLM
+	build           func() (adkmodel.LLM, error)
+	capabilities    Capabilities
+	hasCapabilities bool
 }
 
 type Registry struct {
@@ -97,21 +99,34 @@ func NewRegistry(ctx context.Context, opts *RegistryOptions) (*Registry, error) 
 			return nil, newError(ErrorCodeProtocolInvalid, role, "", fmt.Sprintf("model %q is already registered", spec.Model))
 		}
 		definitionID := role
-		entries[spec.Model] = registryEntry{build: func() (adkmodel.LLM, error) {
-			adapter, _, err := newAdapter(logger, definitionID, &spec, models.Providers, timeout, idleTimeout, vw)
-			return adapter, err
-		}}
+		caps := spec.Capabilities
+		entries[spec.Model] = registryEntry{
+			build: func() (adkmodel.LLM, error) {
+				adapter, _, err := newAdapter(logger, definitionID, &spec, models.Providers, timeout, idleTimeout, vw)
+				return adapter, err
+			},
+			capabilities:    caps,
+			hasCapabilities: caps.ContextTokens > 0,
+		}
 	}
 	for _, name := range slices.Sorted(maps.Keys(routeAdapters)) {
 		if _, taken := entries[name]; taken {
 			return nil, newError(ErrorCodeProtocolInvalid, name, "", fmt.Sprintf("model %q is already registered", models.Definitions[name].Model))
 		}
-		entries[name] = registryEntry{shared: routeAdapters[name]}
+		caps, hasCaps := routeCapabilities(routes[name], models.Definitions)
+		entries[name] = registryEntry{
+			shared:          routeAdapters[name],
+			capabilities:    caps,
+			hasCapabilities: hasCaps,
+		}
 	}
 	return &Registry{entries: entries}, nil
 }
 
 func (r *Registry) LLM(_ context.Context, name string) (adkmodel.LLM, error) {
+	if r == nil {
+		return nil, newError(ErrorCodeNotFound, name, "", fmt.Sprintf("model %q is not registered", name))
+	}
 	entry, ok := r.entries[name]
 	if !ok {
 		return nil, newError(ErrorCodeNotFound, name, "", fmt.Sprintf("model %q is not registered", name))
@@ -120,6 +135,17 @@ func (r *Registry) LLM(_ context.Context, name string) (adkmodel.LLM, error) {
 		return entry.shared, nil
 	}
 	return entry.build()
+}
+
+func (r *Registry) Capabilities(name string) (Capabilities, bool) {
+	if r == nil {
+		return Capabilities{}, false
+	}
+	entry, ok := r.entries[name]
+	if !ok || !entry.hasCapabilities {
+		return Capabilities{}, false
+	}
+	return entry.capabilities, true
 }
 
 type Set map[string]adkmodel.LLM

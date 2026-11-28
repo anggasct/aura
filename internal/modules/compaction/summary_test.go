@@ -335,7 +335,7 @@ func TestProtectedStaysVerbatimWhileRangesResolve(t *testing.T) {
 		events = append(events, Event{Sequence: i + 1, TurnID: "t" + string(rune('a'+i)), InvocationID: "inv-old", Kind: "message.completed", Text: "older work block number " + string(rune('a'+i))})
 	}
 	events = append(events, Event{Sequence: 7, TurnID: "t-live", InvocationID: "inv-new", Kind: "model.delta", Text: "live"})
-	plan, err := planner.Plan(Capability{ID: "m", ContextTokens: 300}, Invocation{InvocationID: "inv-new"}, events)
+	plan, err := planner.Plan(Capability{ID: "m", ContextTokens: 220}, Invocation{InvocationID: "inv-new"}, events)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}

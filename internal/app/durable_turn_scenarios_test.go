@@ -4,6 +4,7 @@ package app
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"log/slog"
@@ -18,6 +19,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
+	runtimeadk "github.com/anggasct/aura/internal/platform/turn/adk"
 	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
 )
 
@@ -52,6 +54,8 @@ type lifeWiring struct {
 	renderer     runtimeengine.SkillRenderer
 	skillContext turn.ContextProvider
 	knowledge    turn.ContextProvider
+	compactor    runtimeadk.HistoryCompactor
+	capabilities runtimeadk.CapabilityLookup
 }
 
 type ledgerOperation struct {
@@ -69,7 +73,8 @@ type turnScenario struct {
 	gated         string
 	approvingLife int
 	requests      []turn.TurnRequest
-	wiring        func(t *testing.T, ledger *turnLedger) lifeWiring
+	seed          func(t *testing.T, db *sql.DB)
+	wiring        func(t *testing.T, db *sql.DB, ledger *turnLedger) lifeWiring
 	firstLife     func(t *testing.T, life *turnLife)
 }
 
@@ -181,6 +186,16 @@ var turnScenarios = map[string]turnScenario{
 		gated:    "tool-a",
 		requests: []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-LOST-LEASE")},
 	},
+	"compaction-replay": {
+		steps:      []string{"tool-a", textStep},
+		tools:      []stubTool{{name: "tool-a"}},
+		operations: []ledgerOperation{{id: operationtest.Change}},
+		discovery:  true,
+		gated:      "tool-a",
+		requests:   []turn.TurnRequest{suiteRequest("turn-1", "USER-TEXT-COMPACTION-REPLAY")},
+		seed:       seedCompactionDurableSession,
+		wiring:     compactionAcrossLives,
+	},
 }
 
 func pinnedRequest(turnID, text string) turn.TurnRequest {
@@ -248,7 +263,7 @@ func (s *ledgerSkill) TurnContext(ctx context.Context, req *turn.TurnRequest) ([
 	return []turn.ContextBlock{{Order: turn.ContextOrderSkills, Content: block}}, nil
 }
 
-func skillAcrossLives(_ *testing.T, ledger *turnLedger) lifeWiring {
+func skillAcrossLives(_ *testing.T, _ *sql.DB, ledger *turnLedger) lifeWiring {
 	stub := &ledgerSkill{ledger: ledger, body: originalSkillBody, block: turn.SkillContextStart + "]\nORIGINAL-BLOCK\n" + turn.SkillContextEnd}
 	if ledger.life > 1 {
 		stub = &ledgerSkill{ledger: ledger, body: "CHANGED-BODY", block: "CHANGED-BLOCK", err: fault.New(turn.ErrorCodeSkillUnavailable, "skill is quarantined")}
@@ -256,7 +271,7 @@ func skillAcrossLives(_ *testing.T, ledger *turnLedger) lifeWiring {
 	return lifeWiring{renderer: stub, skillContext: stub}
 }
 
-func transientSkillRender(_ *testing.T, ledger *turnLedger) lifeWiring {
+func transientSkillRender(_ *testing.T, _ *sql.DB, ledger *turnLedger) lifeWiring {
 	stub := &ledgerSkill{ledger: ledger, block: turn.SkillContextStart + "]\nUNUSED-BLOCK\n" + turn.SkillContextEnd, err: fault.New(sqlite.ErrorCodeUnavailable, "read skill")}
 	return lifeWiring{renderer: stub, skillContext: stub}
 }
@@ -302,7 +317,7 @@ func newLedgerKnowledgeProvider(t *testing.T, idx knowledge.Index) turn.ContextP
 	return provider
 }
 
-func knowledgeAcrossLives(t *testing.T, ledger *turnLedger) lifeWiring {
+func knowledgeAcrossLives(t *testing.T, _ *sql.DB, ledger *turnLedger) lifeWiring {
 	t.Helper()
 	idx := &ledgerKnowledgeIndex{
 		ledger: ledger,
@@ -322,7 +337,7 @@ func knowledgeAcrossLives(t *testing.T, ledger *turnLedger) lifeWiring {
 	return lifeWiring{knowledge: newLedgerKnowledgeProvider(t, idx)}
 }
 
-func failingKnowledge(t *testing.T, ledger *turnLedger) lifeWiring {
+func failingKnowledge(t *testing.T, _ *sql.DB, ledger *turnLedger) lifeWiring {
 	t.Helper()
 	return lifeWiring{knowledge: newLedgerKnowledgeProvider(t, &ledgerKnowledgeIndex{ledger: ledger, err: errors.New("index unavailable")})}
 }
@@ -395,7 +410,7 @@ func (e ledgerEmbedder) Embed(context.Context, knowledge.EmbedRole, []string) ([
 	return [][]float32{{1, 0, 0, 0}}, nil
 }
 
-func embeddingAcrossLives(t *testing.T, ledger *turnLedger) lifeWiring {
+func embeddingAcrossLives(t *testing.T, _ *sql.DB, ledger *turnLedger) lifeWiring {
 	t.Helper()
 	broken := brokenAfterRestart{ledger: ledger}
 	retriever, err := knowledge.NewRetriever(&ledgerLexical{ledger: ledger}, emptyVaultSource{}, knowledge.WithVectors(&knowledge.VectorConfig{

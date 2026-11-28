@@ -26,6 +26,7 @@ const (
 	ErrorCodePersonaMismatch            ErrorCode = "persona_mismatch"
 	ErrorCodeSkillUnavailable           ErrorCode = "skill_unavailable"
 	ErrorCodeWebOnlyUnavailable         ErrorCode = "web_only_unavailable"
+	ErrorCodeContextBudgetExceeded      ErrorCode = "context_budget_exceeded"
 )
 
 func (c ErrorCode) Retryable() bool {
