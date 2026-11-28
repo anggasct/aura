@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -21,13 +22,17 @@ func executorBuiltins() *fakeBuiltinExecutor {
 	}}
 }
 
-func executorWithOperationTool(t *testing.T) *ADKExecutor {
+func executorWithOperationTool(t *testing.T) (*ADKExecutor, *OperationPort) {
 	t.Helper()
+	port := NewOperationPort()
 	executor := &ADKExecutor{}
 	if err := WithBuiltinToolExecutor(executorBuiltins())(executor); err != nil {
 		t.Fatalf("WithBuiltinToolExecutor: %v", err)
 	}
-	return executor
+	if err := WithOperations(port)(executor); err != nil {
+		t.Fatalf("WithOperations: %v", err)
+	}
+	return executor, port
 }
 
 type quietSurface struct{}
@@ -39,9 +44,9 @@ func ownerAudience(tools ...string) *auraagent.Definition {
 }
 
 func TestToolsForOffersOperationToolsOnlyToOwnerAudiencePersonasThatListThem(t *testing.T) {
-	executor := executorWithOperationTool(t)
-	if err := executor.BindOperations(quietSurface{}); err != nil {
-		t.Fatalf("BindOperations: %v", err)
+	executor, port := executorWithOperationTool(t)
+	if err := port.Bind(quietSurface{}, executorBuiltins()); err != nil {
+		t.Fatalf("Bind: %v", err)
 	}
 	trustedPersona := ownerAudience("read_file", "aura_cron_list")
 	trustedPersona.Audience = auraagent.AudienceTrusted
@@ -84,7 +89,7 @@ func TestToolsForOffersOperationToolsOnlyToOwnerAudiencePersonasThatListThem(t *
 		}
 	})
 	t.Run("an executor whose operations were never bound offers none", func(t *testing.T) {
-		unbound := executorWithOperationTool(t)
+		unbound, _ := executorWithOperationTool(t)
 		got := toolNames(unbound.toolsFor(ownerAudience("read_file", "aura_cron_list"), principal.ClassOwner, turn.OriginTerminal, &turnContext{}))
 		if !slices.Equal(got, []string{"read_file"}) {
 			t.Fatalf("tools = %v, want only read_file", got)
@@ -98,34 +103,67 @@ func TestToolsForOffersOperationToolsOnlyToOwnerAudiencePersonasThatListThem(t *
 	})
 }
 
-type growingBuiltins struct {
-	fakeBuiltinExecutor
-	grown bool
-}
-
-func (g *growingBuiltins) Definitions() []BuiltinToolDefinition {
-	definitions := g.fakeBuiltinExecutor.Definitions()
-	if !g.grown {
-		return definitions[:1]
+func TestOperationToolsComeOnlyFromTheBoundPort(t *testing.T) {
+	executor, port := executorWithOperationTool(t)
+	if got := namesOf(executor.tools); !slices.Equal(got, []string{"read_file"}) {
+		t.Fatalf("tools = %v, want the operation definitions kept out of the construction snapshot", got)
 	}
-	return definitions
+	if executor.isOperationTool("aura_cron_list") {
+		t.Fatal("an operation tool is known before the port is bound")
+	}
+	if err := port.Bind(quietSurface{}, executorBuiltins()); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+	if !executor.isOperationTool("aura_cron_list") || !executor.generatesOperation("aura_cron_add") {
+		t.Fatal("the bound operation tools are not known to the executor")
+	}
+	if got := namesOf(executor.tools); !slices.Equal(got, []string{"read_file"}) {
+		t.Fatalf("tools = %v, want the snapshot unchanged by the binding", got)
+	}
 }
 
-func TestBindOperationsRebuildsTheToolSnapshot(t *testing.T) {
-	builtin := &growingBuiltins{fakeBuiltinExecutor: *executorBuiltins()}
+func TestOperationPortIsFilledOnce(t *testing.T) {
+	port := NewOperationPort()
+	if err := port.Bind(nil, executorBuiltins()); err == nil {
+		t.Error("Bind without a surface succeeded")
+	}
+	if err := port.Bind(quietSurface{}, nil); err == nil {
+		t.Error("Bind without a builtin tool executor succeeded")
+	}
+	schema := json.RawMessage(`{"type":"object"}`)
+	legacyOnly := &fakeBuiltinExecutor{definitions: []BuiltinToolDefinition{{Name: "read_file", Version: "v1", Schema: schema}}}
+	if err := port.Bind(quietSurface{}, legacyOnly); err == nil {
+		t.Error("Bind over an executor with no operation tool succeeded")
+	}
+	if err := port.Bind(quietSurface{}, executorBuiltins()); err != nil {
+		t.Fatalf("the first Bind: %v", err)
+	}
+	if err := port.Bind(quietSurface{}, executorBuiltins()); !fault.HasCode(err, turn.ErrorCodeInvalidArgument) {
+		t.Fatalf("the second Bind = %v, want invalid_argument", err)
+	}
+	if err := (*OperationPort)(nil).Bind(quietSurface{}, executorBuiltins()); err == nil {
+		t.Error("Bind on a nil port succeeded")
+	}
+	if err := WithOperations(nil)(&ADKExecutor{}); err == nil {
+		t.Error("WithOperations(nil) succeeded")
+	}
+}
+
+func TestAnExecutorWithoutLegacyToolsStillStartsAndServesOperations(t *testing.T) {
+	port := NewOperationPort()
 	executor := &ADKExecutor{}
-	if err := WithBuiltinToolExecutor(builtin)(executor); err != nil {
-		t.Fatalf("WithBuiltinToolExecutor: %v", err)
+	only := &fakeBuiltinExecutor{definitions: []BuiltinToolDefinition{{Name: "aura_cron_list", Version: "v1", Schema: json.RawMessage(`{"type":"object"}`), Operation: "cron.list"}}}
+	if err := WithBuiltinToolExecutor(only)(executor); err != nil {
+		t.Fatalf("WithBuiltinToolExecutor over operation tools only: %v", err)
 	}
-	if got := toolNames(executor.tools); slices.Contains(got, "aura_cron_list") {
-		t.Fatalf("tools = %v, want the snapshot taken before the operations exist", got)
+	if err := WithOperations(port)(executor); err != nil {
+		t.Fatalf("WithOperations: %v", err)
 	}
-	builtin.grown = true
-	if err := executor.BindOperations(quietSurface{}); err != nil {
-		t.Fatalf("BindOperations: %v", err)
+	if err := port.Bind(quietSurface{}, only); err != nil {
+		t.Fatalf("Bind: %v", err)
 	}
-	if got := toolNames(executor.tools); !slices.Contains(got, "aura_cron_list") || !executor.operationTools["aura_cron_list"] {
-		t.Fatalf("tools = %v, operations = %v, want the operation tools after the rebuild", got, executor.operationTools)
+	if executor.builtinsFor("aura_cron_list") == nil {
+		t.Fatal("the bound operation tool has no executor")
 	}
 }
 

@@ -1,9 +1,14 @@
 package operation_test
 
 import (
+	"go.opentelemetry.io/otel/attribute"
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/metric/metricdata"
+
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -12,6 +17,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -24,7 +30,26 @@ var stubBehaviors = []operation.Behavior{
 
 func discoveryRig(t *testing.T, behaviors []operation.Behavior) *operationtest.Rig {
 	t.Helper()
+	return operationtest.NewRig(t, &operationtest.Options{WithDiscovery: true, Behaviors: behaviors, ChatCommands: true})
+}
+
+func terminalRig(t *testing.T, behaviors []operation.Behavior) *operationtest.Rig {
+	t.Helper()
 	return operationtest.NewRig(t, &operationtest.Options{WithDiscovery: true, Behaviors: behaviors})
+}
+
+var listedStubTools = []string{operationtest.ToolOf(operationtest.Read), operationtest.ToolOf(operationtest.Delete)}
+
+func describeListed(t *testing.T, rig *operationtest.Rig, kind operation.TurnKind, listed ...string) string {
+	t.Helper()
+	text, err := rig.Discovery.Describe(&operation.DescriptionInput{
+		Turn:   operation.Turn{Origin: turn.OriginTerminal, Kind: kind},
+		Listed: listed,
+	})
+	if err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+	return text
 }
 
 func describe(t *testing.T, rig *operationtest.Rig, kind operation.TurnKind, tracked, search bool, withheld ...string) string {
@@ -53,13 +78,98 @@ func TestOperationDescriptionGolden(t *testing.T) {
 		{name: "unattended", kind: operation.TurnUnattended, search: true},
 		{name: "attended-tracked", kind: operation.TurnAttended, tracked: true, search: true},
 		{name: "unattended-tracked", kind: operation.TurnUnattended, tracked: true, search: true},
-		{name: "attended-listed-tools", kind: operation.TurnAttended},
 		{name: "attended-withheld", kind: operation.TurnAttended, search: true, withheld: []string{"web_search", "email_send", "email_send"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			compareGolden(t, "description-"+tc.name+".txt", describe(t, rig, tc.kind, tc.tracked, tc.search, tc.withheld...)+"\n")
 		})
+	}
+}
+
+func TestOperationDescriptionGoldenWithoutChatCommands(t *testing.T) {
+	rig := terminalRig(t, stubBehaviors)
+	compareGolden(t, "description-terminal-attended.txt", describe(t, rig, operation.TurnAttended, false, true)+"\n")
+	compareGolden(t, "description-terminal-unattended.txt", describe(t, rig, operation.TurnUnattended, false, true)+"\n")
+	compareGolden(t, "description-terminal-attended-listed-tools.txt", describeListed(t, rig, operation.TurnAttended, listedStubTools...)+"\n")
+}
+
+func TestListedDescriptionNamesOnlyTheVerbsOfTheListedTools(t *testing.T) {
+	rig := discoveryRig(t, nil)
+	compareGolden(t, "description-attended-listed-tools.txt", describeListed(t, rig, operation.TurnAttended, listedStubTools...)+"\n")
+	line := groupLine(t, describeListed(t, rig, operation.TurnAttended, listedStubTools...), operationtest.Group)
+	for _, verb := range []string{"read", "delete^", "host (host)", "owner-only (owner)"} {
+		if !strings.Contains(line, verb) {
+			t.Errorf("the listed description %q lacks %q", line, verb)
+		}
+	}
+	for _, verb := range []string{"change", "notice", "fresh", "grant", "external", "idempotent"} {
+		if strings.Contains(line, verb) {
+			t.Errorf("the listed description %q names %q, which the persona has no tool for", line, verb)
+		}
+	}
+	if none := describeListed(t, rig, operation.TurnAttended); strings.Contains(none, "change") || !strings.Contains(none, "host (host)") {
+		t.Errorf("a persona that lists no tool is told %q, want only the owner and host commands", none)
+	}
+}
+
+func groupLine(t *testing.T, description, group string) string {
+	t.Helper()
+	for line := range strings.SplitSeq(description, "\n") {
+		if strings.HasPrefix(line, "- "+group+": ") {
+			return line
+		}
+	}
+	t.Fatalf("the description lists no %s group:\n%s", group, description)
+	return ""
+}
+
+func TestOperationDescriptionNamesChatCommandsOnlyWhenTheyExist(t *testing.T) {
+	for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
+		for _, tracked := range []bool{false, true} {
+			terminal := describe(t, terminalRig(t, stubBehaviors), kind, tracked, true)
+			chat := describe(t, discoveryRig(t, stubBehaviors), kind, tracked, true)
+			if strings.Contains(strings.ToLower(terminal), "chat") || strings.Contains(terminal, "/<group>") {
+				t.Errorf("%s tracked=%t: the terminal description mentions a chat command:\n%s", kind, tracked, terminal)
+			}
+			if !strings.Contains(terminal, "aura <group> <verb>") {
+				t.Errorf("%s tracked=%t: the terminal description lacks the command form:\n%s", kind, tracked, terminal)
+			}
+			if !strings.Contains(chat, "/<group> <verb>") {
+				t.Errorf("%s tracked=%t: the chat description lacks the chat form:\n%s", kind, tracked, chat)
+			}
+		}
+	}
+	if got := searchToolDescription(t, terminalRig(t, nil)); strings.Contains(strings.ToLower(got), "chat") {
+		t.Errorf("the terminal search description mentions chat: %q", got)
+	}
+	if got := searchToolDescription(t, discoveryRig(t, nil)); !strings.Contains(got, "chat and CLI") {
+		t.Errorf("the chat search description = %q, want the chat and CLI wording", got)
+	}
+}
+
+func searchToolDescription(t *testing.T, rig *operationtest.Rig) string {
+	t.Helper()
+	registrations := rig.Discovery.Tools()
+	if len(registrations) == 0 {
+		t.Fatal("the discovery registers no tool")
+	}
+	return registrations[0].Definition.Description
+}
+
+func TestOperationDescriptionCarriesTheTrustGrantClause(t *testing.T) {
+	const clause = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
+	for _, rig := range []*operationtest.Rig{terminalRig(t, nil), discoveryRig(t, nil)} {
+		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
+			for _, tracked := range []bool{false, true} {
+				if got := describe(t, rig, kind, tracked, true); !strings.Contains(got, clause) {
+					t.Errorf("%s tracked=%t: the description lacks the trust grant clause", kind, tracked)
+				}
+			}
+		}
+		if got := describeListed(t, rig, operation.TurnAttended, listedStubTools...); !strings.Contains(got, clause) || strings.Contains(got, "a search result") {
+			t.Errorf("the listed description = %q, want the clause without a mention of search", got)
+		}
 	}
 }
 
@@ -264,6 +374,7 @@ type searchedOperation struct {
 	Approval string `json:"approval"`
 	Tool     string `json:"tool"`
 	Offered  *bool  `json:"offered"`
+	Chat     string `json:"chat"`
 	Command  string `json:"command"`
 }
 
@@ -432,6 +543,114 @@ func TestOperationSearch(t *testing.T) {
 			t.Fatalf("response = %+v, want two loaded and session_full", response)
 		}
 	})
+}
+
+func TestOperationSearchGivesTheChatFormOnlyWhenChatCommandsExist(t *testing.T) {
+	scope := &operation.SearchScope{Kind: operation.TurnAttended}
+	chat := searchGroup(t, discoveryRig(t, nil), scope, false)
+	terminal := searchGroup(t, terminalRig(t, nil), scope, false)
+	for i := range terminal.Operations {
+		if terminal.Operations[i].Chat != "" {
+			t.Errorf("%s carries the chat form %q although chat commands do not exist", terminal.Operations[i].ID, terminal.Operations[i].Chat)
+		}
+		if !strings.HasPrefix(terminal.Operations[i].Command, "aura stub ") {
+			t.Errorf("%s command = %q, want the aura form", terminal.Operations[i].ID, terminal.Operations[i].Command)
+		}
+	}
+	byID := map[string]searchedOperation{}
+	for i := range chat.Operations {
+		byID[chat.Operations[i].ID] = chat.Operations[i]
+	}
+	if got := byID[operationtest.Change].Chat; got != "/stub change <subject>" {
+		t.Errorf("stub.change chat = %q, want %q", got, "/stub change <subject>")
+	}
+	if got := byID[operationtest.OwnerOnly].Chat; got != "/stub owner-only <subject>" {
+		t.Errorf("stub.owner-only chat = %q, want %q", got, "/stub owner-only <subject>")
+	}
+	if got := byID[operationtest.Host].Chat; got != "" {
+		t.Errorf("stub.host chat = %q, want none: a host operation has no chat command", got)
+	}
+}
+
+func TestDescriptionBoundCoversTheWithheldList(t *testing.T) {
+	rig := discoveryRig(t, stubBehaviors)
+	withholdable := make([]string, 0, 400)
+	for i := range 400 {
+		withholdable = append(withholdable, fmt.Sprintf("legacy_tool_number_%03d", i))
+	}
+	_, err := operation.NewDiscovery(&operation.DiscoveryDeps{Registry: rig.Registry, Behaviors: stubBehaviors, Withholdable: withholdable})
+	if !fault.HasCode(err, operation.ErrorCodeInvalid) {
+		t.Fatalf("NewDiscovery with a withheld list that overflows the bound = %v, want operation_invalid", err)
+	}
+	if _, err := operation.NewDiscovery(&operation.DiscoveryDeps{Registry: rig.Registry, Behaviors: stubBehaviors, Withholdable: withholdable[:5]}); err != nil {
+		t.Fatalf("NewDiscovery with a small withheld list: %v", err)
+	}
+}
+
+func TestOperationSearchTelemetry(t *testing.T) {
+	reader := sdkmetric.NewManualReader()
+	recorder, err := telemetry.NewOperationRecorder(sdkmetric.NewMeterProvider(sdkmetric.WithReader(reader)))
+	if err != nil {
+		t.Fatalf("NewOperationRecorder: %v", err)
+	}
+	rig := operationtest.NewRig(t, &operationtest.Options{WithDiscovery: true, Telemetry: recorder})
+	scope := &operation.SearchScope{Kind: operation.TurnAttended}
+	full := &operation.SearchScope{Kind: operation.TurnAttended, Loaded: fillerLoaded(operation.MaxLoaded)}
+	searchWith(t, rig, scope, `{"group":"`+operationtest.Group+`"}`, nil)
+	searchWith(t, rig, scope, `{"query":"zzzzqqq"}`, nil)
+	searchWith(t, rig, full, `{"group":"`+operationtest.Group+`"}`, nil)
+	searchWith(t, rig, scope, `{"query":"read"}`, func(r *toolbroker.ToolRequest) { r.PrincipalClass = principal.ClassTrusted })
+
+	var collected metricdata.ResourceMetrics
+	if err := reader.Collect(t.Context(), &collected); err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	outcomes := map[string]int64{}
+	var loadedPoints uint64
+	var loadedSum int64
+	for _, scoped := range collected.ScopeMetrics {
+		for _, point := range scoped.Metrics {
+			switch data := point.Data.(type) {
+			case metricdata.Sum[int64]:
+				if point.Name != telemetry.MetricOperationSearchTotal {
+					continue
+				}
+				for _, dataPoint := range data.DataPoints {
+					if dataPoint.Attributes.Len() != 1 {
+						t.Errorf("a search point carries %d attributes, want only the outcome", dataPoint.Attributes.Len())
+					}
+					outcome, _ := dataPoint.Attributes.Value(attribute.Key(telemetry.AttrOperationOutcome))
+					outcomes[outcome.AsString()] += dataPoint.Value
+				}
+			case metricdata.Histogram[int64]:
+				if point.Name != telemetry.MetricOperationLoadedTools {
+					continue
+				}
+				for _, dataPoint := range data.DataPoints {
+					loadedPoints += dataPoint.Count
+					loadedSum += dataPoint.Sum
+					if dataPoint.Attributes.Len() != 0 {
+						t.Errorf("a loaded tools point carries attributes %v, want none", dataPoint.Attributes.ToSlice())
+					}
+				}
+			}
+		}
+	}
+	want := map[string]int64{telemetry.SearchOutcomeMatched: 1, telemetry.SearchOutcomeEmpty: 1, telemetry.SearchOutcomeSessionFull: 1}
+	if !maps.Equal(outcomes, want) {
+		t.Errorf("search outcomes = %v, want %v: a refused search records nothing", outcomes, want)
+	}
+	if loadedPoints != 3 || loadedSum != int64(8+0+operation.MaxLoaded) {
+		t.Errorf("loaded tools points = %d summing %d, want 3 summing %d", loadedPoints, loadedSum, 8+operation.MaxLoaded)
+	}
+}
+
+func fillerLoaded(n int) []string {
+	names := make([]string, 0, n)
+	for i := range n {
+		names = append(names, fmt.Sprintf("aura_filler_%02d", i))
+	}
+	return names
 }
 
 func TestOperationSearchReportsModuleToolsWithoutLoadingThem(t *testing.T) {

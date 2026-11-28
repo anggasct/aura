@@ -11,6 +11,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 	"github.com/anggasct/aura/internal/platform/turn"
@@ -31,8 +32,9 @@ const (
 	weightDescription = 1
 	weightParameter   = 1
 
-	searchDescription = "Find Aura operations by words or by group and load the ones you can call. Results also give the chat and CLI command of operations only the owner or the host can run."
-	searchSchema      = `{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/aura_operation_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"group":{"type":"string","minLength":1,"maxLength":32},"limit":{"type":"integer","minimum":1,"maximum":10}},"additionalProperties":false}`
+	searchDescriptionChat     = "Find Aura operations by words or by group and load the ones you can call. Results also give the chat and CLI command of operations only the owner or the host can run."
+	searchDescriptionTerminal = "Find Aura operations by words or by group and load the ones you can call. Results also give the aura command of operations only the owner or the host can run."
+	searchSchema              = `{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/aura_operation_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1,"maxLength":200},"group":{"type":"string","minLength":1,"maxLength":32},"limit":{"type":"integer","minimum":1,"maximum":10}},"additionalProperties":false}`
 )
 
 type SearchScope struct {
@@ -73,6 +75,7 @@ type searchEntry struct {
 	Approval Approval `json:"approval"`
 	Tool     string   `json:"tool,omitempty"`
 	Offered  *bool    `json:"offered,omitempty"`
+	Chat     string   `json:"chat,omitempty"`
 	Command  string   `json:"command"`
 }
 
@@ -83,13 +86,17 @@ type searchResult struct {
 }
 
 func (d *Discovery) Tools() []toolbroker.ToolRegistration {
+	description := searchDescriptionTerminal
+	if d.chatCommands {
+		description = searchDescriptionChat
+	}
 	definition := tools.Definition{
 		Name:        tools.OperationSearchToolName,
 		Version:     tools.Version,
 		Schema:      json.RawMessage(searchSchema),
 		OptIn:       true,
 		OwnerOptIn:  true,
-		Description: searchDescription,
+		Description: description,
 		Validator:   validateSearchArguments,
 	}
 	return []toolbroker.ToolRegistration{{
@@ -176,7 +183,8 @@ func (d *Discovery) search(ctx context.Context, request *toolbroker.ToolRequest,
 	if err != nil {
 		return toolbroker.ToolResult{}, err
 	}
-	result := d.result(matches, view, &scope)
+	result, loadedTotal := d.result(matches, view, &scope)
+	d.recorder.RecordSearch(ctx, searchOutcome(&result), loadedTotal)
 	output, err := json.Marshal(result)
 	if err != nil {
 		return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultExecutionFailed, "the search result cannot be encoded")
@@ -256,9 +264,19 @@ func scoreOf(descriptor *Descriptor, tokens []string) int {
 	return score
 }
 
-func (d *Discovery) result(matches []match, view *Turn, scope *SearchScope) searchResult {
+func searchOutcome(result *searchResult) string {
+	switch {
+	case result.SessionFull:
+		return telemetry.SearchOutcomeSessionFull
+	case len(result.Operations) == 0:
+		return telemetry.SearchOutcomeEmpty
+	}
+	return telemetry.SearchOutcomeMatched
+}
+
+func (d *Discovery) result(matches []match, view *Turn, scope *SearchScope) (result searchResult, loadedTotal int) {
 	loaded := slices.Clone(scope.Loaded)
-	result := searchResult{Operations: make([]searchEntry, 0, len(matches)), Loaded: []string{}}
+	result = searchResult{Operations: make([]searchEntry, 0, len(matches)), Loaded: []string{}}
 	full := len(loaded) >= MaxLoaded
 	for i := range matches {
 		found := matches[i].found
@@ -269,7 +287,10 @@ func (d *Discovery) result(matches []match, view *Turn, scope *SearchScope) sear
 			Exposure: descriptor.Exposure,
 			Risk:     descriptor.Risk,
 			Approval: found.approval(view),
-			Command:  synopsis(descriptor),
+			Command:  synopsis(descriptor, SurfaceCLI),
+		}
+		if d.chatCommands && descriptor.Projects(SurfaceChat) {
+			entry.Chat = synopsis(descriptor, SurfaceChat)
 		}
 		switch {
 		case descriptor.ModuleTool != "":
@@ -291,12 +312,16 @@ func (d *Discovery) result(matches []match, view *Turn, scope *SearchScope) sear
 		result.Operations = append(result.Operations, entry)
 	}
 	result.SessionFull = full
-	return result
+	return result, len(loaded)
 }
 
-func synopsis(descriptor *Descriptor) string {
-	parts := append([]string{rootGroup}, commandPath(descriptor.ID)...)
-	positionals := descriptor.Positionals(SurfaceCLI)
+func synopsis(descriptor *Descriptor, surface Surface) string {
+	path := commandPath(descriptor.ID)
+	parts := append([]string{rootGroup}, path...)
+	if surface == SurfaceChat {
+		parts = append([]string{"/" + path[0]}, path[1:]...)
+	}
+	positionals := descriptor.Positionals(surface)
 	for i := range positionals {
 		positional := &positionals[i]
 		label := "<" + positional.Name + ">"
@@ -305,7 +330,7 @@ func synopsis(descriptor *Descriptor) string {
 		}
 		parts = append(parts, label)
 	}
-	flags := descriptor.Flags(SurfaceCLI)
+	flags := descriptor.Flags(surface)
 	for i := range flags {
 		flag := &flags[i]
 		label := "--" + flag.Name

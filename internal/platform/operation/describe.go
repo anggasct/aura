@@ -19,9 +19,16 @@ const (
 	listedSentence      = "Call the operation tools you have been given to run them. "
 	attendedAsks        = "A verb marked ^ always needs the owner's approval card; a verb marked ? asks the owner first; other verbs run without a card unless this conversation carries untrusted input. "
 	attendedTracked     = "A verb marked ^ always needs the owner's approval card; other verbs run without a card unless this conversation carries untrusted input. "
-	unattendedAsks      = "Nobody can approve on this turn: verbs marked ^ or ? are refused here; give the owner the chat command /<group> <verb> for them. Other verbs run. "
-	unattendedTracked   = "Nobody can approve on this turn: verbs marked ^ are refused here; give the owner the chat command /<group> <verb> for them. Other verbs run. "
-	ownerHostSentence   = "A verb marked (owner) only the owner can run: give them the chat command /<group> <verb> in a direct chat. A verb marked (host) only runs on the host: give them aura <group> <verb>. "
+	unattendedAsksHead  = "Nobody can approve on this turn: verbs marked ^ or ? are refused here; give the owner the "
+	unattendedTrackHead = "Nobody can approve on this turn: verbs marked ^ are refused here; give the owner the "
+	unattendedTail      = " for them. Other verbs run. "
+	chatForm            = "chat command /<group> <verb>"
+	terminalForm        = "command aura <group> <verb>"
+	trustGrantSentence  = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
+	trustGrantSearch    = "; a search result states what applies now. "
+	trustGrantListed    = ". "
+	ownerHostChat       = "A verb marked (owner) only the owner can run: give them the chat command /<group> <verb> in a direct chat. A verb marked (host) only runs on the host: give them aura <group> <verb>. "
+	ownerHostTerminal   = "A verb marked (owner) or (host) is not yours to run: give the owner the command aura <group> <verb> to run it in a terminal on the host. "
 	honestySentence     = "Do not say you lack a capability listed here, and do not say you did something you did not call."
 	sessionFullSentence = " Loaded operations stay for this session; when a search says the session is full, the owner can start a new one with /new."
 )
@@ -29,10 +36,11 @@ const (
 type DescriptionInput struct {
 	Turn     Turn
 	Search   bool
+	Listed   []string
 	Withheld []string
 }
 
-func preamble(in *DescriptionInput) string {
+func (d *Discovery) preamble(in *DescriptionInput) string {
 	var text strings.Builder
 	text.WriteString(introSentence)
 	if in.Search {
@@ -40,17 +48,28 @@ func preamble(in *DescriptionInput) string {
 	} else {
 		text.WriteString(listedSentence)
 	}
+	form := terminalForm
+	ownerHost := ownerHostTerminal
+	if d.chatCommands {
+		form, ownerHost = chatForm, ownerHostChat
+	}
 	switch {
 	case in.Turn.Kind == TurnUnattended && in.Turn.ContentTaintTracked:
-		text.WriteString(unattendedTracked)
+		text.WriteString(unattendedTrackHead + form + unattendedTail)
 	case in.Turn.Kind == TurnUnattended:
-		text.WriteString(unattendedAsks)
+		text.WriteString(unattendedAsksHead + form + unattendedTail)
 	case in.Turn.ContentTaintTracked:
 		text.WriteString(attendedTracked)
 	default:
 		text.WriteString(attendedAsks)
 	}
-	text.WriteString(ownerHostSentence)
+	text.WriteString(trustGrantSentence)
+	if in.Search {
+		text.WriteString(trustGrantSearch)
+	} else {
+		text.WriteString(trustGrantListed)
+	}
+	text.WriteString(ownerHost)
 	text.WriteString(honestySentence)
 	if in.Search {
 		text.WriteString(sessionFullSentence)
@@ -65,12 +84,12 @@ func (d *Discovery) Describe(in *DescriptionInput) (string, error) {
 	if !in.Turn.Kind.valid() {
 		return "", NewError(ErrorCodeInvalidArgument, "operation: the description needs a known turn kind")
 	}
-	groups := d.renderGroups(in.Turn.ContentTaintTracked)
+	groups := d.renderGroups(in)
 	if len(groups) == 0 {
 		return "", nil
 	}
 	var text strings.Builder
-	text.WriteString(headingOperate + "\n" + preamble(in) + "\n")
+	text.WriteString(headingOperate + "\n" + d.preamble(in) + "\n")
 	for i := range groups {
 		text.WriteString(groups[i].line + "\n")
 	}
@@ -101,8 +120,8 @@ type renderedGroup struct {
 	line string
 }
 
-func (d *Discovery) renderGroups(tracked bool) []renderedGroup {
-	marking := markerTurn(tracked)
+func (d *Discovery) renderGroups(in *DescriptionInput) []renderedGroup {
+	marking := markerTurn(in.Turn.ContentTaintTracked)
 	var rendered []renderedGroup
 	for _, group := range d.registry.groups {
 		var verbs []string
@@ -111,13 +130,31 @@ func (d *Discovery) renderGroups(tracked bool) []renderedGroup {
 			if !d.available(found.descriptor) {
 				continue
 			}
-			verbs = append(verbs, verbOf(group.Name, id)+verbSuffix(found.approval(marking)))
+			approval := found.approval(marking)
+			if !in.Search && !d.listed(found, approval, in.Listed) {
+				continue
+			}
+			verbs = append(verbs, verbOf(group.Name, id)+verbSuffix(approval))
 		}
 		if len(verbs) > 0 {
 			rendered = append(rendered, renderedGroup{name: group.Name, line: "- " + group.Name + ": " + group.Summary + ": " + strings.Join(verbs, ", ")})
 		}
 	}
 	return rendered
+}
+
+func (d *Discovery) listed(found *entry, approval Approval, listed []string) bool {
+	if approval == ApprovalOwner || approval == ApprovalHost {
+		return true
+	}
+	descriptor := found.descriptor
+	switch {
+	case descriptor.ModuleTool != "":
+		return slices.Contains(listed, descriptor.ModuleTool)
+	case descriptor.GeneratesTool():
+		return slices.Contains(listed, ToolName(descriptor.ID))
+	}
+	return false
 }
 
 func verbOf(group, id string) string {

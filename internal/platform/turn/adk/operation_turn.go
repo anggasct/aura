@@ -3,6 +3,7 @@ package runtimeadk
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -46,11 +47,61 @@ func operationPlanFrom(ctx context.Context) *operationPlan {
 }
 
 func (x *ADKExecutor) turnKind(origin turn.Origin) operation.TurnKind {
-	return operation.TurnKindOf(origin, !x.unattendedTerminal)
+	return operation.TurnKindOf(origin)
+}
+
+func (x *ADKExecutor) binding() *operationBinding {
+	if x.operations == nil {
+		return nil
+	}
+	return x.operations.bound.Load()
 }
 
 func (x *ADKExecutor) isOperationTool(name string) bool {
-	return x.operationTools[name] || name == auratools.OperationSearchToolName
+	binding := x.binding()
+	return binding != nil && binding.owns(name)
+}
+
+func (x *ADKExecutor) generatesOperation(name string) bool {
+	binding := x.binding()
+	return binding != nil && binding.generates(name)
+}
+
+func (x *ADKExecutor) builtinsFor(name string) BuiltinToolExecutor {
+	if binding := x.binding(); binding != nil && binding.owns(name) {
+		return binding.executor
+	}
+	return x.builtins
+}
+
+func (x *ADKExecutor) listedOperationTools(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra *turnContext, allowed []string) []tool.Tool {
+	binding := x.binding()
+	if binding == nil || extra.restriction != nil || !x.ownerTurn(definition, class, origin) {
+		return nil
+	}
+	var listed []tool.Tool
+	for _, name := range binding.order {
+		if slices.Contains(allowed, name) {
+			listed = append(listed, binding.tools[name])
+		}
+	}
+	return listed
+}
+
+func (x *ADKExecutor) WithholdableTools() []string {
+	var names []string
+	for _, t := range x.tools {
+		name := t.Name()
+		_, plugin := x.pluginTools[name]
+		_, external := x.externalServers[name]
+		_, channel := x.channelTools[name]
+		if plugin || external || channel || name == auratools.KBSearchToolName {
+			continue
+		}
+		names = append(names, name)
+	}
+	slices.Sort(names)
+	return names
 }
 
 func (x *ADKExecutor) ownerTurn(definition *auraagent.Definition, class principal.Class, origin turn.Origin) bool {
@@ -80,7 +131,8 @@ type planInput struct {
 func (x *ADKExecutor) planOperations(ctx context.Context, in *planInput) *operationPlan {
 	definition, req, extra := in.definition, in.req, in.extra
 	plan := &operationPlan{kind: x.turnKind(req.Origin), core: x.toolsFor(definition, req.PrincipalClass, req.Origin, extra)}
-	if x.operations == nil || extra.restriction != nil || !x.ownerTurn(definition, req.PrincipalClass, req.Origin) {
+	binding := x.binding()
+	if binding == nil || extra.restriction != nil || !x.ownerTurn(definition, req.PrincipalClass, req.Origin) {
 		return plan
 	}
 	allowed, ok := x.allowedTools(definition, req.PrincipalClass)
@@ -89,9 +141,10 @@ func (x *ADKExecutor) planOperations(ctx context.Context, in *planInput) *operat
 	}
 	tracked := turnAccessFromContext(ctx).contentTaintTracked
 	searchOffered := slices.ContainsFunc(plan.core, func(t tool.Tool) bool { return t.Name() == auratools.OperationSearchToolName })
-	description, err := x.operations.Describe(&operation.DescriptionInput{
+	description, err := binding.surface.Describe(&operation.DescriptionInput{
 		Turn:     operation.Turn{Origin: req.Origin, Kind: plan.kind, ContentTaintTracked: tracked},
 		Search:   searchOffered,
+		Listed:   namesOf(plan.core),
 		Withheld: x.withheldTools(plan.core),
 	})
 	if err != nil {
@@ -102,29 +155,23 @@ func (x *ADKExecutor) planOperations(ctx context.Context, in *planInput) *operat
 	plan.description = description
 	if searchOffered && extra.history != nil {
 		plan.history = extra.history
-		plan.visible = func(name string) bool { return x.operationTools[name] }
-		plan.toolset = &operationToolset{plan: plan, core: plan.core, executor: x, turnID: req.TurnID}
+		plan.visible = binding.generates
+		plan.toolset = &operationToolset{plan: plan, core: plan.core, binding: binding, logger: x.logger, turnID: req.TurnID}
 	}
 	return plan
 }
 
 func (x *ADKExecutor) withheldTools(offered []tool.Tool) []string {
-	var withheld []string
-	for _, t := range x.tools {
-		name := t.Name()
-		_, plugin := x.pluginTools[name]
-		_, external := x.externalServers[name]
-		_, channel := x.channelTools[name]
-		if x.isOperationTool(name) || plugin || external || channel || name == auratools.KBSearchToolName {
-			continue
-		}
-		if slices.ContainsFunc(offered, func(o tool.Tool) bool { return o.Name() == name }) {
-			continue
-		}
-		withheld = append(withheld, name)
+	names := namesOf(offered)
+	return slices.DeleteFunc(x.WithholdableTools(), func(name string) bool { return slices.Contains(names, name) })
+}
+
+func namesOf(tools []tool.Tool) []string {
+	names := make([]string, 0, len(tools))
+	for _, t := range tools {
+		names = append(names, t.Name())
 	}
-	slices.Sort(withheld)
-	return withheld
+	return names
 }
 
 func (p *operationPlan) loadedNow(sessionID string) ([]string, error) {
@@ -139,10 +186,7 @@ func (p *operationPlan) loadedNow(sessionID string) ([]string, error) {
 }
 
 func (p *operationPlan) offeredNames() []string {
-	names := make([]string, 0, len(p.core))
-	for _, t := range p.core {
-		names = append(names, t.Name())
-	}
+	names := namesOf(p.core)
 	slices.Sort(names)
 	return names
 }
@@ -178,10 +222,11 @@ func recordedLoads(events []*session.Event, visible func(name string) bool) []st
 }
 
 type operationToolset struct {
-	plan     *operationPlan
-	core     []tool.Tool
-	executor *ADKExecutor
-	turnID   string
+	plan    *operationPlan
+	core    []tool.Tool
+	binding *operationBinding
+	logger  *slog.Logger
+	turnID  string
 }
 
 func (s *operationToolset) Name() string { return "aura_operations" }
@@ -189,7 +234,7 @@ func (s *operationToolset) Name() string { return "aura_operations" }
 func (s *operationToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error) {
 	names, err := s.plan.loadedNow(ctx.SessionID())
 	if err != nil {
-		s.executor.logger.WarnContext(ctx, "operation toolset unavailable", "component", "turn", "turn_id", s.turnID, "error", fmt.Errorf("read the session history: %w", err))
+		s.logger.WarnContext(ctx, "operation toolset unavailable", "component", "turn", "turn_id", s.turnID, "error", fmt.Errorf("read the session history: %w", err))
 		return nil, nil
 	}
 	loaded := make([]tool.Tool, 0, len(names))
@@ -197,7 +242,7 @@ func (s *operationToolset) Tools(ctx agent.ReadonlyContext) ([]tool.Tool, error)
 		if slices.ContainsFunc(s.core, func(t tool.Tool) bool { return t.Name() == name }) {
 			continue
 		}
-		if found, ok := s.executor.toolIndex[name]; ok {
+		if found, ok := s.binding.tools[name]; ok {
 			loaded = append(loaded, found)
 		}
 	}

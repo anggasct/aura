@@ -358,7 +358,7 @@
       "version": "v1",
       "server": "",
       "plugin": false,
-      "description": "Find Aura operations by words or by group and load the ones you can call. Results also give the chat and CLI command of operations only the owner or the host can run.",
+      "description": "Find Aura operations by words or by group and load the ones you can call. Results also give the aura command of operations only the owner or the host can run.",
       "schema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "$id": "aura://tools/aura_operation_search/v1",

@@ -13,6 +13,14 @@ import (
 const (
 	MetricOperationInvocationsTotal  = "operations.invocations.total"
 	MetricOperationInvocationLatency = "operations.invocation.duration"
+	MetricOperationSearchTotal       = "operations.search.total"
+	MetricOperationLoadedTools       = "operations.loaded.tools"
+)
+
+const (
+	SearchOutcomeMatched     = "matched"
+	SearchOutcomeEmpty       = "empty"
+	SearchOutcomeSessionFull = "session_full"
 )
 
 const (
@@ -33,6 +41,8 @@ type OperationObservation struct {
 type OperationRecorder struct {
 	invocations metric.Int64Counter
 	duration    metric.Float64Histogram
+	searches    metric.Int64Counter
+	loaded      metric.Int64Histogram
 }
 
 func NewOperationRecorder(mp metric.MeterProvider) (*OperationRecorder, error) {
@@ -50,7 +60,23 @@ func NewOperationRecorder(mp metric.MeterProvider) (*OperationRecorder, error) {
 		metric.WithUnit("s"), metric.WithDescription("operation invocation duration in seconds")); err != nil {
 		return nil, fmt.Errorf("telemetry: create operation duration histogram: %w", err)
 	}
+	if recorder.searches, err = meter.Int64Counter(MetricOperationSearchTotal,
+		metric.WithDescription("operation discovery searches by outcome")); err != nil {
+		return nil, fmt.Errorf("telemetry: create operation search counter: %w", err)
+	}
+	if recorder.loaded, err = meter.Int64Histogram(MetricOperationLoadedTools,
+		metric.WithDescription("operation tools loaded in a session after a search")); err != nil {
+		return nil, fmt.Errorf("telemetry: create operation loaded tools histogram: %w", err)
+	}
 	return recorder, nil
+}
+
+func (r *OperationRecorder) RecordSearch(ctx context.Context, outcome string, loaded int) {
+	if r == nil {
+		return
+	}
+	r.searches.Add(ctx, 1, metric.WithAttributeSet(attribute.NewSet(attribute.String(AttrOperationOutcome, outcome))))
+	r.loaded.Record(ctx, int64(loaded))
 }
 
 func (r *OperationRecorder) Record(ctx context.Context, observation *OperationObservation) {

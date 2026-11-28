@@ -51,6 +51,8 @@ type Options struct {
 
 	WithDiscovery bool
 	Behaviors     []operation.Behavior
+	Withholdable  []string
+	ChatCommands  bool
 
 	WithoutRegistry bool
 }
@@ -166,7 +168,10 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 		tb.Fatalf("register the operation tools: %v", err)
 	}
 	if options.WithDiscovery {
-		rig.Discovery, err = operation.NewDiscovery(&operation.DiscoveryDeps{Registry: rig.Registry, Behaviors: options.Behaviors, Capabilities: capabilitytest.Host(tb)})
+		rig.Discovery, err = operation.NewDiscovery(&operation.DiscoveryDeps{
+			Registry: rig.Registry, Behaviors: options.Behaviors, Capabilities: capabilitytest.Host(tb),
+			Withholdable: options.Withholdable, ChatCommands: options.ChatCommands, Telemetry: options.Telemetry,
+		})
 		if err != nil {
 			tb.Fatalf("new discovery: %v", err)
 		}

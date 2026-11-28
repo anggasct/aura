@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -35,7 +36,18 @@ type operationHarness struct {
 	resolver *stubResolver
 	model    *operationtest.ScriptedModel
 	events   turnstore.EventStore
+	sessions *countingSessions
 	turns    int
+}
+
+type countingSessions struct {
+	SessionPort
+	loads atomic.Int32
+}
+
+func (c *countingSessions) ListEvents(ctx context.Context, sessionID string, after uint64, limit int) ([]turn.Event, error) {
+	c.loads.Add(1)
+	return c.SessionPort.ListEvents(ctx, sessionID, after, limit)
 }
 
 func ownerDefinition(tools ...string) auraagent.Definition {
@@ -50,16 +62,18 @@ func newOperationHarness(t *testing.T, definition auraagent.Definition, opts ...
 		t.Fatalf("NewBrokerExecutor: %v", err)
 	}
 	model := &operationtest.ScriptedModel{}
+	sessions := &countingSessions{SessionPort: turnstore.NewSessionService(rig.DB)}
 	resolver := &stubResolver{definition: definition}
-	opts = append([]ExecutorOption{WithAgentResolver(resolver, nil), WithBuiltinToolExecutor(builtin)}, opts...)
-	executor, err := NewADKExecutor("aura", "operation-model", auramodel.Set{"operation-model": model}, turnstore.NewSessionService(rig.DB), builtin, nil, slog.New(slog.DiscardHandler), opts...)
+	port := NewOperationPort()
+	opts = append([]ExecutorOption{WithAgentResolver(resolver, nil), WithBuiltinToolExecutor(builtin), WithOperations(port)}, opts...)
+	executor, err := NewADKExecutor("aura", "operation-model", auramodel.Set{"operation-model": model}, sessions, builtin, nil, slog.New(slog.DiscardHandler), opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
-	if err := executor.BindOperations(rig.Discovery); err != nil {
-		t.Fatalf("BindOperations: %v", err)
+	if err := port.Bind(rig.Discovery, builtin); err != nil {
+		t.Fatalf("Bind: %v", err)
 	}
-	return &operationHarness{t: t, rig: rig, executor: executor, resolver: resolver, model: model, events: turnstore.NewEventStore(rig.DB)}
+	return &operationHarness{t: t, rig: rig, executor: executor, resolver: resolver, model: model, events: turnstore.NewEventStore(rig.DB), sessions: sessions}
 }
 
 func (h *operationHarness) request(mutate func(*turn.TurnRequest)) *turn.TurnRequest {
@@ -167,7 +181,9 @@ func TestLoadedOperationsVanishWhenNoLongerVisible(t *testing.T) {
 	})
 	t.Run("a tool the executor no longer knows", func(t *testing.T) {
 		h.resolver.definition = ownerDefinition(searchTool)
-		h.executor.operationTools = map[string]bool{"aura_stub_read": true}
+		for name := range h.executor.binding().generated {
+			h.executor.binding().generated[name] = name == "aura_stub_read"
+		}
 		got := h.run(nil)
 		if names := operationToolNames(got[0].Tools); !slices.Equal(sortedCopy(names), sortedCopy([]string{"aura_stub_read", searchTool})) {
 			t.Fatalf("declared %v, want only the discovery tool and the tool that is still visible", names)
@@ -322,32 +338,26 @@ func TestOperationDescriptionSitsAfterTheSoulAndBeforeTheCaveats(t *testing.T) {
 
 func TestExecutorSetsUnattendedFromTheTurnKind(t *testing.T) {
 	cases := []struct {
-		name     string
-		origin   turn.Origin
-		terminal bool
-		want     bool
+		name   string
+		origin turn.Origin
+		want   bool
 	}{
 		{name: "a scheduled turn", origin: turn.OriginSchedule, want: true},
 		{name: "an http turn", origin: turn.OriginHTTP, want: true},
-		{name: "a console without an approval bridge", origin: turn.OriginTerminal, terminal: true, want: true},
-		{name: "a console with an approval bridge", origin: turn.OriginTerminal},
+		{name: "a console turn", origin: turn.OriginTerminal},
 		{name: "a chat turn", origin: "telegram:main"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			var opts []ExecutorOption
-			if tc.terminal {
-				opts = append(opts, WithUnattendedTerminal())
-			}
-			h := newOperationHarness(t, ownerDefinition(searchTool, "aura_stub_read"), opts...)
-			recorder := &recordingBuiltins{BuiltinToolExecutor: h.executor.builtins}
-			h.executor.builtins = recorder
+			h := newOperationHarness(t, ownerDefinition(searchTool, "aura_stub_read"))
+			recorder := &recordingBuiltins{BuiltinToolExecutor: h.executor.binding().executor}
+			h.executor.binding().executor = recorder
 			h.run(func(req *turn.TurnRequest) { req.Origin = tc.origin }, operationtest.CallOf("aura_stub_read", map[string]any{"subject": "notes"}), operationtest.CallOf(searchTool, map[string]any{"query": "stub"}))
 			byTool := recorder.byTool()
 			if got := byTool["aura_stub_read"]; got != tc.want {
 				t.Errorf("Unattended on the operation tool = %t, want %t", got, tc.want)
 			}
-			if _, searched := byTool[searchTool]; searched && byTool[searchTool] {
+			if byTool[searchTool] {
 				t.Errorf("Unattended is set on the discovery tool, which is not an operation")
 			}
 		})
@@ -379,9 +389,7 @@ func (r *recordingBuiltins) byTool() map[string]bool {
 
 func TestADescriptionErrorOffersNoOperationTool(t *testing.T) {
 	h := newOperationHarness(t, ownerDefinition(searchTool, "aura_stub_read"))
-	if err := h.executor.BindOperations(failingSurface{}); err != nil {
-		t.Fatalf("BindOperations: %v", err)
-	}
+	h.executor.binding().surface = failingSurface{}
 	got := h.run(nil)
 	if names := operationToolNames(got[0].Tools); len(names) != 0 {
 		t.Fatalf("declared %v, want no operation tool when the description cannot be built", names)
@@ -397,12 +405,35 @@ func (failingSurface) Describe(*operation.DescriptionInput) (string, error) {
 	return "", errors.New("the registry is unavailable")
 }
 
-func TestOperationsNeedTheBuiltinToolExecutor(t *testing.T) {
-	executor := &ADKExecutor{}
-	if err := executor.BindOperations(failingSurface{}); err == nil {
-		t.Fatal("BindOperations without a builtin tool executor succeeded")
+func TestOperationsAddNoHistoryReadToAModelCall(t *testing.T) {
+	loadsOf := func(definition auraagent.Definition, script ...[]*genai.Part) int32 {
+		h := newOperationHarness(t, definition)
+		h.run(nil, script...)
+		return h.sessions.loads.Load()
 	}
-	if err := executor.BindOperations(nil); err == nil {
-		t.Fatal("BindOperations(nil) succeeded")
+	plain := loadsOf(ownerDefinition("read_file"))
+	if got := loadsOf(ownerDefinition(searchTool)); got != plain {
+		t.Errorf("history loads of a one-call turn = %d with operations, %d without", got, plain)
+	}
+	plainTool := loadsOf(ownerDefinition("read_file"), operationtest.CallOf("aura_stub_read", map[string]any{"subject": "notes"}))
+	searched := loadsOf(ownerDefinition(searchTool), operationtest.CallOf(searchTool, map[string]any{"group": operationtest.Group}))
+	if searched != plainTool+1 {
+		t.Errorf("history loads of a two-call turn with one search = %d, want %d: the baseline plus one read for the search scope", searched, plainTool+1)
+	}
+}
+
+func TestAPersonaWithoutOperationEntriesKeepsItsInstructionAndTools(t *testing.T) {
+	h := newOperationHarness(t, ownerDefinition("read_file", "web_search"))
+	bound := h.run(nil)
+	h.executor.operations = nil
+	unbound := h.run(nil)
+	if bound[0].System != unbound[0].System {
+		t.Errorf("the instruction changed with operations bound:\n%s\n---\n%s", bound[0].System, unbound[0].System)
+	}
+	if !slices.Equal(bound[0].Tools, unbound[0].Tools) {
+		t.Errorf("the tools changed with operations bound: %v and %v", bound[0].Tools, unbound[0].Tools)
+	}
+	if names := operationToolNames(bound[0].Tools); len(names) != 0 {
+		t.Errorf("declared %v, want no operation tool", names)
 	}
 }

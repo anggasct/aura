@@ -448,6 +448,7 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
 	}
 	var discovery *operation.Discovery
+	port := runtimeadk.NewOperationPort()
 	if len(parts.scenario.operations) > 0 {
 		var defs []runtimeadk.BuiltinToolDefinition
 		defs, discovery = (&operationWiring{db: db, broker: broker, effects: options.Effects}).register(t, parts)
@@ -455,7 +456,7 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
 	if discovery != nil {
-		opts = append(opts, runtimeadk.WithAgentResolver(ownerSearchPersona{}, nil))
+		opts = append(opts, runtimeadk.WithAgentResolver(ownerSearchPersona{}, nil), runtimeadk.WithOperations(port))
 	}
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps, args: parts.scenario.arguments}
 	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, turnstore.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
@@ -463,8 +464,8 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 		t.Fatalf("NewADKExecutor: %v", err)
 	}
 	if discovery != nil {
-		if err := executor.BindOperations(discovery); err != nil {
-			t.Fatalf("BindOperations: %v", err)
+		if err := port.Bind(discovery, tools); err != nil {
+			t.Fatalf("Bind: %v", err)
 		}
 	}
 	return executor

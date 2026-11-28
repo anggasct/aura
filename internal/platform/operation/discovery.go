@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/anggasct/aura/internal/platform/telemetry"
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
@@ -21,12 +22,17 @@ type DiscoveryDeps struct {
 	Registry     *Registry
 	Behaviors    []Behavior
 	Capabilities []string
+	Withholdable []string
+	ChatCommands bool
+	Telemetry    *telemetry.OperationRecorder
 }
 
 type Discovery struct {
 	registry     *Registry
 	behaviors    []Behavior
 	capabilities []string
+	chatCommands bool
+	recorder     *telemetry.OperationRecorder
 }
 
 func NewDiscovery(deps *DiscoveryDeps) (*Discovery, error) {
@@ -37,19 +43,44 @@ func NewDiscovery(deps *DiscoveryDeps) (*Discovery, error) {
 		registry:     deps.Registry,
 		behaviors:    slices.Clone(deps.Behaviors),
 		capabilities: slices.Clone(deps.Capabilities),
+		chatCommands: deps.ChatCommands,
+		recorder:     deps.Telemetry,
 	}
 	slices.SortFunc(discovery.behaviors, func(a, b Behavior) int { return compareStrings(a.ID, b.ID) })
 	if err := discovery.validateBehaviors(); err != nil {
 		return nil, err
 	}
+	if err := discovery.checkBound(deps.Withholdable); err != nil {
+		return nil, err
+	}
+	return discovery, nil
+}
+
+func (d *Discovery) checkBound(withholdable []string) error {
+	var generated []string
+	for _, id := range d.registry.ids {
+		if descriptor := d.registry.entries[id].descriptor; descriptor.GeneratesTool() {
+			generated = append(generated, ToolName(descriptor.ID))
+		} else if descriptor.ModuleTool != "" {
+			generated = append(generated, descriptor.ModuleTool)
+		}
+	}
 	for _, kind := range []TurnKind{TurnAttended, TurnUnattended} {
 		for _, tracked := range []bool{false, true} {
-			if _, err := discovery.Describe(&DescriptionInput{Turn: Turn{Origin: turn.OriginTerminal, Kind: kind, ContentTaintTracked: tracked}, Search: true}); err != nil {
-				return nil, fmt.Errorf("describe the %s turn: %w", kind, err)
+			for _, search := range []bool{true, false} {
+				in := &DescriptionInput{
+					Turn:     Turn{Origin: turn.OriginTerminal, Kind: kind, ContentTaintTracked: tracked},
+					Search:   search,
+					Listed:   generated,
+					Withheld: withholdable,
+				}
+				if _, err := d.Describe(in); err != nil {
+					return fmt.Errorf("describe the %s turn: %w", kind, err)
+				}
 			}
 		}
 	}
-	return discovery, nil
+	return nil
 }
 
 func (d *Discovery) validateBehaviors() error {

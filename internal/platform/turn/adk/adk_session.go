@@ -47,6 +47,8 @@ type adkSession struct {
 
 	mu       sync.Mutex
 	appended []*session.Event
+	view     []*session.Event
+	viewed   bool
 }
 
 func (s *adkSession) ID() string                { return s.id }
@@ -67,13 +69,23 @@ func (s *adkSession) Events() session.Events {
 }
 
 func (s *adkSession) merged() ([]*session.Event, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.viewed {
+		return s.view, nil
+	}
 	stored, err := s.events()
 	if err != nil {
 		return nil, err
 	}
-	extra := s.appendedSnapshot()
+	out := mergeEvents(stored, s.appended)
+	s.view, s.viewed = out, true
+	return out, nil
+}
+
+func mergeEvents(stored, extra []*session.Event) []*session.Event {
 	if len(extra) == 0 {
-		return stored, nil
+		return stored
 	}
 	seen := make(map[string]struct{}, len(stored)+len(extra))
 	for _, ev := range stored {
@@ -93,7 +105,7 @@ func (s *adkSession) merged() ([]*session.Event, error) {
 		seen[ev.ID] = struct{}{}
 		out = append(out, ev)
 	}
-	return out, nil
+	return out
 }
 
 func (s *adkSession) appendInMemory(ev *session.Event) {
@@ -103,17 +115,7 @@ func (s *adkSession) appendInMemory(ev *session.Event) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appended = append(s.appended, ev)
-}
-
-func (s *adkSession) appendedSnapshot() []*session.Event {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	out := make([]*session.Event, len(s.appended))
-	copy(out, s.appended)
-	return out
+	s.view, s.viewed = nil, false
 }
 
 type adkState struct {

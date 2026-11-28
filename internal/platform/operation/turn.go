@@ -13,8 +13,8 @@ func (k TurnKind) valid() bool {
 	return k == TurnAttended || k == TurnUnattended
 }
 
-func TurnKindOf(origin turn.Origin, terminalHasApprover bool) TurnKind {
-	if origin.Unattended() || (origin == turn.OriginTerminal && !terminalHasApprover) {
+func TurnKindOf(origin turn.Origin) TurnKind {
+	if origin.Unattended() {
 		return TurnUnattended
 	}
 	return TurnAttended
