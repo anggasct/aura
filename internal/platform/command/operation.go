@@ -6,8 +6,6 @@ import (
 	"slices"
 	"strings"
 	"unicode"
-
-	"github.com/anggasct/aura/internal/platform/effect"
 )
 
 const (
@@ -19,7 +17,14 @@ const (
 	ReplyDanglingEscape        = "That command ends with a backslash."
 )
 
-func (d *Dispatcher) operationDefinition(caller *Caller, inv *Invocation) (*Definition, bool) {
+type operationCall struct {
+	caller  *Caller
+	inv     *Invocation
+	def     *Definition
+	binding *Binding
+}
+
+func (d *Dispatcher) operationCallFor(caller *Caller, inv *Invocation) (*operationCall, bool) {
 	b, ok := d.registry.binding(caller.Channel)
 	if !ok {
 		return nil, false
@@ -28,10 +33,11 @@ func (d *Dispatcher) operationDefinition(caller *Caller, inv *Invocation) (*Defi
 	if !ok || def.Kind != KindOperation || !b.names[def.Name] {
 		return nil, false
 	}
-	return &def, true
+	return &operationCall{caller: caller, inv: inv, def: &def, binding: &b.binding}, true
 }
 
-func (d *Dispatcher) planOperation(caller *Caller, inv *Invocation, def *Definition) (plan OperationPlan, tokens []string) {
+func (d *Dispatcher) planOperation(call *operationCall) (plan OperationPlan, tokens []string) {
+	caller, inv, def := call.caller, call.inv, call.def
 	refuse := func(code ErrorCode, line string) (OperationPlan, []string) {
 		refusal := failure(code, line)
 		return OperationPlan{Refusal: &refusal}, nil
@@ -81,51 +87,51 @@ func (d *Dispatcher) Operation(caller *Caller, inv *Invocation) (OperationRef, b
 	if d == nil || caller == nil || inv == nil {
 		return OperationRef{}, false
 	}
-	def, ok := d.operationDefinition(caller, inv)
+	call, ok := d.operationCallFor(caller, inv)
 	if !ok {
 		return OperationRef{}, false
 	}
-	plan, _ := d.planOperation(caller, inv, def)
+	plan, _ := d.planOperation(call)
 	if plan.Refusal != nil || plan.Missing != nil || plan.Operation == "" {
 		return OperationRef{}, false
 	}
 	return OperationRef{ID: plan.Operation, Input: slices.Clone(plan.Input)}, true
 }
 
-func (d *Dispatcher) runOperation(ctx context.Context, caller *Caller, inv *Invocation, def *Definition, b *Binding) Result {
-	plan, tokens := d.planOperation(caller, inv, def)
+func (d *Dispatcher) runOperation(ctx context.Context, call *operationCall) Result {
+	plan, tokens := d.planOperation(call)
 	if plan.Refusal != nil {
 		return *plan.Refusal
 	}
 	if plan.Missing != nil {
-		return d.promptOperation(inv, def, b, &plan, tokens)
+		return promptOperation(call, &plan, tokens)
 	}
-	reply := d.ports.Operations.Run(ctx, &OperationRun{Caller: caller, Plan: &plan, IdempotencyKey: inv.IdempotencyKey})
+	reply := d.ports.Operations.Run(ctx, &OperationRun{Caller: call.caller, Plan: &plan, IdempotencyKey: call.inv.IdempotencyKey})
 	return reply.result()
 }
 
-func (d *Dispatcher) promptOperation(inv *Invocation, def *Definition, b *Binding, plan *OperationPlan, tokens []string) Result {
-	if !b.Interactive {
+func promptOperation(call *operationCall, plan *OperationPlan, tokens []string) Result {
+	if !call.binding.Interactive {
 		return failure(ErrorCodeUsage, plan.Missing.Usage)
 	}
 	args := slices.Clone(tokens)
 	if plan.Missing.Flag != "" {
 		args = append(args, plan.Missing.Flag)
 	}
-	pending := Invocation{Name: def.Name, Token: inv.Token, Args: args}
+	pending := Invocation{Name: call.def.Name, Token: call.inv.Token, Args: args}
 	return Result{Lines: []string{plan.Missing.Text}, Pending: &pending}
 }
 
-func (d *Dispatcher) Resume(ctx context.Context, caller *Caller, inv *Invocation, intent *effect.Intent, recovery *OperationRecovery) (result Result, replayed bool) {
-	if d == nil || caller == nil || inv == nil || intent == nil || recovery == nil {
+func (d *Dispatcher) Resume(ctx context.Context, req *ResumeRequest) (result Result, replayed bool) {
+	if d == nil || req == nil || req.Caller == nil || req.Invocation == nil || req.Intent == nil || req.Recovery == nil {
 		return failure(ErrorCodeInvalidArgument, "aura: resume needs a caller, an invocation, an intent and a recovery"), false
 	}
-	def, ok := d.operationDefinition(caller, inv)
+	call, ok := d.operationCallFor(req.Caller, req.Invocation)
 	if !ok {
-		return unknown(inv), false
+		return unknown(req.Invocation), false
 	}
-	ctx, finish := d.start(ctx, def.Name, caller)
-	plan, _ := d.planOperation(caller, inv, def)
+	ctx, finish := d.start(ctx, call.def.Name, req.Caller)
+	plan, _ := d.planOperation(call)
 	if plan.Refusal != nil {
 		finish(ResultOf(plan.Refusal.Code))
 		return *plan.Refusal, false
@@ -135,7 +141,7 @@ func (d *Dispatcher) Resume(ctx context.Context, caller *Caller, inv *Invocation
 		return failure(ErrorCodeUsage, plan.Missing.Usage), false
 	}
 	reply := d.ports.Operations.Run(ctx, &OperationRun{
-		Caller: caller, Plan: &plan, IdempotencyKey: inv.IdempotencyKey, Intent: intent, Recovery: recovery,
+		Caller: req.Caller, Plan: &plan, IdempotencyKey: req.Invocation.IdempotencyKey, Intent: req.Intent, Recovery: req.Recovery,
 	})
 	if reply.InProgress {
 		finish(ResultReplayed)

@@ -108,7 +108,7 @@ func (d *Dispatcher) execute(ctx context.Context, caller *Caller, inv *Invocatio
 		return failure(ErrorCodeDenied, ReplyDenied)
 	}
 	if def.Kind == KindOperation {
-		return d.runOperation(ctx, caller, inv, def, b)
+		return d.runOperation(ctx, &operationCall{caller: caller, inv: inv, def: def, binding: b})
 	}
 	if def.Session && def.Kind == KindLocal && caller.SessionID == "" {
 		return failure(ErrorCodeScope, "Use /"+def.Name+" inside an Aura thread or a DM.")

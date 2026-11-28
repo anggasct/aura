@@ -185,6 +185,13 @@ type OperationRecovery struct {
 	Settle   func(lines []string, record json.RawMessage) (effect.Outcome, error)
 }
 
+type ResumeRequest struct {
+	Caller     *Caller
+	Invocation *Invocation
+	Intent     *effect.Intent
+	Recovery   *OperationRecovery
+}
+
 type OperationRun struct {
 	Caller         *Caller
 	Plan           *OperationPlan

@@ -161,20 +161,24 @@ func TestChatPlanAsksForTheOnlyMissingValueThatHasAPrompt(t *testing.T) {
 	})
 }
 
-func runChat(t *testing.T, chat *operation.Chat, text, key string, caller *command.Caller) command.OperationReply {
+type typed struct {
+	text, key string
+}
+
+func runChat(t *testing.T, chat *operation.Chat, message typed) command.OperationReply {
 	t.Helper()
-	plan := chat.Plan(operationtest.Group, tokens(t, text))
+	plan := chat.Plan(operationtest.Group, tokens(t, message.text))
 	if plan.Refusal != nil || plan.Missing != nil {
-		t.Fatalf("Plan(%q) = %+v, want an executable plan", text, plan)
+		t.Fatalf("Plan(%q) = %+v, want an executable plan", message.text, plan)
 	}
-	return chat.Run(t.Context(), &command.OperationRun{Caller: caller, Plan: &plan, IdempotencyKey: key})
+	return chat.Run(t.Context(), &command.OperationRun{Caller: ownerChat(), Plan: &plan, IdempotencyKey: message.key})
 }
 
 func TestChatRunsOperationsThroughTheRegistryAndRendersTheCLIOutput(t *testing.T) {
 	rig, chat := chatRig(t)
 
-	read := runChat(t, chat, "read notes", "telegram:1", ownerChat())
-	change := runChat(t, chat, "change notes", "telegram:2", ownerChat())
+	read := runChat(t, chat, typed{"read notes", "telegram:1"})
+	change := runChat(t, chat, typed{"change notes", "telegram:2"})
 
 	want := []string{"done: true", "operation: " + operationtest.Read}
 	if read.Code != command.ErrorCodeOK || !slices.Equal(read.Lines, want) || len(read.Record) == 0 {
@@ -202,15 +206,15 @@ func TestChatRunsOperationsThroughTheRegistryAndRendersTheCLIOutput(t *testing.T
 
 func TestChatRepeatsOfAMessageApplyOnceAndAnotherRequestUnderItsKeyFailsClosed(t *testing.T) {
 	rig, chat := chatRig(t)
-	first := runChat(t, chat, "change notes", "telegram:9", ownerChat())
-	second := runChat(t, chat, "change notes", "telegram:9", ownerChat())
+	first := runChat(t, chat, typed{"change notes", "telegram:9"})
+	second := runChat(t, chat, typed{"change notes", "telegram:9"})
 	if !slices.Equal(first.Lines, second.Lines) {
 		t.Errorf("second reply = %q, want the recorded %q", second.Lines, first.Lines)
 	}
 	if ledger, _ := rig.Stubs.Ledger(t.Context(), operationtest.Change); ledger != 1 {
 		t.Errorf("ledger rows = %d, want one application for one message", ledger)
 	}
-	other := runChat(t, chat, "change elsewhere", "telegram:9", ownerChat())
+	other := runChat(t, chat, typed{"change elsewhere", "telegram:9"})
 	if other.Code != command.ErrorCodeFailed || other.Lines[0] != "operation_key_reused" {
 		t.Errorf("another request under the key = %+v, want operation_key_reused", other)
 	}
@@ -218,11 +222,11 @@ func TestChatRepeatsOfAMessageApplyOnceAndAnotherRequestUnderItsKeyFailsClosed(t
 
 func TestChatDestructiveOperationsPreviewUntilApplied(t *testing.T) {
 	rig, chat := chatRig(t)
-	preview := runChat(t, chat, "delete set1", "telegram:1", ownerChat())
+	preview := runChat(t, chat, typed{"delete set1", "telegram:1"})
 	if !slices.Equal(preview.Lines, []string{"subject: set1", "cannot be undone"}) || rig.Stubs.Handled(operationtest.Delete) != 0 {
 		t.Fatalf("preview = %+v handled %d, want the preview lines and nothing deleted", preview, rig.Stubs.Handled(operationtest.Delete))
 	}
-	applied := runChat(t, chat, "delete set1 --apply", "telegram:2", ownerChat())
+	applied := runChat(t, chat, typed{"delete set1 --apply", "telegram:2"})
 	if applied.Code != command.ErrorCodeOK || applied.Lines[1] != "operation: "+operationtest.Delete || rig.Stubs.Handled(operationtest.Delete) != 1 {
 		t.Fatalf("applied = %+v handled %d, want one deletion", applied, rig.Stubs.Handled(operationtest.Delete))
 	}
@@ -230,7 +234,7 @@ func TestChatDestructiveOperationsPreviewUntilApplied(t *testing.T) {
 
 func TestChatTrustGrantRunsDirectlyBecauseTheOwnerTypedIt(t *testing.T) {
 	rig, chat := chatRig(t)
-	got := runChat(t, chat, "grant set1", "telegram:1", ownerChat())
+	got := runChat(t, chat, typed{"grant set1", "telegram:1"})
 	if got.Code != command.ErrorCodeOK || rig.Stubs.Handled(operationtest.Grant) != 1 || len(rig.Prompts()) != 0 || rig.Stubs.Previews() != 0 {
 		t.Fatalf("grant = %+v handled %d previews %d cards %d, want a direct run with no card and no preview", got, rig.Stubs.Handled(operationtest.Grant), rig.Stubs.Previews(), len(rig.Prompts()))
 	}
@@ -251,7 +255,7 @@ func TestChatRepliesCarryACodedSafeMessage(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := runChat(t, chat, tt.text, "telegram:"+tt.name, ownerChat())
+			got := runChat(t, chat, typed{tt.text, "telegram:" + tt.name})
 			if got.Code != tt.code || !slices.Equal(got.Lines, []string{tt.want}) || got.Record != nil {
 				t.Fatalf("reply = %+v, want only %q", got, tt.want)
 			}

@@ -256,7 +256,7 @@ func TestResumeReportsALiveLeaseAsReplayedAndRunsNothingElse(t *testing.T) {
 	intent := &effect.Intent{ID: "intent-1", State: effect.StateStarted}
 	recovery := &OperationRecovery{}
 
-	got, replayed := d.Resume(t.Context(), direct("discord", principal.ClassOwner), &inv, intent, recovery)
+	got, replayed := d.Resume(t.Context(), &ResumeRequest{Caller: direct("discord", principal.ClassOwner), Invocation: &inv, Intent: intent, Recovery: recovery})
 
 	if !replayed || len(got.Lines) != 0 {
 		t.Fatalf("Resume = %+v, %v; want replayed with no reply", got, replayed)
@@ -272,12 +272,12 @@ func TestResumeRepeatsTheScopeChecksBeforeTouchingOperations(t *testing.T) {
 	inv, _ := Parse("/cron pause j1")
 	intent := &effect.Intent{ID: "intent-1", State: effect.StateStarted}
 
-	got, replayed := d.Resume(t.Context(), caller("discord", principal.ClassOwner), &inv, intent, &OperationRecovery{})
+	got, replayed := d.Resume(t.Context(), &ResumeRequest{Caller: caller("discord", principal.ClassOwner), Invocation: &inv, Intent: intent, Recovery: &OperationRecovery{}})
 
 	if replayed || got.Code != ErrorCodeScope || len(ops.runs) != 0 {
 		t.Fatalf("Resume = %+v, %v runs %d, want the scope refusal", got, replayed, len(ops.runs))
 	}
-	if got, _ := d.Resume(t.Context(), nil, &inv, intent, &OperationRecovery{}); got.Code != ErrorCodeInvalidArgument {
+	if got, _ := d.Resume(t.Context(), &ResumeRequest{Invocation: &inv, Intent: intent, Recovery: &OperationRecovery{}}); got.Code != ErrorCodeInvalidArgument {
 		t.Errorf("Resume without a caller = %+v, want invalid_argument", got)
 	}
 }

@@ -80,21 +80,26 @@ func ownerCaller() *command.Caller {
 	return &command.Caller{Channel: operationChannel, PrincipalID: operationtest.OwnerID, Class: principal.ClassOwner, ConversationKey: "conv", SessionID: operationtest.SessionID, AgentID: "main", Direct: true}
 }
 
-func (r *operationRig) execute(t *testing.T, effects chatcommand.Effects, caller *command.Caller, text, key string) (chatcommand.Outcome, error) {
+type sentMessage struct {
+	caller    *command.Caller
+	text, key string
+}
+
+func (r *operationRig) execute(t *testing.T, effects chatcommand.Effects, message *sentMessage) (chatcommand.Outcome, error) {
 	t.Helper()
-	inv, ok := command.Parse(text)
+	inv, ok := command.Parse(message.text)
 	if !ok {
-		t.Fatalf("Parse(%q) is not a command", text)
+		t.Fatalf("Parse(%q) is not a command", message.text)
 	}
 	return chatcommand.Execute(t.Context(), &chatcommand.Run{
 		Effects: effects, Dispatcher: r.dispatcher, Logger: slog.New(slog.DiscardHandler),
-		Caller: caller, Invocation: &inv, IdempotencyKey: key, EffectSession: operationtest.SessionID,
+		Caller: message.caller, Invocation: &inv, IdempotencyKey: message.key, EffectSession: operationtest.SessionID,
 	})
 }
 
 func (r *operationRig) run(t *testing.T, text, key string) chatcommand.Outcome {
 	t.Helper()
-	outcome, err := r.execute(t, r.Executor, ownerCaller(), text, key)
+	outcome, err := r.execute(t, r.Executor, &sentMessage{caller: ownerCaller(), text: text, key: key})
 	if err != nil {
 		t.Fatalf("Execute(%q): %v", text, err)
 	}
@@ -103,7 +108,7 @@ func (r *operationRig) run(t *testing.T, text, key string) chatcommand.Outcome {
 
 func (r *operationRig) dieAfterStart(t *testing.T, text, key string) {
 	t.Helper()
-	if _, err := r.execute(t, &dyingEffects{journal: r.Executor.Journal()}, ownerCaller(), text, key); !errors.Is(err, errProcessDied) {
+	if _, err := r.execute(t, &dyingEffects{journal: r.Executor.Journal()}, &sentMessage{caller: ownerCaller(), text: text, key: key}); !errors.Is(err, errProcessDied) {
 		t.Fatalf("the dying run = %v, want the simulated death", err)
 	}
 }
@@ -265,7 +270,7 @@ func TestChatOperationRefusalsAreJournaledWithoutTheOperation(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			rig := newOperationRig(t)
 
-			outcome, err := rig.execute(t, rig.Executor, tt.caller(), "/stub change secret-subject", "testchat:1")
+			outcome, err := rig.execute(t, rig.Executor, &sentMessage{caller: tt.caller(), text: "/stub change secret-subject", key: "testchat:1"})
 
 			if err != nil || outcome.Receipt == nil || !slices.Equal(outcome.Receipt.Lines, []string{tt.line}) {
 				t.Fatalf("outcome = %+v, %v; want only %q", outcome, err, tt.line)

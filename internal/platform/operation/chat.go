@@ -280,14 +280,21 @@ func (c *Chat) Run(ctx context.Context, run *command.OperationRun) command.Opera
 		IdempotencyKey: run.IdempotencyKey,
 		RequestDigest:  Digest(run.Plan.Input),
 	}
+	pending := &chatCall{found: found, call: call, run: run}
 	if run.Intent != nil {
-		return c.resume(ctx, found, call, run)
+		return c.resume(ctx, pending)
 	}
-	return c.invoke(ctx, found, call, run.Plan.Apply)
+	return c.invoke(ctx, pending)
 }
 
-func (c *Chat) invoke(ctx context.Context, found *entry, call *Call, apply bool) command.OperationReply {
-	descriptor := found.descriptor
+type chatCall struct {
+	found *entry
+	call  *Call
+	run   *command.OperationRun
+}
+
+func (c *Chat) invoke(ctx context.Context, pending *chatCall) command.OperationReply {
+	descriptor, call, apply := pending.found.descriptor, pending.call, pending.run.Plan.Apply
 	if descriptor.previews() {
 		preview, err := c.registry.Preview(ctx, descriptor.ID, call)
 		if err != nil {
@@ -316,11 +323,12 @@ func previewLines(preview *Preview) []string {
 	return slices.Clone(preview.Lines)
 }
 
-func (c *Chat) resume(ctx context.Context, found *entry, call *Call, run *command.OperationRun) command.OperationReply {
+func (c *Chat) resume(ctx context.Context, pending *chatCall) command.OperationReply {
+	run := pending.run
 	if run.Recovery == nil || run.Recovery.Provider == nil || run.Recovery.Settle == nil {
 		return failedReply(nilArgument("chat recovery"))
 	}
-	descriptor := found.descriptor
+	descriptor := pending.found.descriptor
 	recovery := &toolbroker.RecoveryRun{
 		Provider: run.Recovery.Provider,
 		Settle: func(_ context.Context, data json.RawMessage) (effect.Outcome, error) {
@@ -335,7 +343,7 @@ func (c *Chat) resume(ctx context.Context, found *entry, call *Call, run *comman
 			return run.Recovery.Settle(lines, record)
 		},
 	}
-	result, err := c.registry.Resume(ctx, run.Intent, call, recovery)
+	result, err := c.registry.Resume(ctx, run.Intent, pending.call, recovery)
 	if err != nil {
 		return failedReply(err)
 	}

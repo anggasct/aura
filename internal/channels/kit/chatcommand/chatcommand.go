@@ -94,7 +94,7 @@ func Execute(ctx context.Context, run *Run) (Outcome, error) {
 		return Outcome{}, fmt.Errorf("command effect: %w", err)
 	}
 	if !provider.ran && isOperation && intent != nil && (intent.State == effect.StateStarted || intent.State == effect.StateUnknown) {
-		return resumeOperation(ctx, run, &inv, intent, provider)
+		return resumeOperation(ctx, run, &resumption{inv: &inv, intent: intent, provider: provider})
 	}
 	result := command.ResultReplayed
 	if provider.ran {
@@ -114,9 +114,16 @@ func Execute(ctx context.Context, run *Run) (Outcome, error) {
 	return Outcome{IntentID: intent.ID, Receipt: &receipt}, nil
 }
 
-func resumeOperation(ctx context.Context, run *Run, inv *command.Invocation, intent *effect.Intent, provider *commandProvider) (Outcome, error) {
+type resumption struct {
+	inv      *command.Invocation
+	intent   *effect.Intent
+	provider *commandProvider
+}
+
+func resumeOperation(ctx context.Context, run *Run, resumed *resumption) (Outcome, error) {
+	inv, intent := resumed.inv, resumed.intent
 	recovery := &command.OperationRecovery{
-		Provider: provider,
+		Provider: resumed.provider,
 		Settle: func(lines []string, record json.RawMessage) (effect.Outcome, error) {
 			receipt, err := json.Marshal(Receipt{Lines: lines})
 			if err != nil {
@@ -125,7 +132,7 @@ func resumeOperation(ctx context.Context, run *Run, inv *command.Invocation, int
 			return effect.Outcome{Succeeded: true, Receipt: receipt, Result: record}, nil
 		},
 	}
-	result, replayed := run.Dispatcher.Resume(ctx, run.Caller, inv, intent, recovery)
+	result, replayed := run.Dispatcher.Resume(ctx, &command.ResumeRequest{Caller: run.Caller, Invocation: inv, Intent: intent, Recovery: recovery})
 	name := run.Dispatcher.Registry().MetricName(run.Caller.Channel, inv.Name)
 	if replayed {
 		logResult(ctx, run.Logger, run.Caller, name, command.ResultReplayed, run.EffectSession)
