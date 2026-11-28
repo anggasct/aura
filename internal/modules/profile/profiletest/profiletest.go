@@ -54,16 +54,16 @@ func CandidateFactID() string {
 }
 
 func (r *Rig) SeedVerified(ctx context.Context) error {
-	if _, found, err := r.exists(ctx, VerifiedFactID()); err != nil || found {
-		return r.restore(ctx, VerifiedFactID(), err)
+	if r.exists(ctx, VerifiedFactID()) {
+		return r.restore(ctx, VerifiedFactID())
 	}
 	_, err := r.Service.SetFact(ctx, principal.OwnerID, VerifiedCategory, VerifiedKey, VerifiedValue, nil, SeededAt)
 	return err
 }
 
 func (r *Rig) SeedCandidate(ctx context.Context) error {
-	if _, found, err := r.exists(ctx, CandidateFactID()); err != nil || found {
-		return r.restore(ctx, CandidateFactID(), err)
+	if r.exists(ctx, CandidateFactID()) {
+		return r.restore(ctx, CandidateFactID())
 	}
 	_, err := r.Service.ProposeAgentFact(ctx, &profile.AgentProposal{
 		OwnerID: principal.OwnerID, Category: CandidateCategory, Key: CandidateKey, Value: CandidateValue,
@@ -71,18 +71,12 @@ func (r *Rig) SeedCandidate(ctx context.Context) error {
 	return err
 }
 
-func (r *Rig) exists(ctx context.Context, id string) (profile.Fact, bool, error) {
-	fact, err := r.Service.GetFact(ctx, principal.OwnerID, id)
-	if err != nil {
-		return profile.Fact{}, false, nil
-	}
-	return fact, true, nil
+func (r *Rig) exists(ctx context.Context, id string) bool {
+	_, err := r.Service.GetFact(ctx, principal.OwnerID, id)
+	return err == nil
 }
 
-func (r *Rig) restore(ctx context.Context, id string, prior error) error {
-	if prior != nil {
-		return prior
-	}
+func (r *Rig) restore(ctx context.Context, id string) error {
 	_, err := r.db.ExecContext(ctx, `UPDATE profile_fact SET status = ? WHERE id = ?`, profile.StatusActive, id)
 	return err
 }

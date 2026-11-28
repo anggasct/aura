@@ -47,7 +47,7 @@ func TestModuleFailureLeavesOtherErrorsAlone(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := operation.ModuleFailure[moduleCode](tc.err); got != tc.err {
+			if got := operation.ModuleFailure[moduleCode](tc.err); !errors.Is(got, tc.err) {
 				t.Errorf("error = %v, want %v unchanged", got, tc.err)
 			}
 		})

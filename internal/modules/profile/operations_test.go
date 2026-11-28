@@ -364,9 +364,9 @@ func TestAnAgentFactNeverShadowsAnOwnerVerifiedFact(t *testing.T) {
 	if verified.Status != profile.StatusActive || !verified.OwnerVerified {
 		t.Fatalf("the verified fact = %+v, want it untouched", verified)
 	}
-	context := rig.ownerContext(t)
-	if !strings.Contains(context, "Go") || strings.Contains(context, "Rust") {
-		t.Errorf("the owner context = %q, want only the verified value", context)
+	injected := rig.ownerContext(t)
+	if !strings.Contains(injected, "Go") || strings.Contains(injected, "Rust") {
+		t.Errorf("the owner context = %q, want only the verified value", injected)
 	}
 	var rival profile.Fact
 	facts, err := rig.profile.Service.ListFacts(t.Context(), principal.OwnerID, profile.StatusCandidate, "language", 10)

@@ -20,8 +20,8 @@ const (
 	reviewedFactsCap = 1000
 )
 
-func factIDParam(summary string) operation.Param {
-	return operation.Param{Name: "id", Kind: operation.KindString, Summary: summary, Required: true, Position: 1, MinLength: 1, MaxLength: maxFactIDBytes}
+func factIDParam() operation.Param {
+	return operation.Param{Name: "id", Kind: operation.KindString, Summary: "fact id", Required: true, Position: 1, MinLength: 1, MaxLength: maxFactIDBytes}
 }
 
 func categoryEnum() []operation.EnumValue {
@@ -63,13 +63,13 @@ func Catalog() operation.Catalog {
 				ID: operationAccept, Summary: "Accept a learned fact as owner-verified", Exposure: operation.ExposureOwner,
 				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Needs: needs,
 				Description: "Marks a candidate or learned fact owner-verified, which puts it into every owner turn. A fact that another verified fact already holds the slot of is refused. Only the owner accepts; the agent has no accept.",
-				Params:      []operation.Param{factIDParam("fact id")}, Output: textOutput(),
+				Params:      []operation.Param{factIDParam()}, Output: textOutput(),
 			},
 			{
 				ID: operationDelete, Summary: "Preview or delete a profile fact", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskDestructive, Commit: operation.CommitTransactional, Preview: true, Needs: needs,
 				Description: "Deletes a profile fact so it is never injected again and keeps a tombstone of the deletion. The preview names the fact and the delete removes exactly that fact.",
-				Params:      []operation.Param{factIDParam("fact id")}, Output: textOutput(),
+				Params:      []operation.Param{factIDParam()}, Output: textOutput(),
 			},
 			{
 				ID: operationList, Summary: "List profile facts", Exposure: operation.ExposureAgent,
@@ -85,7 +85,7 @@ func Catalog() operation.Catalog {
 				ID: operationReject, Summary: "Reject a profile fact", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Needs: needs,
 				Description: "Rejects a fact so it is no longer injected into owner turns.",
-				Params:      []operation.Param{factIDParam("fact id")}, Output: textOutput(),
+				Params:      []operation.Param{factIDParam()}, Output: textOutput(),
 			},
 			{
 				ID: operationReview, Summary: "List facts that need review, conflicts first", Exposure: operation.ExposureAgent,
@@ -106,7 +106,7 @@ func Catalog() operation.Catalog {
 				ID: operationShow, Summary: "Show one profile fact with its provenance", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskRead, Commit: operation.CommitNone, UntrustedOutput: true, Needs: needs,
 				Description: "Shows a fact with its status, origin, conflicts and the evidence it was learned from. The value comes from conversations, not from the owner alone.",
-				Params:      []operation.Param{factIDParam("fact id")}, Output: textOutput(),
+				Params:      []operation.Param{factIDParam()}, Output: textOutput(),
 			},
 		},
 	}

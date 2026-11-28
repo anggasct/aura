@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -109,7 +110,7 @@ func factLine(fact *Fact) string {
 
 func factDigest(fact *Fact) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		fact.ID, fact.Status, fact.ValueDigest, fact.Origin, fmt.Sprint(fact.OwnerVerified),
+		fact.ID, fact.Status, fact.ValueDigest, fact.Origin, strconv.FormatBool(fact.OwnerVerified),
 	}, "|")))
 	return hex.EncodeToString(sum[:])
 }
@@ -253,18 +254,15 @@ type setInput struct {
 	ExpiresAt string `json:"expires_at"`
 }
 
-func (o *Operations) expiry(in *setInput) (*time.Time, error) {
-	if in.ExpiresAt == "" {
-		return nil, nil
-	}
-	parsed, err := time.Parse(time.RFC3339, in.ExpiresAt)
+func (o *Operations) futureTime(text string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339, text)
 	if err != nil {
-		return nil, usage("expires_at must be RFC3339")
+		return time.Time{}, usage("expires_at must be RFC3339")
 	}
 	if !parsed.After(o.now().UTC()) {
-		return nil, usage("expires_at must be in the future")
+		return time.Time{}, usage("expires_at must be in the future")
 	}
-	return &parsed, nil
+	return parsed, nil
 }
 
 type setRequest struct {
@@ -279,11 +277,14 @@ func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.R
 	if err := o.ready(call, &in); err != nil {
 		return operation.Result{}, err
 	}
-	expires, err := o.expiry(&in)
-	if err != nil {
-		return operation.Result{}, err
+	request := &setRequest{category: in.Category, key: in.Key, value: in.Value}
+	if in.ExpiresAt != "" {
+		expires, err := o.futureTime(in.ExpiresAt)
+		if err != nil {
+			return operation.Result{}, err
+		}
+		request.expires = &expires
 	}
-	request := &setRequest{category: in.Category, key: in.Key, value: in.Value, expires: expires}
 	var apply func(ctx context.Context) (operation.Result, error)
 	switch call.Caller.Surface {
 	case operation.SurfaceCLI, operation.SurfaceChat:
