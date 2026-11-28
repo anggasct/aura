@@ -40,7 +40,7 @@ type taintStoreBackend interface {
 	OldestSource(ctx context.Context) (string, bool, error)
 	MatchesFile(ctx context.Context, path, sha256Hex string, device, inode int64) (bool, error)
 	MatchesEntry(ctx context.Context, path string, device, inode int64, hasStat bool) (bool, error)
-	ApplyWalkResults(ctx context.Context, res WalkResult, source, sessionID string) (ApplyWalkStats, error)
+	ApplyWalkResults(ctx context.Context, res WalkResult, source, sessionID string) (WalkStats, error)
 }
 
 type Tracker struct {
@@ -49,12 +49,16 @@ type Tracker struct {
 	backend    taintStoreBackend
 	maxEntries int
 	onRecord   func(ctx context.Context, kind string)
+	logger     *slog.Logger
 	walkCount  atomic.Int64
 }
 
-func NewTracker(root string, store *TaintStore, maxEntries int, onRecord func(ctx context.Context, kind string)) *Tracker {
+func NewTracker(root string, store *TaintStore, maxEntries int, onRecord func(ctx context.Context, kind string), logger *slog.Logger) *Tracker {
 	if maxEntries <= 0 {
 		maxEntries = DefaultScanEntries
+	}
+	if logger == nil {
+		logger = slog.Default()
 	}
 	var backend taintStoreBackend
 	if store != nil {
@@ -66,6 +70,7 @@ func NewTracker(root string, store *TaintStore, maxEntries int, onRecord func(ct
 		backend:    backend,
 		maxEntries: maxEntries,
 		onRecord:   onRecord,
+		logger:     logger,
 	}
 }
 
@@ -148,12 +153,16 @@ func (t *Tracker) CheckListDir(ctx context.Context, entries []DirEntryStat) (boo
 	return false, nil
 }
 
-func (t *Tracker) BeginEffect(ctx context.Context, tainted bool, taintSource, sessionID string) (EffectScope, error) {
+func (t *Tracker) BeginEffect(ctx context.Context, tainted bool, taintSource, sessionID string) EffectScope {
 	if t == nil || t.backend == nil {
-		return EffectScope{}, nil
+		return EffectScope{}
 	}
 	hadRecords, err := t.backend.HasRecords(ctx)
 	if err != nil {
+		t.logger.WarnContext(ctx, "workspace taint record check failed; effect scope fails closed",
+			"component", "workspace",
+			"error", err,
+		)
 		return EffectScope{
 			active:     true,
 			hadRecords: true,
@@ -161,10 +170,10 @@ func (t *Tracker) BeginEffect(ctx context.Context, tainted bool, taintSource, se
 			source:     boundSource(taintSource),
 			sessionID:  sessionID,
 			kind:       RecordKindExec,
-		}, err
+		}
 	}
 	if !tainted && !hadRecords {
-		return EffectScope{}, nil
+		return EffectScope{}
 	}
 	source := taintSource
 	kind := RecordKindExec
@@ -181,12 +190,12 @@ func (t *Tracker) BeginEffect(ctx context.Context, tainted bool, taintSource, se
 		source:     boundSource(source),
 		sessionID:  sessionID,
 		kind:       kind,
-	}, nil
+	}
 }
 
-func (t *Tracker) EndEffect(ctx context.Context, scope *EffectScope) (bool, error) {
+func (t *Tracker) EndEffect(ctx context.Context, scope *EffectScope) bool {
 	if t == nil || t.backend == nil || scope == nil || !scope.active {
-		return false, nil
+		return false
 	}
 	t.walkCount.Add(1)
 	walkRes, err := walkWorkspace(ctx, t.root, scope.start, t.maxEntries)
@@ -195,15 +204,12 @@ func (t *Tracker) EndEffect(ctx context.Context, scope *EffectScope) (bool, erro
 	}
 	stats, applyErr := t.backend.ApplyWalkResults(ctx, walkRes, scope.source, scope.sessionID)
 	if applyErr != nil {
-		slog.WarnContext(ctx, "workspace taint walk apply failed; attempting workspace-wide fallback",
+		wideErr := t.recordWideFallback(ctx, scope)
+		t.logger.WarnContext(ctx, "workspace taint walk apply failed; workspace-wide record written as fallback",
 			"component", "workspace",
-			"error", applyErr,
+			"error", errors.Join(applyErr, wideErr),
 		)
-		created, wideErr := t.backend.RecordWorkspaceWide(ctx, scope.source, scope.sessionID)
-		if wideErr == nil && created {
-			t.recordMetric(ctx, RecordKindWide)
-		}
-		return true, errors.Join(applyErr, wideErr)
+		return true
 	}
 	if stats.Wide > 0 {
 		t.recordMetric(ctx, RecordKindWide)
@@ -213,7 +219,19 @@ func (t *Tracker) EndEffect(ctx context.Context, scope *EffectScope) (bool, erro
 	}
 	hasAfter, hasErr := t.backend.HasRecords(ctx)
 	if hasErr != nil {
-		return true, hasErr
+		t.logger.WarnContext(ctx, "workspace taint record check failed after effect walk",
+			"component", "workspace",
+			"error", hasErr,
+		)
+		return true
 	}
-	return scope.hadRecords || hasAfter, err
+	return scope.hadRecords || hasAfter
+}
+
+func (t *Tracker) recordWideFallback(ctx context.Context, scope *EffectScope) error {
+	created, wideErr := t.backend.RecordWorkspaceWide(ctx, scope.source, scope.sessionID)
+	if wideErr == nil && created {
+		t.recordMetric(ctx, RecordKindWide)
+	}
+	return wideErr
 }
