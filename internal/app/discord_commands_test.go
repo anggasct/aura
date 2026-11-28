@@ -255,7 +255,7 @@ func TestDiscordCommandWiringDelegatesToTheEngine(t *testing.T) {
 	recorder := &wireRecorder{}
 	turns := &deferredCommandTurns{}
 	skills := &deferredCommandSkills{}
-	dispatcher, err := newChatCommandDispatcher(nil, nil, nil, turns, skills, recorder)
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{turns: turns, skills: skills, recorder: recorder})
 	if err != nil || dispatcher == nil {
 		t.Fatalf("newChatCommandDispatcher() = %v, %v", dispatcher, err)
 	}

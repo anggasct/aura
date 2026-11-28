@@ -709,6 +709,7 @@ type serverBuild struct {
 	accessRecorder     *telemetry.AccessRecorder
 	commandTurns       *deferredCommandTurns
 	commandSkills      *deferredCommandSkills
+	commandOperations  *deferredCommandOperations
 	mcp                *mcp.Module
 	personaRecorder    *telemetry.PersonaRecorder
 	durableConfig      *runtimeengine.DurableConfig
@@ -1200,7 +1201,16 @@ func (b *build) serverToolWiring(ctx context.Context) (toolWiring, error) {
 	}
 	s.commandTurns = &deferredCommandTurns{}
 	s.commandSkills = &deferredCommandSkills{}
-	dispatcher, err := newChatCommandDispatcher(b.sessions, b.events, turnstore.NewConversationSessionStore(db), s.commandTurns, s.commandSkills, commandRecorder)
+	s.commandOperations = &deferredCommandOperations{}
+	dispatcher, err := newChatCommandDispatcher(&chatCommandDeps{
+		sessions:   b.sessions,
+		events:     b.events,
+		pointers:   turnstore.NewConversationSessionStore(db),
+		turns:      s.commandTurns,
+		skills:     s.commandSkills,
+		operations: s.commandOperations,
+		recorder:   commandRecorder,
+	})
 	if err != nil {
 		return toolWiring{}, err
 	}
@@ -1581,6 +1591,7 @@ func (b *build) buildOperations() error {
 		Behaviors:    b.behaviors,
 		Capabilities: b.result.CapabilityReport.Active(),
 		Withholdable: b.executor.WithholdableTools(),
+		ChatCommands: b.cfg.Channels.Telegram.Enabled || b.cfg.Channels.Discord.Enabled,
 		Telemetry:    recorder,
 	})
 	if err != nil {
@@ -1592,7 +1603,14 @@ func (b *build) buildOperations() error {
 	if b.builtin == nil {
 		return invalidOptions("the operation tools need the builtin tool executor")
 	}
-	return b.operationPort.Bind(discovery, b.builtin)
+	if err := b.operationPort.Bind(discovery, b.builtin); err != nil {
+		return err
+	}
+	chat, err := operation.NewChat(&operation.ChatDeps{Registry: registry, Capabilities: b.result.CapabilityReport.Active()})
+	if err != nil {
+		return err
+	}
+	return b.server.commandOperations.bind(chat)
 }
 
 func (b *build) buildWorkflowHost(ctx context.Context) error {

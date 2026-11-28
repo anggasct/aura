@@ -1728,6 +1728,43 @@ func (t *deferredCommandTurns) Activity(sessionID string) (activeTurnID string, 
 	return (*engine).SessionActivity(sessionID)
 }
 
+type deferredCommandOperations struct {
+	chat atomic.Pointer[command.Operations]
+}
+
+func (o *deferredCommandOperations) bind(chat command.Operations) error {
+	if o == nil || chat == nil {
+		return invalidOptions("the chat operations need a projection")
+	}
+	if !o.chat.CompareAndSwap(nil, &chat) {
+		return invalidOptions("the chat operations are already bound")
+	}
+	return nil
+}
+
+func (o *deferredCommandOperations) Plan(group string, tokens []string) command.OperationPlan {
+	var chat *command.Operations
+	if o != nil {
+		chat = o.chat.Load()
+	}
+	if chat == nil {
+		refusal := command.Result{Lines: []string{command.ReplyOperationsUnavailable}, Diagnostic: true, Code: command.ErrorCodeUnavailable}
+		return command.OperationPlan{Refusal: &refusal}
+	}
+	return (*chat).Plan(group, tokens)
+}
+
+func (o *deferredCommandOperations) Run(ctx context.Context, run *command.OperationRun) command.OperationReply {
+	var chat *command.Operations
+	if o != nil {
+		chat = o.chat.Load()
+	}
+	if chat == nil {
+		return command.OperationReply{Lines: []string{command.ReplyOperationsUnavailable}, Code: command.ErrorCodeUnavailable}
+	}
+	return (*chat).Run(ctx, run)
+}
+
 var errCommandSkillsUnavailable = errors.New("skill support is not available")
 
 type deferredCommandSkills struct {
@@ -1861,16 +1898,42 @@ func missingSession(err error) bool {
 	return errors.Is(err, sql.ErrNoRows) || (ok && code == turnstore.ErrorCodeSessionNotFound)
 }
 
-func newChatCommandDispatcher(sessions turnstore.SessionService, events sequenceReader, pointers turnstore.ConversationSessionStore, turns command.Turns, sk command.Skills, recorder command.Recorder) (*command.Dispatcher, error) {
-	registry, err := command.New(discord.CommandBinding(), telegram.CommandBinding())
+type chatCommandDeps struct {
+	sessions   turnstore.SessionService
+	events     sequenceReader
+	pointers   turnstore.ConversationSessionStore
+	turns      command.Turns
+	skills     command.Skills
+	operations command.Operations
+	recorder   command.Recorder
+}
+
+func withOperationGroups(binding command.Binding, groups []command.Definition) command.Binding {
+	for i := range groups {
+		binding.Names = append(binding.Names, groups[i].Name)
+	}
+	return binding
+}
+
+func newChatCommandDispatcher(deps *chatCommandDeps) (*command.Dispatcher, error) {
+	if deps == nil {
+		return nil, invalidOptions("the chat command dispatcher needs its ports")
+	}
+	groups := operation.ChatGroups(operationCatalogs())
+	registry, err := command.NewRegistry(
+		append(command.Catalog(), groups...),
+		withOperationGroups(discord.CommandBinding(), groups),
+		withOperationGroups(telegram.CommandBinding(), groups),
+	)
 	if err != nil {
 		return nil, err
 	}
 	return command.NewDispatcher(registry, command.Ports{
-		Sessions: &discordCommandSessions{sessions: sessions, events: events, pointers: pointers},
-		Turns:    turns,
-		Skills:   sk,
-	}, recorder)
+		Sessions:   &discordCommandSessions{sessions: deps.sessions, events: deps.events, pointers: deps.pointers},
+		Turns:      deps.turns,
+		Skills:     deps.skills,
+		Operations: deps.operations,
+	}, deps.recorder)
 }
 
 func githubConfig(cfg *appconfig.Config) *github.Config {
