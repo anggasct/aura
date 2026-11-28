@@ -85,34 +85,8 @@ func usage(detail string) error {
 }
 
 func moduleFailure(err error) error {
-	if err == nil {
-		return nil
-	}
-	if _, coded := fault.CodeOf[operation.ErrorCode](err); coded {
-		return err
-	}
-	if code, coded := fault.CodeOf[ErrorCode](err); coded {
-		return operation.Fail(code, &renderedOnce{code: code, cause: err})
-	}
-	return err
+	return operation.ModuleFailure[ErrorCode](err)
 }
-
-type renderedOnce struct {
-	code  ErrorCode
-	cause error
-}
-
-func (e *renderedOnce) Error() string { return e.SafeDetail() }
-
-func (e *renderedOnce) SafeDetail() string {
-	var coded *fault.Error[ErrorCode]
-	if errors.As(e.cause, &coded) {
-		return coded.Detail
-	}
-	return ""
-}
-
-func (e *renderedOnce) Unwrap() error { return e.cause }
 
 func (o *Operations) ready(call *operation.Call, input *collectionInput) error {
 	if o.service == nil {
@@ -384,7 +358,7 @@ func nothingRefreshed(notes []refreshNote) error {
 		parts = append(parts, notes[i].Label+" ("+notes[i].Code+")")
 	}
 	cause := Errorf(ErrorCodeNothingRefreshed, "no source could be refreshed and the stored chunks are kept: %s", strings.Join(parts, ", "))
-	return operation.NotPerformed(ErrorCodeNothingRefreshed, &renderedOnce{code: ErrorCodeNothingRefreshed, cause: cause})
+	return operation.NotPerformed(ErrorCodeNothingRefreshed, operation.RenderedOnce[ErrorCode](cause))
 }
 
 func slicesChanged(results []IngestResult) bool {
@@ -702,7 +676,7 @@ var refusalsBeforeSend = []ErrorCode{
 func refusedBeforeSend(err error) error {
 	code, coded := fault.CodeOf[ErrorCode](err)
 	if coded && slices.Contains(refusalsBeforeSend, code) {
-		return operation.NotPerformed(code, &renderedOnce{code: code, cause: err})
+		return operation.NotPerformed(code, operation.RenderedOnce[ErrorCode](err))
 	}
 	return moduleFailure(err)
 }
