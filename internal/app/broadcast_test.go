@@ -183,7 +183,7 @@ func TestDiscordBroadcastSenderReportsAStartedIntentAsAmbiguous(t *testing.T) {
 			if err != nil {
 				t.Fatalf("NewChannelEffects: %v", err)
 			}
-			payload, err := json.Marshal(discord.SendOperation{ChannelID: "123456", Text: "hello"})
+			payload, err := json.Marshal(discord.SendOperation{ChannelID: "123456", Text: "hello", Previews: true})
 			if err != nil {
 				t.Fatalf("encode the request: %v", err)
 			}

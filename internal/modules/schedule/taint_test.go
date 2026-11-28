@@ -392,3 +392,23 @@ func TestCronConfirmWritesOnlyInsideCommit(t *testing.T) {
 		Outside: rig.starter.fingerprint, Previewed: true,
 	})
 }
+
+func TestOccurrenceRunPlumbsTurnTaintToNotifier(t *testing.T) {
+	for _, wantTainted := range []bool{false, true} {
+		name := "clean"
+		if wantTainted {
+			name = "tainted"
+		}
+		t.Run(name, func(t *testing.T) {
+			inBubble(t, nil, func(t *testing.T, f *runFixture) {
+				f.turns.scripts = []turnScript{{result: TurnResult{TurnID: "turn-1", Text: "https://example.test/x", Succeeded: true, Tainted: wantTainted}}}
+				fire := f.nextFire(t)
+				f.succeed(t, f.scheduled(t, fire))
+				notices := f.notify.notices()
+				if len(notices) != 1 || notices[0].Tainted != wantTainted {
+					t.Fatalf("notices = %+v, want one with Tainted=%t", notices, wantTainted)
+				}
+			})
+		})
+	}
+}

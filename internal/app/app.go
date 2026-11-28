@@ -1507,7 +1507,7 @@ func (b *build) buildSchedule() error {
 	s.scheduleMod, err = schedule.New(&schedule.ModuleDeps{
 		Config:   cfg.Scheduler,
 		DB:       db,
-		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows, webTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil })},
+		Turns:    &engineTurnRunner{engine: b.engine, sessions: b.sessions, workflows: s.scheduledWorkflows, webTools: webToolsOfPersona(func() (*auraagent.Registry, error) { return b.registry, nil }), personas: b.registry},
 		Notify:   &cronNotifier{broadcaster: s.broadcastMod.Broadcaster()},
 		Starter:  s.broadcastRuntime,
 		Logger:   logger,

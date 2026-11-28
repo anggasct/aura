@@ -43,6 +43,7 @@ type TurnResult struct {
 	Text          string
 	Succeeded     bool
 	SafeErrorCode string
+	Tainted       bool
 }
 
 type TurnRunner interface {
@@ -55,6 +56,7 @@ type NotifyRequest struct {
 	Priority         string
 	DestinationAlias string
 	Text             string
+	Tainted          bool
 }
 
 type Notifier interface {
@@ -430,7 +432,7 @@ func (r *Runner) notifyOutcome(ctx context.Context, inv durable.Invocation, n *t
 	}
 	req := &NotifyRequest{
 		Producer: "cron", Key: "cron:" + n.occurrence.ID, Priority: priority,
-		DestinationAlias: n.outcome.Destination, Text: n.outcome.Text,
+		DestinationAlias: n.outcome.Destination, Text: n.outcome.Text, Tainted: n.outcome.Tainted,
 	}
 	_, err := inv.RunAction(ctx, actionNotify, func(actionCtx context.Context) ([]byte, error) {
 		err := r.notify.Notify(actionCtx, req)
