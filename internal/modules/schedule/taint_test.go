@@ -332,7 +332,7 @@ func TestConfirmWithoutTheCodeIsRefused(t *testing.T) {
 	}
 }
 
-func TestConfirmCodeNeverEntersSessionEvents(t *testing.T) {
+func TestConfirmIsNotReachableFromTheAgentSurface(t *testing.T) {
 	rig := newScheduleRig(t, ownerRoute{alias: "me", route: "telegram:owner"})
 	job := rig.createTainted(t)
 	input := json.RawMessage(`{"id":"` + job.ID + `"}`)
