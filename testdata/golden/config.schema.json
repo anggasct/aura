@@ -93,6 +93,9 @@
             },
             "web_only_fetches_per_run": {
               "type": "integer"
+            },
+            "tainted_fetches_per_turn": {
+              "type": "integer"
             }
           },
           "additionalProperties": false
@@ -114,6 +117,9 @@
               "type": "integer"
             },
             "web_only_queries_per_run": {
+              "type": "integer"
+            },
+            "tainted_queries_per_turn": {
               "type": "integer"
             }
           },

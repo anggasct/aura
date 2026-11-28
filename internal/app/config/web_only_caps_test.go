@@ -59,6 +59,56 @@ func TestWebOnlyCapsConfig(t *testing.T) {
 	}
 }
 
+func TestTaintedBudgetsConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		result, err := LoadWithOptions(writeTempConfig(t, webOnlyBase), execLinuxOptions(t))
+		if err != nil {
+			t.Fatalf("LoadWithOptions: %v", err)
+		}
+		if got := result.Config.Tools; got.Fetch.TaintedFetchesPerTurn != 5 || got.WebSearch.TaintedQueriesPerTurn != 5 {
+			t.Errorf("budgets = %d fetches and %d queries, want 5 and 5", got.Fetch.TaintedFetchesPerTurn, got.WebSearch.TaintedQueriesPerTurn)
+		}
+	})
+	t.Run("the file and the environment", func(t *testing.T) {
+		t.Setenv("AURA_TOOLS_WEB_SEARCH_TAINTED_QUERIES_PER_TURN", "20")
+		content := strings.Replace(webOnlyBase, "tools:\n", "tools:\n  fetch:\n    tainted_fetches_per_turn: 3\n", 1)
+		result, err := LoadWithOptions(writeTempConfig(t, content), execLinuxOptions(t))
+		if err != nil {
+			t.Fatalf("LoadWithOptions: %v", err)
+		}
+		if got := result.Config.Tools; got.Fetch.TaintedFetchesPerTurn != 3 || got.WebSearch.TaintedQueriesPerTurn != 20 {
+			t.Errorf("budgets = %d fetches and %d queries, want 3 and 20", got.Fetch.TaintedFetchesPerTurn, got.WebSearch.TaintedQueriesPerTurn)
+		}
+		t.Setenv("AURA_TOOLS_FETCH_TAINTED_FETCHES_PER_TURN", "20")
+		result, err = LoadWithOptions(writeTempConfig(t, content), execLinuxOptions(t))
+		if err != nil || result.Config.Tools.Fetch.TaintedFetchesPerTurn != 20 {
+			t.Errorf("the environment did not override the file: %+v, %v", result.Config.Tools, err)
+		}
+	})
+	t.Run("zero disables relief", func(t *testing.T) {
+		t.Setenv("AURA_TOOLS_FETCH_TAINTED_FETCHES_PER_TURN", "0")
+		t.Setenv("AURA_TOOLS_WEB_SEARCH_TAINTED_QUERIES_PER_TURN", "0")
+		result, err := LoadWithOptions(writeTempConfig(t, webOnlyBase), execLinuxOptions(t))
+		if err != nil || result.Config.Tools.Fetch.TaintedFetchesPerTurn != 0 || result.Config.Tools.WebSearch.TaintedQueriesPerTurn != 0 {
+			t.Errorf("budgets = %+v, %v, want zero", result.Config.Tools, err)
+		}
+	})
+	for name, tc := range map[string]struct{ env, value, path string }{
+		"fetches above the bound": {"AURA_TOOLS_FETCH_TAINTED_FETCHES_PER_TURN", "21", "tools.fetch.tainted_fetches_per_turn"},
+		"fetches below zero":      {"AURA_TOOLS_FETCH_TAINTED_FETCHES_PER_TURN", "-1", "tools.fetch.tainted_fetches_per_turn"},
+		"queries above the bound": {"AURA_TOOLS_WEB_SEARCH_TAINTED_QUERIES_PER_TURN", "21", "tools.web_search.tainted_queries_per_turn"},
+		"queries below zero":      {"AURA_TOOLS_WEB_SEARCH_TAINTED_QUERIES_PER_TURN", "-1", "tools.web_search.tainted_queries_per_turn"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(tc.env, tc.value)
+			_, err := LoadWithOptions(writeTempConfig(t, webOnlyBase), execLinuxOptions(t))
+			if err == nil || !strings.Contains(err.Error(), "config_invalid") || !strings.Contains(err.Error(), tc.path) {
+				t.Errorf("err = %v, want config_invalid at %s", err, tc.path)
+			}
+		})
+	}
+}
+
 func TestWorkspaceAndDataDirMustNotNest(t *testing.T) {
 	root := t.TempDir()
 	inside := filepath.Join(root, "data", "workspace")
