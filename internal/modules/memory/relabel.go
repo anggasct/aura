@@ -112,7 +112,7 @@ func (c *batchTaintContext) observeEvent(sessionID string, sequence uint64, turn
 			c.requestTaintedTurns[turnID] = true
 		}
 	case turn.EventKindTurnAccepted:
-		if turnID != "" && acceptedTurnHasRequestTaint(author, payload) {
+		if turnID != "" && (c.req == nil || c.req.TurnID == "" || turnID != c.req.TurnID) && acceptedTurnHasRequestTaint(author, payload) {
 			c.requestTaintedTurns[turnID] = true
 		}
 	}
@@ -271,6 +271,9 @@ func RelabelUnlabelled(ctx context.Context, db *sql.DB, opts *RelabelOptions) (i
 	var eventsReader RelabelEventReader
 	var toolMayTaint func(string) bool
 	if opts != nil {
+		if opts.BatchSize < 0 {
+			return 0, fault.New(ErrorCodeInvalidArgument, "batch size must not be negative")
+		}
 		if opts.BatchSize > 0 {
 			batchSize = opts.BatchSize
 		}
@@ -441,20 +444,21 @@ func deriveRelabelledTaint(ctx context.Context, db *sql.DB, doc *StoredDocument,
 		if textHasRelayedOrAttachment(doc.Content) {
 			return true, nil
 		}
-		if info != nil && doc.FromSequence > 0 && doc.ToSequence >= 0 && doc.ToSequence >= doc.FromSequence {
-			from := uint64(doc.FromSequence)
-			to := uint64(doc.ToSequence)
-			for seq := from; seq <= to; seq++ {
-				ev, ok := info.eventsBySeq[seq]
-				if !ok {
-					continue
-				}
-				if hasUserRequestTaint(ev.Payload) {
-					return true, nil
-				}
-				if ev.TurnID != "" && info.requestTaintedTurns[ev.TurnID] {
-					return true, nil
-				}
+		if info == nil || doc.FromSequence <= 0 || doc.ToSequence < 0 || doc.ToSequence < doc.FromSequence {
+			return true, nil
+		}
+		from := uint64(doc.FromSequence)
+		to := uint64(doc.ToSequence)
+		for seq := from; seq <= to; seq++ {
+			ev, ok := info.eventsBySeq[seq]
+			if !ok {
+				return true, nil
+			}
+			if hasUserRequestTaint(ev.Payload) {
+				return true, nil
+			}
+			if ev.TurnID != "" && info.requestTaintedTurns[ev.TurnID] {
+				return true, nil
 			}
 		}
 		return false, nil

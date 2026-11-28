@@ -116,9 +116,7 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	}
 	taintReader := deps.TaintReader
 	if taintReader == nil {
-		if reader, ok := turnstore.NewTaintReader(deps.DB).(SessionTaintAtReader); ok {
-			taintReader = reader
-		}
+		taintReader = turnstore.NewTaintReader(deps.DB)
 	}
 	mod.extractor, err = NewExtractor(
 		mod.service,

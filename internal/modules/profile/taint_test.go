@@ -30,6 +30,14 @@ import (
 
 var profileConfirmCodePattern = regexp.MustCompile(`^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$`)
 
+type failingTaintReader struct {
+	err error
+}
+
+func (f failingTaintReader) SessionTaintAt(context.Context, string, uint64, string) (turn.TaintMark, bool, error) {
+	return turn.TaintMark{}, false, f.err
+}
+
 func (r *opsRig) cliRaw(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	open := func(_ *cobra.Command, _ *operation.Descriptor, run func(context.Context, operation.Invoker) error) error {
@@ -151,14 +159,12 @@ func TestProfileFactProposedWhileTaintedShowsItsSource(t *testing.T) {
 		if err != nil {
 			t.Fatalf("NewService: %v", err)
 		}
-		taintReader, ok := turnstore.NewTaintReader(db).(profile.SessionTaintAtReader)
-		if !ok {
-			t.Fatal("turnstore TaintReader does not implement SessionTaintAtReader")
-		}
+		taintReader := turnstore.NewTaintReader(db)
 		extractedJSON := `[` +
 			`{"category":"preference","key":"drink_clean","value":"tea","sources":[1]},` +
 			`{"category":"preference","key":"drink_dirty","value":"espresso","sources":[3]}` +
 			`]`
+		completed := make(chan profile.Observation, 4)
 		extractor, err := profile.NewExtractor(
 			svc,
 			staticProfileModelCaller{text: extractedJSON},
@@ -169,6 +175,11 @@ func TestProfileFactProposedWhileTaintedShowsItsSource(t *testing.T) {
 			4,
 			slog.New(slog.DiscardHandler),
 			profile.WithTaintReader(taintReader),
+			profile.WithObserver(func(_ context.Context, obs *profile.Observation) {
+				if obs != nil && obs.Result == profile.ResultCompleted {
+					completed <- *obs
+				}
+			}),
 		)
 		if err != nil {
 			t.Fatalf("NewExtractor: %v", err)
@@ -191,19 +202,17 @@ func TestProfileFactProposedWhileTaintedShowsItsSource(t *testing.T) {
 			t.Fatalf("Enqueue: %v", err)
 		}
 
-		cleanID := profile.FactID(principal.OwnerID, "preference", "drink_clean", profile.ValueDigest("tea"))
-		dirtyID := profile.FactID(principal.OwnerID, "preference", "drink_dirty", profile.ValueDigest("espresso"))
-		deadline := time.Now().Add(3 * time.Second)
-		for time.Now().Before(deadline) {
-			if _, err1 := svc.GetFact(ctx, principal.OwnerID, cleanID); err1 == nil {
-				if _, err2 := svc.GetFact(ctx, principal.OwnerID, dirtyID); err2 == nil {
-					break
-				}
-			}
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-completed:
+		case <-time.After(3 * time.Second):
+			cancel()
+			t.Fatal("timed out waiting for profile extraction to complete")
 		}
 		cancel()
 		<-done
+
+		cleanID := profile.FactID(principal.OwnerID, "preference", "drink_clean", profile.ValueDigest("tea"))
+		dirtyID := profile.FactID(principal.OwnerID, "preference", "drink_dirty", profile.ValueDigest("espresso"))
 
 		cleanFact, err := svc.GetFact(ctx, principal.OwnerID, cleanID)
 		if err != nil {
@@ -218,6 +227,86 @@ func TestProfileFactProposedWhileTaintedShowsItsSource(t *testing.T) {
 		}
 		if dirtyFact.TaintSource != sourceLabel {
 			t.Errorf("tainted derived fact taint_source = %q, want %q", dirtyFact.TaintSource, sourceLabel)
+		}
+	})
+
+	t.Run("extractor fails closed with legacy taint label when taint lookup errors", func(t *testing.T) {
+		ctx := t.Context()
+		db := operationtest.OpenDatabase(t, profile.Schema())
+		sessions := turnstore.NewSessionService(db)
+		events := turnstore.NewEventStore(db)
+		now := time.Now().UTC()
+		if err := sessions.Create(ctx, &turn.Session{
+			ID: "sess-err", OwnerID: principal.OwnerID, AgentID: "main", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatalf("Create session: %v", err)
+		}
+		evSeq, err := events.AppendSequenced(ctx, "sess-err", &turn.Event{
+			ID: "ev-err", SessionID: "sess-err", TurnID: "t1", Author: "user",
+			Kind: "adk_event", SchemaVersion: 1, Payload: json.RawMessage(`{"text":"i prefer matcha"}`), CreatedAt: now,
+		})
+		if err != nil {
+			t.Fatalf("append event: %v", err)
+		}
+		store, err := profile.NewSQLiteStore(db)
+		if err != nil {
+			t.Fatalf("NewSQLiteStore: %v", err)
+		}
+		svc, err := profile.NewService(store, profile.ServiceOptions{MinConfidence: 0.99, Scanner: secret.New()})
+		if err != nil {
+			t.Fatalf("NewService: %v", err)
+		}
+		completed := make(chan profile.Observation, 4)
+		extractor, err := profile.NewExtractor(
+			svc,
+			staticProfileModelCaller{text: `[{"category":"preference","key":"drink_err","value":"matcha","sources":[1]}]`},
+			secret.New(),
+			"profiling",
+			"v1",
+			256,
+			4,
+			slog.New(slog.DiscardHandler),
+			profile.WithTaintReader(failingTaintReader{err: errors.New("taint ledger unavailable")}),
+			profile.WithObserver(func(_ context.Context, obs *profile.Observation) {
+				if obs != nil && obs.Result == profile.ResultCompleted {
+					completed <- *obs
+				}
+			}),
+		)
+		if err != nil {
+			t.Fatalf("NewExtractor: %v", err)
+		}
+		runCtx, cancel := context.WithCancel(ctx)
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			extractor.Run(runCtx)
+		}()
+		if err := extractor.Enqueue(ctx, profile.Job{
+			OwnerID:   principal.OwnerID,
+			SessionID: "sess-err",
+			Events:    []profile.JobEvent{{ID: "ev-err", Sequence: evSeq, Text: "i prefer matcha"}},
+		}); err != nil {
+			cancel()
+			t.Fatalf("Enqueue: %v", err)
+		}
+		select {
+		case <-completed:
+		case <-time.After(3 * time.Second):
+			cancel()
+			t.Fatal("timed out waiting for profile extraction to complete")
+		}
+		cancel()
+		<-done
+
+		factID := profile.FactID(principal.OwnerID, "preference", "drink_err", profile.ValueDigest("matcha"))
+		fact, err := svc.GetFact(ctx, principal.OwnerID, factID)
+		if err != nil {
+			t.Fatalf("GetFact: %v", err)
+		}
+		wantLabel := turn.TaintMark{Source: turn.TaintSourceLegacy}.Label()
+		if fact.TaintSource != wantLabel {
+			t.Errorf("taint_source on lookup error = %q, want %q", fact.TaintSource, wantLabel)
 		}
 	})
 }

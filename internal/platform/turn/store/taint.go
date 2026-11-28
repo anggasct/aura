@@ -14,6 +14,7 @@ import (
 type TaintReader interface {
 	SessionTaint(ctx context.Context, sessionID, turnID, principalID string) (turn.TaintMark, bool, error)
 	SessionMarks(ctx context.Context, sessionIDs []string) (map[string]uint64, error)
+	SessionTaintAt(ctx context.Context, sessionID string, atSequence uint64, principalID string) (turn.TaintMark, bool, error)
 }
 
 type OtherPrincipalMarkChecker interface {

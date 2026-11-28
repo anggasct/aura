@@ -102,19 +102,19 @@ type skillContextJournal struct {
 	TaintSkill string `json:"taint_skill,omitempty"`
 }
 
-func decodeSkillContextJournal(raw []byte) skillContextJournal {
+func decodeSkillContextJournal(raw []byte) (entry skillContextJournal, valid bool) {
 	trimmed := strings.TrimSpace(string(raw))
 	if trimmed == "" {
-		return skillContextJournal{}
+		return skillContextJournal{}, true
 	}
 	if strings.HasPrefix(trimmed, "{") {
-		var entry skillContextJournal
 		if err := json.Unmarshal([]byte(trimmed), &entry); err == nil {
 			entry.Content = strings.TrimSpace(entry.Content)
-			return entry
+			entry.TaintSkill = strings.TrimSpace(entry.TaintSkill)
+			return entry, true
 		}
 	}
-	return skillContextJournal{Content: trimmed}
+	return skillContextJournal{Content: trimmed}, false
 }
 
 func (s *SessionContext) TurnContext(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
@@ -142,9 +142,14 @@ func (s *SessionContext) TurnContext(ctx context.Context, req *turn.TurnRequest)
 			return nil, nil
 		}
 	} else {
-		raw, _ = render(ctx)
+		var err error
+		raw, err = render(ctx)
+		if err != nil {
+			s.engine.logger.WarnContext(ctx, "skill context render failed", "component", "skills", "error", err, "turn_id", req.TurnID)
+			return nil, nil
+		}
 	}
-	entry := decodeSkillContextJournal(raw)
+	entry, valid := decodeSkillContextJournal(raw)
 	if entry.Content == "" {
 		return nil, nil
 	}
@@ -152,7 +157,10 @@ func (s *SessionContext) TurnContext(ctx context.Context, req *turn.TurnRequest)
 		Order:   turn.ContextOrderSkills,
 		Content: entry.Content,
 	}
-	if entry.TaintSkill != "" {
+	switch {
+	case !valid:
+		cb.Taint = &turn.TaintMark{Source: turn.TaintSourceLegacy}
+	case entry.TaintSkill != "":
 		cb.Taint = &turn.TaintMark{Source: turn.TaintSourceSkill, Detail: entry.TaintSkill}
 	}
 	return []turn.ContextBlock{cb}, nil
@@ -189,23 +197,20 @@ func (s *SessionContext) skillContext(ctx context.Context, req *turn.TurnRequest
 		}
 		record, err := s.engine.registry.Get(ctx, activation.SkillID)
 		if err != nil {
-			if activation.TurnID != req.TurnID {
-				if fault.HasCode(err, ErrorCodeSkillNotFound) {
-					continue
-				}
-				return "", "", err
-			}
-		} else {
-			if activation.TurnID != req.TurnID && (record.State != StateActive || record.Digest != activation.Digest) {
+			if activation.TurnID != req.TurnID && fault.HasCode(err, ErrorCodeSkillNotFound) {
 				continue
 			}
-			if taintSkill == "" && record.AcceptedTaintSource != "" {
-				taintSkill = activation.SkillID
-			}
+			return "", "", err
+		}
+		if activation.TurnID != req.TurnID && (record.State != StateActive || record.Digest != activation.Digest) {
+			continue
 		}
 		size := utf8.RuneCountInString(body)
 		if size > remaining {
 			break
+		}
+		if taintSkill == "" && record.AcceptedTaintSource != "" {
+			taintSkill = activation.SkillID
 		}
 		remaining -= size
 		activation.Body = body

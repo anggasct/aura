@@ -285,7 +285,36 @@ func TestOtherPrincipalsKeepTheStricterRules(t *testing.T) {
 		}
 	})
 
-	t.Run("public principal with knowledge scope stays tainted by knowledge_scope", func(t *testing.T) {
+	t.Run("public principal with knowledge scope keeps egress forbidden and stays tainted by knowledge_scope", func(t *testing.T) {
+		root := t.TempDir()
+		publicInvalidPath := filepath.Join(root, "config.yaml")
+		publicInvalidYAML := `version: 1
+storage:
+  path: ` + root + `
+tools:
+  workspace: ` + t.TempDir() + `
+  web_search:
+    provider: searxng
+    endpoint: ` + server.URL + `/search
+    max_results: 5
+agents:
+  definitions:
+    - id: main
+      description: default
+      instructions: "You answer."
+      tools: [read_file, write_file, web_search, web_fetch]
+      knowledge: [notes]
+      principal_tools: [read_file]
+      public_tools: [read_file, web_search]
+      public_knowledge: [notes]
+`
+		if err := os.WriteFile(publicInvalidPath, []byte(publicInvalidYAML), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := appconfig.Load(publicInvalidPath); err == nil {
+			t.Fatal("config with public_knowledge and egress tools unexpectedly loaded")
+		}
+
 		ownerReq := &turn.TurnRequest{Origin: "discord:test", PrincipalClass: principal.ClassOwner, Knowledge: []string{"notes"}}
 		if mark, tainted := ownerReq.AdmissionTaint(); tainted {
 			t.Errorf("owner with knowledge scope admission taint = %+v, want untainted", mark)

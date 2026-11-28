@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
@@ -348,6 +349,42 @@ func TestMemoryDocumentsCarryTheirTaint(t *testing.T) {
 			if want := wantBySeq[doc.FromSequence]; *doc.Tainted != want {
 				t.Errorf("seq %d (%q) tainted=%t, want %t", doc.FromSequence, doc.Content, *doc.Tainted, want)
 			}
+		}
+	})
+
+	t.Run("live clean owner HTTP turn stays untainted while client history taints", func(t *testing.T) {
+		for _, sid := range []string{"sess-http-clean", "sess-http-hist"} {
+			if err := sessions.Create(ctx, &turn.Session{ID: sid, OwnerID: principal.OwnerID, AgentID: "main", CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatalf("Create(%s): %v", sid, err)
+			}
+		}
+		cleanEvents := []turn.Event{
+			{ID: "http-acc-1", SessionID: "sess-http-clean", TurnID: "t-http-clean", Sequence: 1, Author: principal.OwnerID, Kind: turn.EventKindTurnAccepted, SchemaVersion: 1, Payload: json.RawMessage(`{"origin":"http","principal":"local-owner"}`), CreatedAt: now},
+			makeTurnADKEvent(t, "sess-http-clean", "t-http-clean", 2, "user", &genai.Content{Role: "user", Parts: []*genai.Part{{Text: "clean http owner prompt"}}}),
+		}
+		if err := hook.AfterTurn(ctx, &turn.TurnRequest{
+			TurnID: "t-http-clean", SessionID: "sess-http-clean", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: turn.OriginHTTP,
+		}, cleanEvents); err != nil {
+			t.Fatalf("AfterTurn clean http: %v", err)
+		}
+		cleanDoc, ok, err := memStore.GetDocument(ctx, documentID("sess-http-clean", KindEventText, 2, 2, ""))
+		if err != nil || !ok || cleanDoc.Tainted == nil || *cleanDoc.Tainted {
+			t.Fatalf("clean http owner doc = %+v (ok=%v err=%v), want tainted=false", cleanDoc, ok, err)
+		}
+
+		histEvents := []turn.Event{
+			{ID: "http-acc-2", SessionID: "sess-http-hist", TurnID: "t-http-hist", Sequence: 1, Author: principal.OwnerID, Kind: turn.EventKindTurnAccepted, SchemaVersion: 1, Payload: json.RawMessage(`{"origin":"http","principal":"local-owner"}`), CreatedAt: now},
+			makeTurnADKEvent(t, "sess-http-hist", "t-http-hist", 2, "user", &genai.Content{Role: "user", Parts: []*genai.Part{{Text: "http prompt with client history"}}}),
+		}
+		if err := hook.AfterTurn(ctx, &turn.TurnRequest{
+			TurnID: "t-http-hist", SessionID: "sess-http-hist", PrincipalID: principal.OwnerID, PrincipalClass: principal.ClassOwner, Origin: turn.OriginHTTP,
+			UntrustedContext: &turn.UntrustedRecall{},
+		}, histEvents); err != nil {
+			t.Fatalf("AfterTurn http client_history: %v", err)
+		}
+		histDoc, ok, err := memStore.GetDocument(ctx, documentID("sess-http-hist", KindEventText, 2, 2, ""))
+		if err != nil || !ok || histDoc.Tainted == nil || !*histDoc.Tainted {
+			t.Fatalf("http client_history doc = %+v (ok=%v err=%v), want tainted=true", histDoc, ok, err)
 		}
 	})
 
@@ -742,5 +779,25 @@ func TestExistingMemoryIsRelabelledOnce(t *testing.T) {
 	}
 	if second != 0 {
 		t.Fatalf("second relabelled = %d, want 0 (idempotent)", second)
+	}
+
+	if _, err := RelabelUnlabelled(ctx, db, &RelabelOptions{BatchSize: -1}); !fault.HasCode(err, ErrorCodeInvalidArgument) {
+		t.Fatalf("negative batch size err = %v, want %s", err, ErrorCodeInvalidArgument)
+	}
+
+	if _, err := memStore.UpsertDocument(ctx, &StoredDocument{
+		ID: "doc-missing-event", OwnerID: principal.OwnerID, SessionID: "sess-rel-clean", Kind: KindEventText,
+		FromSequence: 77, ToSequence: 77, Content: "owner input missing backing runtime_event",
+		TrustLabel: string(approval.TrustOwnerInput), CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("UpsertDocument(missing event): %v", err)
+	}
+	missingCount, err := RelabelUnlabelled(ctx, db, &RelabelOptions{BatchSize: 2})
+	if err != nil || missingCount != 1 {
+		t.Fatalf("RelabelUnlabelled(missing event) = %d, %v; want 1, nil", missingCount, err)
+	}
+	missingDoc, ok, err := memStore.GetDocument(ctx, "doc-missing-event")
+	if err != nil || !ok || missingDoc.Tainted == nil || !*missingDoc.Tainted {
+		t.Fatalf("doc-missing-event = %+v (ok=%v err=%v), want fail-closed tainted=true", missingDoc, ok, err)
 	}
 }
