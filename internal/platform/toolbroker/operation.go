@@ -53,6 +53,9 @@ func checkOperationRegistration(definition *tools.Definition, rule *approval.Rul
 	if err := definition.ValidateOperation(); err != nil {
 		return err
 	}
+	if tools.IsOperationEntry(definition.Name) && definition.Operation == "" && definition.Name != tools.OperationSearchToolName {
+		return errorf(ResultInvalidArgument, "tool name %q is reserved for operation tools", definition.Name)
+	}
 	if definition.Operation == "" {
 		if previewer != nil {
 			return errorf(ResultInvalidArgument, "tool %q has a previewer but no operation", definition.Name)
