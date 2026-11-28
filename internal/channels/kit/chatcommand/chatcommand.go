@@ -196,6 +196,7 @@ func (p *commandProvider) Invoke(ctx context.Context, _ *effect.Invocation) (eff
 	p.code = string(result.Code)
 	if p.resuming {
 		switch result.Fate {
+		case command.FatePerformed:
 		case command.FateNotPerformed:
 			return effect.Outcome{SafeErrorCode: p.code}, nil
 		case command.FateAmbiguous:

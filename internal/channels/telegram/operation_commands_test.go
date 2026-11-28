@@ -3,6 +3,7 @@ package telegram
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"slices"
 	"strconv"
 	"strings"
@@ -22,7 +23,7 @@ func (s *operationSpy) Plan(_ string, tokens []string) command.OperationPlan {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.planned = append(s.planned, slices.Clone(tokens))
-	input, _ := json.Marshal(map[string][]string{"tokens": tokens})
+	input := json.RawMessage(fmt.Sprintf(`{"tokens":%q}`, strings.Join(tokens, " ")))
 	return command.OperationPlan{Operation: "cron.list", Input: input}
 }
 
