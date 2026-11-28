@@ -63,7 +63,7 @@ func TestToolsForOffersOperationToolsOnlyToOwnerAudiencePersonasThatListThem(t *
 	}
 	for _, tc := range none {
 		t.Run(tc.name+" is offered no operation tool", func(t *testing.T) {
-			for _, name := range toolNames(executor.toolsFor(tc.definition, tc.class, tc.origin, turnContext{})) {
+			for _, name := range toolNames(executor.toolsFor(tc.definition, tc.class, tc.origin, &turnContext{})) {
 				if name == "aura_cron_list" || name == "aura_cron_add" {
 					t.Fatalf("the operation tool %q is offered", name)
 				}
@@ -71,27 +71,27 @@ func TestToolsForOffersOperationToolsOnlyToOwnerAudiencePersonasThatListThem(t *
 		})
 	}
 	t.Run("an owner persona is offered the operation tools it lists by name", func(t *testing.T) {
-		got := toolNames(executor.toolsFor(ownerAudience("read_file", "aura_cron_list", "aura_cron_add"), principal.ClassOwner, "discord:main", turnContext{}))
+		got := toolNames(executor.toolsFor(ownerAudience("read_file", "aura_cron_list", "aura_cron_add"), principal.ClassOwner, "discord:main", &turnContext{}))
 		want := []string{"aura_cron_add", "aura_cron_list", "read_file"}
 		if !slices.Equal(sortedCopy(got), want) {
 			t.Fatalf("tools = %v, want %v", got, want)
 		}
 	})
 	t.Run("a tool restriction removes them", func(t *testing.T) {
-		got := toolNames(executor.toolsFor(ownerAudience("read_file", "aura_cron_list"), principal.ClassOwner, turn.OriginTerminal, turnContext{restriction: &turn.ToolRestriction{Allowed: []string{"read_file"}}}))
+		got := toolNames(executor.toolsFor(ownerAudience("read_file", "aura_cron_list"), principal.ClassOwner, turn.OriginTerminal, &turnContext{restriction: &turn.ToolRestriction{Allowed: []string{"read_file"}}}))
 		if !slices.Equal(got, []string{"read_file"}) {
 			t.Fatalf("tools = %v, want only read_file", got)
 		}
 	})
 	t.Run("an executor whose operations were never bound offers none", func(t *testing.T) {
 		unbound := executorWithOperationTool(t)
-		got := toolNames(unbound.toolsFor(ownerAudience("read_file", "aura_cron_list"), principal.ClassOwner, turn.OriginTerminal, turnContext{}))
+		got := toolNames(unbound.toolsFor(ownerAudience("read_file", "aura_cron_list"), principal.ClassOwner, turn.OriginTerminal, &turnContext{}))
 		if !slices.Equal(got, []string{"read_file"}) {
 			t.Fatalf("tools = %v, want only read_file", got)
 		}
 	})
 	t.Run("the other tools stay offered", func(t *testing.T) {
-		got := toolNames(executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, turn.OriginTerminal, turnContext{}))
+		got := toolNames(executor.toolsFor(&auraagent.Definition{}, principal.ClassOwner, turn.OriginTerminal, &turnContext{}))
 		if !slices.Contains(got, "read_file") {
 			t.Fatalf("tools = %v, want read_file", got)
 		}

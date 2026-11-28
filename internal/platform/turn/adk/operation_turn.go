@@ -79,7 +79,7 @@ type planInput struct {
 
 func (x *ADKExecutor) planOperations(ctx context.Context, in *planInput) *operationPlan {
 	definition, req, extra := in.definition, in.req, in.extra
-	plan := &operationPlan{kind: x.turnKind(req.Origin), core: x.toolsFor(definition, req.PrincipalClass, req.Origin, *extra)}
+	plan := &operationPlan{kind: x.turnKind(req.Origin), core: x.toolsFor(definition, req.PrincipalClass, req.Origin, extra)}
 	if x.operations == nil || extra.restriction != nil || !x.ownerTurn(definition, req.PrincipalClass, req.Origin) {
 		return plan
 	}

@@ -137,7 +137,7 @@ func verbSuffix(approval Approval) string {
 }
 
 func (d *Discovery) behaviorLines(groups []renderedGroup) []string {
-	var lines []string
+	lines := make([]string, 0, len(d.behaviors))
 	for i := range d.behaviors {
 		behavior := &d.behaviors[i]
 		line := "- " + behavior.ID + ": " + behavior.Summary

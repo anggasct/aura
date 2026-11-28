@@ -296,17 +296,21 @@ func (d *Discovery) result(matches []match, view *Turn, scope *SearchScope) sear
 
 func synopsis(descriptor *Descriptor) string {
 	parts := append([]string{rootGroup}, commandPath(descriptor.ID)...)
-	for _, positional := range descriptor.Positionals(SurfaceCLI) {
+	positionals := descriptor.Positionals(SurfaceCLI)
+	for i := range positionals {
+		positional := &positionals[i]
 		label := "<" + positional.Name + ">"
 		if !positional.Required {
 			label = "[" + label + "]"
 		}
 		parts = append(parts, label)
 	}
-	for _, flag := range descriptor.Flags(SurfaceCLI) {
+	flags := descriptor.Flags(SurfaceCLI)
+	for i := range flags {
+		flag := &flags[i]
 		label := "--" + flag.Name
 		if flag.Kind != KindBoolean {
-			label += " <" + placeholder(&flag) + ">"
+			label += " <" + placeholder(flag) + ">"
 		}
 		if !flag.Required {
 			label = "[" + label + "]"

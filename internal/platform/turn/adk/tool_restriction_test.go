@@ -42,7 +42,7 @@ func TestToolsForHonoursTheRestriction(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := toolNames(executor.toolsFor(tc.definition, principal.ClassOwner, tc.origin, turnContext{restriction: tc.restriction}))
+			got := toolNames(executor.toolsFor(tc.definition, principal.ClassOwner, tc.origin, &turnContext{restriction: tc.restriction}))
 			if got == nil {
 				got = []string{}
 			}

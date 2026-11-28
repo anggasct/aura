@@ -426,7 +426,7 @@ func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Se
 	if _, ok := durable.TurnScopeFrom(ctx); ok {
 		model = journalModel(model)
 	}
-	rootAgent, err := buildAgent(x.agentName(definition), definition, model, extra.plan.core, x.beforeTool, recallAttached, ownerContext, *extra)
+	rootAgent, err := buildAgent(x.agentName(definition), definition, model, extra.plan.core, x.beforeTool, recallAttached, ownerContext, extra)
 	if err != nil {
 		return nil, err
 	}
@@ -631,7 +631,7 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 	return model, nil
 }
 
-func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra turnContext) []tool.Tool {
+func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra *turnContext) []tool.Tool {
 	allowed, ok := x.allowedTools(definition, class)
 	if !ok {
 		return nil
@@ -720,7 +720,7 @@ func exposesPluginTool(definition *auraagent.Definition, class principal.Class, 
 	return !restricted || auratools.ListsPluginTool(ceiling, toolName, plugin)
 }
 
-func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra turnContext) (agent.Agent, error) {
+func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra *turnContext) (agent.Agent, error) {
 	instruction := definition.Instructions
 	if ownerContext != "" {
 		instruction = ownerContext
