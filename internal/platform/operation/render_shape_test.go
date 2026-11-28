@@ -121,3 +121,18 @@ func TestACatalogRejectsABadOutputHeader(t *testing.T) {
 		})
 	}
 }
+
+func TestATableWithoutAHeaderPrintsOnlyTheRows(t *testing.T) {
+	_, root := hostileRig(t)
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetArgs([]string{"hostile", "table"})
+
+	if err := root.ExecuteContext(t.Context()); err != nil {
+		t.Fatalf("hostile table: %v", err)
+	}
+
+	if lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n"); len(lines) != 2 || lines[0] != "A\tB" {
+		t.Errorf("lines = %q, want the column names and the one row", lines)
+	}
+}

@@ -90,6 +90,10 @@ func TestProfileCLISetShowAcceptRejectDelete(t *testing.T) {
 		t.Errorf("list active = %q, %v", out, err)
 	}
 	candidate := seedProfileCandidate(t, cfg)
+	out, err = runProfileCommand(t, cfg, "show", candidate)
+	if err != nil || !strings.Contains(out, "evidence:\n  - event=evt-prof-1 model=p/m prompt=v1\n") {
+		t.Errorf("show of a learned fact = %q, %v, want one evidence item per line", out, err)
+	}
 	out, err = runProfileCommand(t, cfg, "review")
 	if err != nil || !strings.Contains(out, candidate) {
 		t.Errorf("review = %q, %v", out, err)

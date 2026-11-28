@@ -169,7 +169,7 @@ func TestKBLifecycleAddListShowRefreshRemove(t *testing.T) {
 		t.Fatalf("list --json = %q, %v", out, err)
 	}
 	out, err = runKBCommand(t, cfg, "show", "support")
-	if err != nil || !strings.Contains(out, "policy.md\tfile\t2\t") {
+	if err != nil || !strings.HasPrefix(out, "collection: support\nsources: 1\nchunks: 2\nURI\tLABEL\tKIND\tCHUNKS\tDIGEST\tINGESTED\n") || !strings.Contains(out, "policy.md\tfile\t2\t") {
 		t.Fatalf("show = %q, %v", out, err)
 	}
 

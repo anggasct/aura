@@ -27,8 +27,10 @@ func (d *Descriptor) renderOn(surface Surface, out io.Writer, data json.RawMessa
 	escape := d.UntrustedOutput && surface != SurfaceAgent
 	switch d.Output.Kind {
 	case OutputTable:
-		if err := renderRecord(out, object, d.OutputHeaderOn(surface), escape); err != nil {
-			return err
+		if header := d.OutputHeaderOn(surface); len(header) > 0 {
+			if err := renderRecord(out, object, header, escape); err != nil {
+				return err
+			}
 		}
 		return renderTable(out, object, fields, escape)
 	case OutputText:
