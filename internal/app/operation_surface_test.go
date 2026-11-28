@@ -62,9 +62,10 @@ var describedGroups = []string{"cron", "kb"}
 func groupTools(t *testing.T, rig *registryRig, group string) []toolbroker.ToolRegistration {
 	t.Helper()
 	var found []toolbroker.ToolRegistration
-	for _, registration := range registeredTools(t, rig) {
-		if strings.HasPrefix(registration.Definition.Operation, group+".") {
-			found = append(found, registration)
+	registrations := registeredTools(t, rig)
+	for i := range registrations {
+		if strings.HasPrefix(registrations[i].Definition.Operation, group+".") {
+			found = append(found, registrations[i])
 		}
 	}
 	if len(found) == 0 {
