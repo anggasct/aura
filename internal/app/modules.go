@@ -378,7 +378,7 @@ func (b *build) buildKnowledgeOperations() error {
 	if err != nil {
 		return err
 	}
-	operations, err := knowledge.NewOperations(&knowledge.OperationDeps{Service: service})
+	operations, err := knowledge.NewOperations(&knowledge.OperationDeps{Service: service, Logger: b.logger})
 	if err != nil {
 		return err
 	}

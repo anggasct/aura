@@ -1619,12 +1619,16 @@ func (b *build) buildOperations() error {
 }
 
 func (b *build) operationFiles() *operation.FileDeps {
+	return operationFileDeps(b.cfg, b.db, b.artifactRoot)
+}
+
+func operationFileDeps(cfg *appconfig.Config, db *sql.DB, artifactRoot string) *operation.FileDeps {
 	files := &operation.FileDeps{}
-	if b.cfg.Tools != nil {
-		files.Workspace = b.cfg.Tools.Workspace
+	if cfg.Tools != nil {
+		files.Workspace = cfg.Tools.Workspace
 	}
-	if b.artifactRoot != "" {
-		files.Artifacts = storage.NewArtifactStore(b.db, b.artifactRoot, int64(b.cfg.Storage.ArtifactQuota))
+	if artifactRoot != "" {
+		files.Artifacts = storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))
 	}
 	return files
 }

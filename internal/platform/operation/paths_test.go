@@ -138,12 +138,12 @@ func TestTheKernelResolvesAPathParameterBeforeTheHandlerSeesIt(t *testing.T) {
 
 func TestTheKernelRefusesAHostPathItCannotOpenSafely(t *testing.T) {
 	dir := t.TempDir()
-	real := filepath.Join(dir, "real.md")
-	if err := os.WriteFile(real, []byte("body"), 0o600); err != nil {
+	target := filepath.Join(dir, "target.md")
+	if err := os.WriteFile(target, []byte("body"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	link := filepath.Join(dir, "link.md")
-	if err := os.Symlink(real, link); err != nil {
+	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {

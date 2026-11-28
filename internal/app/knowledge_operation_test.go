@@ -95,3 +95,26 @@ func TestKnowledgeChatCommandsAreAnsweredOnceWhenAMessageIsRedelivered(t *testin
 		t.Errorf("the page was fetched %d times for one message, want once", got)
 	}
 }
+
+func TestKnowledgeChatEmbedShowsItsPreviewUntilApplied(t *testing.T) {
+	rig := newChatRigE2E(t)
+	owner := chatSender{channel: principal.ChannelTelegram, class: principal.ClassOwner, direct: true}
+
+	previewed := rig.say(t, owner, "/kb embed support")
+
+	text := strings.Join(previewed, "\n")
+	for _, want := range []string{"would send", "model test-model", "destination:", "queries:"} {
+		if !strings.Contains(text, want) {
+			t.Errorf("the preview %q lacks %q", text, want)
+		}
+	}
+	if rig.kb.Provider.Sent() != 0 {
+		t.Fatalf("the preview sent %d chunks to the provider", rig.kb.Provider.Sent())
+	}
+
+	applied := rig.say(t, owner, "/kb embed support --apply")
+
+	if len(applied) == 0 || !strings.HasPrefix(applied[0], "embedded: ") || rig.kb.Provider.Sent() == 0 {
+		t.Fatalf("embed --apply replied %q and sent %d chunks, want the chunks sent", applied, rig.kb.Provider.Sent())
+	}
+}

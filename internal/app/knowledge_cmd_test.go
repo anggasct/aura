@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -22,9 +23,13 @@ import (
 	"github.com/anggasct/aura/internal/platform/egress"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/sandbox"
 	"github.com/anggasct/aura/internal/platform/secret/secrettest"
 	"github.com/anggasct/aura/internal/platform/sqlite"
+	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/turn"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	platformwebhook "github.com/anggasct/aura/internal/platform/webhook"
 )
 
@@ -54,12 +59,23 @@ func runKBCommand(t *testing.T, cfg string, args ...string) (string, error) {
 
 func addKBSource(ctx context.Context, service *knowledge.Service, collection, location string) (knowledge.IngestResult, error) {
 	var prepared *knowledge.Prepared
-	var err error
 	if knowledge.IsURLReference(location) {
-		prepared, err = service.PrepareURL(ctx, collection, location)
-	} else {
-		prepared, err = service.PrepareHostFile(ctx, collection, location)
+		var err error
+		if prepared, err = service.PrepareURL(ctx, collection, location); err != nil {
+			return knowledge.IngestResult{}, err
+		}
+		return service.Write(ctx, knowledge.ActionAdd, prepared)
 	}
+	file, err := os.Open(location)
+	if err != nil {
+		return knowledge.IngestResult{}, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return knowledge.IngestResult{}, err
+	}
+	prepared, err = service.PrepareStream(ctx, collection, &knowledge.Stream{URI: location, Name: filepath.Base(location), Size: info.Size(), Reader: file})
 	if err != nil {
 		return knowledge.IngestResult{}, err
 	}
@@ -69,6 +85,14 @@ func addKBSource(ctx context.Context, service *knowledge.Service, collection, lo
 func requireKBCode(t *testing.T, err error, want knowledge.ErrorCode) {
 	t.Helper()
 	code, ok := fault.CodeOf[knowledge.ErrorCode](err)
+	if !ok || code != want {
+		t.Fatalf("error = %v, want code %s", err, want)
+	}
+}
+
+func requireOperationCode(t *testing.T, err error, want operation.ErrorCode) {
+	t.Helper()
+	code, ok := fault.CodeOf[operation.ErrorCode](err)
 	if !ok || code != want {
 		t.Fatalf("error = %v, want code %s", err, want)
 	}
@@ -232,7 +256,10 @@ func TestKBRefreshFailureKeepsOldChunks(t *testing.T) {
 		t.Fatalf("remove document: %v", err)
 	}
 	_, err := runKBCommand(t, cfg, "refresh", "support")
-	requireKBCode(t, err, knowledge.ErrorCodeSourceNotFound)
+	requireKBCode(t, err, knowledge.ErrorCodeNothingRefreshed)
+	if !strings.Contains(err.Error(), "policy.md (source_unavailable)") {
+		t.Errorf("error %q does not name the source and its reason", err.Error())
+	}
 	out, err := runKBCommand(t, cfg, "show", "support")
 	if err != nil || !strings.Contains(out, "chunks=1") {
 		t.Fatalf("show after failed refresh = %q, %v; want the old chunks kept", out, err)
@@ -249,10 +276,6 @@ func TestKBRefreshFailureKeepsOldChunks(t *testing.T) {
 func TestKBAddRefusalsReturnTheirCodes(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	realFile := writeKBDocument(t, "real.md", "content")
-	link := filepath.Join(t.TempDir(), "link.md")
-	if err := os.Symlink(realFile, link); err != nil {
-		t.Fatalf("symlink: %v", err)
-	}
 	oversized := writeKBDocument(t, "big.txt", strings.Repeat("a", knowledge.MaxSourceBytes+1))
 	binary := writeKBDocument(t, "latin.txt", "caf\xe9")
 	cases := []struct {
@@ -263,9 +286,6 @@ func TestKBAddRefusalsReturnTheirCodes(t *testing.T) {
 	}{
 		{"invalid collection", "Support", realFile, knowledge.ErrorCodeCollectionInvalid},
 		{"unsupported extension", "support", writeKBDocument(t, "doc.pdf", "x"), knowledge.ErrorCodeSourceUnsupported},
-		{"symlink", "support", link, knowledge.ErrorCodeSourceNotRegular},
-		{"directory", "support", t.TempDir() + "/", knowledge.ErrorCodeSourceUnsupported},
-		{"missing", "support", filepath.Join(t.TempDir(), "missing.md"), knowledge.ErrorCodeSourceNotFound},
 		{"oversized", "support", oversized, knowledge.ErrorCodeSourceTooLarge},
 		{"not utf8", "support", binary, knowledge.ErrorCodeSourceNotUTF8},
 		{"plain http", "support", "http://docs.example.com/a", knowledge.ErrorCodeURLRefused},
@@ -283,6 +303,38 @@ func TestKBAddRefusalsReturnTheirCodes(t *testing.T) {
 			}
 			if strings.Contains(err.Error(), "pass") {
 				t.Errorf("error %q prints URL credentials", err.Error())
+			}
+		})
+	}
+	_, db, _ := kbTestStorage(t, cfg)
+	if chunks := countRows(t, db, `SELECT count(*) FROM kb_chunk`); chunks != 0 {
+		t.Errorf("refused sources left %d chunks", chunks)
+	}
+}
+
+func TestKBAddRefusesHostFilesTheKernelCannotOpen(t *testing.T) {
+	cfg := writeMemoryCLIConfig(t)
+	realFile := writeKBDocument(t, "real.md", "content")
+	link := filepath.Join(t.TempDir(), "link.md")
+	if err := os.Symlink(realFile, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	cases := []struct {
+		name   string
+		source string
+		want   operation.ErrorCode
+	}{
+		{"symlink", link, operation.ErrorCodePolicyDenied},
+		{"directory", t.TempDir(), operation.ErrorCodeSourceUnavailable},
+		{"missing", filepath.Join(t.TempDir(), "missing.md"), operation.ErrorCodeSourceUnavailable},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out, err := runKBCommand(t, cfg, "add", "support", tc.source)
+
+			requireOperationCode(t, err, tc.want)
+			if strings.Contains(out, "added") || strings.Contains(err.Error(), filepath.Dir(tc.source)) {
+				t.Errorf("out %q, error %q: a refused source was reported added or the error carries the host path", out, err)
 			}
 		})
 	}
@@ -569,5 +621,84 @@ func TestKnowledgeHTTPClientRefusesRedirectsToDeniedDestinations(t *testing.T) {
 			err = client.CheckRedirect(request, nil)
 			requireKBCode(t, err, knowledge.ErrorCodeURLRefused)
 		})
+	}
+}
+
+func TestKBRefreshReadsTheWorkspaceFilesAndAttachmentsAnAgentAdded(t *testing.T) {
+	cfgPath := writeMemoryCLIConfig(t)
+	cfg, db, _ := kbTestStorage(t, cfgPath)
+	service, err := newKnowledgeService(cfg, db, nil)
+	if err != nil {
+		t.Fatalf("newKnowledgeService: %v", err)
+	}
+	now := time.Now().UTC()
+	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: "session-1", OwnerID: "owner-1", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatalf("create the session: %v", err)
+	}
+	_, artifactRoot, _, err := storage.ResolvePaths(&cfg.Storage)
+	if err != nil {
+		t.Fatalf("ResolvePaths: %v", err)
+	}
+	artifacts := storage.NewArtifactStore(db, artifactRoot, int64(cfg.Storage.ArtifactQuota))
+	attachment, err := artifacts.Put(t.Context(), strings.NewReader("# Faq\nHow do refunds work?\n"), &storage.ArtifactMetadata{
+		ID: "art-0123456789abcdef", SessionID: "session-1", Filename: "faq.md", MediaType: "text/markdown",
+	})
+	if err != nil {
+		t.Fatalf("store the attachment: %v", err)
+	}
+	workspaceFile := filepath.Join(cfg.Tools.Workspace, "docs", "policy.md")
+	if err := os.MkdirAll(filepath.Dir(workspaceFile), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(workspaceFile, []byte("# Policy\nRefunds are issued within thirty days.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, stored := range []struct{ uri, name, body string }{
+		{"workspace:docs/policy.md", "policy.md", "# Policy\nRefunds are issued within thirty days.\n"},
+		{"artifact:" + attachment.ID, "faq.md", "# Faq\nHow do refunds work?\n"},
+	} {
+		prepared, err := service.PrepareStream(t.Context(), "support", &knowledge.Stream{
+			URI: stored.uri, Name: stored.name, MediaType: "text/markdown", Size: int64(len(stored.body)), Reader: strings.NewReader(stored.body),
+		})
+		if err != nil {
+			t.Fatalf("prepare %s: %v", stored.uri, err)
+		}
+		if _, err := service.Write(t.Context(), knowledge.ActionAdd, prepared); err != nil {
+			t.Fatalf("write %s: %v", stored.uri, err)
+		}
+	}
+	if err := os.WriteFile(workspaceFile, []byte("# Policy\nRefunds are issued within sixty days.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := runKBCommand(t, cfgPath, "refresh", "support")
+
+	if err != nil {
+		t.Fatalf("refresh: %v (%s)", err, out)
+	}
+	if !strings.Contains(out, "replaced: policy.md") || !strings.Contains(out, "unchanged: faq.md") {
+		t.Fatalf("refresh output = %q, want the workspace file replaced and the attachment reported unchanged", out)
+	}
+	show, err := runKBCommand(t, cfgPath, "show", "support")
+	if err != nil || !strings.Contains(show, "workspace:docs/policy.md") || !strings.Contains(show, "artifact:"+attachment.ID) {
+		t.Fatalf("show = %q, %v; want both stored sources kept", show, err)
+	}
+}
+
+func TestKBAddHelpDescribesOnlyWhatTheCLIDoes(t *testing.T) {
+	cfg := writeMemoryCLIConfig(t)
+
+	out, err := runKBCommand(t, cfg, "add", "--help")
+
+	if err != nil {
+		t.Fatalf("help: %v", err)
+	}
+	if !strings.Contains(out, "add <collection> <source>") || !strings.Contains(out, "a file on this host") {
+		t.Errorf("help = %q, want the source as a file on this host or an address", out)
+	}
+	for _, refused := range []string{"workspace", "attachment", "artifact:"} {
+		if strings.Contains(out, refused) {
+			t.Errorf("help = %q, mentions %q which is not true on the CLI", out, refused)
+		}
 	}
 }

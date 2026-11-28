@@ -1,15 +1,15 @@
-cron.add exposure=agent risk=trust_grant commit=transactional fresh=false notice=false sink=true untrusted=false preview=true surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_add
-cron.delete exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_delete
-cron.list exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_list
-cron.pause exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_pause
-cron.resume exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_resume
-cron.run-now exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_run_now
-cron.runs exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_runs
-kb.add exposure=agent risk=change commit=transactional fresh=false notice=false sink=true untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_add
-kb.check exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_check
-kb.embed exposure=agent risk=trust_grant commit=external fresh=false notice=false sink=false untrusted=false preview=true surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_embed
-kb.list exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_list
-kb.refresh exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_refresh
-kb.remove exposure=agent risk=destructive commit=transactional fresh=false notice=false sink=false untrusted=false preview=true surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_remove
-kb.show exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=true preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_show
-kb.unembed exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=true surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_unembed
+cron.add exposure=agent risk=trust_grant commit=transactional fresh=false notice=false sink=true untrusted=false preview=true previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_add
+cron.delete exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_delete
+cron.list exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_list
+cron.pause exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_pause
+cron.resume exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_resume
+cron.run-now exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_run_now
+cron.runs exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_runs
+kb.add exposure=agent risk=change commit=transactional fresh=false notice=false sink=true untrusted=false preview=true previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_add
+kb.check exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_check
+kb.embed exposure=agent risk=trust_grant commit=external fresh=false notice=false sink=false untrusted=false preview=true previewfirst=true surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_embed
+kb.list exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_list
+kb.refresh exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_refresh
+kb.remove exposure=agent risk=destructive commit=transactional fresh=false notice=false sink=false untrusted=false preview=true previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_remove
+kb.show exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=true preview=false previewfirst=false surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_show
+kb.unembed exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=true previewfirst=true surfaces=cli,chat,agent secret=- caps=- tool=aura_kb_unembed

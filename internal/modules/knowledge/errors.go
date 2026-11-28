@@ -22,6 +22,7 @@ const (
 	ErrorCodeCollectionInvalid ErrorCode = "kb_collection_invalid"
 	ErrorCodeSourceNotFound    ErrorCode = "kb_source_not_found"
 	ErrorCodeIndexDamaged      ErrorCode = "kb_index_damaged"
+	ErrorCodeNothingRefreshed  ErrorCode = "kb_nothing_refreshed"
 
 	ErrorCodeEmbeddingUnavailable ErrorCode = "kb_embedding_unavailable"
 	ErrorCodeEmbeddingFailed      ErrorCode = "kb_embedding_failed"

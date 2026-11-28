@@ -632,9 +632,12 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
-	knowledgeOperations, err := knowledge.NewOperations(&knowledge.OperationDeps{Service: a.knowledge})
-	if err != nil {
-		return nil, err
+	knowledgeOperations := knowledge.UnavailableOperations()
+	if a.knowledge != nil {
+		knowledgeOperations, err = knowledge.NewOperations(&knowledge.OperationDeps{Service: a.knowledge, Logger: a.logger})
+		if err != nil {
+			return nil, err
+		}
 	}
 	effects, err := newChannelEffects(a.db, a.logger)
 	if err != nil {
@@ -644,11 +647,16 @@ func (a *App) commandOperations() (*operation.Registry, error) {
 	if err != nil {
 		return nil, err
 	}
+	_, artifactRoot, _, err := storage.ResolvePaths(&cfg.Storage)
+	if err != nil {
+		return nil, err
+	}
 	bindings := append(operations.Bindings(), knowledgeOperations.Bindings()...)
 	return operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{
 		DB:      a.db,
 		Effects: effects,
 		Tools:   lookup,
+		Files:   operationFileDeps(cfg, a.db, artifactRoot),
 		Logger:  a.logger,
 	})
 }

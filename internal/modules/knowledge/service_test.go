@@ -3,7 +3,6 @@ package knowledge
 import (
 	"context"
 	"errors"
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -511,19 +510,5 @@ func TestCheckReportsAnIndexWithProblemsAsDamaged(t *testing.T) {
 	requireCode(t, err, ErrorCodeIndexDamaged)
 	if len(report.Problems) != 1 {
 		t.Fatalf("report = %+v, want the problems returned with the error", report)
-	}
-}
-
-func TestIngestedFilesUseTheNoFollowOpen(t *testing.T) {
-	fixture := newFixture(t)
-	target := writeSource(t, "real.md", []byte("content"))
-	link := filepath.Join(t.TempDir(), "link.md")
-	if err := os.Symlink(target, link); err != nil {
-		t.Fatal(err)
-	}
-	_, err := fixture.add(t.Context(), "support", link)
-	requireCode(t, err, ErrorCodeSourceNotRegular)
-	if len(fixture.store.writes) != 0 {
-		t.Error("a symlink was ingested")
 	}
 }

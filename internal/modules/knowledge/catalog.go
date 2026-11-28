@@ -42,9 +42,13 @@ func addParams() []operation.Param {
 	return []operation.Param{
 		collectionParam(),
 		{
-			Name: "source", Kind: operation.KindString, Position: 2, Required: true, MinLength: 1, MaxLength: maxSourceInputBytes,
-			Summary:  "a host path or https URL; for the agent a workspace path, artifact:<id> of an attachment in this session, or an https URL",
+			Name: "source", Kind: operation.KindPath, Position: 2, Required: true, URLParam: "url",
+			Summary:  "a file or an https URL",
 			Surfaces: []operation.Surface{operation.SurfaceCLI, operation.SurfaceAgent},
+			Texts: []operation.SurfaceText{
+				{Surface: operation.SurfaceCLI, Text: "a file on this host or an https URL"},
+				{Surface: operation.SurfaceAgent, Text: "a file path in the workspace, artifact:<id> of an attachment of this session, or an https URL"},
+			},
 		},
 		{
 			Name: "url", Kind: operation.KindString, Summary: "https URL of the document", Position: 3, Required: true,
@@ -77,14 +81,18 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationAdd, Summary: "Ingest a document into a collection", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Sink: true, Needs: needs,
-				Description: "Reads Markdown, plain text or HTML from an https URL, a file in the workspace or an attachment of this session and stores its text as searchable chunks. An address you choose is fetched from this host.",
-				Params:      addParams(), Output: textOutput(),
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Sink: true, Preview: true, Needs: needs,
+				Description: "Reads Markdown, plain text or HTML from an https URL and stores its text as searchable chunks. An address you choose is fetched from this host.",
+				Texts: []operation.SurfaceText{
+					{Surface: operation.SurfaceCLI, Text: "Reads Markdown, plain text or HTML from an https URL or a file on this host and stores its text as searchable chunks. An address you choose is fetched from this host."},
+					{Surface: operation.SurfaceAgent, Text: "Reads Markdown, plain text or HTML from an https URL, a file in the workspace or an attachment of this session and stores its text as searchable chunks. An address you choose is fetched from this host."},
+				},
+				Params: addParams(), Output: textOutput(),
 			},
 			{
 				ID: operationRefresh, Summary: "Re-read the stored sources of a collection", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Needs: needs,
-				Description: "Reads again the sources already stored in the collection; a source that fails to read leaves the whole collection unchanged.",
+				Description: "Reads again the sources already stored in the collection. A source that cannot be read keeps its stored chunks and is reported; a stored attachment never changes; a file on the host is refreshed only from the host.",
 				Params:      []operation.Param{collectionParam(), storedSourceParam(false)}, Output: textOutput(),
 			},
 			{
@@ -94,13 +102,13 @@ func Catalog() operation.Catalog {
 			},
 			{
 				ID: operationEmbed, Summary: "Send a collection's chunks to the embedding provider for vectors", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskTrustGrant, Commit: operation.CommitExternal, Preview: true, Needs: needs,
+				Risk: operation.RiskTrustGrant, Commit: operation.CommitExternal, Preview: true, PreviewFirst: true, Needs: needs,
 				Description: "Opts the collection in to sending its chunk text to the configured embedding provider and stores the vectors; it also rebuilds vectors after the model or destination changed.",
 				Params:      []operation.Param{collectionParam()}, Output: textOutput(),
 			},
 			{
 				ID: operationUnembed, Summary: "Clear a collection's embedding opt-in and erase its vectors", Exposure: operation.ExposureAgent,
-				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Preview: true, Needs: needs,
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, Preview: true, PreviewFirst: true, Needs: needs,
 				Params: []operation.Param{collectionParam()}, Output: textOutput(),
 			},
 		},

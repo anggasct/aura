@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
+	"path/filepath"
 
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
@@ -12,7 +15,22 @@ func (f *serviceFixture) prepared(ctx context.Context, collection, source string
 	if IsURLReference(source) {
 		return f.service.PrepareURL(ctx, collection, source)
 	}
-	return f.service.PrepareHostFile(ctx, collection, source)
+	if err := requireCollection(collection); err != nil {
+		return nil, err
+	}
+	file, err := os.Open(source)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, Errorf(ErrorCodeSourceNotFound, "source file does not exist")
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	return f.service.PrepareStream(ctx, collection, &Stream{URI: source, Name: filepath.Base(source), Size: info.Size(), Reader: file})
 }
 
 func (f *serviceFixture) add(ctx context.Context, collection, source string) (IngestResult, error) {

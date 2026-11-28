@@ -154,11 +154,7 @@ func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
 	if err != nil {
 		t.Fatalf("schedule.NewOperations: %v", err)
 	}
-	knowledgeOperations, err := knowledge.NewOperations(&knowledge.OperationDeps{})
-	if err != nil {
-		t.Fatalf("knowledge.NewOperations: %v", err)
-	}
-	bindings := append(operations.Bindings(), knowledgeOperations.Bindings()...)
+	bindings := append(operations.Bindings(), knowledge.UnavailableOperations().Bindings()...)
 	registry, err := operation.NewRegistry(operationCatalogs(), bindings, &operation.Deps{DB: db, Effects: effects, Tools: broker})
 	if err != nil {
 		t.Fatalf("operation.NewRegistry: %v", err)

@@ -195,10 +195,6 @@ func (s *Service) PrepareURL(ctx context.Context, collection, raw string) (*Prep
 	return s.prepare(ctx, collection, func() (*loadedSource, error) { return loadURL(ctx, s.http, raw) })
 }
 
-func (s *Service) PrepareHostFile(ctx context.Context, collection, location string) (*Prepared, error) {
-	return s.prepare(ctx, collection, func() (*loadedSource, error) { return loadFile(location) })
-}
-
 func (s *Service) PrepareStream(ctx context.Context, collection string, stream *Stream) (*Prepared, error) {
 	if stream == nil || stream.Reader == nil {
 		return nil, Errorf(ErrorCodeInvalidArgument, "source stream must not be nil")

@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"io/fs"
 	"mime"
 	"net/http"
 	"net/url"
@@ -58,46 +57,6 @@ func fileFormat(name string) (Format, bool) {
 	return "", false
 }
 
-func loadFile(location string) (*loadedSource, error) {
-	absolute, err := filepath.Abs(location)
-	if err != nil {
-		return nil, Errorf(ErrorCodeSourceNotFound, "source path cannot be resolved")
-	}
-	format, ok := fileFormat(absolute)
-	if !ok {
-		return nil, Errorf(ErrorCodeSourceUnsupported, "only .md, .txt and .html files are supported")
-	}
-	file, err := openNoFollow(absolute)
-	if err != nil {
-		return nil, classifyOpenError(err)
-	}
-	defer func() { _ = file.Close() }()
-	info, err := file.Stat()
-	if err != nil {
-		return nil, Errorf(ErrorCodeSourceNotRegular, "source cannot be inspected")
-	}
-	if !info.Mode().IsRegular() {
-		return nil, Errorf(ErrorCodeSourceNotRegular, "source is not a regular file")
-	}
-	if info.Size() > MaxSourceBytes {
-		return nil, Errorf(ErrorCodeSourceTooLarge, "source exceeds %d bytes", MaxSourceBytes)
-	}
-	data, err := readBounded(file)
-	if err != nil {
-		return nil, err
-	}
-	if err := requireText(data); err != nil {
-		return nil, err
-	}
-	return &loadedSource{
-		kind:   SourceKindFile,
-		uri:    absolute,
-		label:  sanitizeLabel(filepath.Base(absolute)),
-		format: format,
-		data:   data,
-	}, nil
-}
-
 func loadStream(stream *Stream) (*loadedSource, error) {
 	format, err := streamFormat(stream.Name, stream.MediaType)
 	if err != nil {
@@ -142,16 +101,6 @@ func streamFormat(name, mediaType string) (Format, error) {
 		return FormatText, nil
 	}
 	return "", Errorf(ErrorCodeSourceUnsupported, "only Markdown, plain text and HTML attachments are supported")
-}
-
-func classifyOpenError(err error) error {
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return Errorf(ErrorCodeSourceNotFound, "source file does not exist")
-	case isSymlinkOpenError(err):
-		return Errorf(ErrorCodeSourceNotRegular, "source is a symbolic link")
-	}
-	return Errorf(ErrorCodeSourceNotRegular, "source cannot be opened as a regular file")
 }
 
 func readBounded(reader io.Reader) ([]byte, error) {

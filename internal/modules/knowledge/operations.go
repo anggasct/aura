@@ -4,9 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
-	"path"
+	"log/slog"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 const (
@@ -34,17 +34,27 @@ var removalNotes = []string{
 
 type OperationDeps struct {
 	Service *Service
+	Logger  *slog.Logger
 }
 
 type Operations struct {
 	service *Service
+	logger  *slog.Logger
 }
 
 func NewOperations(deps *OperationDeps) (*Operations, error) {
-	if deps == nil {
-		return nil, Errorf(ErrorCodeInvalidArgument, "knowledge operation deps must not be nil")
+	if deps == nil || deps.Service == nil {
+		return nil, Errorf(ErrorCodeInvalidArgument, "knowledge operation deps need a service")
 	}
-	return &Operations{service: deps.Service}, nil
+	logger := deps.Logger
+	if logger == nil {
+		logger = slog.New(slog.DiscardHandler)
+	}
+	return &Operations{service: deps.Service, logger: logger}, nil
+}
+
+func UnavailableOperations() *Operations {
+	return &Operations{logger: slog.New(slog.DiscardHandler)}
 }
 
 func (o *Operations) Bindings() []operation.Binding {
@@ -52,7 +62,7 @@ func (o *Operations) Bindings() []operation.Binding {
 		{ID: operationList, Handle: o.list},
 		{ID: operationShow, Handle: o.show},
 		{ID: operationCheck, Handle: o.check},
-		{ID: operationAdd, Handle: o.add},
+		{ID: operationAdd, Handle: o.add, Preview: o.previewAdd},
 		{ID: operationRefresh, Handle: o.refresh},
 		{ID: operationRemove, Handle: o.remove, Preview: o.previewRemove},
 		{ID: operationEmbed, Handle: o.embed, Preview: o.previewEmbed},
@@ -66,6 +76,8 @@ type collectionInput struct {
 	URL        string `json:"url"`
 }
 
+const sourceParam = "source"
+
 func usage(detail string) error {
 	return operation.NewError(operation.ErrorCodeInputInvalid, detail)
 }
@@ -78,14 +90,25 @@ func moduleFailure(err error) error {
 		return err
 	}
 	if code, coded := fault.CodeOf[ErrorCode](err); coded {
-		return operation.Fail(code, err)
+		return operation.Fail(code, &renderedOnce{code: code, cause: err})
 	}
 	return err
 }
 
+type renderedOnce struct {
+	code  ErrorCode
+	cause error
+}
+
+func (e *renderedOnce) Error() string {
+	return strings.Replace(e.cause.Error(), string(e.code)+": ", "", 1)
+}
+
+func (e *renderedOnce) Unwrap() error { return e.cause }
+
 func (o *Operations) ready(call *operation.Call, input *collectionInput) error {
 	if o.service == nil {
-		return Errorf(ErrorCodeInvalidArgument, "knowledge service must not be nil")
+		return Errorf(ErrorCodeInvalidArgument, "the knowledge service is not available in this command")
 	}
 	return call.Decode(input)
 }
@@ -192,54 +215,93 @@ func (o *Operations) add(ctx context.Context, call *operation.Call) (operation.R
 			return operation.Result{}, err
 		}
 		written, applied = result, true
-		return ingestResult([]IngestResult{result}, embeddedAs{})
+		return ingestResult([]IngestResult{result}, nil, embeddedAs{})
 	})
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
-	if !applied || written.Status == StatusUnchanged {
+	if !applied {
 		return committed, nil
 	}
-	return ingestResult([]IngestResult{written}, o.embedAfterWrite(ctx, in.Collection))
+	o.logger.InfoContext(ctx, "knowledge source ingested", sourceAttrs("add", &written)...)
+	if written.Status == StatusUnchanged {
+		return committed, nil
+	}
+	return ingestResult([]IngestResult{written}, nil, o.embedAfterWrite(ctx, in.Collection))
+}
+
+func (o *Operations) previewAdd(ctx context.Context, call *operation.Call) (operation.Preview, error) {
+	var in collectionInput
+	if err := o.ready(call, &in); err != nil {
+		return operation.Preview{}, err
+	}
+	line := "fetches the address from this host and stores its text as searchable chunks in collection " + in.Collection
+	if call.HasFile(sourceParam) {
+		file, err := call.File(ctx, sourceParam)
+		if err != nil {
+			return operation.Preview{}, moduleFailure(err)
+		}
+		line = fmt.Sprintf("reads %s (%s, %d bytes) and stores its text as searchable chunks in collection %s",
+			turn.QuoteUntrustedName(file.Name()), mediaTypeLabel(file.MediaType()), file.Size(), in.Collection)
+	}
+	return operation.Preview{Lines: []string{line}, Digest: digestOf(line)}, nil
+}
+
+func mediaTypeLabel(mediaType string) string {
+	if mediaType == "" {
+		return "media type not recorded"
+	}
+	return mediaType
+}
+
+func sourceAttrs(verb string, result *IngestResult) []any {
+	return []any{
+		"component", "knowledge", "operation", verb, "collection", result.Collection,
+		"status", result.Status, "chunks", result.Chunks,
+	}
 }
 
 func (o *Operations) prepareAdd(ctx context.Context, call *operation.Call, in *collectionInput) (*Prepared, error) {
 	switch {
-	case (in.Source == "") == (in.URL == ""):
-		return nil, usage("exactly one of source or url is required")
 	case in.URL != "":
 		return o.service.PrepareURL(ctx, in.Collection, in.URL)
-	case IsURLReference(in.Source):
-		return o.service.PrepareURL(ctx, in.Collection, in.Source)
-	case call.Caller.Surface == operation.SurfaceCLI:
-		return o.service.PrepareHostFile(ctx, in.Collection, in.Source)
+	case call.HasFile(sourceParam):
+		file, err := call.File(ctx, sourceParam)
+		if err != nil {
+			return nil, err
+		}
+		return o.prepareFrom(ctx, in.Collection, file)
 	}
-	return o.prepareOpened(ctx, call, in.Collection, in.Source)
+	return nil, usage("a source or a url is required")
 }
 
-func (o *Operations) prepareOpened(ctx context.Context, call *operation.Call, collection, source string) (*Prepared, error) {
-	if call.Files == nil {
-		return nil, operation.NewError(operation.ErrorCodePolicyDenied, "file sources are not available")
-	}
-	file, err := call.Files.Open(ctx, source)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = file.Close() }()
+func (o *Operations) prepareFrom(ctx context.Context, collection string, file operation.File) (*Prepared, error) {
 	return o.service.PrepareStream(ctx, collection, &Stream{
-		URI: storedURI(source), Name: file.Name(), MediaType: file.MediaType(), Size: file.Size(), Reader: file,
+		URI: file.Reference(), Name: file.Name(), MediaType: file.MediaType(), Size: file.Size(), Reader: file,
 	})
 }
 
-func storedURI(source string) string {
-	if strings.HasPrefix(source, artifactScheme) {
-		return source
-	}
-	return workspaceScheme + path.Clean(filepath.ToSlash(source))
+type refreshNote struct {
+	Label  string `json:"label"`
+	Status string `json:"status"`
+	Code   string `json:"code,omitempty"`
+	Chunks int    `json:"chunks,omitempty"`
 }
 
-func openableSource(uri string) string {
-	return strings.TrimPrefix(uri, workspaceScheme)
+const (
+	noteUnchanged = "unchanged"
+	noteSkipped   = "skipped"
+	noteFailed    = "failed"
+)
+
+func (n *refreshNote) line() string {
+	switch n.Status {
+	case noteUnchanged:
+		return fmt.Sprintf("unchanged: %s chunks=%d (a stored attachment never changes)", n.Label, n.Chunks)
+	case noteSkipped:
+		return fmt.Sprintf("skipped: %s (%s): refresh this source from the host", n.Label, n.Code)
+	}
+	return fmt.Sprintf("failed: %s (%s): the stored chunks are kept", n.Label, n.Code)
 }
 
 func (o *Operations) refresh(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -252,17 +314,20 @@ func (o *Operations) refresh(ctx context.Context, call *operation.Call) (operati
 		return operation.Result{}, moduleFailure(err)
 	}
 	prepared := make([]*Prepared, 0, len(records))
-	var failures []error
+	var notes []refreshNote
 	for i := range records {
-		next, err := o.prepareStored(ctx, call, in.Collection, &records[i])
+		next, note, err := o.prepareStored(ctx, call, in.Collection, &records[i])
 		if err != nil {
-			failures = append(failures, fmt.Errorf("refresh %s: %w", records[i].Label, err))
+			return operation.Result{}, moduleFailure(err)
+		}
+		if note != nil {
+			notes = append(notes, *note)
 			continue
 		}
 		prepared = append(prepared, next)
 	}
-	if len(failures) > 0 {
-		return operation.Result{}, moduleFailure(errors.Join(failures...))
+	if len(prepared) == 0 && len(notes) > 0 && !slices.ContainsFunc(notes, func(n refreshNote) bool { return n.Status != noteFailed }) {
+		return operation.Result{}, nothingRefreshed(notes)
 	}
 	var written []IngestResult
 	committed, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
@@ -273,15 +338,27 @@ func (o *Operations) refresh(ctx context.Context, call *operation.Call) (operati
 			}
 			written = append(written, result)
 		}
-		return ingestResult(written, embeddedAs{})
+		return ingestResult(written, notes, embeddedAs{})
 	})
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
 	}
+	for i := range written {
+		o.logger.InfoContext(ctx, "knowledge source refreshed", sourceAttrs("refresh", &written[i])...)
+	}
 	if !slicesChanged(written) {
 		return committed, nil
 	}
-	return ingestResult(written, o.embedAfterWrite(ctx, in.Collection))
+	return ingestResult(written, notes, o.embedAfterWrite(ctx, in.Collection))
+}
+
+func nothingRefreshed(notes []refreshNote) error {
+	parts := make([]string, 0, len(notes))
+	for i := range notes {
+		parts = append(parts, notes[i].Label+" ("+notes[i].Code+")")
+	}
+	cause := Errorf(ErrorCodeNothingRefreshed, "no source could be refreshed and the stored chunks are kept: %s", strings.Join(parts, ", "))
+	return operation.NotPerformed(ErrorCodeNothingRefreshed, &renderedOnce{code: ErrorCodeNothingRefreshed, cause: cause})
 }
 
 func slicesChanged(results []IngestResult) bool {
@@ -293,14 +370,44 @@ func slicesChanged(results []IngestResult) bool {
 	return false
 }
 
-func (o *Operations) prepareStored(ctx context.Context, call *operation.Call, collection string, record *SourceRecord) (*Prepared, error) {
+func (o *Operations) prepareStored(ctx context.Context, call *operation.Call, collection string, record *SourceRecord) (*Prepared, *refreshNote, error) {
 	switch {
 	case record.Kind == SourceKindURL:
-		return o.service.PrepareURL(ctx, collection, record.URI)
-	case call.Caller.Surface != operation.SurfaceAgent && filepath.IsAbs(record.URI):
-		return o.service.PrepareHostFile(ctx, collection, record.URI)
+		return o.settled(ctx, record, func() (*Prepared, error) { return o.service.PrepareURL(ctx, collection, record.URI) })
+	case strings.HasPrefix(record.URI, artifactScheme):
+		return nil, &refreshNote{Label: record.Label, Status: noteUnchanged, Chunks: record.Chunks}, nil
+	case call.Caller.Surface != operation.SurfaceCLI && filepath.IsAbs(record.URI):
+		return nil, &refreshNote{Label: record.Label, Status: noteSkipped, Code: string(operation.ErrorCodePolicyDenied)}, nil
 	}
-	return o.prepareOpened(ctx, call, collection, openableSource(record.URI))
+	return o.settled(ctx, record, func() (*Prepared, error) {
+		file, err := call.Files.Open(ctx, record.URI)
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = file.Close() }()
+		return o.prepareFrom(ctx, collection, file)
+	})
+}
+
+func (o *Operations) settled(ctx context.Context, record *SourceRecord, prepare func() (*Prepared, error)) (*Prepared, *refreshNote, error) {
+	prepared, err := prepare()
+	switch {
+	case err == nil:
+		return prepared, nil, nil
+	case ctx.Err() != nil:
+		return nil, nil, err
+	}
+	return nil, &refreshNote{Label: record.Label, Status: noteFailed, Code: reasonCode(err)}, nil
+}
+
+func reasonCode(err error) string {
+	if code, coded := fault.CodeOf[ErrorCode](err); coded {
+		return string(code)
+	}
+	if code, coded := fault.CodeOf[operation.ErrorCode](err); coded {
+		return string(code)
+	}
+	return string(operation.ErrorCodeFailed)
 }
 
 type embeddedAs struct {
@@ -318,7 +425,7 @@ func (o *Operations) embedAfterWrite(ctx context.Context, collection string) emb
 	return embeddedAs{state: outcome.State, sent: outcome.Sent}
 }
 
-func ingestResult(results []IngestResult, embedded embeddedAs) (operation.Result, error) {
+func ingestResult(results []IngestResult, notes []refreshNote, embedded embeddedAs) (operation.Result, error) {
 	type row struct {
 		Status string `json:"status"`
 		Label  string `json:"label"`
@@ -328,12 +435,15 @@ func ingestResult(results []IngestResult, embedded embeddedAs) (operation.Result
 		Kept   int    `json:"chunks_kept"`
 	}
 	rows := make([]row, 0, len(results))
-	lines := make([]string, 0, len(results)+1)
+	lines := make([]string, 0, len(results)+len(notes)+1)
 	for i := range results {
 		result := &results[i]
 		rows = append(rows, row{result.Status, result.Label, result.Chunks, result.ChunksAdded, result.ChunksRemoved, result.ChunksKept})
 		lines = append(lines, fmt.Sprintf("%s: %s chunks=%d added=%d removed=%d kept=%d",
 			result.Status, result.Label, result.Chunks, result.ChunksAdded, result.ChunksRemoved, result.ChunksKept))
+	}
+	for i := range notes {
+		lines = append(lines, notes[i].line())
 	}
 	collection := ""
 	if len(results) > 0 {
@@ -341,6 +451,9 @@ func ingestResult(results []IngestResult, embedded embeddedAs) (operation.Result
 	}
 	lines = append(lines, embeddingLines(collection, embedded)...)
 	data := map[string]any{"sources": rows}
+	if len(notes) > 0 {
+		data["notes"] = notes
+	}
 	if embedded.state != embeddingNotApplied {
 		data["embedding"] = embedded.state
 		data["embedding_sent"] = embedded.sent
@@ -411,7 +524,7 @@ func (o *Operations) remove(ctx context.Context, call *operation.Call) (operatio
 			return operation.Result{}, err
 		}
 		outcome, applied = removed, true
-		return removedResult(&outcome, true)
+		return removedResult(&outcome, walUnchecked)
 	})
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
@@ -419,30 +532,50 @@ func (o *Operations) remove(ctx context.Context, call *operation.Call) (operatio
 	if !applied {
 		return committed, nil
 	}
-	truncated, err := o.service.TruncateWAL(ctx)
-	if err != nil {
-		truncated = false
+	o.logger.InfoContext(ctx, "knowledge source removed",
+		"component", "knowledge", "operation", "remove", "collection", in.Collection, "chunks", outcome.Chunks)
+	return removedResult(&outcome, o.truncateWAL(ctx))
+}
+
+type walState int
+
+const (
+	walUnchecked walState = iota
+	walTruncated
+	walBlocked
+)
+
+func (o *Operations) truncateWAL(ctx context.Context) walState {
+	if truncated, err := o.service.TruncateWAL(ctx); err == nil && truncated {
+		return walTruncated
 	}
-	return removedResult(&outcome, truncated)
+	return walBlocked
 }
 
 func staleSet(detail string) error {
 	return operation.NotPerformed(operation.ErrorCodePreviewStale, operation.NewError(operation.ErrorCodePreviewStale, detail))
 }
 
-func removedResult(outcome *RemoveOutcome, truncated bool) (operation.Result, error) {
+func removedResult(outcome *RemoveOutcome, wal walState) (operation.Result, error) {
 	lines := make([]string, 0, len(removalNotes)+2)
 	lines = append(lines, fmt.Sprintf("removed: %d chunks", outcome.Chunks))
-	lines = append(lines, walLines(truncated)...)
+	lines = append(lines, walLines(wal)...)
 	lines = append(lines, removalNotes...)
-	return linesResult(lines, map[string]any{"removed": outcome.Chunks, "wal_truncated": truncated})
+	return linesResult(lines, walData(wal, map[string]any{"removed": outcome.Chunks}))
 }
 
-func walLines(truncated bool) []string {
-	if truncated {
+func walLines(wal walState) []string {
+	if wal != walBlocked {
 		return nil
 	}
 	return []string{"warning: the write-ahead log could not be truncated because a reader was active"}
+}
+
+func walData(wal walState, data map[string]any) map[string]any {
+	if wal != walUnchecked {
+		data["wal_truncated"] = wal == walTruncated
+	}
+	return data
 }
 
 func embedPreviewLines(preview *EmbedPreview) []string {
@@ -507,8 +640,11 @@ func (o *Operations) embed(ctx context.Context, call *operation.Call) (operation
 		if result.Batches == 0 {
 			return operation.Result{}, refusedBeforeSend(err)
 		}
-		return operation.Result{}, moduleFailure(err)
+		return operation.Result{}, moduleFailure(fmt.Errorf("%w; %d chunks were sent, rerun aura kb embed %s to resume", err, result.Sent, in.Collection))
 	}
+	o.logger.InfoContext(ctx, "knowledge collection embedded",
+		"component", "knowledge", "operation", "embed", "collection", in.Collection,
+		"chunks", result.Sent, "batches", result.Batches, "completed", result.Completed)
 	lines := []string{fmt.Sprintf("embedded: %d chunks in %d batches sent to %s", result.Sent, result.Batches, result.Destination)}
 	if result.Completed {
 		lines = append(lines, "complete: every chunk has a vector")
@@ -528,7 +664,7 @@ var refusalsBeforeSend = []ErrorCode{
 func refusedBeforeSend(err error) error {
 	code, coded := fault.CodeOf[ErrorCode](err)
 	if coded && slices.Contains(refusalsBeforeSend, code) {
-		return operation.NotPerformed(code, err)
+		return operation.NotPerformed(code, &renderedOnce{code: code, cause: err})
 	}
 	return moduleFailure(err)
 }
@@ -575,7 +711,7 @@ func (o *Operations) unembed(ctx context.Context, call *operation.Call) (operati
 			return operation.Result{}, err
 		}
 		outcome, applied = disabled, true
-		return unembeddedResult(&outcome, true)
+		return unembeddedResult(&outcome, walUnchecked)
 	})
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
@@ -583,17 +719,15 @@ func (o *Operations) unembed(ctx context.Context, call *operation.Call) (operati
 	if !applied {
 		return committed, nil
 	}
-	truncated, err := o.service.TruncateWAL(ctx)
-	if err != nil {
-		truncated = false
-	}
-	return unembeddedResult(&outcome, truncated)
+	o.logger.InfoContext(ctx, "knowledge embedding switched off",
+		"component", "knowledge", "operation", "embed_off", "collection", in.Collection, "vectors", outcome.Vectors)
+	return unembeddedResult(&outcome, o.truncateWAL(ctx))
 }
 
-func unembeddedResult(outcome *DisableOutcome, truncated bool) (operation.Result, error) {
+func unembeddedResult(outcome *DisableOutcome, wal walState) (operation.Result, error) {
 	lines := make([]string, 0, len(removalNotes)+2)
 	lines = append(lines, fmt.Sprintf("embedding off: %d vectors deleted and the opt-in cleared", outcome.Vectors))
-	lines = append(lines, walLines(truncated)...)
+	lines = append(lines, walLines(wal)...)
 	lines = append(lines, removalNotes...)
-	return linesResult(lines, map[string]any{"vectors": outcome.Vectors, "wal_truncated": truncated})
+	return linesResult(lines, walData(wal, map[string]any{"vectors": outcome.Vectors}))
 }

@@ -15,7 +15,7 @@ import (
 
 var (
 	parityTimestamp = regexp.MustCompile(`\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?`)
-	paritySourceID  = regexp.MustCompile(`kb[sc]_[0-9a-z]+`)
+	paritySourceID  = regexp.MustCompile(`kb[sc]_[0-9a-z]+|art-\d+`)
 )
 
 func tableState(t *testing.T, db *sql.DB, table string) []string {

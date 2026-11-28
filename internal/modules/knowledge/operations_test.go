@@ -31,6 +31,7 @@ type opsRig struct {
 	workspace string
 	artifacts storage.ArtifactStore
 	calls     int
+	attached  string
 }
 
 func newOpsRig(t *testing.T) *opsRig {
@@ -87,6 +88,7 @@ func (r *opsRig) attach(t *testing.T, session, name, mediaType, body string) str
 	if err != nil {
 		t.Fatalf("store the attachment: %v", err)
 	}
+	r.attached = ref.ID
 	return ref.ID
 }
 
@@ -132,6 +134,7 @@ func TestCatalogIsValid(t *testing.T) {
 
 func TestKnowledgeAddSourcesBySurface(t *testing.T) {
 	const documentBody = "# Policy\nRefunds are issued within thirty days.\n"
+	var hostPath string
 	cases := []struct {
 		name     string
 		run      func(t *testing.T, rig *opsRig) error
@@ -141,13 +144,14 @@ func TestKnowledgeAddSourcesBySurface(t *testing.T) {
 		{
 			name: "the CLI reads a host path",
 			run: func(t *testing.T, rig *opsRig) error {
-				host := filepath.Join(t.TempDir(), "policy.md")
-				if err := os.WriteFile(host, []byte(documentBody), 0o600); err != nil {
+				hostPath = filepath.Join(t.TempDir(), "policy.md")
+				if err := os.WriteFile(hostPath, []byte(documentBody), 0o600); err != nil {
 					t.Fatal(err)
 				}
-				_, err := rig.invoke(t, operation.SurfaceCLI, "kb.add", `{"collection":"support","source":`+quote(host)+`}`)
+				_, err := rig.invoke(t, operation.SurfaceCLI, "kb.add", `{"collection":"support","source":`+quote(hostPath)+`}`)
 				return err
 			},
+			wantURI:  func(*opsRig) string { return hostPath },
 			wantKind: knowledge.SourceKindFile,
 		},
 		{
@@ -191,7 +195,7 @@ func TestKnowledgeAddSourcesBySurface(t *testing.T) {
 				id := rig.attach(t, operationtest.SessionID, "policy.md", "text/markdown; charset=utf-8", documentBody)
 				return requireOK(rig.tool("kb.add", `{"collection":"support","source":"artifact:`+id+`"}`))
 			},
-			wantURI:  func(*opsRig) string { return "" },
+			wantURI:  func(rig *opsRig) string { return "artifact:" + rig.attached },
 			wantKind: knowledge.SourceKindFile,
 		},
 	}
@@ -380,7 +384,8 @@ func TestKnowledgeOperationsWriteOnlyInsideCommit(t *testing.T) {
 
 			operationtest.RequireWritesOnlyInCommit(t, &operationtest.WriteProbe{
 				Registry: rig.Registry, DB: rig.DB, ID: tc.id, Input: json.RawMessage(tc.input),
-				Outside: func() string { return strconv.Itoa(rig.kb.Provider.Sent()) },
+				Outside:  func() string { return strconv.Itoa(rig.kb.Provider.Sent()) },
+				Recorded: withoutPostCommitFacts,
 			})
 		})
 	}
@@ -505,4 +510,17 @@ func TestDestructiveApplyBindsPreviewDigest(t *testing.T) {
 	if sources := rig.sources(t); len(sources) != 1 {
 		t.Errorf("sources = %+v, want the source kept after the stale apply", sources)
 	}
+}
+
+func withoutPostCommitFacts(live json.RawMessage) json.RawMessage {
+	var data map[string]json.RawMessage
+	if err := json.Unmarshal(live, &data); err != nil {
+		return live
+	}
+	delete(data, "wal_truncated")
+	kept, err := json.Marshal(data)
+	if err != nil {
+		return live
+	}
+	return kept
 }

@@ -23,6 +23,7 @@ type Site struct {
 	mediaType string
 	body      []byte
 	fetched   int
+	withdrawn map[string]bool
 }
 
 func NewSite(mediaType, body string) *Site {
@@ -35,6 +36,15 @@ func (s *Site) Serve(mediaType, body string) {
 	s.mediaType, s.body = mediaType, []byte(body)
 }
 
+func (s *Site) Withdraw(rawURL string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.withdrawn == nil {
+		s.withdrawn = map[string]bool{}
+	}
+	s.withdrawn[rawURL] = true
+}
+
 func (s *Site) Fetches() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -45,6 +55,9 @@ func (s *Site) Do(req *http.Request) (*http.Response, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.fetched++
+	if s.withdrawn[req.URL.String()] {
+		return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: http.NoBody, Request: req}, nil
+	}
 	header := http.Header{}
 	header.Set("Content-Type", s.mediaType)
 	return &http.Response{

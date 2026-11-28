@@ -46,10 +46,10 @@ func operationCatalogLine(d *operation.Descriptor) string {
 	case d.GeneratesTool():
 		tool = operation.ToolName(d.ID)
 	}
-	return fmt.Sprintf("%s exposure=%s risk=%s commit=%s fresh=%s notice=%s sink=%s untrusted=%s preview=%s surfaces=%s secret=%s caps=%s tool=%s",
+	return fmt.Sprintf("%s exposure=%s risk=%s commit=%s fresh=%s notice=%s sink=%s untrusted=%s preview=%s previewfirst=%s surfaces=%s secret=%s caps=%s tool=%s",
 		d.ID, d.Exposure, d.Risk, d.Commit,
 		strconv.FormatBool(d.FreshApproval), strconv.FormatBool(d.OwnerNotice), strconv.FormatBool(d.Sink),
-		strconv.FormatBool(d.UntrustedOutput), strconv.FormatBool(d.Preview),
+		strconv.FormatBool(d.UntrustedOutput), strconv.FormatBool(d.Preview), strconv.FormatBool(d.PreviewFirst),
 		joinOrDash(surfaces), joinOrDash(secrets), joinOrDash(d.RequiredCapabilities), tool)
 }
 
