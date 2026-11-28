@@ -285,6 +285,7 @@ func TestOperationDescriptionVisibility(t *testing.T) {
 		{name: "on a scheduled turn", definition: ownerDefinition(searchTool), class: principal.ClassOwner, origin: turn.OriginSchedule, wantText: true, wantSearch: true},
 		{name: "on an http turn", definition: ownerDefinition(searchTool), class: principal.ClassOwner, origin: turn.OriginHTTP, wantText: true, wantSearch: true},
 		{name: "a persona listing only an operation tool", definition: ownerDefinition("aura_stub_read"), class: principal.ClassOwner, origin: turn.OriginTerminal, wantText: true, wantTools: []string{"aura_stub_read"}},
+		{name: "a persona listing an operation tool the registry does not hold", definition: ownerDefinition("aura_profile_list", "aura_stub_read"), class: principal.ClassOwner, origin: turn.OriginTerminal, wantText: true, wantTools: []string{"aura_stub_read"}},
 		{name: "a persona listing neither", definition: ownerDefinition("read_file"), class: principal.ClassOwner, origin: turn.OriginTerminal},
 		{name: "a persona with no tool list", definition: ownerDefinition(), class: principal.ClassOwner, origin: turn.OriginTerminal},
 		{name: "a trusted principal", definition: ownerDefinition(searchTool, "aura_stub_read"), class: principal.ClassTrusted, origin: "telegram:main"},

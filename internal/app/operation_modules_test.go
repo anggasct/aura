@@ -1,6 +1,7 @@
 package app
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -126,4 +127,21 @@ func withoutGroups(catalogs []operation.Catalog, names ...string) []operation.Ca
 		}
 	}
 	return kept
+}
+
+func TestAPersonaMayListAModuleToolWhileTheModuleIsDisabled(t *testing.T) {
+	cfg := appconfig.Default()
+	cfg.Profile = nil
+	cfg.Memory.Enabled = false
+
+	names := personaToolNames(&cfg)
+
+	for _, want := range []string{"aura_profile_list", "aura_profile_set", "aura_memory_inspect", "aura_memory_forget"} {
+		if !slices.Contains(names, want) {
+			t.Errorf("the persona tool names lack %s, so a persona that lists it would stop validating when the module is switched off", want)
+		}
+	}
+	if slices.Contains(names, "aura_profile_accept") {
+		t.Error("the persona tool names hold an accept tool")
+	}
 }

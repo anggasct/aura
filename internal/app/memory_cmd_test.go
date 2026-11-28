@@ -240,6 +240,29 @@ func TestMemoryCLIPurgeBounded(t *testing.T) {
 	}
 }
 
+func TestMemoryCLIPurgeListsWhatItWouldDeleteUntilApplied(t *testing.T) {
+	cfg := writeMemoryCLIConfig(t)
+	past := time.Now().UTC().Add(-time.Hour)
+	seedMemorySummary(t, cfg, "mem-s1", principal.OwnerID, "sess-a", past, 1)
+
+	out, err := runMemoryCommand(t, cfg, "purge")
+	if err != nil || !strings.Contains(out, "dry-run: 1 would be deleted") || !strings.Contains(out, "mem-s1") {
+		t.Fatalf("purge without --apply = %q, %v, want a dry-run that names the summary", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "inspect", "--session", "sess-a")
+	if err != nil || !strings.Contains(out, "mem-s1") {
+		t.Errorf("the dry-run deleted the summary: %q, %v", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "purge", "--apply")
+	if err != nil || strings.TrimSpace(out) != "purged: 1" {
+		t.Fatalf("purge --apply = %q, %v", out, err)
+	}
+	out, err = runMemoryCommand(t, cfg, "purge")
+	if err != nil || !strings.Contains(out, "dry-run: 0 would be deleted") {
+		t.Errorf("a purge with nothing expired = %q, %v", out, err)
+	}
+}
+
 func TestMemoryCLIForgetRequiresScope(t *testing.T) {
 	cfg := writeMemoryCLIConfig(t)
 	_, err := runMemoryCommand(t, cfg, "forget", "--apply")
