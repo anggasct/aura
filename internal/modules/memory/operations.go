@@ -173,7 +173,8 @@ func cardLines(headline string, documents []StoredDocument) []string {
 }
 
 func ownerLines(documents []StoredDocument) []string {
-	lines := []string{fmt.Sprintf("dry-run: %d would be deleted", len(documents))}
+	lines := make([]string, 0, 1+len(documents))
+	lines = append(lines, fmt.Sprintf("dry-run: %d would be deleted", len(documents)))
 	for i := range documents {
 		lines = append(lines, documentLine(&documents[i]))
 	}

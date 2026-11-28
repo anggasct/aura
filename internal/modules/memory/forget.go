@@ -10,8 +10,9 @@ import (
 )
 
 const (
-	maxInspectLimit = 200
-	maxForgetLimit  = 200
+	maxListLimit    = 200
+	maxInspectLimit = maxListLimit
+	maxForgetLimit  = maxListLimit
 	maxPurgeLimit   = 500
 )
 
@@ -37,7 +38,7 @@ type DocumentQuery struct {
 	Limit      int
 }
 
-func (s *Service) checkQuery(ctx context.Context, query *DocumentQuery, maximum int) (int, error) {
+func (s *Service) checkQuery(ctx context.Context, query *DocumentQuery) (int, error) {
 	if ctx == nil {
 		return 0, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
@@ -52,9 +53,9 @@ func (s *Service) checkQuery(ctx context.Context, query *DocumentQuery, maximum 
 	}
 	limit := query.Limit
 	if limit <= 0 {
-		limit = maximum
+		limit = maxListLimit
 	}
-	if limit > maximum {
+	if limit > maxListLimit {
 		return 0, fault.New(ErrorCodeInvalidArgument, "document limit is out of bounds")
 	}
 	return limit, nil
@@ -69,7 +70,7 @@ func (s *Service) redactedCopies(documents []StoredDocument) []StoredDocument {
 }
 
 func (s *Service) PreviewForgetBySession(ctx context.Context, query *DocumentQuery) ([]StoredDocument, error) {
-	limit, err := s.checkQuery(ctx, query, maxForgetLimit)
+	limit, err := s.checkQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +97,7 @@ func (s *Service) PreviewForgetBySession(ctx context.Context, query *DocumentQue
 }
 
 func (s *Service) PreviewForgetByID(ctx context.Context, query *DocumentQuery) ([]StoredDocument, error) {
-	if _, err := s.checkQuery(ctx, query, maxForgetLimit); err != nil {
+	if _, err := s.checkQuery(ctx, query); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(query.DocumentID) == "" {
@@ -119,7 +120,7 @@ func (s *Service) PreviewForgetByID(ctx context.Context, query *DocumentQuery) (
 }
 
 func (s *Service) PreviewForgetByQuery(ctx context.Context, query *DocumentQuery) ([]StoredDocument, error) {
-	limit, err := s.checkQuery(ctx, query, maxForgetLimit)
+	limit, err := s.checkQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}
@@ -172,7 +173,7 @@ func (s *Service) PreviewPurge(ctx context.Context, now time.Time, limit int) ([
 }
 
 func (s *Service) Inspect(ctx context.Context, query *DocumentQuery) ([]StoredDocument, error) {
-	limit, err := s.checkQuery(ctx, query, maxInspectLimit)
+	limit, err := s.checkQuery(ctx, query)
 	if err != nil {
 		return nil, err
 	}

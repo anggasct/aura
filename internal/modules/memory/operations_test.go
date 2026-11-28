@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -127,6 +128,15 @@ func requireOK(t *testing.T, outcome operationtest.Outcome) {
 	}
 }
 
+func rowIDs(t *testing.T, output string) []string {
+	t.Helper()
+	var ids []string
+	for _, row := range resultRows(t, json.RawMessage(output)) {
+		ids = append(ids, fmt.Sprint(row["id"]))
+	}
+	return ids
+}
+
 func resultRows(t *testing.T, data json.RawMessage) []map[string]any {
 	t.Helper()
 	var decoded struct {
@@ -136,17 +146,6 @@ func resultRows(t *testing.T, data json.RawMessage) []map[string]any {
 		t.Fatalf("decode %s: %v", data, err)
 	}
 	return decoded.Rows
-}
-
-func resultText(t *testing.T, data json.RawMessage) string {
-	t.Helper()
-	var decoded struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(data, &decoded); err != nil {
-		t.Fatalf("decode %s: %v", data, err)
-	}
-	return decoded.Text
 }
 
 func TestCatalogIsValid(t *testing.T) {
@@ -493,13 +492,7 @@ func TestAgentInspectListsOnlyTheCallingPersonasMemory(t *testing.T) {
 	beta := rig.toolAs(memorytest.BetaPersona, "memory.inspect", `{"query":"trains"}`)
 	requireOK(t, beta)
 
-	var alphaIDs, betaIDs []string
-	for _, row := range resultRows(t, json.RawMessage(alpha.Output)) {
-		alphaIDs = append(alphaIDs, row["id"].(string))
-	}
-	for _, row := range resultRows(t, json.RawMessage(beta.Output)) {
-		betaIDs = append(betaIDs, row["id"].(string))
-	}
+	alphaIDs, betaIDs := rowIDs(t, alpha.Output), rowIDs(t, beta.Output)
 	if strings.Join(alphaIDs, ",") != "mem-alpha-1,mem-alpha-old" {
 		t.Errorf("alpha saw %v, want only its own documents", alphaIDs)
 	}
