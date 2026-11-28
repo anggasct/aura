@@ -357,8 +357,9 @@ func TestIMAP_WaitReturnsImmediatelyForMailNotifiedBeforeIdle(t *testing.T) {
 	if err := session.Wait(ctx, time.Hour); err != nil {
 		t.Fatalf("Wait for queued mail: %v", err)
 	}
-	if got := server.idling.Load(); got != 1 {
-		t.Fatalf("idle entries = %d, want 1", got)
+	infos, err := session.List(t.Context(), 1, 10)
+	if err != nil || len(infos) != 2 {
+		t.Fatalf("List() = %+v, %v; want the queued mail visible without pinning a delivery path", infos, err)
 	}
 }
 
