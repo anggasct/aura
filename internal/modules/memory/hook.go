@@ -53,9 +53,9 @@ type turnProjection struct {
 func projectTurn(ctx context.Context, p *turnProjection) (BatchResult, error) {
 	service, req, events := p.service, p.req, p.events
 	if req.Origin != turn.OriginSchedule {
-		return service.ProjectBatch(ctx, req.PrincipalID, events)
+		return service.ProjectTurnBatch(ctx, req, events)
 	}
-	return service.ProjectRunOutput(ctx, req.PrincipalID, events)
+	return service.ProjectRunOutputForTurn(ctx, req, events)
 }
 
 func (m *Module) AfterTurn(ctx context.Context, req *turn.TurnRequest, events []turn.Event) error {

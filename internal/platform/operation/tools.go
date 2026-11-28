@@ -88,6 +88,10 @@ func (r *Registry) definition(descriptor *Descriptor) (tools.Definition, error) 
 }
 
 func agentCall(request *toolbroker.ToolRequest) *Call {
+	taintSource := request.TaintSource
+	if taintSource == "" && request.TaintMark.Source != "" {
+		taintSource = request.TaintMark.Label()
+	}
 	return &Call{
 		Caller: Caller{
 			Surface:     SurfaceAgent,
@@ -98,7 +102,7 @@ func agentCall(request *toolbroker.ToolRequest) *Call {
 			AgentID:     request.AgentID,
 			Origin:      string(request.Origin),
 			Tainted:     request.Tainted,
-			TaintSource: request.TaintSource,
+			TaintSource: taintSource,
 		},
 		Input:          request.Arguments,
 		IdempotencyKey: request.IdempotencyKey,

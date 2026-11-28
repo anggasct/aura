@@ -41,6 +41,16 @@ CREATE TRIGGER memory_document_fts_delete AFTER DELETE ON memory_document BEGIN 
 CREATE TRIGGER memory_document_fts_update AFTER UPDATE OF content ON memory_document BEGIN INSERT INTO memory_document_fts(memory_document_fts, rowid, content) VALUES ('delete', old.rowid, old.content); INSERT INTO memory_document_fts(rowid, content) VALUES (new.rowid, new.content); END;
 `
 
+const taintColumnStepSQL = `
+ALTER TABLE memory_document ADD COLUMN tainted INTEGER CHECK (tainted IN (0,1));
+`
+
+const taintColumnStepVersion = 34
+
 func Schema() sqlite.SchemaOwner {
-	return sqlite.StaticSchema{Name: "memory", SQL: schemaSQL}
+	return sqlite.StaticSchema{
+		Name:  "memory",
+		SQL:   schemaSQL,
+		Steps: []sqlite.Step{{Version: taintColumnStepVersion, SQL: taintColumnStepSQL}},
+	}
 }

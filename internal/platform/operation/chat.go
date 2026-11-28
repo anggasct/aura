@@ -315,7 +315,7 @@ func (c *Chat) invoke(ctx context.Context, pending *chatCall) command.OperationR
 		if err != nil {
 			return failedReply(err)
 		}
-		if !apply || preview.Empty {
+		if !preview.Direct && (!apply || preview.Empty) {
 			return recordedReply(descriptor.ID, previewLines(&preview))
 		}
 		call.PreviewDigest = preview.Digest

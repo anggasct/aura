@@ -145,10 +145,19 @@ DROP TABLE profile_fact_keep;
 
 const agentOriginStepVersion = 28
 
+const taintSourceStepSQL = `
+ALTER TABLE profile_fact ADD COLUMN taint_source TEXT;
+`
+
+const taintSourceStepVersion = 35
+
 func Schema() sqlite.SchemaOwner {
 	return sqlite.StaticSchema{
-		Name:  "profile",
-		SQL:   schemaSQL,
-		Steps: []sqlite.Step{{Version: agentOriginStepVersion, SQL: agentOriginStepSQL}},
+		Name: "profile",
+		SQL:  schemaSQL,
+		Steps: []sqlite.Step{
+			{Version: agentOriginStepVersion, SQL: agentOriginStepSQL},
+			{Version: taintSourceStepVersion, SQL: taintSourceStepSQL},
+		},
 	}
 }

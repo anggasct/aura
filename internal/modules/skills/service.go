@@ -21,15 +21,16 @@ const (
 )
 
 type Record struct {
-	ID         string
-	Name       string
-	Origin     string
-	Digest     string
-	State      string
-	Validation string
-	Requested  string
-	Granted    string
-	ReviewedAt string
+	ID                  string
+	Name                string
+	Origin              string
+	Digest              string
+	State               string
+	Validation          string
+	Requested           string
+	Granted             string
+	ReviewedAt          string
+	AcceptedTaintSource string
 }
 
 type Registry interface {

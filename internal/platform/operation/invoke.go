@@ -213,7 +213,7 @@ func (r *Registry) run(ctx context.Context, found *entry, call *Call) (result Re
 		return Result{}, refusal(err), err
 	}
 	defer prepared.run.closeFiles()
-	if err := r.confirmed(ctx, found.descriptor, prepared); err != nil {
+	if err := r.confirmed(ctx, found, prepared); err != nil {
 		seen.outcome = outcomeRefused
 		return Result{}, refusal(err), err
 	}
@@ -402,13 +402,23 @@ func (r *Registry) winner(ctx context.Context, call *Call) (Result, error) {
 	return recordedResult(&found, call.RequestDigest)
 }
 
-func (r *Registry) confirmed(ctx context.Context, descriptor *Descriptor, call *Call) error {
+func (r *Registry) confirmed(ctx context.Context, found *entry, call *Call) error {
+	descriptor := found.descriptor
 	if !descriptor.confirmsWithCode() {
 		return nil
 	}
 	if call.Caller.Surface == SurfaceAgent {
 		r.taintRecorder.RecordConfirmation(ctx, telemetry.ConfirmationOutcomeInvalid)
 		return NewError(ErrorCodeConfirmation, "an operation that confirms with a code cannot be applied from the agent surface")
+	}
+	if call.Confirmation == "" && found.binding.Preview != nil {
+		preview, err := found.binding.Preview(ctx, call)
+		if err != nil {
+			return asOperationError(err)
+		}
+		if preview.Direct {
+			return nil
+		}
 	}
 	if call.PreviewDigest == "" || call.Confirmation == "" || !r.confirmer.Matches(call.PreviewDigest, call.Confirmation) {
 		r.taintRecorder.RecordConfirmation(ctx, telemetry.ConfirmationOutcomeInvalid)

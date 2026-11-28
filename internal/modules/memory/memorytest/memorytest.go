@@ -62,6 +62,7 @@ func (r *Rig) Seed(ctx context.Context) error {
 		return err
 	}
 	expired := seededAt.Add(-time.Hour)
+	clean := false
 	for _, seed := range []seedDocument{
 		{id: "mem-a1", session: FirstSession, kind: memory.KindEventText, content: "alpha recording one", sequence: 1},
 		{id: "mem-a2", session: FirstSession, kind: memory.KindEventText, content: "alpha recording two", sequence: 2},
@@ -71,7 +72,7 @@ func (r *Rig) Seed(ctx context.Context) error {
 		if _, err := r.Store.UpsertDocument(ctx, &memory.StoredDocument{
 			ID: seed.id, OwnerID: principal.OwnerID, SessionID: seed.session, Kind: seed.kind,
 			FromSequence: seed.sequence, ToSequence: seed.sequence, Content: seed.content,
-			TrustLabel: "owner_input", CreatedAt: seededAt, ExpiresAt: seed.expires,
+			TrustLabel: "owner_input", Tainted: &clean, CreatedAt: seededAt, ExpiresAt: seed.expires,
 		}); err != nil {
 			return err
 		}
@@ -87,20 +88,22 @@ type Document struct {
 }
 
 func (r *Rig) Add(ctx context.Context, document *Document) error {
+	clean := false
 	_, err := r.Store.UpsertDocument(ctx, &memory.StoredDocument{
 		ID: document.ID, OwnerID: principal.OwnerID, SessionID: document.Session, Kind: memory.KindEventText,
 		FromSequence: document.Sequence, ToSequence: document.Sequence, Content: document.Content,
-		TrustLabel: "owner_input", CreatedAt: seededAt,
+		TrustLabel: "owner_input", Tainted: &clean, CreatedAt: seededAt,
 	})
 	return err
 }
 
 func (r *Rig) AddExpiredSummary(ctx context.Context, document *Document) error {
+	clean := false
 	expired := seededAt.Add(-time.Minute)
 	_, err := r.Store.UpsertDocument(ctx, &memory.StoredDocument{
 		ID: document.ID, OwnerID: principal.OwnerID, SessionID: document.Session, Kind: memory.KindSummary,
 		FromSequence: document.Sequence, ToSequence: document.Sequence, Content: document.Content,
-		TrustLabel: "owner_input", CreatedAt: seededAt, ExpiresAt: &expired,
+		TrustLabel: "owner_input", Tainted: &clean, CreatedAt: seededAt, ExpiresAt: &expired,
 	})
 	return err
 }

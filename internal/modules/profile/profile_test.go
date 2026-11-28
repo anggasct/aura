@@ -73,6 +73,9 @@ func (f *fakeRegistry) Reinforce(ctx stdcontext.Context, factID string, evidence
 	}
 	f.addEvidenceLocked(factID, evidence)
 	stored.Confidence = ConfidenceV1(len(f.evidence[factID]))
+	if !stored.OwnerVerified && stored.TaintSource == "" && evidence.TaintSource != "" {
+		stored.TaintSource = evidence.TaintSource
+	}
 	if stored.Status == StatusCandidate && stored.Confidence >= minConfidence {
 		blocked := false
 		for _, other := range f.facts {
@@ -102,6 +105,9 @@ func (f *fakeRegistry) SetState(ctx stdcontext.Context, factID, status, conflict
 	stored.ConflictsWithID = conflictsWith
 	stored.Confidence = confidence
 	stored.OwnerVerified = verified
+	if status == StatusActive && verified {
+		stored.TaintSource = ""
+	}
 	stored.UpdatedAt = at
 	return nil
 }
@@ -120,6 +126,7 @@ func (f *fakeRegistry) Promote(ctx stdcontext.Context, factID string, expiresAt 
 	stored.ConflictsWithID = ""
 	stored.Confidence = 1.0
 	stored.OwnerVerified = true
+	stored.TaintSource = ""
 	stored.Origin = OriginOwner
 	stored.ExpiresAt = expiresAt
 	stored.UpdatedAt = at

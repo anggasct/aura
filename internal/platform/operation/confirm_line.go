@@ -8,7 +8,7 @@ import (
 const confirmLinePrefix = "confirm with: "
 
 func (r *Registry) confirmable(descriptor *Descriptor, call *Call, preview Preview) (Preview, error) {
-	if !descriptor.confirmsWithCode() || preview.Empty || call.Caller.Surface == SurfaceAgent {
+	if !descriptor.confirmsWithCode() || preview.Empty || preview.Direct || call.Caller.Surface == SurfaceAgent {
 		return preview, nil
 	}
 	code, err := r.confirmer.Code(preview.Digest)

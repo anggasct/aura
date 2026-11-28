@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
@@ -42,7 +43,7 @@ func UnavailableOperations() *Operations {
 
 func (o *Operations) Bindings() []operation.Binding {
 	return []operation.Binding{
-		{ID: operationAccept, Handle: o.accept},
+		{ID: operationAccept, Handle: o.accept, Preview: o.previewAccept},
 		{ID: operationDelete, Handle: o.delete, Preview: o.previewDelete},
 		{ID: operationList, Handle: o.list},
 		{ID: operationReject, Handle: o.reject},
@@ -87,7 +88,7 @@ func factDigest(fact *Fact) string {
 		return ""
 	}
 	sum := sha256.Sum256([]byte(strings.Join([]string{
-		fact.ID, fact.Status, fact.ValueDigest, fact.Origin, strconv.FormatBool(fact.OwnerVerified),
+		fact.ID, fact.Category, fact.Key, fact.Status, fact.ValueDigest, fact.Origin, strconv.FormatBool(fact.OwnerVerified), fact.TaintSource,
 	}, "|")))
 	return hex.EncodeToString(sum[:])
 }
@@ -101,6 +102,7 @@ type factRow struct {
 	Confidence    float64 `json:"confidence"`
 	Origin        string  `json:"origin"`
 	Verified      bool    `json:"verified"`
+	TaintSource   string  `json:"taint_source,omitempty"`
 	ConflictsWith string  `json:"conflicts_with,omitempty"`
 }
 
@@ -110,7 +112,8 @@ func rowOf(fact *Fact) factRow {
 	}
 	return factRow{
 		ID: fact.ID, Category: fact.Category, Key: fact.Key, Value: fact.Value, Status: fact.Status,
-		Confidence: fact.Confidence, Origin: fact.Origin, Verified: fact.OwnerVerified, ConflictsWith: fact.ConflictsWithID,
+		Confidence: fact.Confidence, Origin: fact.Origin, Verified: fact.OwnerVerified,
+		TaintSource: fact.TaintSource, ConflictsWith: fact.ConflictsWithID,
 	}
 }
 
@@ -180,6 +183,7 @@ type reviewRow struct {
 	Origin        string  `json:"origin"`
 	Confidence    float64 `json:"confidence"`
 	ConflictsWith string  `json:"conflicts_with,omitempty"`
+	TaintSource   string  `json:"taint_source,omitempty"`
 }
 
 func reviewRowOf(state string, fact *Fact) reviewRow {
@@ -188,7 +192,7 @@ func reviewRowOf(state string, fact *Fact) reviewRow {
 	}
 	return reviewRow{
 		State: state, ID: fact.ID, Category: fact.Category, Key: fact.Key, Value: fact.Value,
-		Origin: fact.Origin, Confidence: fact.Confidence, ConflictsWith: fact.ConflictsWithID,
+		Origin: fact.Origin, Confidence: fact.Confidence, ConflictsWith: fact.ConflictsWithID, TaintSource: fact.TaintSource,
 	}
 }
 
@@ -226,12 +230,57 @@ func (o *Operations) review(ctx context.Context, call *operation.Call) (operatio
 	return operation.JSONResult(map[string]any{"rows": rows})
 }
 
+func acceptPreviewLines(fact *Fact) []string {
+	if fact == nil {
+		return nil
+	}
+	return []string{
+		"Fact: " + fact.ID,
+		"Category: " + fact.Category,
+		"Key: " + fact.Key,
+		"Value: " + fact.Value,
+		"Origin: " + fact.Origin,
+		"Taint source: " + fact.TaintSource,
+		"Accepting marks this fact owner-verified for every owner turn and clears its taint source.",
+	}
+}
+
+func (o *Operations) previewAccept(ctx context.Context, call *operation.Call) (operation.Preview, error) {
+	var in factInput
+	if err := o.ready(call, &in); err != nil {
+		return operation.Preview{}, err
+	}
+	fact, err := o.service.GetFact(ctx, principal.OwnerID, in.ID)
+	if err != nil {
+		return operation.Preview{}, moduleFailure(err)
+	}
+	if fact.Status == StatusDeleted {
+		return operation.Preview{}, moduleFailure(fault.New(ErrorCodeProfileConflict, "deleted facts cannot be accepted"))
+	}
+	if fact.TaintSource == "" {
+		return operation.Preview{Digest: factDigest(&fact), Direct: true}, nil
+	}
+	return operation.Preview{Lines: acceptPreviewLines(&fact), Digest: factDigest(&fact)}, nil
+}
+
 func (o *Operations) accept(ctx context.Context, call *operation.Call) (operation.Result, error) {
 	var in factInput
 	if err := o.ready(call, &in); err != nil {
 		return operation.Result{}, err
 	}
 	result, err := call.Commit(ctx, func(ctx context.Context) (operation.Result, error) {
+		current, err := o.service.GetFact(ctx, principal.OwnerID, in.ID)
+		if err != nil {
+			return operation.Result{}, err
+		}
+		if current.TaintSource != "" {
+			if call.Confirmation == "" {
+				return operation.Result{}, operation.NewError(operation.ErrorCodeConfirmation, "accepting a tainted fact requires the preview confirmation code")
+			}
+			if call.PreviewDigest == "" || factDigest(&current) != call.PreviewDigest {
+				return operation.Result{}, staleSet("the fact changed after the preview")
+			}
+		}
 		fact, err := o.service.AcceptFact(ctx, principal.OwnerID, in.ID, o.now().UTC())
 		if err != nil {
 			return operation.Result{}, err
@@ -276,10 +325,31 @@ func (o *Operations) futureTime(text string) (time.Time, error) {
 }
 
 type setRequest struct {
-	category string
-	key      string
-	value    string
-	expires  *time.Time
+	category    string
+	key         string
+	value       string
+	taintSource string
+	expires     *time.Time
+}
+
+const unknownTaintSourceLabel = "content from outside your control"
+
+func callerTaintSource(caller *operation.Caller) string {
+	if caller == nil || !caller.Tainted {
+		return ""
+	}
+	source := strings.TrimSpace(caller.TaintSource)
+	if source == "" {
+		return unknownTaintSourceLabel
+	}
+	if len(source) > turn.MaxTaintDetailBytes {
+		cut := turn.MaxTaintDetailBytes
+		for cut > 0 && !utf8.RuneStart(source[cut]) {
+			cut--
+		}
+		source = strings.ToValidUTF8(source[:cut], "")
+	}
+	return source
 }
 
 func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.Result, error) {
@@ -300,6 +370,7 @@ func (o *Operations) set(ctx context.Context, call *operation.Call) (operation.R
 	case operation.SurfaceCLI, operation.SurfaceChat:
 		apply = func(ctx context.Context) (operation.Result, error) { return o.setVerified(ctx, request) }
 	case operation.SurfaceAgent:
+		request.taintSource = callerTaintSource(&call.Caller)
 		apply = func(ctx context.Context) (operation.Result, error) { return o.proposeUnverified(ctx, request) }
 	default:
 		return operation.Result{}, operation.NewError(operation.ErrorCodeNotExposed, "operation: this surface cannot set a fact")
@@ -318,7 +389,8 @@ func (o *Operations) setVerified(ctx context.Context, request *setRequest) (oper
 
 func (o *Operations) proposeUnverified(ctx context.Context, request *setRequest) (operation.Result, error) {
 	fact, err := o.service.ProposeAgentFact(ctx, &AgentProposal{
-		OwnerID: principal.OwnerID, Category: request.category, Key: request.key, Value: request.value, ExpiresAt: request.expires,
+		OwnerID: principal.OwnerID, Category: request.category, Key: request.key, Value: request.value,
+		TaintSource: request.taintSource, ExpiresAt: request.expires,
 	}, o.now().UTC())
 	if err != nil {
 		return operation.Result{}, err

@@ -77,8 +77,8 @@ func Catalog() operation.Catalog {
 		Descriptors: []operation.Descriptor{
 			{
 				ID: operationAccept, Summary: "Accept a learned fact as owner-verified", Exposure: operation.ExposureOwner,
-				Risk: operation.RiskChange, Commit: operation.CommitTransactional, UntrustedOutput: true, Needs: needs,
-				Description: "Marks a candidate or learned fact owner-verified, which puts it into every owner turn, and prints the whole value it verified. A fact that another verified fact already holds the slot of is refused. Only the owner accepts; the agent has no accept.",
+				Risk: operation.RiskChange, Commit: operation.CommitTransactional, UntrustedOutput: true, Preview: true, Confirmation: operation.ConfirmPreviewWithCode, Needs: needs,
+				Description: "Marks a candidate or learned fact owner-verified, which puts it into every owner turn, and prints the whole value it verified. A fact carrying a taint source prints a preview with a confirmation code and applies only with --apply <code>, clearing the taint source. A fact that another verified fact already holds the slot of is refused. Only the owner accepts; the agent has no accept.",
 				Params:      []operation.Param{factIDParam()},
 				Output:      fieldsOutput(operation.OutputRecord, "accepted", "category", "key", "value", "origin"),
 			},
@@ -108,7 +108,7 @@ func Catalog() operation.Catalog {
 				ID: operationReview, Summary: "List facts that need review, conflicts first", Exposure: operation.ExposureAgent,
 				Risk: operation.RiskRead, Commit: operation.CommitNone, ResultTaint: profileReviewResultTaints, Needs: needs,
 				Description: "Lists candidates and unverified active facts that wait for the owner, the ones that conflict with a verified fact first, with origin and the whole value. The values come from conversations, not from the owner alone.",
-				Output:      fieldsOutput(operation.OutputTable, "state", "id", "category", "key", "value", "origin", "confidence", "conflicts_with"),
+				Output:      fieldsOutput(operation.OutputTable, "state", "id", "category", "key", "value", "origin", "confidence", "conflicts_with", "taint_source"),
 			},
 			{
 				ID: operationSet, Summary: "Set a profile fact", Exposure: operation.ExposureAgent,
@@ -125,7 +125,7 @@ func Catalog() operation.Catalog {
 				Description: "Shows a fact with its status, origin, conflicts, the whole value and the evidence it was learned from. The value comes from conversations, not from the owner alone.",
 				Params:      []operation.Param{factIDParam()},
 				Output: fieldsOutput(operation.OutputRecord, "id", "category", "key", "value", "status", "origin", "verified", "confidence",
-					"created", "conflicts_with", "expires_at", "evidence"),
+					"taint_source", "created", "conflicts_with", "expires_at", "evidence"),
 			},
 		},
 	}

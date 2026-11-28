@@ -62,6 +62,10 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
+	taintMarks := deps.TaintMarks
+	if taintMarks == nil {
+		taintMarks = turnstore.NewTaintReader(deps.DB)
+	}
 	service, err := NewService(store, deps.Secrets, &ServiceOptions{
 		MaxDocuments:         deps.Config.MaxDocuments,
 		TokenBudget:          deps.Config.RecallTokenBudget,
@@ -69,21 +73,18 @@ func New(ctx context.Context, deps *Deps) (*Module, error) {
 		SummaryTTL:           time.Duration(deps.Config.SummaryTTL),
 		RangeThreshold:       deps.Config.RangeThreshold,
 		RangeLiveWindow:      deps.Config.RangeLiveWindow,
+		TaintMarks:           taintMarks,
 		Observer:             deps.Observer,
 	})
 	if err != nil {
 		return nil, err
 	}
-	taintMarks := deps.TaintMarks
-	if taintMarks == nil {
-		taintMarks = turnstore.NewTaintReader(deps.DB)
-	}
 	summaryModel, summarizer := BuildSummary(ctx, deps.ModelConfig, deps.ModelRoutes, deps.Models, deps.Logger, deps.Observer)
-	provider, err := NewProvider(service, &ProviderConfig{Scopes: deps.Scopes, TaintMarks: taintMarks})
+	provider, err := NewProvider(service, &ProviderConfig{Scopes: deps.Scopes})
 	if err != nil {
 		return nil, err
 	}
-	operations, err := NewOperations(&OperationDeps{Service: service, Scopes: deps.Scopes, TaintMarks: taintMarks, Logger: deps.Logger})
+	operations, err := NewOperations(&OperationDeps{Service: service, Scopes: deps.Scopes, Logger: deps.Logger})
 	if err != nil {
 		return nil, err
 	}

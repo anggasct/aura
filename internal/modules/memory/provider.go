@@ -37,7 +37,6 @@ type ProviderConfig struct {
 	Scopes         RecallScopes
 	Model          *SummaryModel
 	Summarizer     Summarizer
-	TaintMarks     TaintMarksReader
 	TracerProvider trace.TracerProvider
 	Now            func() time.Time
 }
@@ -47,7 +46,6 @@ type Provider struct {
 	scopes     RecallScopes
 	model      *SummaryModel
 	summarizer Summarizer
-	taintMarks TaintMarksReader
 	tracer     trace.Tracer
 	now        func() time.Time
 }
@@ -72,7 +70,6 @@ func NewProvider(service *Service, config *ProviderConfig) (*Provider, error) {
 		scopes:     config.Scopes,
 		model:      config.Model,
 		summarizer: config.Summarizer,
-		taintMarks: config.TaintMarks,
 		tracer:     tp.Tracer(SpanMemoryRecall),
 		now:        now,
 	}, nil
@@ -154,7 +151,6 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 		}
 		return nil, observation, err
 	}
-	p.annotateTaint(ctx, &result)
 	summaryTainted := result.Tainted
 	screened := p.screen(&result)
 	observation.Screened = screened
@@ -189,48 +185,6 @@ func (p *Provider) recall(ctx context.Context, req *turn.TurnRequest) (*turn.Unt
 	observation.Documents = len(result.Documents)
 	observation.Outcome = OutcomeOK
 	return result.Evidence(), observation, nil
-}
-
-func (p *Provider) annotateTaint(ctx context.Context, result *RecallContext) {
-	if result == nil || (len(result.Documents) == 0 && result.Summary == "") {
-		return
-	}
-	if p.taintMarks == nil {
-		result.Tainted = true
-		for i := range result.Documents {
-			result.Documents[i].Tainted = true
-		}
-		return
-	}
-	seen := map[string]struct{}{}
-	sessionIDs := make([]string, 0, len(result.Documents))
-	for i := range result.Documents {
-		sid := result.Documents[i].SessionID
-		if sid == "" {
-			continue
-		}
-		if _, ok := seen[sid]; !ok {
-			seen[sid] = struct{}{}
-			sessionIDs = append(sessionIDs, sid)
-		}
-	}
-	marks, err := p.taintMarks.SessionMarks(ctx, sessionIDs)
-	if err != nil {
-		result.Tainted = true
-		for i := range result.Documents {
-			result.Documents[i].Tainted = true
-		}
-		return
-	}
-	anyTainted := false
-	for i := range result.Documents {
-		firstSeq, marked := marks[result.Documents[i].SessionID]
-		if marked && firstSeq <= result.Documents[i].ToSequence {
-			result.Documents[i].Tainted = true
-			anyTainted = true
-		}
-	}
-	result.Tainted = anyTainted
 }
 
 func (p *Provider) screen(result *RecallContext) int {

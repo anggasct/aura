@@ -73,6 +73,7 @@ type Document struct {
 	ToSequence   uint64
 	Content      string
 	Trust        approval.TrustLabel
+	Tainted      bool
 	CreatedAt    time.Time
 	ExpiresAt    *time.Time
 }
@@ -107,12 +108,17 @@ type StoredDocument struct {
 	ToSequence    int64
 	Content       string
 	TrustLabel    string
+	Tainted       *bool
 	PromptVersion string
 	ModelProtocol string
 	ModelName     string
 	AgentID       string
 	CreatedAt     time.Time
 	ExpiresAt     *time.Time
+}
+
+func (d *StoredDocument) IsTainted() bool {
+	return d == nil || d.Tainted == nil || *d.Tainted
 }
 
 type DocumentFilter struct {
@@ -211,12 +217,14 @@ type ServiceOptions struct {
 	FallbackTokenBudget  int
 	RangeThreshold       int
 	RangeLiveWindow      int
+	TaintMarks           TaintMarksReader
 	Observer             Observer
 }
 
 type Service struct {
 	documents          DocumentStore
 	secrets            Secrets
+	taintMarks         TaintMarksReader
 	observer           Observer
 	maxDocs            int
 	tokens             int
@@ -284,6 +292,7 @@ func NewService(documents DocumentStore, secrets Secrets, config *ServiceOptions
 	return &Service{
 		documents:       documents,
 		secrets:         secrets,
+		taintMarks:      config.TaintMarks,
 		observer:        config.Observer,
 		maxDocs:         maxDocs,
 		tokens:          tokens,
@@ -443,6 +452,14 @@ func stripRecallEvidence(text string) (string, bool) {
 }
 
 func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event) (Document, bool, error) {
+	var taintCtx *batchTaintContext
+	if event != nil {
+		taintCtx = s.buildBatchTaintContext(ctx, nil, []*Event{event})
+	}
+	return s.projectEvent(ctx, ownerID, event, taintCtx)
+}
+
+func (s *Service) projectEvent(ctx context.Context, ownerID string, event *Event, taintCtx *batchTaintContext) (Document, bool, error) {
 	if ctx == nil {
 		return Document{}, false, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
@@ -469,8 +486,9 @@ func (s *Service) ProjectEvent(ctx context.Context, ownerID string, event *Event
 	if !ok {
 		return Document{}, false, nil
 	}
+	tainted := taintCtx.isEventTainted(ownerID, event)
 	return s.writeProjection(ctx, ownerID, &projection{
-		sessionID: event.SessionID, from: event.Sequence, to: event.Sequence, text: text, trust: trust, createdAt: event.CreatedAt,
+		sessionID: event.SessionID, from: event.Sequence, to: event.Sequence, text: text, trust: trust, tainted: tainted, createdAt: event.CreatedAt,
 	})
 }
 
@@ -480,6 +498,7 @@ type projection struct {
 	to        uint64
 	text      string
 	trust     approval.TrustLabel
+	tainted   bool
 	createdAt time.Time
 }
 
@@ -520,6 +539,7 @@ func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projec
 		ToSequence:   p.to,
 		Content:      content,
 		Trust:        p.trust,
+		Tainted:      p.tainted,
 		CreatedAt:    createdAt,
 	}
 	inserted, err := s.documents.UpsertDocument(ctx, &StoredDocument{
@@ -531,6 +551,7 @@ func (s *Service) writeProjection(ctx context.Context, ownerID string, p *projec
 		ToSequence:   to,
 		Content:      document.Content,
 		TrustLabel:   string(document.Trust),
+		Tainted:      boolPtr(document.Tainted),
 		CreatedAt:    document.CreatedAt,
 	})
 	if err != nil {
@@ -692,6 +713,7 @@ func recallDocumentFromHit(hit *StoredHit) (RecallDocument, error) {
 		ToSequence:    to,
 		Content:       hit.Content,
 		Trust:         approval.TrustLabel(hit.TrustLabel),
+		Tainted:       hit.IsTainted(),
 		PromptVersion: hit.PromptVersion,
 		ModelProtocol: hit.ModelProtocol,
 		ModelName:     hit.ModelName,
@@ -777,12 +799,13 @@ func (s *Service) RebuildSession(ctx context.Context, ownerID, sessionID string,
 	if err := s.documents.DeleteSessionDocuments(ctx, sessionID); err != nil {
 		return 0, err
 	}
+	taintCtx := s.buildBatchTaintContext(ctx, nil, events)
 	count := 0
 	for _, event := range events {
 		if err := ctx.Err(); err != nil {
 			return count, err
 		}
-		_, indexed, err := s.ProjectEvent(ctx, ownerID, event)
+		_, indexed, err := s.projectEvent(ctx, ownerID, event, taintCtx)
 		if err != nil {
 			return count, err
 		}
@@ -876,9 +899,16 @@ func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query strin
 	if s.secrets != nil && s.secrets.Contains(content) {
 		return RecallContext{}, fault.New(ErrorCodeUnavailable, "summarizer returned no usable content")
 	}
+	summaryTainted := false
 	from, to := documents[0].FromSequence, documents[0].ToSequence
+	if documents[0].Tainted {
+		summaryTainted = true
+	}
 	for i := range documents[1:] {
 		document := &documents[1+i]
+		if document.Tainted {
+			summaryTainted = true
+		}
 		if document.FromSequence < from {
 			from = document.FromSequence
 		}
@@ -894,6 +924,7 @@ func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query strin
 		Kind:          KindSummary,
 		Content:       content,
 		TrustLabel:    string(approval.TrustDerivedUntrusted),
+		Tainted:       boolPtr(summaryTainted),
 		PromptVersion: s.summaryPrompt,
 		ModelProtocol: model.Protocol,
 		ModelName:     model.Name,
@@ -918,6 +949,7 @@ func (s *Service) Summarize(ctx context.Context, ownerID, sessionID, query strin
 		Summary:    content,
 		Provenance: provenanceFor(documents),
 		Trust:      approval.TrustDerivedUntrusted,
+		Tainted:    summaryTainted,
 	}, nil
 }
 
@@ -927,7 +959,14 @@ func (s *Service) RecallWithSummary(ctx context.Context, req *RecallRequest, mod
 		return RecallContext{}, err
 	}
 	if model == nil || summarizer == nil || len(documents) == 0 {
-		return RecallContext{Query: req.Query, Documents: documents, Provenance: provenanceFor(documents)}, nil
+		anyTainted := false
+		for i := range documents {
+			if documents[i].Tainted {
+				anyTainted = true
+				break
+			}
+		}
+		return RecallContext{Query: req.Query, Documents: documents, Provenance: provenanceFor(documents), Tainted: anyTainted}, nil
 	}
 	return s.Summarize(ctx, req.OwnerID, req.SessionID, req.Query, documents, model, summarizer)
 }

@@ -40,6 +40,7 @@ type Fact struct {
 	Status           string
 	Origin           string
 	OwnerVerified    bool
+	TaintSource      string
 	Confidence       float64
 	ConfidencePolicy string
 	ConflictsWithID  string
@@ -56,6 +57,7 @@ type Evidence struct {
 	ModelVersion  string
 	PromptVersion string
 	PromptDigest  string
+	TaintSource   string
 	ObservedAt    time.Time
 }
 
@@ -175,7 +177,8 @@ func (s *Service) ProposeFact(ctx stdcontext.Context, ownerID, category, key, va
 	fact := Fact{
 		ID: id, OwnerID: ownerID, Category: category, Key: key, Value: value,
 		ValueDigest: digest, Status: StatusCandidate, Origin: OriginDerived,
-		Confidence: ConfidenceV1(1), ConfidencePolicy: ConfidencePolicyV1,
+		TaintSource: evidence.TaintSource,
+		Confidence:  ConfidenceV1(1), ConfidencePolicy: ConfidencePolicyV1,
 		CreatedAt: now, UpdatedAt: now,
 	}
 	for i := range actives {

@@ -200,6 +200,7 @@ type Preview struct {
 	Lines  []string
 	Digest string
 	Empty  bool
+	Direct bool
 	Code   string
 }
 

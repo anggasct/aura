@@ -8,7 +8,12 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
+
+type SessionTaintAtReader interface {
+	SessionTaintAt(ctx stdcontext.Context, sessionID string, atSequence uint64, principalID string) (turn.TaintMark, bool, error)
+}
 
 type ModelProducer struct {
 	Provider     string
@@ -77,6 +82,7 @@ type Extractor struct {
 	logger          *slog.Logger
 	dropped         atomic.Int64
 	observer        Observer
+	taintReader     SessionTaintAtReader
 }
 
 type ExtractorOption func(*Extractor)
@@ -84,6 +90,12 @@ type ExtractorOption func(*Extractor)
 func WithObserver(observer Observer) ExtractorOption {
 	return func(e *Extractor) {
 		e.observer = observer
+	}
+}
+
+func WithTaintReader(reader SessionTaintAtReader) ExtractorOption {
+	return func(e *Extractor) {
+		e.taintReader = reader
 	}
 }
 
@@ -231,6 +243,7 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job, queueAge time.Durati
 			if !ok {
 				continue
 			}
+			taintSource := e.taintSourceAt(ctx, job.SessionID, event.Sequence, job.OwnerID)
 			_, err := e.service.ProposeFact(ctx, job.OwnerID, candidate.Category, candidate.Key, candidate.Value, &Evidence{
 				SourceEventID: event.ID,
 				SourceDigest:  ValueDigest(event.Text),
@@ -239,6 +252,7 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job, queueAge time.Durati
 				ModelVersion:  result.Producer.ModelVersion,
 				PromptVersion: e.promptVersion,
 				PromptDigest:  e.promptDigest,
+				TaintSource:   taintSource,
 				ObservedAt:    now,
 			}, now)
 			if err != nil {
@@ -256,6 +270,20 @@ func (e *Extractor) handle(ctx stdcontext.Context, job Job, queueAge time.Durati
 		}
 	}
 	e.finish(ctx, outcome, ResultCompleted, queueAge)
+}
+
+func (e *Extractor) taintSourceAt(ctx stdcontext.Context, sessionID string, sequence uint64, ownerID string) string {
+	if e == nil || e.taintReader == nil {
+		return ""
+	}
+	mark, tainted, err := e.taintReader.SessionTaintAt(ctx, sessionID, sequence, ownerID)
+	if err != nil {
+		return turn.TaintMark{Source: turn.TaintSourceLegacy}.Label()
+	}
+	if !tainted {
+		return ""
+	}
+	return mark.Label()
 }
 
 func (e *Extractor) callWithRetry(ctx stdcontext.Context, sources []ExtractSource) (*ExtractResult, int, error) {
