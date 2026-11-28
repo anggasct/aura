@@ -523,28 +523,36 @@ func groupProjectionsAndTokens(
 }
 
 func projectRowFunctionResponses(row *turn.Event, mediaType string, sequence uint64, maxBytes int) ([]ToolProjection, string, error) {
-	parts := extractFunctionResponseParts(row.Payload)
+	parts := extractRowContentParts(row.Payload)
 	if len(parts) == 0 {
 		return nil, "", nil
 	}
-	threshold := maxBytes
+	responseCount := 0
 	oversizedCount := 0
 	for _, part := range parts {
-		if len(part.Raw) > threshold {
+		if !part.IsFunctionResponse {
+			continue
+		}
+		responseCount++
+		if len(part.Text) > maxBytes {
 			oversizedCount++
 		}
 	}
+	if responseCount == 0 {
+		return nil, "", nil
+	}
+	threshold := maxBytes
 	if oversizedCount == 0 {
-		threshold = max(maxBytes/len(parts), 1)
+		threshold = max(maxBytes/responseCount, 1)
 	}
 	var projections []ToolProjection
 	var sb strings.Builder
 	for _, part := range parts {
-		if len(part.Raw) <= threshold {
-			sb.WriteString(part.Raw)
+		if !part.IsFunctionResponse || len(part.Text) <= threshold {
+			sb.WriteString(part.Text)
 			continue
 		}
-		proj := projectText(part.Raw, mediaType, sequence, threshold)
+		proj := projectText(part.Text, mediaType, sequence, threshold)
 		projections = append(projections, ToolProjection{
 			PartIndex:  part.PartIndex,
 			Projection: *proj,
@@ -583,16 +591,19 @@ func oldestOptionalKept(groups []Group, protected, kept map[int]bool) (int, bool
 func degradeOldestSummary(parts []resolvedPart, counter TokenCounter) (int, bool) {
 	changed := false
 	for i := range parts {
-		if parts[i].Kind != PartSummary {
+		part := &parts[i]
+		if part.Kind != PartSummary {
 			continue
 		}
-		for j := range parts[i].Summaries {
-			if !parts[i].Summaries[j].Degraded {
-				entry := &parts[i].Summaries[j]
-				*entry = unavailableEntry(entry.StartSeq, entry.EndSeq, entry.EventCount, counter)
-				changed = true
-				break
+		for j := range part.Summaries {
+			if part.Summaries[j].Degraded {
+				continue
 			}
+			entry := &part.Summaries[j]
+			*entry = unavailableEntry(entry.StartSeq, entry.EndSeq, entry.EventCount, counter)
+			part.Summaries = coalesceUnavailableEntries(part.Summaries, counter)
+			changed = true
+			break
 		}
 		if changed {
 			break
@@ -603,12 +614,13 @@ func degradeOldestSummary(parts []resolvedPart, counter TokenCounter) (int, bool
 	}
 	total := 0
 	for i := range parts {
-		switch parts[i].Kind {
+		part := &parts[i]
+		switch part.Kind {
 		case PartVerbatim:
-			total += parts[i].GroupTokens
+			total += part.GroupTokens
 		case PartSummary:
-			for j := range parts[i].Summaries {
-				total += parts[i].Summaries[j].Tokens
+			for j := range part.Summaries {
+				total += part.Summaries[j].Tokens
 			}
 		}
 	}
@@ -616,7 +628,7 @@ func degradeOldestSummary(parts []resolvedPart, counter TokenCounter) (int, bool
 }
 
 func collectCompactOutput(parts []resolvedPart, priorRowBySeq map[uint64]*turn.Event, usedTokens, effective int) *CompactOutput {
-	var items []CompactItem
+	items := make([]CompactItem, 0, len(parts))
 	for i := range parts {
 		switch parts[i].Kind {
 		case PartVerbatim:

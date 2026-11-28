@@ -291,3 +291,70 @@ func TestModuleDegradesGracefullyWhenSummarizerFails(t *testing.T) {
 		t.Fatalf("err = %v, want %s", err, ErrorCodeBudgetExceeded)
 	}
 }
+
+func TestDegradeOldestSummaryCoalescesAdjacentDegradedChunks(t *testing.T) {
+	parts := []resolvedPart{
+		{
+			Kind: PartSummary,
+			Summaries: []resolvedSummaryEntry{
+				{ID: "ctxsum-1", Text: strings.Repeat("a", 300), Tokens: 300, Degraded: false, StartSeq: 1, EndSeq: 2, EventCount: 2},
+				{ID: "ctxsum-2", Text: strings.Repeat("b", 300), Tokens: 300, Degraded: false, StartSeq: 3, EndSeq: 4, EventCount: 2},
+			},
+		},
+	}
+	firstTotal, ok := degradeOldestSummary(parts, exactCounter{})
+	if !ok {
+		t.Fatal("first degrade returned false")
+	}
+	if len(parts[0].Summaries) != 2 || !parts[0].Summaries[0].Degraded || parts[0].Summaries[1].Degraded {
+		t.Fatalf("after first degrade summaries = %+v", parts[0].Summaries)
+	}
+	secondTotal, ok := degradeOldestSummary(parts, exactCounter{})
+	if !ok {
+		t.Fatal("second degrade returned false")
+	}
+	if len(parts[0].Summaries) != 1 {
+		t.Fatalf("adjacent degraded chunks were not coalesced: len=%d (%+v)", len(parts[0].Summaries), parts[0].Summaries)
+	}
+	merged := parts[0].Summaries[0]
+	if !merged.Degraded || merged.StartSeq != 1 || merged.EndSeq != 4 || merged.EventCount != 4 {
+		t.Errorf("coalesced summary = %+v", merged)
+	}
+	if secondTotal >= firstTotal {
+		t.Errorf("coalesced total %d did not shrink below %d", secondTotal, firstTotal)
+	}
+}
+
+func TestProjectRowFunctionResponsesPreservesSiblingPartText(t *testing.T) {
+	siblingText := "SIBLING-ASSISTANT-NOTE-KEEP-COUNT"
+	rawPayload, err := json.Marshal(map[string]any{
+		"content": map[string]any{
+			"role": "user",
+			"parts": []map[string]any{
+				{"text": siblingText},
+				{"functionCall": map[string]any{"id": "call_1", "name": "fs_read", "args": map[string]any{"path": "a.txt"}}},
+				{"functionResponse": map[string]any{"id": "call_1", "name": "fs_read", "response": map[string]any{"output": strings.Repeat("X", 500)}}},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	row := &turn.Event{Sequence: 7, Kind: "adk_event", Payload: rawPayload}
+	projections, projectedText, err := projectRowFunctionResponses(row, "text/plain", 7, 64)
+	if err != nil {
+		t.Fatalf("projectRowFunctionResponses: %v", err)
+	}
+	if len(projections) != 1 || projections[0].PartIndex != 2 {
+		t.Fatalf("projections = %+v, want single projection at part 2", projections)
+	}
+	if !strings.Contains(projectedText, siblingText) {
+		t.Errorf("projectedText dropped sibling text part: %q", projectedText)
+	}
+	if !strings.Contains(projectedText, "fs_read") || !strings.Contains(projectedText, `"path":"a.txt"`) {
+		t.Errorf("projectedText dropped sibling functionCall part: %q", projectedText)
+	}
+	if !strings.Contains(projectedText, `"projected":true`) {
+		t.Errorf("projectedText missing projected response: %q", projectedText)
+	}
+}

@@ -160,7 +160,17 @@ func (s *adkSession) merged() ([]*session.Event, error) {
 		currentRows = append(currentRows, re)
 	}
 	s.compactStep++
-	res, err := s.compact(s.compactStep, s.priorRaw, currentRows, s.appended)
+	var toolBase []*session.Event
+	if s.hasCompacted {
+		toolBase = s.compactedBase
+	} else {
+		toolBase = make([]*session.Event, 0, len(s.priorRaw))
+		for i := range s.priorRaw {
+			toolBase = append(toolBase, s.priorBySeq[s.priorRaw[i].Sequence])
+		}
+	}
+	toolEvents := mergeEvents(toolBase, s.appended)
+	res, err := s.compact(s.compactStep, s.priorRaw, currentRows, toolEvents)
 	if err != nil {
 		s.view, s.viewErr, s.viewed = nil, err, true
 		return nil, err
@@ -254,15 +264,15 @@ func (e *adkEvents) loadOnce() {
 		return
 	}
 	e.cache, e.err = e.load()
+	if e.err != nil && e.onErr != nil {
+		e.onErr(e.err)
+	}
 }
 
 func (e *adkEvents) All() iter.Seq[*session.Event] {
 	return func(yield func(*session.Event) bool) {
 		e.loadOnce()
 		if e.err != nil {
-			if e.onErr != nil {
-				e.onErr(e.err)
-			}
 			return
 		}
 		for _, ev := range e.cache {

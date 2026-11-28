@@ -105,12 +105,13 @@ func MapEvent(row *turn.Event) Event {
 	return event
 }
 
-type functionResponsePart struct {
-	PartIndex int
-	Raw       string
+type rowContentPart struct {
+	PartIndex          int
+	IsFunctionResponse bool
+	Text               string
 }
 
-func extractFunctionResponseParts(raw json.RawMessage) []functionResponsePart {
+func extractRowContentParts(raw json.RawMessage) []rowContentPart {
 	if len(raw) == 0 {
 		return nil
 	}
@@ -118,12 +119,23 @@ func extractFunctionResponseParts(raw json.RawMessage) []functionResponsePart {
 	if err := json.Unmarshal(raw, &payload); err != nil || payload.Content == nil {
 		return nil
 	}
-	var parts []functionResponsePart
+	var parts []rowContentPart
 	for i, part := range payload.Content.Parts {
+		if strings.TrimSpace(part.Text) != "" {
+			parts = append(parts, rowContentPart{PartIndex: i, Text: part.Text})
+		}
+		if part.FunctionCall != nil {
+			if len(part.FunctionCall.Args) > 0 {
+				parts = append(parts, rowContentPart{PartIndex: i, Text: part.FunctionCall.Name + string(part.FunctionCall.Args)})
+			} else if part.FunctionCall.Name != "" {
+				parts = append(parts, rowContentPart{PartIndex: i, Text: part.FunctionCall.Name})
+			}
+		}
 		if part.FunctionResponse != nil && len(part.FunctionResponse.Response) > 0 {
-			parts = append(parts, functionResponsePart{
-				PartIndex: i,
-				Raw:       string(part.FunctionResponse.Response),
+			parts = append(parts, rowContentPart{
+				PartIndex:          i,
+				IsFunctionResponse: true,
+				Text:               string(part.FunctionResponse.Response),
 			})
 		}
 	}

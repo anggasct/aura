@@ -108,23 +108,33 @@ func compactWithJournal(
 	step uint64,
 	prior []turn.Event,
 	current []turn.Event,
-	appended []*session.Event,
+	toolEvents []*session.Event,
 ) (*CompactionResult, error) {
 	if cfg == nil || cfg.compactor == nil {
 		return nil, invalidArgument("session compaction is not configured")
 	}
 	run := func(runCtx context.Context) (*CompactionResult, error) {
-		return cfg.compactor.Compact(runCtx, &CompactionRequest{
+		res, err := cfg.compactor.Compact(runCtx, &CompactionRequest{
 			SessionID:       sessionID,
 			TurnID:          cfg.turnID,
 			InvocationID:    cfg.turnID,
 			Capability:      cfg.capability,
 			SystemText:      cfg.systemText,
-			ToolText:        toolDefinitionsText(cfg.coreTools, cfg.operationPlan, cfg.operationBinding, appended),
+			ToolText:        toolDefinitionsText(cfg.coreTools, cfg.operationPlan, cfg.operationBinding, toolEvents),
 			MaxOutputTokens: 0,
 			PriorEvents:     prior,
 			CurrentEvents:   current,
 		})
+		if err != nil {
+			return nil, err
+		}
+		if res != nil && res.Items == nil {
+			res.Items = []CompactionItem{}
+		}
+		if err := validateCompactionResult(res, len(prior)); err != nil {
+			return nil, err
+		}
+		return res, nil
 	}
 	scope, durableTurn := durable.TurnScopeFrom(ctx)
 	if !durableTurn {
@@ -141,32 +151,58 @@ func compactWithJournal(
 	if err != nil {
 		return nil, err
 	}
-	var res CompactionResult
+	var res *CompactionResult
 	if err := json.Unmarshal(raw, &res); err != nil {
 		return nil, codedError(turn.ErrorCodeRuntimeInternal, "decode journaled compaction result", err)
 	}
-	return &res, nil
+	if err := validateCompactionResult(res, len(prior)); err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+func validateCompactionResult(res *CompactionResult, priorCount int) error {
+	if res == nil {
+		return codedError(turn.ErrorCodeRuntimeInternal, "journaled compaction result is nil", nil)
+	}
+	if res.Items == nil {
+		return codedError(turn.ErrorCodeRuntimeInternal, "journaled compaction result misses items", nil)
+	}
+	if priorCount > 0 && len(res.Items) == 0 {
+		return codedError(turn.ErrorCodeRuntimeInternal, "journaled compaction result dropped all prior history", nil)
+	}
+	return nil
 }
 
 func materializeCompactedEvents(res *CompactionResult, priorBySeq map[uint64]*session.Event) ([]*session.Event, error) {
-	if res == nil {
-		return nil, invalidArgument("compaction result must not be nil")
+	if err := validateCompactionResult(res, len(priorBySeq)); err != nil {
+		return nil, err
 	}
 	out := make([]*session.Event, 0, len(res.Items))
 	for i := range res.Items {
 		item := &res.Items[i]
 		switch item.Kind {
 		case CompactionItemEvent:
+			if item.Sequence == 0 {
+				return nil, codedError(turn.ErrorCodeRuntimeInternal, "compacted event item carries no sequence", nil)
+			}
 			ev, ok := priorBySeq[item.Sequence]
 			if !ok || ev == nil {
 				return nil, codedError(turn.ErrorCodeRuntimeInternal, fmt.Sprintf("compacted event sequence %d missing from history", item.Sequence), nil)
 			}
 			if len(item.Projections) > 0 {
-				out = append(out, cloneEventWithProjections(ev, item.Projections))
+				cloned, err := cloneEventWithProjections(ev, item.Projections)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, cloned)
 			} else {
 				out = append(out, ev)
 			}
 		case CompactionItemSummary:
+			if strings.TrimSpace(item.SummaryID) == "" || strings.TrimSpace(item.SummaryText) == "" {
+				return nil, codedError(turn.ErrorCodeRuntimeInternal, "compacted summary item misses id or text", nil)
+			}
 			out = append(out, &session.Event{
 				ID:           item.SummaryID,
 				Author:       userAuthor,
@@ -182,13 +218,24 @@ func materializeCompactedEvents(res *CompactionResult, priorBySeq map[uint64]*se
 	return out, nil
 }
 
-func cloneEventWithProjections(ev *session.Event, projections []CompactionToolProjection) *session.Event {
-	if ev == nil || ev.Content == nil || len(projections) == 0 {
-		return ev
+func cloneEventWithProjections(ev *session.Event, projections []CompactionToolProjection) (*session.Event, error) {
+	if len(projections) == 0 {
+		return ev, nil
+	}
+	if ev == nil || ev.Content == nil {
+		return nil, codedError(turn.ErrorCodeRuntimeInternal, "projected event carries no content", nil)
 	}
 	byPart := make(map[int]CompactionToolProjection, len(projections))
 	for i := range projections {
-		byPart[projections[i].PartIndex] = projections[i]
+		idx := projections[i].PartIndex
+		if idx < 0 || idx >= len(ev.Content.Parts) {
+			return nil, codedError(turn.ErrorCodeRuntimeInternal, fmt.Sprintf("projection part index %d out of range", idx), nil)
+		}
+		part := ev.Content.Parts[idx]
+		if part == nil || part.FunctionResponse == nil {
+			return nil, codedError(turn.ErrorCodeRuntimeInternal, fmt.Sprintf("projection part index %d is not a function response", idx), nil)
+		}
+		byPart[idx] = projections[i]
 	}
 	cloned := *ev
 	contentCopy := *ev.Content
@@ -198,7 +245,7 @@ func cloneEventWithProjections(ev *session.Event, projections []CompactionToolPr
 			continue
 		}
 		proj, hasProj := byPart[i]
-		if !hasProj || part.FunctionResponse == nil {
+		if !hasProj {
 			partsCopy[i] = part
 			continue
 		}
@@ -216,7 +263,7 @@ func cloneEventWithProjections(ev *session.Event, projections []CompactionToolPr
 	}
 	contentCopy.Parts = partsCopy
 	cloned.Content = &contentCopy
-	return &cloned
+	return &cloned, nil
 }
 
 func hasPendingFunctionCall(events []*session.Event) bool {
