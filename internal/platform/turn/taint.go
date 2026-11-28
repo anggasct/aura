@@ -81,3 +81,7 @@ func (r *TurnRequest) AdmissionTaint() (TaintMark, bool) {
 	}
 	return TaintMark{}, false
 }
+
+func WebOnlyRestriction() *ToolRestriction {
+	return &ToolRestriction{Allowed: []string{"web_search", "web_fetch"}}
+}

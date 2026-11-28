@@ -239,17 +239,25 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		if _, ok := durable.TurnScopeFrom(runCtx); ok {
 			sessionService.leaveOutTurn = req.TurnID
 		}
-		recallAttached := req.UntrustedContext != nil
-		blocks, err := x.collectContextBlocks(runCtx, req)
-		if err != nil {
-			yield(turn.Event{}, err)
-			return
+		recallAttached := req.UntrustedContext != nil && !req.WebOnly
+		var blocks []turn.ContextBlock
+		if !req.WebOnly {
+			blocks, err = x.collectContextBlocks(runCtx, req)
+			if err != nil {
+				yield(turn.Event{}, err)
+				return
+			}
 		}
 		extra := turnContext{
 			blocks:         blocks,
 			knowledgeScope: req.Knowledge,
 			restriction:    req.ToolRestriction,
 			history:        sessionService,
+		}
+		if req.WebOnly {
+			extra.knowledgeScope = nil
+			extra.restriction = turn.WebOnlyRestriction()
+			extra.webOnly = webOnlyInstruction(x.now(), req.Timezone)
 		}
 		extra.plan = x.planOperations(runCtx, &planInput{definition: &definition, req: req, extra: &extra})
 		runCtx = withOperationPlan(runCtx, extra.plan)
@@ -355,6 +363,7 @@ type turnContext struct {
 	restriction    *turn.ToolRestriction
 	history        historyReader
 	plan           *operationPlan
+	webOnly        string
 }
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
@@ -505,6 +514,7 @@ func (x *ADKExecutor) executeBuiltinTool(callCtx context.Context, actx agent.Con
 		TaintSource:     access.taintSource,
 		Origin:          access.origin,
 		Unattended:      access.unattended && x.generatesOperation(definition.Name),
+		WebOnlyRelief:   access.webOnlyRelief,
 		ToolName:        definition.Name,
 		ToolVersion:     definition.Version,
 		Arguments:       raw,
@@ -614,6 +624,9 @@ func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.De
 }
 
 func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra *turnContext) []tool.Tool {
+	if extra.webOnly != "" {
+		return x.webOnlyTools(extra.restriction)
+	}
 	allowed, ok := x.allowedTools(definition, class)
 	if !ok {
 		return nil
@@ -698,7 +711,9 @@ func exposesPluginTool(definition *auraagent.Definition, class principal.Class, 
 
 func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra *turnContext) (agent.Agent, error) {
 	instruction := definition.Instructions
-	if ownerContext != "" {
+	if extra.webOnly != "" {
+		instruction = extra.webOnly
+	} else if ownerContext != "" {
 		instruction = ownerContext
 		if soul := strings.TrimSpace(definition.Instructions); soul != "" {
 			instruction += "\n\n" + soul

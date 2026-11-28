@@ -17,6 +17,7 @@ func ToolDefinition() tools.Definition {
 		Schema:               []byte(`{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"aura://tools/web_search/v1","type":"object","properties":{"query":{"type":"string","minLength":1},"max_results":{"type":"integer","minimum":1}},"required":["query"],"additionalProperties":false}`),
 		RequiredCapabilities: []string{"provider-search"},
 		ExternalSink:         true,
+		SinkRelief:           &tools.SinkRelief{Kind: tools.SinkReliefBoundedQuery, Argument: "query", MaxBytes: MaxQueryBytes},
 		Validator:            validateSearchArguments,
 	}
 }

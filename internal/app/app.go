@@ -595,6 +595,10 @@ func newToolBroker(in *toolExecutorInput) (*toolbroker.Broker, *runtimeadk.Broke
 		HostCapabilities:     host,
 		ApprovalReachable:    wiring.reachable,
 		Clock:                in.clock,
+		WebOnly: toolbroker.WebOnlyLimits{
+			Fetches: in.result.Config.Tools.Fetch.WebOnlyFetchesPerRun,
+			Queries: in.result.Config.Tools.WebSearch.WebOnlyQueriesPerRun,
+		},
 	})
 	if err != nil {
 		return nil, nil, nil, err

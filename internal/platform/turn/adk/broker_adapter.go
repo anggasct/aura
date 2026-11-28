@@ -113,7 +113,7 @@ func (e *BrokerExecutor) Execute(ctx context.Context, request *BuiltinToolReques
 		Deadline: request.Deadline, IdempotencyKey: request.IdempotencyKey,
 		AllocateEventSequence: true, EventInvocation: request.EventInvocation,
 		EventBranch: request.EventBranch, EventAuthor: request.EventAuthor,
-		Knowledge: slices.Clone(request.Knowledge), Tainted: request.Tainted, TaintSource: request.TaintSource, Unattended: request.Unattended, Origin: request.Origin, ContentTaintTracked: request.ContentTaintTracked,
+		Knowledge: slices.Clone(request.Knowledge), Tainted: request.Tainted, TaintSource: request.TaintSource, Unattended: request.Unattended, WebOnlyRelief: request.WebOnlyRelief, Origin: request.Origin, ContentTaintTracked: request.ContentTaintTracked,
 	})
 	if err != nil {
 		return nil, err
