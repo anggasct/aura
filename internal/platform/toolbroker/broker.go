@@ -98,6 +98,7 @@ type Observation struct {
 	Executor      string
 	Duration      time.Duration
 	OutputBytes   int64
+	OperationID   string
 }
 
 type Observer func(context.Context, Observation)
@@ -362,6 +363,10 @@ func (b *Broker) UnregisterTool(toolName, toolVersion string) {
 	b.engine.UnregisterRule(toolName)
 }
 
+func (b *Broker) Effects() *effect.Executor {
+	return b.effects
+}
+
 func (b *Broker) PolicyVersion() string {
 	return b.engine.PolicyVersion()
 }
@@ -445,6 +450,11 @@ func (b *Broker) Execute(ctx context.Context, request *ToolRequest) (result Tool
 		if request != nil {
 			observation.ToolName = request.ToolName
 			observation.ToolVersion = request.ToolVersion
+			b.mu.RLock()
+			if definition := b.definitions[request.ToolName+"@"+request.ToolVersion]; definition != nil {
+				observation.OperationID = definition.Operation
+			}
+			b.mu.RUnlock()
 		}
 		b.observer(ctx, observation)
 	}()

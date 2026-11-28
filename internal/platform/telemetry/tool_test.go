@@ -355,3 +355,32 @@ func TestToolSpanCarriesTheWorkflowRunAndStep(t *testing.T) {
 		}
 	}
 }
+
+func TestToolSpanCarriesTheOperationID(t *testing.T) {
+	exporter, tp := newToolTestTracer(t)
+	recorder, err := NewToolRecorder(tp, sdkmetric.NewMeterProvider())
+	if err != nil {
+		t.Fatalf("NewToolRecorder: %v", err)
+	}
+	recorder.Record(context.Background(), &ToolObservation{Name: "aura_cron_list@v1", Status: "ok", OperationID: "cron.list"})
+	recorder.Record(context.Background(), &ToolObservation{Name: "read_file@v1", Status: "ok"})
+
+	spans := exporter.GetSpans()
+	if len(spans) != 2 {
+		t.Fatalf("spans = %d, want 2", len(spans))
+	}
+	has := func(index int) (string, bool) {
+		for _, kv := range spans[index].Attributes {
+			if string(kv.Key) == AttrOperationID {
+				return kv.Value.AsString(), true
+			}
+		}
+		return "", false
+	}
+	if id, ok := has(0); !ok || id != "cron.list" {
+		t.Errorf("operation span %s = %q (%v), want cron.list", AttrOperationID, id, ok)
+	}
+	if _, ok := has(1); ok {
+		t.Errorf("a span of a tool without an operation carries %s", AttrOperationID)
+	}
+}

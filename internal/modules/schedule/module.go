@@ -8,6 +8,7 @@ import (
 
 	"github.com/anggasct/aura/internal/platform/durable"
 	"github.com/anggasct/aura/internal/platform/fault"
+	"github.com/anggasct/aura/internal/platform/operation"
 )
 
 const DefaultPassInterval = 5 * time.Minute
@@ -21,6 +22,9 @@ type ModuleDeps struct {
 	PassInterval time.Duration
 	Logger       *slog.Logger
 	Observer     Observer
+
+	WorkflowChecker WorkflowChecker
+	Owner           OwnerDestination
 }
 
 type Module struct {
@@ -30,6 +34,7 @@ type Module struct {
 	starter      Starter
 	passInterval time.Duration
 	logger       *slog.Logger
+	operations   *Operations
 }
 
 func New(deps *ModuleDeps) (*Module, error) {
@@ -72,6 +77,13 @@ func New(deps *ModuleDeps) (*Module, error) {
 	if err != nil {
 		return nil, err
 	}
+	operations, err := NewOperations(&OperationDeps{
+		Config: deps.Config, Store: store, Service: service, Starter: deps.Starter,
+		WorkflowChecker: deps.WorkflowChecker, Owner: deps.Owner,
+	})
+	if err != nil {
+		return nil, err
+	}
 	passInterval := deps.PassInterval
 	if passInterval <= 0 {
 		passInterval = DefaultPassInterval
@@ -83,7 +95,12 @@ func New(deps *ModuleDeps) (*Module, error) {
 		starter:      deps.Starter,
 		passInterval: passInterval,
 		logger:       logger,
+		operations:   operations,
 	}, nil
+}
+
+func (m *Module) Bindings() []operation.Binding {
+	return m.operations.Bindings()
 }
 
 func (m *Module) Store() *SQLiteStore {

@@ -46,6 +46,11 @@ func TestBroadcastConfigValidate(t *testing.T) {
 		{"bad destination route", func(c *Config) { c.Destinations = map[string]string{"ops": "https://evil.example"} }, "destinations[ops]"},
 		{"bad fallback alias", func(c *Config) { c.Fallback = map[string]string{"BAD": "discord:owner"} }, "fallback"},
 		{"bad fallback route", func(c *Config) { c.Fallback = map[string]string{"ops": "a:b:c"} }, "fallback[ops]"},
+		{"owner destination without a destination", func(c *Config) { c.OwnerDestination = "me" }, "owner_destination"},
+		{"owner destination naming another alias", func(c *Config) {
+			c.Destinations = map[string]string{"ops": "discord:ops"}
+			c.OwnerDestination = "me"
+		}, "owner_destination"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -70,4 +75,26 @@ func TestBroadcastConfigValidate(t *testing.T) {
 			t.Fatalf("valid config rejected: %v", err)
 		}
 	})
+}
+
+func TestOwnerRouteResolvesOnlyAConfiguredAlias(t *testing.T) {
+	cases := []struct {
+		name      string
+		cfg       *Config
+		wantAlias string
+		wantRoute string
+	}{
+		{name: "a nil config", cfg: nil},
+		{name: "the default has no owner destination", cfg: &Config{}},
+		{name: "an alias that names no destination", cfg: &Config{OwnerDestination: "me", Destinations: map[string]string{"ops": "discord:ops"}}},
+		{name: "a configured alias", cfg: &Config{OwnerDestination: "me", Destinations: map[string]string{"me": "telegram:owner-dm"}}, wantAlias: "me", wantRoute: "telegram:owner-dm"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			alias, route := tc.cfg.OwnerRoute()
+			if alias != tc.wantAlias || route != tc.wantRoute {
+				t.Fatalf("OwnerRoute() = (%q, %q), want (%q, %q)", alias, route, tc.wantAlias, tc.wantRoute)
+			}
+		})
+	}
 }

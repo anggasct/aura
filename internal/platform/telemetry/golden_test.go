@@ -188,6 +188,7 @@ func TestToolSpanAllowedAttrs(t *testing.T) {
 		AttrToolApproval,
 		AttrToolExecutor,
 		AttrToolOutputBytes,
+		AttrOperationID,
 		AttrWorkflowRunID,
 		AttrWorkflowStepID,
 		AttrSemconvVersion,

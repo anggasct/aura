@@ -7,7 +7,14 @@ import (
 	"strings"
 )
 
-const MCPToolPrefix = "mcp_"
+const (
+	MCPToolPrefix       = "mcp_"
+	OperationToolPrefix = "aura_"
+)
+
+func IsOperationEntry(name string) bool {
+	return strings.HasPrefix(name, OperationToolPrefix)
+}
 
 func IsMCPEntry(name string) bool {
 	return strings.HasPrefix(name, MCPToolPrefix)

@@ -432,6 +432,32 @@ func TestCardStatesTheUntrustedInputReason(t *testing.T) {
 	}
 }
 
+func TestCardStatesTheContentUnverifiedReason(t *testing.T) {
+	cases := []struct {
+		reason string
+		want   string
+	}{
+		{reason: policy.ReasonContentUnverified, want: policy.ContentUnverifiedNotice},
+		{reason: policy.ReasonUntrustedInput, want: policy.UntrustedInputNotice},
+	}
+	for _, tc := range cases {
+		t.Run(tc.reason, func(t *testing.T) {
+			card := RenderCard(&Prompt{ToolName: "aura_cron_add", ToolVersion: "v1", SessionID: "s", PrincipalID: "p", Arguments: "{}", ReasonCode: tc.reason}, "team", nil)
+			lines := strings.Split(card, "\n")
+			if lines[1] != tc.want {
+				t.Errorf("second line = %q, want %q", lines[1], tc.want)
+			}
+			other := policy.ContentUnverifiedNotice
+			if tc.reason == policy.ReasonContentUnverified {
+				other = policy.UntrustedInputNotice
+			}
+			if strings.Contains(card, other) {
+				t.Errorf("card carries the notice of the other reason: %q", card)
+			}
+		})
+	}
+}
+
 func TestRenderCardEscapesEveryField(t *testing.T) {
 	hostile := "\u202e\U000E0041"
 	card := RenderCard(&Prompt{ToolName: "t" + hostile, ToolVersion: "v" + hostile, SessionID: "s" + hostile, PrincipalID: "p" + hostile, Arguments: `a\\b`}, "persona"+hostile, nil)

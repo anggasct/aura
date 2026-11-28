@@ -2,6 +2,357 @@
   "policy_version": "builtin-tools-v1",
   "definitions": [
     {
+      "key": "aura_cron_add@v1",
+      "name": "aura_cron_add",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Create a scheduled job and start its run\n\nStores a prompt or workflow start that later runs unattended with the owner's authority. The owner picks the destination of its output; a call from the agent always uses the owner destination.",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.add/v1",
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "job name"
+          },
+          "schedule": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "description": "five-field cron expression"
+          },
+          "timezone": {
+            "type": "string",
+            "maxLength": 64,
+            "description": "IANA timezone (default from config)"
+          },
+          "prompt": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 65536,
+            "description": "turn prompt"
+          },
+          "workflow": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "workflow or routine id to start instead of a prompt"
+          },
+          "input": {
+            "type": "object",
+            "properties": {
+              "objective": {
+                "type": "string"
+              }
+            },
+            "additionalProperties": false
+          },
+          "overlap": {
+            "type": "string",
+            "enum": [
+              "skip",
+              "queue_one"
+            ],
+            "description": "overlap policy",
+            "default": "skip"
+          },
+          "grace": {
+            "type": "string",
+            "pattern": "^\\+?(0|((\\d+(\\.\\d*)?|\\.\\d+)(ns|us|µs|μs|ms|s|m|h))+)$",
+            "description": "catch-up grace (default from config)"
+          }
+        },
+        "required": [
+          "name",
+          "schedule"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": true,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": true,
+      "no_standing_grant": true,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "name",
+        "schedule",
+        "timezone",
+        "prompt",
+        "workflow",
+        "input",
+        "overlap",
+        "grace"
+      ],
+      "has_validator": false,
+      "risk": "trust_grant",
+      "operation": "cron.add",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_cron_delete@v1",
+      "name": "aura_cron_delete",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Soft-delete a job and retain its history",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.delete/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "job id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "cron.delete",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_cron_list@v1",
+      "name": "aura_cron_list",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "List jobs with their next fire instant",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.list/v1",
+        "type": "object",
+        "properties": {},
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": null,
+      "has_validator": false,
+      "risk": "read",
+      "operation": "cron.list",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_cron_pause@v1",
+      "name": "aura_cron_pause",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Pause a job after its in-flight turn settles",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.pause/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "job id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "cron.pause",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_cron_resume@v1",
+      "name": "aura_cron_resume",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Resume a paused job and restart its run",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.resume/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "job id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "cron.resume",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_cron_run_now@v1",
+      "name": "aura_cron_run_now",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "Record a manual fire and start the job run",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.run-now/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "job id"
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": true,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": true,
+      "orchestration": false,
+      "display": [
+        "id"
+      ],
+      "has_validator": false,
+      "risk": "change",
+      "operation": "cron.run-now",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
+      "key": "aura_cron_runs@v1",
+      "name": "aura_cron_runs",
+      "version": "v1",
+      "server": "",
+      "plugin": false,
+      "description": "List occurrence history for a job",
+      "schema": {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "aura://operations/cron.runs/v1",
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128,
+            "description": "job id"
+          },
+          "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 1000,
+            "description": "maximum rows to show",
+            "default": 50
+          }
+        },
+        "required": [
+          "id"
+        ],
+        "additionalProperties": false
+      },
+      "required_capabilities": null,
+      "requires_approval": false,
+      "effectful": false,
+      "opt_in": true,
+      "owner_opt_in": true,
+      "external_sink": false,
+      "no_standing_grant": false,
+      "exact_display": false,
+      "orchestration": false,
+      "display": [
+        "id",
+        "limit"
+      ],
+      "has_validator": false,
+      "risk": "read",
+      "operation": "cron.runs",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
+    },
+    {
       "key": "code_execute@v1",
       "name": "code_execute",
       "version": "v1",
@@ -57,7 +408,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "email_send@v1",
@@ -107,7 +463,12 @@
         "subject",
         "body"
       ],
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "exec@v1",
@@ -148,7 +509,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "handoff_to_owner@v1",
@@ -182,7 +548,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "kb_search@v1",
@@ -221,7 +592,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "list_dir@v1",
@@ -259,7 +635,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "read_file@v1",
@@ -298,7 +679,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "web_fetch@v1",
@@ -334,7 +720,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "web_search@v1",
@@ -373,7 +764,12 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "workflow_cancel@v1",
@@ -407,7 +803,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "workflow_list@v1",
@@ -433,7 +834,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "workflow_propose@v1",
@@ -647,7 +1053,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "workflow_save_routine@v1",
@@ -687,7 +1098,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "workflow_start@v1",
@@ -725,7 +1141,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "workflow_status@v1",
@@ -759,7 +1180,12 @@
       "exact_display": false,
       "orchestration": true,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     },
     {
       "key": "write_file@v1",
@@ -801,10 +1227,127 @@
       "exact_display": false,
       "orchestration": false,
       "display": null,
-      "has_validator": false
+      "has_validator": false,
+      "risk": "",
+      "operation": "",
+      "fresh_approval": false,
+      "owner_notice": false,
+      "untrusted_output": false
     }
   ],
   "rules": [
+    {
+      "tool_name": "aura_cron_add",
+      "tool_version": "v1",
+      "requires_approval": true,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_cron_delete",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_cron_list",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_cron_pause",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_cron_resume",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_cron_run_now",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
+    {
+      "tool_name": "aura_cron_runs",
+      "tool_version": "v1",
+      "requires_approval": false,
+      "required_capabilities": null,
+      "allowed_trust": [
+        "owner_input",
+        "trusted_configuration",
+        "derived_untrusted"
+      ],
+      "constraints": {
+        "allow_network": false,
+        "max_output_bytes": 65536,
+        "timeout": 30000000000
+      }
+    },
     {
       "tool_name": "code_execute",
       "tool_version": "v1",

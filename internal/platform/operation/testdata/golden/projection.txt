@@ -29,7 +29,7 @@ schema agent:
     },
     "grace": {
       "type": "string",
-      "pattern": "^\\d+(ns|us|ms|s|m|h)(\\d+(ns|us|ms|s|m|h))*$",
+      "pattern": "^\\+?(0|((\\d+(\\.\\d*)?|\\.\\d+)(ns|us|µs|μs|ms|s|m|h))+)$",
       "description": "wait first"
     },
     "tags": {

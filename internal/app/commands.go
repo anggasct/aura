@@ -39,8 +39,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/logging"
 	"github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/storage"
+	"github.com/anggasct/aura/internal/platform/toolbroker"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 	"github.com/anggasct/aura/internal/platform/usage"
 )
@@ -113,7 +115,6 @@ func MountCommands(root *cobra.Command, gf *GlobalFlags) {
 	root.AddCommand(memory.Commands(memoryOpener(gf))...)
 	root.AddCommand(profile.Commands(profileOpener(gf))...)
 	root.AddCommand(handoff.Commands(handoffOpener(gf))...)
-	root.AddCommand(schedule.Commands(scheduleOpener(gf))...)
 	root.AddCommand(broadcast.Commands(broadcastOpener(gf))...)
 	root.AddCommand(plugin.Commands(pluginOpener(gf))...)
 	root.AddCommand(mcp.Commands(mcpOpener(gf))...)
@@ -121,6 +122,7 @@ func MountCommands(root *cobra.Command, gf *GlobalFlags) {
 	root.AddCommand(workflow.Commands(workflowOpener(gf))...)
 	root.AddCommand(codeexec.Commands(interpreterOpener(gf))...)
 	root.AddCommand(child.Commands(childOpener(gf))...)
+	mountOperationCommands(root, gf)
 }
 
 func loadCommandConfig(cmd *cobra.Command, gf *GlobalFlags) (appconfig.LoadResult, *slog.Logger, error) {
@@ -552,37 +554,97 @@ func broadcastOpener(gf *GlobalFlags) broadcast.Opener {
 	}
 }
 
-func scheduleOpener(gf *GlobalFlags) schedule.Opener {
-	return func(cmd *cobra.Command, needDurable bool, fn func(ctx context.Context, env *schedule.CommandEnv) error) error {
+func operationCatalogs() []operation.Catalog {
+	return []operation.Catalog{schedule.Catalog()}
+}
+
+func IsOperationCommand(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[operation.AnnotationOperation] != ""
+}
+
+func mountOperationCommands(root *cobra.Command, gf *GlobalFlags) {
+	catalogs := operationCatalogs()
+	commands, err := operation.Commands(catalogs, operationOpener(gf))
+	if err != nil {
+		for i := range catalogs {
+			root.AddCommand(refusedGroup(catalogs[i].Group, err))
+		}
+		return
+	}
+	root.AddCommand(commands...)
+}
+
+func refusedGroup(group operation.Group, cause error) *cobra.Command {
+	return &cobra.Command{
+		Use:                group.Name,
+		Short:              group.Summary,
+		DisableFlagParsing: true,
+		RunE:               func(*cobra.Command, []string) error { return cause },
+	}
+}
+
+func commandParts(needs []string) []Part {
+	parts := make([]Part, 0, len(needs))
+	for _, need := range needs {
+		parts = append(parts, Part(need))
+	}
+	return parts
+}
+
+func operationOpener(gf *GlobalFlags) operation.Opener {
+	return func(cmd *cobra.Command, descriptor *operation.Descriptor, run func(ctx context.Context, invoker operation.Invoker) error) error {
 		result, err := appconfig.Load(gf.ConfigPath)
 		if err != nil {
 			return err
 		}
-		var parts []Part
-		if needDurable {
-			parts = []Part{PartDurable}
-		}
-		return withApp(cmd, &commandInput{result: &result, parts: parts}, func(ctx context.Context, app *App) error {
-			jobs, err := schedule.NewSQLiteStore(app.db)
+		input := &commandInput{result: &result, parts: commandParts(descriptor.Needs)}
+		return withApp(cmd, input, func(ctx context.Context, app *App) error {
+			registry, err := app.commandOperations()
 			if err != nil {
 				return err
 			}
-			service, err := schedule.NewService(jobs)
-			if err != nil {
-				return err
-			}
-			env := &schedule.CommandEnv{
-				Config:  app.result.Config.Scheduler,
-				Store:   jobs,
-				Service: service,
-				Starter: app.runtime,
-				WorkflowChecker: func(checkCtx context.Context, id string) error {
-					return checkScheduledWorkflow(checkCtx, app.result.Config, app.db, id)
-				},
-			}
-			return fn(ctx, env)
+			return run(ctx, registry)
 		})
 	}
+}
+
+func (a *App) commandOperations() (*operation.Registry, error) {
+	cfg := a.result.Config
+	jobs, err := schedule.NewSQLiteStore(a.db)
+	if err != nil {
+		return nil, err
+	}
+	service, err := schedule.NewService(jobs)
+	if err != nil {
+		return nil, err
+	}
+	operations, err := schedule.NewOperations(&schedule.OperationDeps{
+		Config:  cfg.Scheduler,
+		Store:   jobs,
+		Service: service,
+		Starter: a.runtime,
+		WorkflowChecker: func(ctx context.Context, id string) error {
+			return checkScheduledWorkflow(ctx, cfg, a.db, id)
+		},
+		Owner: &cfg.Broadcast,
+	})
+	if err != nil {
+		return nil, err
+	}
+	effects, err := newChannelEffects(a.db, a.logger)
+	if err != nil {
+		return nil, err
+	}
+	lookup, err := toolbroker.New(&toolbroker.Options{Effects: effects})
+	if err != nil {
+		return nil, err
+	}
+	return operation.NewRegistry(operationCatalogs(), operations.Bindings(), &operation.Deps{
+		DB:      a.db,
+		Effects: effects,
+		Tools:   lookup,
+		Logger:  a.logger,
+	})
 }
 
 func handoffOpener(gf *GlobalFlags) handoff.CommandOpener {

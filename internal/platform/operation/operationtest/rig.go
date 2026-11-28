@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/storage"
 	"github.com/anggasct/aura/internal/platform/telemetry"
@@ -33,16 +34,18 @@ const (
 )
 
 type Options struct {
-	DB          *sql.DB
-	Clock       *durabletest.ManualClock
-	Catalogs    []operation.Catalog
-	Bindings    func(stubs *Stubs) []operation.Binding
-	Tools       []toolbroker.ToolRegistration
-	NoApprover  bool
-	Observer    effect.Observer
-	Logger      *slog.Logger
-	Telemetry   *telemetry.OperationRecorder
-	AnswerCards func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error)
+	DB           *sql.DB
+	Clock        *durabletest.ManualClock
+	Catalogs     []operation.Catalog
+	Bindings     func(stubs *Stubs) []operation.Binding
+	Tools        []toolbroker.ToolRegistration
+	NoApprover   bool
+	Access       toolbroker.AccessPolicy
+	Observer     effect.Observer
+	ToolObserver toolbroker.Observer
+	Logger       *slog.Logger
+	Telemetry    *telemetry.OperationRecorder
+	AnswerCards  func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error)
 
 	AllowInvalid bool
 
@@ -64,17 +67,23 @@ type Rig struct {
 	approver bool
 }
 
-func OpenDatabase(tb testing.TB) *sql.DB {
+func OpenDatabase(tb testing.TB, extra ...sqlite.SchemaOwner) *sql.DB {
 	tb.Helper()
-	db := sqlitetest.OpenMigrated(tb, turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), operation.Schema())
+	schemas := append([]sqlite.SchemaOwner{turnstore.Schema(), durablesqlite.Schema(), effect.Schema(), principal.Schema(), storage.Schema(), operation.Schema()}, extra...)
+	db := sqlitetest.OpenMigrated(tb, schemas...)
 	now := time.Now().UTC()
 	if err := turnstore.NewSessionService(db).Create(tb.Context(), &turn.Session{ID: SessionID, OwnerID: OwnerID, CreatedAt: now, UpdatedAt: now}); err != nil {
 		tb.Fatalf("create the session: %v", err)
 	}
+	CreateLedger(tb, db)
+	return db
+}
+
+func CreateLedger(tb testing.TB, db *sql.DB) {
+	tb.Helper()
 	if _, err := db.ExecContext(tb.Context(), ledgerSQL); err != nil {
 		tb.Fatalf("create the stub ledger: %v", err)
 	}
-	return db
 }
 
 func NewRig(tb testing.TB, options *Options) *Rig {
@@ -105,6 +114,8 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 		HostCapabilities: capabilitytest.Host(tb),
 		Effects:          rig.Executor,
 		Clock:            rig.Clock,
+		Access:           options.Access,
+		Observer:         options.ToolObserver,
 		ApprovalDecider: func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 			rig.mu.Lock()
 			rig.prompts = append(rig.prompts, *prompt)
@@ -187,11 +198,15 @@ func Request(tb testing.TB, tool, subject string) *toolbroker.ToolRequest {
 	if err != nil {
 		tb.Fatalf("encode the arguments: %v", err)
 	}
+	return RequestFor(tool, arguments, "idempotency-"+tool+"-"+subject)
+}
+
+func RequestFor(tool string, arguments json.RawMessage, key string) *toolbroker.ToolRequest {
 	return &toolbroker.ToolRequest{
 		RequestID: "call-1", TurnID: "turn-1", SessionID: SessionID,
 		PrincipalID: OwnerID, PrincipalClass: principal.ClassOwner, Origin: turn.OriginTerminal,
 		ToolName: tool, ToolVersion: tools.Version, Arguments: arguments,
-		Trust: approval.TrustOwnerInput, IdempotencyKey: "idempotency-" + tool + "-" + subject,
+		Trust: approval.TrustOwnerInput, IdempotencyKey: key,
 		AllocateEventSequence: true, EventInvocation: "invocation-1", EventBranch: "main", EventAuthor: "test",
 	}
 }

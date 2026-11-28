@@ -1,0 +1,7 @@
+cron.add exposure=agent risk=trust_grant commit=transactional fresh=false notice=false sink=true untrusted=false preview=true surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_add
+cron.delete exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_delete
+cron.list exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_list
+cron.pause exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_pause
+cron.resume exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_resume
+cron.run-now exposure=agent risk=change commit=transactional fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_run_now
+cron.runs exposure=agent risk=read commit=none fresh=false notice=false sink=false untrusted=false preview=false surfaces=cli,chat,agent secret=- caps=- tool=aura_cron_runs

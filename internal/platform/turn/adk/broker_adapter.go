@@ -68,6 +68,7 @@ func (e *BrokerExecutor) Definitions() []BuiltinToolDefinition {
 			RequiredCapabilities: definition.RequiredCapabilities,
 			OptIn:                definition.OptIn,
 			OwnerOptIn:           definition.OwnerOptIn,
+			Operation:            definition.Operation,
 		})
 	}
 	return result

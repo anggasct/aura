@@ -107,6 +107,7 @@ broadcast:
   min_dispatch_gap: 5s
   destinations: {}
   fallback: {}
+  owner_destination: ""
 scheduler:
   enabled: true
   default_timezone: UTC

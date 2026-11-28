@@ -146,6 +146,7 @@ var toolSpanAttrs = []string{
 	AttrToolApproval,
 	AttrToolExecutor,
 	AttrToolOutputBytes,
+	AttrOperationID,
 	AttrWorkflowRunID,
 	AttrWorkflowStepID,
 	AttrSemconvVersion,

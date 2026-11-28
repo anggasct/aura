@@ -18,10 +18,13 @@ import (
 	"github.com/anggasct/aura/internal/modules/filesystem"
 	"github.com/anggasct/aura/internal/modules/handoff"
 	"github.com/anggasct/aura/internal/modules/knowledge"
+	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/search"
 	"github.com/anggasct/aura/internal/modules/shellexec"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/approval"
+	"github.com/anggasct/aura/internal/platform/operation"
+	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
 	"github.com/anggasct/aura/internal/platform/toolbroker"
 	"github.com/anggasct/aura/internal/platform/tools"
 )
@@ -71,6 +74,11 @@ type catalogDefinition struct {
 	Orchestration        bool            `json:"orchestration"`
 	Display              []string        `json:"display"`
 	HasValidator         bool            `json:"has_validator"`
+	Risk                 string          `json:"risk"`
+	Operation            string          `json:"operation"`
+	FreshApproval        bool            `json:"fresh_approval"`
+	OwnerNotice          bool            `json:"owner_notice"`
+	UntrustedOutput      bool            `json:"untrusted_output"`
 }
 
 type catalogRule struct {
@@ -127,19 +135,48 @@ func registerAllBuiltinToolProviders(t *testing.T, broker *toolbroker.Broker) {
 	}
 }
 
+func registerOperationToolProvider(t *testing.T, broker *toolbroker.Broker) {
+	t.Helper()
+	db := sqlitetest.OpenMigrated(t, Schemas()...)
+	effects, err := newChannelEffects(db, nil)
+	if err != nil {
+		t.Fatalf("newChannelEffects: %v", err)
+	}
+	jobs, err := schedule.NewSQLiteStore(db)
+	if err != nil {
+		t.Fatalf("schedule.NewSQLiteStore: %v", err)
+	}
+	service, err := schedule.NewService(jobs)
+	if err != nil {
+		t.Fatalf("schedule.NewService: %v", err)
+	}
+	operations, err := schedule.NewOperations(&schedule.OperationDeps{Config: schedule.Default(), Store: jobs, Service: service})
+	if err != nil {
+		t.Fatalf("schedule.NewOperations: %v", err)
+	}
+	registry, err := operation.NewRegistry(operationCatalogs(), operations.Bindings(), &operation.Deps{DB: db, Effects: effects, Tools: broker})
+	if err != nil {
+		t.Fatalf("operation.NewRegistry: %v", err)
+	}
+	if err := broker.RegisterProvider(registry); err != nil {
+		t.Fatalf("RegisterProvider(operations): %v", err)
+	}
+}
+
 func TestToolCatalogGolden(t *testing.T) {
 	broker, err := toolbroker.New(&toolbroker.Options{})
 	if err != nil {
 		t.Fatalf("toolbroker.New: %v", err)
 	}
 	registerAllBuiltinToolProviders(t, broker)
+	if staticCount := len(appconfig.BuiltinToolDefinitions()); staticCount != len(broker.Definitions()) {
+		t.Fatalf("BuiltinToolDefinitions() = %d, want %d", staticCount, len(broker.Definitions()))
+	}
+	registerOperationToolProvider(t, broker)
 
 	definitions := broker.Definitions()
-	if len(definitions) != 16 {
-		t.Fatalf("registered definitions = %d, want 16", len(definitions))
-	}
-	if staticCount := len(appconfig.BuiltinToolDefinitions()); staticCount != len(definitions) {
-		t.Fatalf("BuiltinToolDefinitions() = %d, want %d", staticCount, len(definitions))
+	if len(definitions) != 23 {
+		t.Fatalf("registered definitions = %d, want 23", len(definitions))
 	}
 
 	catalog := toolCatalog{}
@@ -174,6 +211,11 @@ func TestToolCatalogGolden(t *testing.T) {
 			Orchestration:        definition.Orchestration,
 			Display:              definition.Display,
 			HasValidator:         false,
+			Risk:                 string(definition.Risk),
+			Operation:            definition.Operation,
+			FreshApproval:        definition.FreshApproval,
+			OwnerNotice:          definition.OwnerNotice,
+			UntrustedOutput:      definition.UntrustedOutput,
 		})
 	}
 	slices.SortFunc(catalog.Definitions, func(a, b catalogDefinition) int {
@@ -198,6 +240,12 @@ func TestToolCatalogGolden(t *testing.T) {
 	}
 	got = append(got, '\n')
 	goldenPath := filepath.Join("..", "platform", "toolbroker", "testdata", "golden", "tool-catalog.json")
+	if *updateGolden {
+		if err := os.WriteFile(goldenPath, got, 0o600); err != nil {
+			t.Fatalf("write golden: %v", err)
+		}
+		return
+	}
 	want, err := os.ReadFile(goldenPath)
 	if err != nil {
 		t.Fatalf("read golden: %v", err)

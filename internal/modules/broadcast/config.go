@@ -24,6 +24,8 @@ type Config struct {
 	MinDispatchGap configkit.Duration `json:"min_dispatch_gap"`
 	Destinations   map[string]string  `json:"destinations"`
 	Fallback       map[string]string  `json:"fallback"`
+
+	OwnerDestination string `json:"owner_destination"`
 }
 
 func Default() Config {
@@ -38,6 +40,17 @@ func Default() Config {
 		Destinations:   map[string]string{},
 		Fallback:       map[string]string{},
 	}
+}
+
+func (c *Config) OwnerRoute() (alias, route string) {
+	if c == nil || c.OwnerDestination == "" {
+		return "", ""
+	}
+	route, found := c.Destinations[c.OwnerDestination]
+	if !found {
+		return "", ""
+	}
+	return c.OwnerDestination, route
 }
 
 func ValidRoute(route string) bool {
@@ -93,6 +106,11 @@ func (c *Config) Validate() error {
 		}
 		if !ValidRoute(route) {
 			problems = append(problems, configkit.Invalid("fallback["+alias+"]", "route is not a channel destination"))
+		}
+	}
+	if c.OwnerDestination != "" {
+		if _, found := c.Destinations[c.OwnerDestination]; !found {
+			problems = append(problems, configkit.Invalid("owner_destination", "must name a key of destinations"))
 		}
 	}
 	return errors.Join(problems...)

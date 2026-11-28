@@ -6,8 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/spf13/cobra"
-
 	"github.com/anggasct/aura/internal/modules/schedule"
 	"github.com/anggasct/aura/internal/modules/workflow"
 	"github.com/anggasct/aura/internal/platform/fault"
@@ -115,14 +113,14 @@ func TestScheduleAddNeedsOneKnownTarget(t *testing.T) {
 		args []string
 		want string
 	}{
-		"neither":          {args: nil, want: "exactly one of --prompt or --workflow"},
-		"both":             {args: []string{"--prompt", "p", "--workflow", "w"}, want: "exactly one of --prompt or --workflow"},
-		"input alone":      {args: []string{"--prompt", "p", "--input", "{}"}, want: "--input requires --workflow"},
+		"neither":          {args: nil, want: "exactly one of prompt or workflow"},
+		"both":             {args: []string{"--prompt", "p", "--workflow", "w"}, want: "exactly one of prompt or workflow"},
+		"input alone":      {args: []string{"--prompt", "p", "--input", "{}"}, want: "input requires workflow"},
 		"unknown workflow": {args: []string{"--workflow", "ghost"}, want: `"ghost" is neither a definition nor a saved routine`},
-		"bad input":        {args: []string{"--workflow", "ghost", "--input", `{"permissions":["exec"]}`}, want: "--input must be a JSON object"},
+		"bad input":        {args: []string{"--workflow", "ghost", "--input", `{"permissions":["exec"]}`}, want: "input must be a JSON object"},
 	} {
 		args := append([]string{"add", "--name", "n", "--schedule", "0 3 * * 1", "--channel", "discord", "--destination", "default"}, tc.args...)
-		_, err := runAccessCommand(t, func(gf *GlobalFlags) *cobra.Command { return schedule.Commands(scheduleOpener(gf))[0] }, cfg, args...)
+		_, err := runAccessCommand(t, cronCommand, cfg, args...)
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: err = %v, want %q", label, err, tc.want)
 		}

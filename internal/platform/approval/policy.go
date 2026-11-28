@@ -73,6 +73,7 @@ const (
 	ReasonUntrustedInput    = "untrusted_input"
 	ReasonContentUnverified = "content_unverified"
 	UntrustedInputNotice    = "untrusted input: content from outside your control shaped this request, so it can be approved only once"
+	ContentUnverifiedNotice = "content not verified: Aura cannot tell whether content from outside your control shaped this request, so check it before you approve"
 )
 
 type ToolResult struct {

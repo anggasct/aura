@@ -29,6 +29,7 @@ type BuiltinToolDefinition struct {
 	RequiredCapabilities []string
 	OptIn                bool
 	OwnerOptIn           bool
+	Operation            string
 }
 
 type BuiltinToolRequest struct {

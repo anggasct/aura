@@ -32,6 +32,7 @@ import (
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	auramodel "github.com/anggasct/aura/internal/platform/model"
+	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	"github.com/anggasct/aura/internal/platform/sqlite/sqlitetest"
@@ -224,6 +225,7 @@ func (l *turnLedger) decider(approvingLife int) toolbroker.ApprovalDecider {
 type scriptedModel struct {
 	ledger *turnLedger
 	steps  []string
+	args   map[string]map[string]any
 }
 
 func (m *scriptedModel) Name() string { return scriptedModelName }
@@ -237,10 +239,14 @@ func (m *scriptedModel) GenerateContent(_ context.Context, req *adkmodel.LLMRequ
 		}
 		part := &genai.Part{Text: scriptedAnswerText}
 		if position < len(m.steps) && m.steps[position] != textStep {
+			args, scripted := m.args[m.steps[position]]
+			if !scripted {
+				args = map[string]any{"query": "x"}
+			}
 			part = &genai.Part{FunctionCall: &genai.FunctionCall{
 				ID:   fmt.Sprintf("call-%d", position+1),
 				Name: m.steps[position],
-				Args: map[string]any{"query": "x"},
+				Args: args,
 			}}
 		}
 		yield(&adkmodel.LLMResponse{
@@ -315,6 +321,7 @@ func (l *ledgerTools) Execute(ctx context.Context, request *runtimeadk.BuiltinTo
 		IdempotencyKey:        request.IdempotencyKey,
 		Knowledge:             request.Knowledge,
 		Tainted:               request.Tainted,
+		Origin:                request.Origin,
 		AllocateEventSequence: true,
 		EventInvocation:       request.EventInvocation,
 		EventBranch:           request.EventBranch,
@@ -378,9 +385,13 @@ func (g succeededGate) Observe(ctx context.Context, observation *effect.Observat
 	}
 }
 
-func newGatedEffects(t *testing.T, db *sql.DB, ledger *turnLedger) *effect.Executor {
+func newGatedEffects(t *testing.T, db *sql.DB, ledger *turnLedger, gateSuccess bool) *effect.Executor {
 	t.Helper()
-	journal, err := effect.NewJournal(db, effect.Options{Logger: slog.New(slog.DiscardHandler), Observer: succeededGate{ledger: ledger}, Turns: turnstore.NewTurnStore(db)})
+	options := effect.Options{Logger: slog.New(slog.DiscardHandler), Turns: turnstore.NewTurnStore(db)}
+	if gateSuccess {
+		options.Observer = succeededGate{ledger: ledger}
+	}
+	journal, err := effect.NewJournal(db, options)
 	if err != nil {
 		t.Fatalf("effect.NewJournal: %v", err)
 	}
@@ -398,8 +409,11 @@ func (s *turnScenario) hasEffectfulTool() bool {
 func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.ADKExecutor {
 	t.Helper()
 	options := &toolbroker.Options{HostCapabilities: capabilitytest.Host(t), ApprovalDecider: parts.ledger.decider(parts.scenario.approvingLife)}
-	if parts.scenario.hasEffectfulTool() {
-		options.Effects = newGatedEffects(t, db, parts.ledger)
+	if parts.scenario.hasEffectfulTool() || len(parts.scenario.operations) > 0 {
+		options.Effects = newGatedEffects(t, db, parts.ledger, len(parts.scenario.operations) == 0)
+	}
+	if len(parts.scenario.operations) > 0 {
+		options.ApprovalReachable = func(string) bool { return true }
 	}
 	broker := toolbrokertest.NewBroker(t, options)
 	tools := &ledgerTools{broker: broker, ledger: parts.ledger, gated: parts.scenario.gated}
@@ -407,8 +421,11 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 		toolbrokertest.Register(t, broker, toolbrokertest.Stub{Name: stub.name, RequiresApproval: stub.approval, Effectful: stub.effectful, Run: parts.ledger.adapter(stub)})
 		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
 	}
+	if len(parts.scenario.operations) > 0 {
+		tools.defs = append(tools.defs, (&operationWiring{db: db, broker: broker, effects: options.Effects}).register(t, parts)...)
+	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
-	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps}
+	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps, args: parts.scenario.arguments}
 	executor, err := runtimeadk.NewADKExecutor("aura", model.Name(), auramodel.Set{model.Name(): model}, turnstore.NewSessionService(db), tools, nil, slog.New(slog.DiscardHandler), opts...)
 	if err != nil {
 		t.Fatalf("NewADKExecutor: %v", err)
@@ -537,6 +554,9 @@ func seedSuite(t *testing.T, scenario string) (lifePlan, *sql.DB) {
 		t.Fatalf("open the database: %v", err)
 	}
 	t.Cleanup(func() { _ = db.Close() })
+	if len(turnScenarios[scenario].operations) > 0 {
+		operationtest.CreateLedger(t, db)
+	}
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: suiteSession, OwnerID: suiteOwner}); err != nil {
 		t.Fatalf("create %s: %v", suiteSession, err)
 	}
@@ -691,6 +711,11 @@ func startKilledSuite(t *testing.T, scenario string) *killedSuite {
 func (s *killedSuite) resume(t *testing.T) *turnLife {
 	t.Helper()
 	s.child.kill(t)
+	return s.openSecondLife(t)
+}
+
+func (s *killedSuite) openSecondLife(t *testing.T) *turnLife {
+	t.Helper()
 	plan := s.plan
 	plan.Life = 2
 	life := openLife(t, plan)
