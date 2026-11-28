@@ -558,6 +558,10 @@ func operationCatalogs() []operation.Catalog {
 	return []operation.Catalog{schedule.Catalog()}
 }
 
+func IsOperationCommand(cmd *cobra.Command) bool {
+	return cmd != nil && cmd.Annotations[operation.AnnotationOperation] != ""
+}
+
 func mountOperationCommands(root *cobra.Command, gf *GlobalFlags) {
 	catalogs := operationCatalogs()
 	commands, err := operation.Commands(catalogs, operationOpener(gf))

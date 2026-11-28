@@ -10,7 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/anggasct/aura/internal/platform/operation"
+	"github.com/anggasct/aura/internal/app"
 )
 
 var updateGolden = flag.Bool("update", false, "rewrite golden files")
@@ -23,7 +23,7 @@ func commandLeaves(root *cobra.Command) (generated, handWritten []string) {
 		children := cmd.Commands()
 		if len(children) == 0 && cmd != root {
 			path := strings.TrimPrefix(cmd.CommandPath(), root.Name()+" ")
-			if cmd.Annotations[operation.AnnotationOperation] != "" {
+			if app.IsOperationCommand(cmd) {
 				generated = append(generated, path)
 			} else {
 				handWritten = append(handWritten, path)
