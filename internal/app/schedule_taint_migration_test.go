@@ -12,6 +12,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/anggasct/aura/internal/modules/schedule"
+	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 )
@@ -145,5 +146,21 @@ func TestAgentCreatedJobsAreTaintedOnUpgrade(t *testing.T) {
 		if !wantTainted && job.source.Valid {
 			t.Errorf("%s carries a taint source %q without a mark", id, job.source.String)
 		}
+	}
+	for name, statement := range map[string]string{
+		"a mark without a source":      `UPDATE scheduled_job SET tainted = 1 WHERE id = 'by-owner-cli'`,
+		"a source without a mark":      `UPDATE scheduled_job SET taint_source = 'a webhook' WHERE id = 'by-owner-cli'`,
+		"an empty source":              `UPDATE scheduled_job SET tainted = 1, taint_source = '' WHERE id = 'by-owner-cli'`,
+		"a source past 120 bytes":      `UPDATE scheduled_job SET tainted = 1, taint_source = printf('%0121d', 0) WHERE id = 'by-owner-cli'`,
+		"an unknown context":           `UPDATE scheduled_job SET context = 'private' WHERE id = 'by-owner-cli'`,
+		"a web-only workflow job":      `UPDATE scheduled_job SET context = 'web_only' WHERE id = 'workflow-from-receipt'`,
+		"a mark that is not a boolean": `UPDATE scheduled_job SET tainted = 2 WHERE id = 'by-owner-cli'`,
+	} {
+		if _, err := db.ExecContext(ctx, statement); !fault.HasCode(sqlite.Classify(err), sqlite.ErrorCodeConstraintCheck) {
+			t.Errorf("%s: err = %v, want a check constraint", name, err)
+		}
+	}
+	if _, err := db.ExecContext(ctx, `UPDATE scheduled_job SET context = 'web_only' WHERE id = 'by-owner-cli'`); err != nil {
+		t.Errorf("a web-only prompt job was refused: %v", err)
 	}
 }
