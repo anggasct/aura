@@ -154,11 +154,7 @@ func (r *Registry) admit(found *entry, call *Call) (*Call, error) {
 	}
 	prepared := *call
 	prepared.Input = canonical
-	files := r.filesFor(&prepared.Caller)
-	if err := files.refuseUnresolvedPaths(paths); err != nil {
-		return nil, err
-	}
-	prepared.Files = files
+	prepared.Files = r.filesFor(&prepared.Caller)
 	prepared.run = &invocation{registry: r, entry: found, paths: paths}
 	return &prepared, nil
 }
