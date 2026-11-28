@@ -115,6 +115,7 @@ func (s *imapSession) failure(ctx context.Context, err error) error {
 
 func (s *imapSession) Select(ctx context.Context, folder string) (MailboxStatus, error) {
 	defer s.guard(ctx)()
+	drainUpdates(s.updates)
 	data, err := s.client.Select(folder, &imap.SelectOptions{ReadOnly: true}).Wait()
 	if err != nil {
 		return MailboxStatus{}, s.failure(ctx, err)
@@ -180,6 +181,13 @@ func (s *imapSession) Wait(ctx context.Context, interval time.Duration) error {
 		}
 		return nil
 	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-s.updates:
+		return nil
+	default:
+	}
 	defer s.guard(ctx)()
 	command, err := s.client.Idle()
 	if err != nil {
@@ -202,6 +210,16 @@ func (s *imapSession) Wait(ctx context.Context, interval time.Duration) error {
 		return s.failure(ctx, err)
 	}
 	return nil
+}
+
+func drainUpdates(updates <-chan struct{}) {
+	for {
+		select {
+		case <-updates:
+		default:
+			return
+		}
+	}
 }
 
 func (s *imapSession) Close() error {

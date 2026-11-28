@@ -13,6 +13,7 @@ import (
 	"math/big"
 	"net"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -89,6 +90,29 @@ func newTestCA(t *testing.T) *testCA {
 	return &testCA{pool: pool, cert: tls.Certificate{Certificate: [][]byte{leafDER}, PrivateKey: leafKey}}
 }
 
+type idleSignal struct {
+	mu sync.Mutex
+	ch chan struct{}
+}
+
+func newIdleSignal() *idleSignal {
+	return &idleSignal{ch: make(chan struct{})}
+}
+
+func (s *idleSignal) snapshot() <-chan struct{} {
+	s.mu.Lock()
+	ch := s.ch
+	s.mu.Unlock()
+	return ch
+}
+
+func (s *idleSignal) broadcast() {
+	s.mu.Lock()
+	close(s.ch)
+	s.ch = make(chan struct{})
+	s.mu.Unlock()
+}
+
 type imapFixture struct {
 	t      *testing.T
 	ca     *testCA
@@ -96,6 +120,7 @@ type imapFixture struct {
 	host   string
 	port   int
 	idling *atomic.Int64
+	signal *idleSignal
 }
 
 func (f *imapFixture) awaitIdleEntries(want int64) {
@@ -114,6 +139,7 @@ type idleSession struct {
 	*imapmemserver.UserSession
 	user    *imapmemserver.User
 	started *atomic.Int64
+	signal  *idleSignal
 }
 
 func (s *idleSession) Login(username, password string) error {
@@ -126,7 +152,22 @@ func (s *idleSession) Login(username, password string) error {
 
 func (s *idleSession) Idle(w *imapserver.UpdateWriter, stop <-chan struct{}) error {
 	s.started.Add(1)
-	return s.UserSession.Idle(w, stop)
+	for {
+		next := s.signal.snapshot()
+		select {
+		case <-stop:
+			return nil
+		default:
+		}
+		if err := s.Poll(w, true); err != nil {
+			return err
+		}
+		select {
+		case <-next:
+		case <-stop:
+			return nil
+		}
+	}
 }
 
 func startIMAPServer(t *testing.T, caps imap.CapSet) *imapFixture {
@@ -137,9 +178,10 @@ func startIMAPServer(t *testing.T, caps imap.CapSet) *imapFixture {
 		t.Fatalf("create INBOX: %v", err)
 	}
 	idling := new(atomic.Int64)
+	signal := newIdleSignal()
 	server := imapserver.New(&imapserver.Options{
 		NewSession: func(*imapserver.Conn) (imapserver.Session, *imapserver.GreetingData, error) {
-			return &idleSession{user: user, started: idling}, nil, nil
+			return &idleSession{user: user, started: idling, signal: signal}, nil, nil
 		},
 		Caps:   caps,
 		Logger: discardLogger{},
@@ -160,7 +202,7 @@ func startIMAPServer(t *testing.T, caps imap.CapSet) *imapFixture {
 	})
 	port := listenerPort(t, listener)
 	t.Setenv(imapPasswordName, imapPassword)
-	return &imapFixture{t: t, ca: ca, user: user, host: "127.0.0.1", port: port, idling: idling}
+	return &imapFixture{t: t, ca: ca, user: user, host: "127.0.0.1", port: port, idling: idling, signal: signal}
 }
 
 var (
@@ -192,6 +234,7 @@ func (f *imapFixture) append(raw []byte) {
 	if _, err := f.user.Append("INBOX", literal{bytes.NewReader(raw)}, &imap.AppendOptions{}); err != nil {
 		f.t.Fatalf("append: %v", err)
 	}
+	f.signal.broadcast()
 }
 
 func (f *imapFixture) account(poll time.Duration) *Account {
@@ -281,6 +324,42 @@ func TestIMAP_IdleDeliversNewMailWithoutPolling(t *testing.T) {
 	h.awaitEnvelopes(2)
 	if got := h.sink.all()[1].PrincipalClass; got != "trusted" {
 		t.Errorf("second class = %q, want trusted", got)
+	}
+}
+
+func TestIMAP_WaitReturnsImmediatelyForMailNotifiedBeforeIdle(t *testing.T) {
+	server := startIMAPServer(t, rev1Caps)
+	session, err := server.connector(server.account(time.Hour)).Connect(t.Context())
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+	if _, err := session.Select(t.Context(), "INBOX"); err != nil {
+		t.Fatalf("Select: %v", err)
+	}
+	server.append(mailSpec{subject: "during cycle", messageID: "before-idle@example.com"}.raw())
+	if _, err := session.List(t.Context(), 1, 1); err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	if err := session.Wait(ctx, time.Hour); err != nil {
+		t.Fatalf("Wait after unilateral update: %v", err)
+	}
+	if got := server.idling.Load(); got != 0 {
+		t.Fatalf("idle entries = %d, want 0 when update was already buffered", got)
+	}
+	status, err := session.Select(t.Context(), "INBOX")
+	if err != nil || status.UIDNext != 2 {
+		t.Fatalf("Select() = %+v, %v, want uid next 2", status, err)
+	}
+	server.append(mailSpec{subject: "queued before idle", messageID: "queued-before-idle@example.com"}.raw())
+	if err := session.Wait(ctx, time.Hour); err != nil {
+		t.Fatalf("Wait for queued mail: %v", err)
+	}
+	infos, err := session.List(t.Context(), 1, 10)
+	if err != nil || len(infos) != 2 {
+		t.Fatalf("List() = %+v, %v; want the queued mail visible without pinning a delivery path", infos, err)
 	}
 }
 
