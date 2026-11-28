@@ -1,5 +1,7 @@
 package agent
 
+import "github.com/anggasct/aura/internal/platform/tools"
+
 const DefaultID = "main"
 
 const DefaultName = "Aura"
@@ -14,7 +16,7 @@ var builtins = []Definition{
 		// definitions existed: the executor maps these fields straight onto
 		// the ADK agent, so any text here would silently change every
 		// default turn's system prompt.
-		Tools: []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search"},
+		Tools: []string{"read_file", "write_file", "list_dir", "exec", "web_fetch", "web_search", tools.OperationSearchToolName},
 	},
 	{
 		ID:           "engineer",

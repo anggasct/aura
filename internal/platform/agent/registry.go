@@ -206,6 +206,9 @@ func buildOverride(override *Persona, index int, knownTools []string, catalog []
 			continue
 		}
 		if !slices.Contains(knownTools, tool) {
+			if tools.IsOperationEntry(tool) {
+				return nil, codedError(ErrorCodePersonaInvalid, field+".tools: an aura_ entry must name the discovery tool or a generated operation tool")
+			}
 			return nil, codedError(ErrorCodeUnknownTool, field+".tools: unknown tool "+fmt.Sprintf("%q", tool))
 		}
 	}
