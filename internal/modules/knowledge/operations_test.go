@@ -375,16 +375,20 @@ func TestKnowledgeWritesRollBackWhenTheOwnerActionCannotBeRecorded(t *testing.T)
 		id    string
 		input string
 		seed  bool
+		trust bool
 	}{
 		{name: "add", id: "kb.add", input: `{"collection":"support","url":"` + knowledgetest.PageURL + `"}`},
 		{name: "remove", id: "kb.remove", input: `{"collection":"support","source":"` + knowledgetest.PageURL + `"}`, seed: true},
-		{name: "untrust", id: "kb.untrust", input: `{"collection":"support"}`, seed: true},
+		{name: "untrust", id: "kb.untrust", input: `{"collection":"support"}`, seed: true, trust: true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			rig := newOpsRig(t)
 			if tc.seed {
 				seedSource(t, rig)
+			}
+			if tc.trust {
+				rig.trustCollection(t, knowledgetest.Collection)
 			}
 			before := len(rig.sources(t))
 			rig.kb.Ledger.FailWith(errors.New("event store unavailable"))
@@ -396,6 +400,20 @@ func TestKnowledgeWritesRollBackWhenTheOwnerActionCannotBeRecorded(t *testing.T)
 			}
 			if after := len(rig.sources(t)); after != before {
 				t.Errorf("sources went from %d to %d, want the write rolled back", before, after)
+			}
+			if tc.trust {
+				detail, showErr := rig.kb.Service.Show(t.Context(), knowledgetest.Collection)
+				if showErr != nil {
+					t.Fatalf("Show after rolled-back untrust: %v", showErr)
+				}
+				if detail.Trust != knowledge.TrustTrusted || detail.TrustedAt == nil {
+					t.Errorf("collection trust after rolled-back untrust = %q (trusted_at=%v), want trusted", detail.Trust, detail.TrustedAt)
+				}
+				for i := range detail.Sources {
+					if !detail.Sources[i].Vouched() {
+						t.Errorf("source %d lost vouching after rolled-back untrust: %+v", i, detail.Sources[i])
+					}
+				}
 			}
 		})
 	}

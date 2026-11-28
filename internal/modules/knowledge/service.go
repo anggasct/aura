@@ -83,6 +83,9 @@ type SourceRecord struct {
 }
 
 func (s *SourceRecord) Vouched() bool {
+	if s == nil {
+		return false
+	}
 	return s.VouchedSHA256 != "" && s.VouchedSHA256 == s.ContentSHA256
 }
 
