@@ -75,7 +75,7 @@ func TestDecideForOwnerOpensTheOwnerCardWithoutRequesterNotices(t *testing.T) {
 				if got := rig.routed.recorded(); !slices.Equal(got, tc.wantRouted) {
 					t.Errorf("routed observations = %v, want %v", got, tc.wantRouted)
 				}
-				assertKeyboardRemoved(t, rig, card)
+				assertOutcomeEdited(t, rig, card)
 			})
 		})
 	}
@@ -105,7 +105,7 @@ func TestDecideForOwnerTimesOutWithTheOwnerApprovalTimeout(t *testing.T) {
 		if got := rig.plainMessages(); len(got) != 0 {
 			t.Errorf("plain messages = %q, want no requester notices", got)
 		}
-		assertKeyboardRemoved(t, rig, card)
+		assertOutcomeEdited(t, rig, card)
 	})
 }
 
@@ -116,7 +116,7 @@ func TestDecideForOwnerOffersStandingGrantsByClass(t *testing.T) {
 		wantLabels []string
 		wantGrants int
 	}{
-		{"trusted requester", principal.ClassTrusted, []string{"Approve", "Allow 7 days", "Reject"}, 1},
+		{"trusted requester", principal.ClassTrusted, []string{"Approve", "Allow for 7 days", "Reject"}, 1},
 		{"public requester", principal.ClassPublic, []string{"Approve", "Reject"}, 0},
 		{"owner requester", principal.ClassOwner, []string{"Approve", "Reject"}, 0},
 	}
@@ -135,7 +135,7 @@ func TestDecideForOwnerOffersStandingGrantsByClass(t *testing.T) {
 				}
 				answer := "Approve"
 				if tc.wantGrants == 1 {
-					answer = "Allow 7 days"
+					answer = "Allow for 7 days"
 				}
 				rig.press(t, "cb-owner", ownerUserID, card, card.data(t, answer))
 				if outcome, done := settled(result); !done || outcome.err != nil || !outcome.accepted {
@@ -167,7 +167,7 @@ func TestOwnerCardOffersNoStandingGrantForUntrustedInput(t *testing.T) {
 		reason     string
 		wantLabels []string
 	}{
-		{"approval_required", []string{"Approve", "Allow 7 days", "Reject"}},
+		{"approval_required", []string{"Approve", "Allow for 7 days", "Reject"}},
 		{policy.ReasonUntrustedInput, []string{"Approve", "Reject"}},
 	}
 	for _, tc := range cases {
@@ -203,7 +203,7 @@ func TestOwnerCardOffersNoStandingGrantForPerCallOnlyTools(t *testing.T) {
 		allowed    bool
 		wantLabels []string
 	}{
-		{"standing allowed", true, []string{"Approve", "Allow 7 days", "Reject"}},
+		{"standing allowed", true, []string{"Approve", "Allow for 7 days", "Reject"}},
 		{"per call only", false, []string{"Approve", "Reject"}},
 	}
 	for _, tc := range cases {

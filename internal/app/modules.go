@@ -1241,10 +1241,22 @@ func buildDiscordAdapter(cfg *appconfig.Config, account *discord.Account, db *sq
 	return discord.New(&full)
 }
 
+func ownerLocation(cfg *appconfig.Config) *time.Location {
+	if cfg == nil || cfg.Owner == nil || cfg.Owner.Timezone == "" {
+		return nil
+	}
+	loc, err := time.LoadLocation(cfg.Owner.Timezone)
+	if err != nil {
+		return nil
+	}
+	return loc
+}
+
 func buildDiscordAdapters(bc *channelBuildContext) ([]runtimechannelhost.ChannelPort, []health.RegisteredCheck, []approvalAdapter, error) {
 	if !bc.cfg.Channels.Discord.Enabled {
 		return nil, nil, nil, nil
 	}
+	ownerLoc := ownerLocation(bc.cfg)
 	adapters := make(discord.Adapters, 0, len(bc.cfg.Channels.Discord.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Discord.Accounts))
 	approvers := make([]approvalAdapter, 0, len(bc.cfg.Channels.Discord.Accounts))
@@ -1256,6 +1268,7 @@ func buildDiscordAdapters(bc *channelBuildContext) ([]runtimechannelhost.Channel
 			PersonaRouter:     bc.router,
 			Access:            &settings,
 			Commands:          bc.commands,
+			OwnerLocation:     ownerLoc,
 			OnAdmitted: func(ctx context.Context, class principal.Class) {
 				bc.principalRec.Admitted(ctx, string(class), principal.ChannelDiscord)
 			},
@@ -1315,6 +1328,7 @@ func buildTelegramAdapters(bc *channelBuildContext) ([]runtimechannelhost.Channe
 	ledger := turnstore.NewDedupeStore(bc.db)
 	visionSvc := newVisionService(bc.cfg, bc.db, bc.artifactRoot)
 	settings := channelAccessSettings(bc.cfg, bc.db, bc.accessRec, bc.runs)
+	ownerLoc := ownerLocation(bc.cfg)
 	adapters := make(telegram.Adapters, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	ports := make([]runtimechannelhost.ChannelPort, 0, len(bc.cfg.Channels.Telegram.Accounts))
 	approvers := make([]approvalAdapter, 0, len(bc.cfg.Channels.Telegram.Accounts))
@@ -1335,6 +1349,7 @@ func buildTelegramAdapters(bc *channelBuildContext) ([]runtimechannelhost.Channe
 			Vision:            visionSvc,
 			UpdateLedger:      ledger,
 			Access:            &settings,
+			OwnerLocation:     ownerLoc,
 			OnAdmitted: func(ctx context.Context, class principal.Class) {
 				bc.principalRec.Admitted(ctx, string(class), principal.ChannelTelegram)
 			},

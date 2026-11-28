@@ -35,16 +35,17 @@ type patchCall struct {
 }
 
 type approvalStub struct {
-	srv       *httptest.Server
-	mu        sync.Mutex
-	posts     []cardPost
-	callbacks []callbackCall
-	patches   []patchCall
-	postID    string
-	postCode  int
-	dmID      string
-	dmCode    int
-	dmCalls   int
+	srv        *httptest.Server
+	mu         sync.Mutex
+	posts      []cardPost
+	callbacks  []callbackCall
+	patches    []patchCall
+	postID     string
+	postCode   int
+	dmID       string
+	dmCode     int
+	dmCalls    int
+	patchCodes []int
 }
 
 func newApprovalStub(t *testing.T) *approvalStub {
@@ -79,7 +80,12 @@ func newApprovalStub(t *testing.T) *approvalStub {
 			w.WriteHeader(http.StatusNoContent)
 		case r.Method == http.MethodPatch && len(segments) == 4 && segments[0] == "channels" && segments[2] == "messages":
 			stub.patches = append(stub.patches, patchCall{channel: segments[1], message: segments[3], body: decoded})
-			w.WriteHeader(http.StatusOK)
+			status := http.StatusOK
+			if len(stub.patchCodes) > 0 {
+				status = stub.patchCodes[0]
+				stub.patchCodes = stub.patchCodes[1:]
+			}
+			w.WriteHeader(status)
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -465,7 +471,7 @@ func TestApproval_ConcurrentClicksOneWins(t *testing.T) {
 func TestRenderApprovalCardNeutralizesMentions(t *testing.T) {
 	prompt := testPrompt("dm:111", time.Now().Add(time.Minute))
 	prompt.Arguments = "@everyone " + strings.Repeat("x", 100)
-	card := renderApprovalCard(prompt, "")
+	card := renderApprovalCard(prompt, nil)
 	if strings.Contains(card, "@everyone") {
 		t.Error("card preserves a mass mention")
 	}

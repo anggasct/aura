@@ -13,7 +13,10 @@ import (
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
-const maxTrackedTargets = 1024
+const (
+	maxTrackedTargets          = 1024
+	entityExpandableBlockquote = "expandable_blockquote"
+)
 
 type approvalTarget struct {
 	binding approval.Binding
@@ -21,18 +24,25 @@ type approvalTarget struct {
 }
 
 type cardRequest struct {
-	binding   *approval.Binding
-	dest      destination
-	text      string
-	entities  []messageEntity
-	expiresAt time.Time
+	binding     *approval.Binding
+	dest        destination
+	text        string
+	entities    []messageEntity
+	buttons     approval.CardButtons
+	persona     auraagent.Definition
+	editOutcome bool
+	expiresAt   time.Time
 }
 
 type openedCard struct {
-	tokenID   string
-	pending   *approval.Pending
-	dest      destination
-	messageID int64
+	tokenID     string
+	pending     *approval.Pending
+	dest        destination
+	messageID   int64
+	text        string
+	entities    []messageEntity
+	persona     auraagent.Definition
+	editOutcome bool
 }
 
 func scopeOf(dest destination) [2]string {
@@ -110,6 +120,41 @@ func (a *Adapter) ServesPersona(persona string) bool {
 	return a.router != nil && a.router.ServesPersona(auraagent.BindingChannelTelegram, a.account.Name, persona)
 }
 
+func (a *Adapter) cardPersona(personaID string) auraagent.Definition {
+	definition, ok := a.personaDefinition(personaID)
+	if !ok && personaID == "" && a.account != nil {
+		definition, _ = a.personaDefinition(a.account.Persona)
+	}
+	if definition.ID == "" {
+		definition.ID = personaID
+	}
+	return definition
+}
+
+func (a *Adapter) buildToolCard(prompt *approval.Prompt, persona *auraagent.Definition, standing bool) (text string, entities []messageEntity, buttons approval.CardButtons, err error) {
+	rendered := approval.RenderCard(prompt, approval.CardOptions{Persona: persona})
+	head := rendered.Header + "\n"
+	text = head + rendered.Details
+	entities = []messageEntity{{
+		Type:   entityExpandableBlockquote,
+		Offset: utf16Len(head),
+		Length: utf16Len(rendered.Details),
+	}}
+	longest := approval.LongestOutcomeLine(&approval.OutcomeLineInput{
+		Persona:     persona,
+		StandingTTL: a.access.StandingGrantTTL,
+		Location:    a.ownerLoc,
+	}, standing, utf16Len)
+	if utf16Len(text)+1+longest > messageLimit {
+		return "", nil, approval.CardButtons{}, approvalUnavailable("approval card exceeds telegram message limit")
+	}
+	var standingTTL time.Duration
+	if standing {
+		standingTTL = a.access.StandingGrantTTL
+	}
+	return text, entities, approval.RenderButtons(persona, standingTTL), nil
+}
+
 func (a *Adapter) decideInChat(ctx context.Context, prompt *approval.Prompt, target *approvalTarget) (bool, error) {
 	expiresAt := prompt.ExpiresAt
 	if expiresAt.IsZero() {
@@ -123,7 +168,21 @@ func (a *Adapter) decideInChat(ctx context.Context, prompt *approval.Prompt, tar
 		a.logger.WarnContext(ctx, "approval token unavailable", "component", "telegram", "account", a.account.Name)
 		return false, ctx.Err()
 	}
-	card, err := a.openCard(ctx, token, &cardRequest{binding: &target.binding, dest: target.dest, text: approval.RenderCard(prompt, "", nil), expiresAt: expiresAt})
+	definition := a.cardPersona(target.binding.Persona)
+	text, entities, buttons, err := a.buildToolCard(prompt, &definition, false)
+	if err != nil {
+		return false, err
+	}
+	card, err := a.openCard(ctx, token, &cardRequest{
+		binding:     &target.binding,
+		dest:        target.dest,
+		text:        text,
+		entities:    entities,
+		buttons:     buttons,
+		persona:     definition,
+		editOutcome: true,
+		expiresAt:   expiresAt,
+	})
 	if err != nil {
 		a.logger.WarnContext(ctx, "approval card delivery failed", "component", "telegram", "account", a.account.Name)
 		return false, ctx.Err()
@@ -134,10 +193,7 @@ func (a *Adapter) decideInChat(ctx context.Context, prompt *approval.Prompt, tar
 
 func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, requester *approvalTarget) (bool, error) {
 	persona := requester.binding.Persona
-	definition, _ := a.personaDefinition(persona)
-	if definition.ID == "" {
-		definition.ID = persona
-	}
+	definition := a.cardPersona(persona)
 	ownerChat, ok := a.ownerChatID()
 	if !ok {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
@@ -157,16 +213,30 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *approval.Prompt, r
 		return false, nil
 	}
 	ownerDest := destination{chatID: ownerChat}
+	standing := approval.OffersStandingGrant(prompt, requester.binding.Class, approval.StandingOffer{Grants: a.access.Grants, TTL: a.access.StandingGrantTTL})
+	text, entities, buttons, err := a.buildToolCard(prompt, &definition, standing)
+	if err != nil {
+		a.observeRouted(ctx, approval.RoutedUnavailable)
+		return false, err
+	}
 	binding := approval.Binding{
 		Principal: requester.binding.Principal,
 		Class:     requester.binding.Class,
 		Persona:   persona,
 		Actor:     strconv.FormatInt(ownerChat, 10),
 		Scope:     scopeOf(ownerDest),
-		Standing:  approval.OffersStandingGrant(prompt, requester.binding.Class, approval.StandingOffer{Grants: a.access.Grants, TTL: a.access.StandingGrantTTL}),
+		Standing:  standing,
 	}
-	text := approval.RenderCard(prompt, approval.PersonaLabel(definition.ID, definition.Name), nil)
-	card, err := a.openCard(ctx, token, &cardRequest{binding: &binding, dest: ownerDest, text: text, expiresAt: expiresAt})
+	card, err := a.openCard(ctx, token, &cardRequest{
+		binding:     &binding,
+		dest:        ownerDest,
+		text:        text,
+		entities:    entities,
+		buttons:     buttons,
+		persona:     definition,
+		editOutcome: true,
+		expiresAt:   expiresAt,
+	})
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, approvalUnavailable("owner approval card delivery failed")
@@ -212,11 +282,15 @@ func (a *Adapter) openCard(ctx context.Context, token string, card *cardRequest)
 		return openedCard{}, err
 	}
 	callbacks := a.approvals.Callbacks(tokenID, card.binding, card.expiresAt)
-	row := []inlineButton{{Text: "Approve", CallbackData: callbacks.Approve}}
-	if callbacks.Standing != "" {
-		row = append(row, inlineButton{Text: approval.StandingGrantLabel(a.access.StandingGrantTTL), CallbackData: callbacks.Standing})
+	buttons := card.buttons
+	if buttons.Approve == "" || buttons.Reject == "" {
+		buttons = approval.RenderButtons(nil, 0)
 	}
-	row = append(row, inlineButton{Text: "Reject", CallbackData: callbacks.Reject})
+	row := []inlineButton{{Text: buttons.Approve, CallbackData: callbacks.Approve}}
+	if callbacks.Standing != "" {
+		row = append(row, inlineButton{Text: buttons.Standing, CallbackData: callbacks.Standing})
+	}
+	row = append(row, inlineButton{Text: buttons.Reject, CallbackData: callbacks.Reject})
 	call, cancel := context.WithTimeout(ctx, sendTimeout)
 	defer cancel()
 	sent, err := a.bot.sendMessage(call, token, &sendMessageRequest{
@@ -235,7 +309,16 @@ func (a *Adapter) openCard(ctx context.Context, token string, card *cardRequest)
 		a.approvals.Drop(tokenID, pending)
 		return openedCard{}, deliveryAmbiguous("approval card post has no message id")
 	}
-	return openedCard{tokenID: tokenID, pending: pending, dest: card.dest, messageID: sent.MessageID}, nil
+	return openedCard{
+		tokenID:     tokenID,
+		pending:     pending,
+		dest:        card.dest,
+		messageID:   sent.MessageID,
+		text:        card.text,
+		entities:    card.entities,
+		persona:     card.persona,
+		editOutcome: card.editOutcome,
+	}, nil
 }
 
 func cardSendError(err error) error {
@@ -246,8 +329,38 @@ func cardSendError(err error) error {
 }
 
 func (a *Adapter) awaitApproval(ctx context.Context, token string, card *openedCard) (approval.Outcome, bool, error) {
-	defer a.clearKeyboard(context.WithoutCancel(ctx), token, card)
-	return a.approvals.Await(ctx, card.tokenID, card.pending)
+	outcome, timedOut, err := a.approvals.Await(ctx, card.tokenID, card.pending)
+	notify := context.WithoutCancel(ctx)
+	if card.editOutcome {
+		a.finishToolCard(notify, token, card, approval.CardOutcomeOf(outcome, timedOut, err))
+	} else {
+		a.clearKeyboard(notify, token, card)
+	}
+	return outcome, timedOut, err
+}
+
+func (a *Adapter) finishToolCard(ctx context.Context, token string, card *openedCard, outcome approval.CardOutcome) {
+	line := approval.RenderOutcomeLine(&approval.OutcomeLineInput{
+		Persona:     &card.persona,
+		Outcome:     outcome,
+		StandingTTL: a.access.StandingGrantTTL,
+		At:          time.Now(),
+		Location:    a.ownerLoc,
+	})
+	call, cancel := context.WithTimeout(ctx, noticeTimeout)
+	defer cancel()
+	_, err := a.bot.editMessageText(call, token, &editMessageTextRequest{
+		ChatID:             card.dest.chatID,
+		MessageID:          card.messageID,
+		Text:               card.text + "\n" + line,
+		Entities:           card.entities,
+		ReplyMarkup:        &inlineKeyboard{Rows: [][]inlineButton{}},
+		LinkPreviewOptions: previewsDisabled(),
+	})
+	if err != nil {
+		a.logger.WarnContext(ctx, "approval card outcome edit failed", "component", "telegram", "account", a.account.Name)
+		a.clearKeyboard(ctx, token, card)
+	}
 }
 
 func (a *Adapter) clearKeyboard(ctx context.Context, token string, card *openedCard) {

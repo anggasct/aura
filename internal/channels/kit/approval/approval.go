@@ -8,7 +8,6 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
-	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,7 +16,6 @@ import (
 	policy "github.com/anggasct/aura/internal/platform/approval"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/principal"
-	"github.com/anggasct/aura/internal/platform/tools"
 )
 
 const (
@@ -331,19 +329,6 @@ func OffersStandingGrant(prompt *Prompt, class principal.Class, offer StandingOf
 		prompt.StandingGrantAllowed
 }
 
-func StandingGrantLabel(ttl time.Duration) string {
-	switch {
-	case ttl == 24*time.Hour:
-		return "Allow 1 day"
-	case ttl%(24*time.Hour) == 0:
-		return fmt.Sprintf("Allow %d days", ttl/(24*time.Hour))
-	case ttl%time.Hour == 0:
-		return fmt.Sprintf("Allow %d hours", ttl/time.Hour)
-	default:
-		return "Allow " + ttl.String()
-	}
-}
-
 func OwnerTimeout(persona, configured time.Duration) time.Duration {
 	return cmp.Or(persona, configured, FallbackTTL)
 }
@@ -353,46 +338,4 @@ func PersonaLabel(id, name string) string {
 		return id
 	}
 	return name + " (" + id + ")"
-}
-
-func RenderCard(prompt *Prompt, persona string, clean func(string) string) string {
-	if prompt == nil {
-		return ""
-	}
-	if clean == nil {
-		clean = func(text string) string { return text }
-	}
-	header := func(text string) string { return clean(tools.EscapeDisplayText(text)) }
-	arguments := clean(strings.TrimSpace(prompt.Arguments))
-	if arguments == "" {
-		arguments = "{}"
-	}
-	var card strings.Builder
-	card.WriteString("approval required: " + header(prompt.ToolName))
-	if prompt.ToolVersion != "" {
-		card.WriteString("@" + header(prompt.ToolVersion))
-	}
-	switch prompt.ReasonCode {
-	case policy.ReasonUntrustedTrustGrant:
-		card.WriteString("\n" + policy.UntrustedTrustGrantNotice)
-	case policy.ReasonUntrustedInput:
-		card.WriteString("\n" + policy.UntrustedInputNotice)
-	case policy.ReasonContentUnverified:
-		card.WriteString("\n" + policy.ContentUnverifiedNotice)
-	}
-	if prompt.TaintSource != "" {
-		card.WriteString("\ncame in through: " + header(prompt.TaintSource))
-	}
-	if persona != "" {
-		card.WriteString("\npersona: " + header(persona))
-	}
-	card.WriteString("\nsession: " + header(prompt.SessionID))
-	card.WriteString("\nprincipal: " + header(prompt.PrincipalID))
-	if strings.Contains(arguments, "\n") {
-		card.WriteString("\narguments:\n" + arguments)
-	} else {
-		card.WriteString("\narguments: " + arguments)
-	}
-	card.WriteString("\napprove exactly this request?")
-	return card.String()
 }

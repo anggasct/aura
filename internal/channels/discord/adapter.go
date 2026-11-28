@@ -90,6 +90,7 @@ type Deps struct {
 	SecretVault       *secret.Vault
 	Vision            *vision.Service
 	Access            *access.Settings
+	OwnerLocation     *time.Location
 	Transport         http.RoundTripper
 	OnAdmitted        func(context.Context, principal.Class)
 	OnDropped         func(context.Context, string)
@@ -163,6 +164,8 @@ type Adapter struct {
 	latestDM       latestInbound
 	approvals      *approval.Registry
 	stops          *approval.Registry
+	ownerLoc       *time.Location
+	now            func() time.Time
 	targetsMu      sync.Mutex
 	targets        map[string]approvalBinding
 	access         AccessSettings
@@ -273,6 +276,7 @@ func New(deps *Deps) (*Adapter, error) {
 		holds:          map[string]time.Time{},
 		approvals:      approvals,
 		stops:          stops,
+		ownerLoc:       deps.OwnerLocation,
 		targets:        map[string]approvalBinding{},
 		ownerDMs:       map[string]string{},
 		triggerThreads: map[string]string{},

@@ -53,7 +53,14 @@ func (a *Adapter) OfferProposal(ctx context.Context, card approval.ProposalCard,
 		Actor:     actor,
 		Scope:     scopeOf(dest),
 	}
-	opened, err := a.openCard(ctx, token, &cardRequest{binding: &binding, dest: dest, text: text, entities: entities, expiresAt: expiresAt})
+	opened, err := a.openCard(ctx, token, &cardRequest{
+		binding:   &binding,
+		dest:      dest,
+		text:      text,
+		entities:  entities,
+		buttons:   approval.RenderButtons(nil, 0),
+		expiresAt: expiresAt,
+	})
 	if errors.Is(err, runtimechannelhost.ErrDeliveryAmbiguous) {
 		return err
 	}

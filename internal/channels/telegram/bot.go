@@ -312,6 +312,7 @@ type editMessageTextRequest struct {
 	ChatID             int64               `json:"chat_id"`
 	MessageID          int64               `json:"message_id"`
 	Text               string              `json:"text"`
+	Entities           []messageEntity     `json:"entities,omitempty"`
 	ReplyMarkup        *inlineKeyboard     `json:"reply_markup,omitempty"`
 	LinkPreviewOptions *linkPreviewOptions `json:"link_preview_options,omitempty"`
 }

@@ -155,8 +155,10 @@ func (d *Definition) ListsPlugin(plugin string) bool {
 }
 
 func (d *Definition) Message(key string) string {
-	if text, ok := d.Messages[key]; ok {
-		return text
+	if !bundleOnlyMessages[key] {
+		if text, ok := d.Messages[key]; ok {
+			return text
+		}
 	}
 	if text, ok := d.bundle[key]; ok {
 		return text

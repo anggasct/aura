@@ -2,7 +2,6 @@ package discord
 
 import (
 	"bytes"
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/channels/kit/approval"
 	auraagent "github.com/anggasct/aura/internal/platform/agent"
@@ -101,11 +101,55 @@ func (a *Adapter) Decide(ctx context.Context, prompt *ApprovalPrompt) (bool, err
 	if binding.principal != principal.OwnerID {
 		return a.decideForOwner(ctx, prompt, &binding)
 	}
-	card, ok := a.openChannelCard(ctx, prompt, &binding)
-	if !ok {
+	return a.decideInChat(ctx, prompt, &binding)
+}
+
+func (a *Adapter) decideInChat(ctx context.Context, prompt *ApprovalPrompt, binding *approvalBinding) (bool, error) {
+	expiresAt := prompt.ExpiresAt
+	if expiresAt.IsZero() {
+		expiresAt = time.Now().Add(approval.FallbackTTL)
+	}
+	if !time.Now().Before(expiresAt) {
+		return false, nil
+	}
+	token, err := a.tokenRef.Resolve()
+	if err != nil {
+		a.logger.WarnContext(ctx, "approval token unavailable", "component", "discord")
 		return false, ctx.Err()
 	}
-	outcome, _, err := a.awaitApproval(ctx, card.token, card.tokenID, card.pending, card.ref)
+	definition := a.cardPersona(binding.persona)
+	content, buttons, err := a.buildToolCard(prompt, &definition, false)
+	if err != nil {
+		return false, err
+	}
+	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
+	if err != nil {
+		a.logger.WarnContext(ctx, "approval token mint failed", "component", "discord")
+		return false, ctx.Err()
+	}
+	cardID, err := a.postApprovalCard(ctx, &cardPostRequest{
+		token:     token,
+		channelID: binding.channelID,
+		content:   content,
+		tokenID:   tokenID,
+		pending:   pending,
+		buttons:   buttons,
+	})
+	if err != nil {
+		a.approvals.Drop(tokenID, pending)
+		a.logger.WarnContext(ctx, "approval card delivery failed", "component", "discord")
+		return false, ctx.Err()
+	}
+	card := openedCard{
+		token:       token,
+		tokenID:     tokenID,
+		pending:     pending,
+		ref:         cardRef{channel: binding.channelID, message: cardID},
+		content:     content,
+		persona:     definition,
+		editOutcome: true,
+	}
+	outcome, _, err := a.awaitApproval(ctx, &card)
 	return outcome.Accepted, err
 }
 
@@ -124,44 +168,62 @@ func (a *Adapter) ServesPersona(persona string) bool {
 }
 
 type openedCard struct {
-	token   string
-	tokenID string
-	pending *approval.Pending
-	ref     cardRef
+	token       string
+	tokenID     string
+	pending     *approval.Pending
+	ref         cardRef
+	content     string
+	persona     auraagent.Definition
+	editOutcome bool
 }
 
-func (a *Adapter) openChannelCard(ctx context.Context, prompt *ApprovalPrompt, binding *approvalBinding) (openedCard, bool) {
-	expiresAt := prompt.ExpiresAt
-	if expiresAt.IsZero() {
-		expiresAt = time.Now().Add(approval.FallbackTTL)
+type cardPostRequest struct {
+	token     string
+	channelID string
+	content   string
+	tokenID   string
+	pending   *approval.Pending
+	buttons   approval.CardButtons
+}
+
+func (a *Adapter) clockNow() time.Time {
+	if a.now != nil {
+		return a.now()
 	}
-	if !time.Now().Before(expiresAt) {
-		return openedCard{}, false
+	return time.Now()
+}
+
+func (a *Adapter) cardPersona(personaID string) auraagent.Definition {
+	definition, ok := a.personaDefinition(personaID)
+	if !ok && personaID == "" && a.account != nil {
+		definition, _ = a.personaDefinition(a.account.Persona)
 	}
-	token, err := a.tokenRef.Resolve()
-	if err != nil {
-		a.logger.WarnContext(ctx, "approval token unavailable", "component", "discord")
-		return openedCard{}, false
+	if definition.ID == "" {
+		definition.ID = personaID
 	}
-	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
-	if err != nil {
-		a.logger.WarnContext(ctx, "approval token mint failed", "component", "discord")
-		return openedCard{}, false
+	return definition
+}
+
+func (a *Adapter) buildToolCard(prompt *ApprovalPrompt, persona *auraagent.Definition, standing bool) (content string, buttons approval.CardButtons, err error) {
+	content = renderApprovalCard(prompt, persona)
+	longest := approval.LongestOutcomeLine(&approval.OutcomeLineInput{
+		Persona:     persona,
+		StandingTTL: a.access.StandingGrantTTL,
+		Location:    a.ownerLoc,
+		Clean:       neutralizeMentions,
+	}, standing, utf8.RuneCountInString)
+	if utf8.RuneCountInString(content)+1+longest > discordMessageLimit {
+		return "", approval.CardButtons{}, approvalUnavailable("approval card exceeds discord message limit")
 	}
-	cardID, err := a.postApprovalCard(ctx, token, binding.channelID, renderApprovalCard(prompt, ""), tokenID, pending)
-	if err != nil {
-		a.approvals.Drop(tokenID, pending)
-		a.logger.WarnContext(ctx, "approval card delivery failed", "component", "discord")
-		return openedCard{}, false
+	var standingTTL time.Duration
+	if standing {
+		standingTTL = a.access.StandingGrantTTL
 	}
-	return openedCard{token: token, tokenID: tokenID, pending: pending, ref: cardRef{channel: binding.channelID, message: cardID}}, true
+	return content, approval.RenderButtons(persona, standingTTL), nil
 }
 
 func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, requester *approvalBinding) (bool, error) {
-	definition, _ := a.personaDefinition(requester.persona)
-	if definition.ID == "" {
-		definition.ID = requester.persona
-	}
+	definition := a.cardPersona(requester.persona)
 	owners := a.owners.OwnerExternalIDs(principal.ChannelDiscord)
 	if len(owners) == 0 {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
@@ -171,6 +233,12 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, approvalUnavailable("approval token is unavailable")
+	}
+	standing := a.offersStandingGrant(prompt, requester.class)
+	content, buttons, err := a.buildToolCard(prompt, &definition, standing)
+	if err != nil {
+		a.observeRouted(ctx, approval.RoutedUnavailable)
+		return false, err
 	}
 	ownerID := owners[0]
 	dmChannel, err := a.ownerDMChannel(ctx, token, ownerID)
@@ -192,21 +260,36 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 		persona:   requester.persona,
 		actor:     ownerID,
 		channelID: dmChannel,
-		standing:  a.offersStandingGrant(prompt, requester.class),
+		standing:  standing,
 	}
 	tokenID, pending, err := a.approvals.Issue(binding.shared(), expiresAt)
 	if err != nil {
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, approvalUnavailable("approval token mint failed")
 	}
-	cardID, err := a.postApprovalCard(ctx, token, dmChannel, renderApprovalCard(prompt, personaLabel(&definition)), tokenID, pending)
+	cardID, err := a.postApprovalCard(ctx, &cardPostRequest{
+		token:     token,
+		channelID: dmChannel,
+		content:   content,
+		tokenID:   tokenID,
+		pending:   pending,
+		buttons:   buttons,
+	})
 	if err != nil {
 		a.approvals.Drop(tokenID, pending)
 		a.observeRouted(ctx, approval.RoutedUnavailable)
 		return false, approvalUnavailable("owner approval card delivery failed")
 	}
 	a.postNotice(ctx, token, requester.channelID, definition.Message(auraagent.MessageWaitingForOwner))
-	outcome, timedOut, err := a.awaitApproval(ctx, token, tokenID, pending, cardRef{channel: dmChannel, message: cardID})
+	outcome, timedOut, err := a.awaitApproval(ctx, &openedCard{
+		token:       token,
+		tokenID:     tokenID,
+		pending:     pending,
+		ref:         cardRef{channel: dmChannel, message: cardID},
+		content:     content,
+		persona:     definition,
+		editOutcome: true,
+	})
 	notify := context.WithoutCancel(ctx)
 	switch {
 	case timedOut || errors.Is(err, context.DeadlineExceeded):
@@ -240,20 +323,76 @@ func (a *Adapter) decideForOwner(ctx context.Context, prompt *ApprovalPrompt, re
 	}
 }
 
-func (a *Adapter) awaitApproval(ctx context.Context, token, tokenID string, pending *approval.Pending, card cardRef) (approval.Outcome, bool, error) {
-	defer func() {
-		a.disableApprovalCard(context.WithoutCancel(ctx), token, card.channel, card.message)
-	}()
-	return a.approvals.Await(ctx, tokenID, pending)
+func (a *Adapter) awaitApproval(ctx context.Context, card *openedCard) (approval.Outcome, bool, error) {
+	outcome, timedOut, err := a.approvals.Await(ctx, card.tokenID, card.pending)
+	notify := context.WithoutCancel(ctx)
+	if card.editOutcome {
+		a.finishToolCard(notify, card, approval.CardOutcomeOf(outcome, timedOut, err))
+	} else {
+		a.disableApprovalCard(notify, card.token, card.ref.channel, card.ref.message)
+	}
+	return outcome, timedOut, err
 }
 
-func renderApprovalCard(prompt *ApprovalPrompt, persona string) string {
+func (a *Adapter) finishToolCard(ctx context.Context, card *openedCard, outcome approval.CardOutcome) {
+	if card.ref.channel == "" || card.ref.message == "" {
+		return
+	}
+	line := approval.RenderOutcomeLine(&approval.OutcomeLineInput{
+		Persona:     &card.persona,
+		Outcome:     outcome,
+		StandingTTL: a.access.StandingGrantTTL,
+		At:          a.clockNow(),
+		Location:    a.ownerLoc,
+		Clean:       neutralizeMentions,
+	})
+	if err := a.editApprovalCard(ctx, card, card.content+"\n"+line); err != nil {
+		a.logger.WarnContext(ctx, "approval card outcome edit failed", "component", "discord")
+		a.disableApprovalCard(ctx, card.token, card.ref.channel, card.ref.message)
+	}
+}
+
+func (a *Adapter) editApprovalCard(ctx context.Context, card *openedCard, content string) error {
+	payload, err := json.Marshal(map[string]any{
+		"content":          content,
+		"components":       []componentPayload{},
+		"flags":            suppressEmbedsFlags,
+		"allowed_mentions": map[string]any{"parse": []string{}},
+	})
+	if err != nil {
+		return fault.New(ErrorCodeProtocolInvalid, "approval card edit is not serializable")
+	}
+	call, cancel := context.WithTimeout(ctx, restTimeout)
+	defer cancel()
+	endpoint := a.restBase + "/channels/" + card.ref.channel + "/messages/" + card.ref.message
+	req, err := http.NewRequestWithContext(call, http.MethodPatch, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bot "+card.token)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, approvalHTTPBytes))
+	_ = resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fault.New(ErrorCodeDeliveryFailed, "approval card edit did not succeed")
+	}
+	return nil
+}
+
+func renderApprovalCard(prompt *ApprovalPrompt, persona *auraagent.Definition) string {
 	if prompt == nil {
 		return ""
 	}
-	fenced := *prompt
-	fenced.Arguments = fenceBlock(cmp.Or(strings.TrimSpace(prompt.Arguments), "{}"))
-	return approval.RenderCard(&fenced, persona, neutralizeMentions)
+	rendered := approval.RenderCard(prompt, approval.CardOptions{
+		Persona:        persona,
+		InlineCodeTool: true,
+		Clean:          neutralizeMentions,
+	})
+	return rendered.Header + "\n" + fenceBlock(rendered.Details)
 }
 
 func fenceBlock(text string) string {
@@ -270,33 +409,37 @@ func fenceBlock(text string) string {
 	return "```\n" + body + "\n```"
 }
 
-func (a *Adapter) approvalButtons(tokenID string, pending *approval.Pending) []componentPayload {
-	binding := pending.Binding()
-	callbacks := a.approvals.Callbacks(tokenID, &binding, pending.ExpiresAt())
-	buttons := []buttonPayload{{Type: componentButton, Style: buttonStyleDanger, Label: "Approve", CustomID: callbacks.Approve}}
-	if callbacks.Standing != "" {
-		buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStyleDanger, Label: approval.StandingGrantLabel(a.access.StandingGrantTTL), CustomID: callbacks.Standing})
+func (a *Adapter) approvalButtons(req *cardPostRequest) []componentPayload {
+	binding := req.pending.Binding()
+	callbacks := a.approvals.Callbacks(req.tokenID, &binding, req.pending.ExpiresAt())
+	labels := req.buttons
+	if labels.Approve == "" || labels.Reject == "" {
+		labels = approval.RenderButtons(nil, 0)
 	}
-	buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStylePrimary, Label: "Reject", CustomID: callbacks.Reject})
+	buttons := []buttonPayload{{Type: componentButton, Style: buttonStyleDanger, Label: labels.Approve, CustomID: callbacks.Approve}}
+	if callbacks.Standing != "" {
+		buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStyleDanger, Label: labels.Standing, CustomID: callbacks.Standing})
+	}
+	buttons = append(buttons, buttonPayload{Type: componentButton, Style: buttonStylePrimary, Label: labels.Reject, CustomID: callbacks.Reject})
 	return []componentPayload{{Type: componentActionRow, Components: buttons}}
 }
 
-func (a *Adapter) postApprovalCard(ctx context.Context, token, channelID, content, tokenID string, pending *approval.Pending) (string, error) {
+func (a *Adapter) postApprovalCard(ctx context.Context, card *cardPostRequest) (string, error) {
 	payload, err := json.Marshal(map[string]any{
-		"content":          content,
+		"content":          card.content,
 		"flags":            suppressEmbedsFlags,
-		"components":       a.approvalButtons(tokenID, pending),
+		"components":       a.approvalButtons(card),
 		"allowed_mentions": map[string]any{"parse": []string{}},
 	})
 	if err != nil {
 		return "", fault.New(ErrorCodeProtocolInvalid, "approval card is not serializable")
 	}
-	endpoint := a.restBase + "/channels/" + channelID + "/messages"
+	endpoint := a.restBase + "/channels/" + card.channelID + "/messages"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}
-	req.Header.Set("Authorization", "Bot "+token)
+	req.Header.Set("Authorization", "Bot "+card.token)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := a.httpClient.Do(req)
 	if err != nil {

@@ -109,6 +109,7 @@ type Deps struct {
 	Vision            *vision.Service
 	UpdateLedger      UpdateLedger
 	Access            *access.Settings
+	OwnerLocation     *time.Location
 	Transport         http.RoundTripper
 	OnAdmitted        func(ctx context.Context, class principal.Class)
 	OnDropped         func(ctx context.Context, reason string)
@@ -171,6 +172,7 @@ type Adapter struct {
 
 	approvals   *approval.Registry
 	stops       *approval.Registry
+	ownerLoc    *time.Location
 	proposalTTL time.Duration
 	targetsMu   sync.Mutex
 	targets     map[string]approvalTarget
@@ -266,6 +268,7 @@ func New(deps *Deps) (*Adapter, error) {
 		holds:       map[int64]time.Time{},
 		approvals:   approvals,
 		stops:       stops,
+		ownerLoc:    deps.OwnerLocation,
 		proposalTTL: approval.ProposalCardTTL,
 		targets:     map[string]approvalTarget{},
 		commands:    deps.Commands,

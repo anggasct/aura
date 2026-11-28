@@ -239,6 +239,9 @@ func validateMessages(field string, messages map[string]string) error {
 		if _, known := defaults[key]; !known {
 			return configkit.Field(field+".messages", fault.New(ErrorCodePersonaInvalid, fmt.Sprintf("unknown key %q", key)))
 		}
+		if bundleOnlyMessages[key] {
+			return configkit.Field(field+".messages."+key, fault.New(ErrorCodePersonaInvalid, "cannot be overridden by a persona"))
+		}
 		if err := validateMessageValue(key, messages[key]); err != nil {
 			return configkit.Field(field+".messages."+key, err)
 		}

@@ -82,7 +82,7 @@ func TestOwnerApprovalThroughPollingInAPrivateChat(t *testing.T) {
 		t.Fatalf("decision = %+v, want accepted", outcome)
 	}
 	awaitCursor(t, rig.h, 12)
-	eventually(t, "keyboard removal", func() bool { return rig.h.api.count("editMessageReplyMarkup") == 1 })
+	eventually(t, "outcome edit", func() bool { return rig.h.api.count("editMessageText") == 1 })
 	eventually(t, "callback answer", func() bool { return rig.h.api.count("answerCallbackQuery") == 1 })
 	if calls, turns := rig.sink.stats("update:11"); calls != 0 || turns != 0 {
 		t.Errorf("callback reached the runtime: calls=%d turns=%d", calls, turns)
