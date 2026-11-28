@@ -219,7 +219,7 @@ func TestCronOperationsWriteOnlyInsideCommit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			operationtest.RequireWritesOnlyInCommit(t, rig.Registry, rig.db, tc.id, json.RawMessage(tc.input))
+			operationtest.RequireWritesOnlyInCommit(t, &operationtest.WriteProbe{Registry: rig.Registry, DB: rig.db, ID: tc.id, Input: json.RawMessage(tc.input)})
 		})
 	}
 }

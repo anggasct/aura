@@ -22,8 +22,15 @@ const (
 	afterCommitGate  = "operation-after-commit"
 )
 
-func registerLedgerOperations(t *testing.T, db *sql.DB, broker *toolbroker.Broker, effects *effect.Executor, parts *ledgerTurn) []runtimeadk.BuiltinToolDefinition {
+type operationWiring struct {
+	db      *sql.DB
+	broker  *toolbroker.Broker
+	effects *effect.Executor
+}
+
+func (w *operationWiring) register(t *testing.T, parts *ledgerTurn) []runtimeadk.BuiltinToolDefinition {
 	t.Helper()
+	db, broker, effects := w.db, w.broker, w.effects
 	ledger := parts.ledger
 	stubs := operationtest.NewStubs(db)
 	for _, planned := range parts.scenario.operations {

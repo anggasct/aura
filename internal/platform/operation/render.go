@@ -15,10 +15,7 @@ const (
 	nullCell     = "-"
 )
 
-func renderResult(out io.Writer, descriptor *Descriptor, data json.RawMessage, asJSON bool) error {
-	if asJSON {
-		return writeIndented(out, data)
-	}
+func renderOutput(out io.Writer, descriptor *Descriptor, data json.RawMessage) error {
 	var object map[string]json.RawMessage
 	if err := json.Unmarshal(data, &object); err != nil {
 		return wrapError(ErrorCodeFailed, "the result is not a JSON object", err)

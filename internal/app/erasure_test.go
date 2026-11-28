@@ -163,6 +163,9 @@ func TestRetentionSweepPrunesOldOperationReceipts(t *testing.T) {
 		}
 		kept = append(kept, key)
 	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
 	if want := []string{"current", "recent"}; !slices.Equal(kept, want) {
 		t.Fatalf("receipts after the sweep = %v, want %v", kept, want)
 	}

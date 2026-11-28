@@ -422,7 +422,7 @@ func newLedgerExecutor(t *testing.T, db *sql.DB, parts *ledgerTurn) *runtimeadk.
 		tools.defs = append(tools.defs, runtimeadk.BuiltinToolDefinition{Name: stub.name, Version: stubToolVersion, Schema: json.RawMessage(`{"type":"object"}`)})
 	}
 	if len(parts.scenario.operations) > 0 {
-		tools.defs = append(tools.defs, registerLedgerOperations(t, db, broker, options.Effects, parts)...)
+		tools.defs = append(tools.defs, (&operationWiring{db: db, broker: broker, effects: options.Effects}).register(t, parts)...)
 	}
 	opts := append([]runtimeadk.ExecutorOption{runtimeadk.WithBuiltinToolExecutor(tools)}, parts.options...)
 	model := &scriptedModel{ledger: parts.ledger, steps: parts.scenario.steps, args: parts.scenario.arguments}

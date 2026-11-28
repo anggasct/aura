@@ -320,5 +320,8 @@ func (l *leafCommand) invoke(ctx context.Context, run *commandRun) error {
 	if err != nil {
 		return usageOr(err)
 	}
-	return renderResult(run.cmd.OutOrStdout(), l.descriptor, result.Data, run.asJSON)
+	if run.asJSON {
+		return writeIndented(run.cmd.OutOrStdout(), result.Data)
+	}
+	return renderOutput(run.cmd.OutOrStdout(), l.descriptor, result.Data)
 }

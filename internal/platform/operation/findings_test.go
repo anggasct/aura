@@ -381,7 +381,7 @@ func TestWriteGuardCatchesAHandlerThatWritesBeforeCommit(t *testing.T) {
 					return err
 				})
 			}
-			problem := operationtest.WritesOutsideCommit(t, rig.Registry, rig.DB, operationtest.Change, json.RawMessage(`{"subject":"a"}`))
+			problem := operationtest.WritesOutsideCommit(t, &operationtest.WriteProbe{Registry: rig.Registry, DB: rig.DB, ID: operationtest.Change, Input: json.RawMessage(`{"subject":"a"}`)})
 			if (problem != "") != tc.want {
 				t.Fatalf("problem = %q, want a problem: %v", problem, tc.want)
 			}

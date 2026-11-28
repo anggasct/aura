@@ -80,37 +80,44 @@ func tableRows(ctx context.Context, db *sql.DB, table string) ([]string, error) 
 	return lines, rows.Err()
 }
 
-func RequireWritesOnlyInCommit(tb testing.TB, registry *operation.Registry, db *sql.DB, id string, input json.RawMessage) {
+type WriteProbe struct {
+	Registry *operation.Registry
+	DB       *sql.DB
+	ID       string
+	Input    json.RawMessage
+}
+
+func RequireWritesOnlyInCommit(tb testing.TB, probe *WriteProbe) {
 	tb.Helper()
-	if problem := WritesOutsideCommit(tb, registry, db, id, input); problem != "" {
+	if problem := WritesOutsideCommit(tb, probe); problem != "" {
 		tb.Error(problem)
 	}
 }
 
-func WritesOutsideCommit(tb testing.TB, registry *operation.Registry, db *sql.DB, id string, input json.RawMessage) string {
+func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 	tb.Helper()
 	newCall := func() *operation.Call {
 		return &operation.Call{
 			Caller:         operation.Caller{Surface: operation.SurfaceChat, PrincipalID: OwnerID, Class: principal.ClassOwner, SessionID: SessionID},
-			Input:          input,
-			IdempotencyKey: "write-probe-" + id,
-			RequestDigest:  operation.Digest(input),
+			Input:          probe.Input,
+			IdempotencyKey: "write-probe-" + probe.ID,
+			RequestDigest:  operation.Digest(probe.Input),
 		}
 	}
-	first, err := registry.Invoke(tb.Context(), id, newCall())
+	first, err := probe.Registry.Invoke(tb.Context(), probe.ID, newCall())
 	if err != nil {
-		tb.Fatalf("%s: first call: %v", id, err)
+		tb.Fatalf("%s: first call: %v", probe.ID, err)
 	}
-	before := Snapshot(tb, db)
-	replayed, err := registry.Invoke(tb.Context(), id, newCall())
+	before := Snapshot(tb, probe.DB)
+	replayed, err := probe.Registry.Invoke(tb.Context(), probe.ID, newCall())
 	if err != nil {
-		tb.Fatalf("%s: replayed call: %v", id, err)
+		tb.Fatalf("%s: replayed call: %v", probe.ID, err)
 	}
 	if string(first.Data) != string(replayed.Data) {
-		return fmt.Sprintf("%s: a replayed call returned %s, want the recorded %s", id, replayed.Data, first.Data)
+		return fmt.Sprintf("%s: a replayed call returned %s, want the recorded %s", probe.ID, replayed.Data, first.Data)
 	}
-	if Snapshot(tb, db) != before {
-		return id + ": a replayed call changed the database, so the handler writes outside Commit"
+	if Snapshot(tb, probe.DB) != before {
+		return probe.ID + ": a replayed call changed the database, so the handler writes outside Commit"
 	}
 	return ""
 }

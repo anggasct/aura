@@ -678,7 +678,6 @@ type build struct {
 	broker     *toolbroker.Broker
 	clock      durable.Clock
 	bindings   []operation.Binding
-	operations *operation.Registry
 	artifacts  storage.ArtifactStore
 	builtin    *runtimeadk.BrokerExecutor
 	routeModel func(route string) (string, error)
@@ -1573,7 +1572,6 @@ func (b *build) buildOperations() error {
 	if err := b.broker.RegisterProvider(registry); err != nil {
 		return err
 	}
-	b.operations = registry
 	return nil
 }
 

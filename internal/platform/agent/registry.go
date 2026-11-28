@@ -186,7 +186,7 @@ func buildOverride(override *Persona, index int, knownTools []string, catalog []
 	if len(override.Tools) > 0 {
 		definition.Tools = append([]string(nil), override.Tools...)
 	}
-	if path, detail := operationToolDefect(definition.Audience, definition.Tools, definition.PrincipalTools, definition.PublicTools); path != "" {
+	if path, detail := operationToolDefect(definition.Audience, &toolLists{listed: definition.Tools, principal: definition.PrincipalTools, public: definition.PublicTools}); path != "" {
 		return nil, codedError(ErrorCodePersonaInvalid, field+"."+path+": "+detail)
 	}
 	definition.Capabilities = append([]string(nil), override.Capabilities...)
