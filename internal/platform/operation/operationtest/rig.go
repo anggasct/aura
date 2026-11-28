@@ -40,6 +40,7 @@ type Options struct {
 	Bindings     func(stubs *Stubs) []operation.Binding
 	Tools        []toolbroker.ToolRegistration
 	NoApprover   bool
+	Access       toolbroker.AccessPolicy
 	Observer     effect.Observer
 	ToolObserver toolbroker.Observer
 	Logger       *slog.Logger
@@ -113,6 +114,7 @@ func NewRig(tb testing.TB, options *Options) *Rig {
 		HostCapabilities: capabilitytest.Host(tb),
 		Effects:          rig.Executor,
 		Clock:            rig.Clock,
+		Access:           options.Access,
 		Observer:         options.ToolObserver,
 		ApprovalDecider: func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error) {
 			rig.mu.Lock()

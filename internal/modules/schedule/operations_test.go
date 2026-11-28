@@ -4,11 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/durable"
+	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/operation"
@@ -26,15 +29,43 @@ func (o ownerRoute) OwnerRoute() (alias, route string) { return o.alias, o.route
 
 type startedRuns struct {
 	keys []string
+	next Starter
 }
 
-func (s *startedRuns) Start(_ context.Context, req durable.StartRequest) (durable.RunRef, error) {
+func (s *startedRuns) fingerprint() string { return strings.Join(s.keys, ",") }
+
+func (s *startedRuns) Start(ctx context.Context, req durable.StartRequest) (durable.RunRef, error) {
 	s.keys = append(s.keys, req.Key)
+	if s.next != nil {
+		return s.next.Start(ctx, req)
+	}
 	return durable.RunRef{Key: req.Key}, nil
+}
+
+type switchableChecker struct {
+	mu   sync.Mutex
+	fail func(context.Context, string) error
+}
+
+func (c *switchableChecker) set(fail func(context.Context, string) error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fail = fail
+}
+
+func (c *switchableChecker) check(ctx context.Context, id string) error {
+	c.mu.Lock()
+	fail := c.fail
+	c.mu.Unlock()
+	if fail == nil {
+		return nil
+	}
+	return fail(ctx, id)
 }
 
 type scheduleRig struct {
 	*operationtest.Rig
+	checker *switchableChecker
 	db      *sql.DB
 	starter *startedRuns
 	store   *SQLiteStore
@@ -43,6 +74,23 @@ type scheduleRig struct {
 
 func newScheduleRig(t *testing.T, owner OwnerDestination) *scheduleRig {
 	t.Helper()
+	return newConfiguredScheduleRig(t, &rigOptions{owner: owner})
+}
+
+func newWrappedScheduleRig(t *testing.T, owner OwnerDestination, wrap func(*scheduleRig, []operation.Binding)) *scheduleRig {
+	t.Helper()
+	return newConfiguredScheduleRig(t, &rigOptions{owner: owner, wrap: wrap})
+}
+
+type rigOptions struct {
+	owner   OwnerDestination
+	wrap    func(*scheduleRig, []operation.Binding)
+	durable bool
+}
+
+func newConfiguredScheduleRig(t *testing.T, options *rigOptions) *scheduleRig {
+	t.Helper()
+	owner, wrap := options.owner, options.wrap
 	db := operationtest.OpenDatabase(t, Schema())
 	store, err := NewSQLiteStore(db)
 	if err != nil {
@@ -52,20 +100,36 @@ func newScheduleRig(t *testing.T, owner OwnerDestination) *scheduleRig {
 	if err != nil {
 		t.Fatalf("NewService: %v", err)
 	}
+	checker := &switchableChecker{}
 	starter := &startedRuns{}
+	if options.durable {
+		runtime, err := durablesqlite.New(durablesqlite.HostOptions(db, slog.New(slog.DiscardHandler), time.Second))
+		if err != nil {
+			t.Fatalf("durablesqlite.New: %v", err)
+		}
+		runtime.DeclareHandlers(HandlerName)
+		starter.next = runtime
+	}
 	operations, err := NewOperations(&OperationDeps{
 		Config: Default(), Store: store, Service: service, Starter: starter, Owner: owner,
-		WorkflowChecker: func(context.Context, string) error { return nil },
+		WorkflowChecker: checker.check,
 	})
 	if err != nil {
 		t.Fatalf("NewOperations: %v", err)
 	}
-	rig := operationtest.NewRig(t, &operationtest.Options{
+	scheduled := &scheduleRig{checker: checker, db: db, starter: starter, store: store, service: service}
+	scheduled.Rig = operationtest.NewRig(t, &operationtest.Options{
 		DB:       db,
 		Catalogs: []operation.Catalog{Catalog()},
-		Bindings: func(*operationtest.Stubs) []operation.Binding { return operations.Bindings() },
+		Bindings: func(*operationtest.Stubs) []operation.Binding {
+			bindings := operations.Bindings()
+			if wrap != nil {
+				wrap(scheduled, bindings)
+			}
+			return bindings
+		},
 	})
-	return &scheduleRig{Rig: rig, db: db, starter: starter, store: store, service: service}
+	return scheduled
 }
 
 func (r *scheduleRig) addArguments(t *testing.T) json.RawMessage {
@@ -219,7 +283,7 @@ func TestCronOperationsWriteOnlyInsideCommit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			operationtest.RequireWritesOnlyInCommit(t, &operationtest.WriteProbe{Registry: rig.Registry, DB: rig.db, ID: tc.id, Input: json.RawMessage(tc.input)})
+			operationtest.RequireWritesOnlyInCommit(t, &operationtest.WriteProbe{Registry: rig.Registry, DB: rig.db, ID: tc.id, Input: json.RawMessage(tc.input), Outside: rig.starter.fingerprint})
 		})
 	}
 }
@@ -258,5 +322,37 @@ func TestCronReadsReturnRows(t *testing.T) {
 	}
 	if strings.TrimSpace(string(runs.Data)) != `{"rows":[]}` {
 		t.Errorf("cron.runs = %s, want no rows", runs.Data)
+	}
+}
+
+func TestWriteGuardSeesARunStartedOutsideCommit(t *testing.T) {
+	rig := newWrappedScheduleRig(t, nil, func(scheduled *scheduleRig, bindings []operation.Binding) {
+		for i := range bindings {
+			if bindings[i].ID != "cron.resume" {
+				continue
+			}
+			handle := bindings[i].Handle
+			bindings[i].Handle = func(ctx context.Context, call *operation.Call) (operation.Result, error) {
+				if _, err := scheduled.starter.Start(ctx, durable.StartRequest{Key: "early", Handler: HandlerName}); err != nil {
+					return operation.Result{}, err
+				}
+				return handle(ctx, call)
+			}
+		}
+	})
+	created, err := rig.service.Create(t.Context(), &JobSpec{
+		Name: "nightly", CronExpression: "0 21 * * *", Timezone: "UTC", Prompt: "p",
+		OriginChannel: "discord", OriginDestination: "default", OverlapPolicy: OverlapSkip,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	problem := operationtest.WritesOutsideCommit(t, &operationtest.WriteProbe{
+		Registry: rig.Registry, DB: rig.db, ID: "cron.resume", Input: json.RawMessage(`{"id":"` + created.ID + `"}`), Outside: rig.starter.fingerprint,
+	})
+
+	if problem == "" {
+		t.Fatal("a run started before Commit went unnoticed")
 	}
 }

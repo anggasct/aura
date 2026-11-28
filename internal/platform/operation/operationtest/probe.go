@@ -85,6 +85,7 @@ type WriteProbe struct {
 	DB       *sql.DB
 	ID       string
 	Input    json.RawMessage
+	Outside  func() string
 }
 
 func RequireWritesOnlyInCommit(tb testing.TB, probe *WriteProbe) {
@@ -109,6 +110,7 @@ func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 		tb.Fatalf("%s: first call: %v", probe.ID, err)
 	}
 	before := Snapshot(tb, probe.DB)
+	outsideBefore := probe.outside()
 	replayed, err := probe.Registry.Invoke(tb.Context(), probe.ID, newCall())
 	if err != nil {
 		tb.Fatalf("%s: replayed call: %v", probe.ID, err)
@@ -119,5 +121,15 @@ func WritesOutsideCommit(tb testing.TB, probe *WriteProbe) string {
 	if Snapshot(tb, probe.DB) != before {
 		return probe.ID + ": a replayed call changed the database, so the handler writes outside Commit"
 	}
+	if probe.outside() != outsideBefore {
+		return probe.ID + ": a replayed call reached a side effect outside the database, so the handler acts outside Commit"
+	}
 	return ""
+}
+
+func (p *WriteProbe) outside() string {
+	if p.Outside == nil {
+		return ""
+	}
+	return p.Outside()
 }
