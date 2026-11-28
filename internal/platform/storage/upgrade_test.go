@@ -25,8 +25,9 @@ func upgradeTestMigrations(t *testing.T) []sqlite.Migration {
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
+	probeVersion := base[len(base)-1].Version + 1
 	return append(base, sqlite.Migration{
-		Version: len(base) + 1,
+		Version: probeVersion,
 		Owner:   "storage",
 		SQL:     `CREATE TABLE storage_upgrade_probe (id TEXT PRIMARY KEY);`,
 	})
