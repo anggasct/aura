@@ -16,6 +16,7 @@ import (
 	"github.com/anggasct/aura/internal/platform/operation"
 	"github.com/anggasct/aura/internal/platform/operation/operationtest"
 	"github.com/anggasct/aura/internal/platform/principal"
+	"github.com/anggasct/aura/internal/platform/turn"
 )
 
 type chatRigE2E struct {
@@ -248,5 +249,26 @@ func TestChatCommandsAreNamedOnlyWhereTheOwnerCanUseThem(t *testing.T) {
 	}
 	if ownerReachableInChat(nil, nil) {
 		t.Error("a missing config reported a reachable owner")
+	}
+}
+
+func TestOperationDescriptionOnAMessengerTurnNamesTheChatCommandsAndNew(t *testing.T) {
+	rig := newRegistryRig(t, nil)
+	chat, err := operation.NewDiscovery(&operation.DiscoveryDeps{Registry: rig.Registry, ChatCommands: true})
+	if err != nil {
+		t.Fatalf("NewDiscovery: %v", err)
+	}
+	for _, origin := range []turn.Origin{"telegram:main", "discord:main"} {
+		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
+			text, err := chat.Describe(&operation.DescriptionInput{Turn: operation.Turn{Origin: origin, Kind: kind}, Search: true})
+			if err != nil {
+				t.Fatalf("Describe(%s, %s): %v", origin, kind, err)
+			}
+			for _, want := range []string{"the chat command /<group> <verb>", "the owner can start a new one with /new."} {
+				if !strings.Contains(text, want) {
+					t.Errorf("%s %s description lacks %q:\n%s", origin, kind, want, text)
+				}
+			}
+		}
 	}
 }
