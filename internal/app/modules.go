@@ -1908,11 +1908,10 @@ type chatCommandDeps struct {
 	recorder   command.Recorder
 }
 
-func withOperationGroups(binding command.Binding, groups []command.Definition) command.Binding {
+func addOperationGroups(binding *command.Binding, groups []command.Definition) {
 	for i := range groups {
 		binding.Names = append(binding.Names, groups[i].Name)
 	}
-	return binding
 }
 
 func newChatCommandDispatcher(deps *chatCommandDeps) (*command.Dispatcher, error) {
@@ -1920,11 +1919,10 @@ func newChatCommandDispatcher(deps *chatCommandDeps) (*command.Dispatcher, error
 		return nil, invalidOptions("the chat command dispatcher needs its ports")
 	}
 	groups := operation.ChatGroups(operationCatalogs())
-	registry, err := command.NewRegistry(
-		append(command.Catalog(), groups...),
-		withOperationGroups(discord.CommandBinding(), groups),
-		withOperationGroups(telegram.CommandBinding(), groups),
-	)
+	discordBinding, telegramBinding := discord.CommandBinding(), telegram.CommandBinding()
+	addOperationGroups(&discordBinding, groups)
+	addOperationGroups(&telegramBinding, groups)
+	registry, err := command.NewRegistry(append(command.Catalog(), groups...), discordBinding, telegramBinding)
 	if err != nil {
 		return nil, err
 	}
