@@ -29,8 +29,24 @@ func validateReferences(cfg *Config, doc *document) error {
 		emailOwnerProblem(&cfg.Channels.Email, cfg.Owner),
 		errors.Join(bindingAccountProblems(cfg.Bindings, &cfg.Channels)...),
 		configkit.Under("agents", auraagent.ValidateKnowledgeTools(cfg.Agents, BuiltinToolDefinitions())),
+		embeddingReferenceProblems(cfg),
 		screenOwnerSecrets(cfg.Owner, cfg),
 	)
+}
+
+func embeddingReferenceProblems(cfg *Config) error {
+	if cfg == nil {
+		return nil
+	}
+	hasEmbedding := cfg.Knowledge != nil && cfg.Knowledge.Embedding != nil
+	var problems []error
+	if cfg.Memory.EmbeddingEnabled && !hasEmbedding {
+		problems = append(problems, configkit.Invalid("memory.embedding_enabled", "requires knowledge.embedding to be configured"))
+	}
+	if cfg.Profile != nil && cfg.Profile.EmbeddingEnabled && !hasEmbedding {
+		problems = append(problems, configkit.Invalid("profile.embedding_enabled", "requires knowledge.embedding to be configured"))
+	}
+	return errors.Join(problems...)
 }
 
 func modelRouteReferenceProblems(routes model.Routes, models model.Config) error {

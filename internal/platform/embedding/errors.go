@@ -16,6 +16,7 @@ const (
 	ErrorCodeResponseInvalid   ErrorCode = "embedding_response_invalid"
 	ErrorCodeRedirectRefused   ErrorCode = "embedding_redirect_refused"
 	ErrorCodeDestinationDenied ErrorCode = "embedding_destination_denied"
+	ErrorCodeVectorInvalid     ErrorCode = "embedding_vector_invalid"
 )
 
 func Errorf(code ErrorCode, format string, args ...any) error {

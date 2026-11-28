@@ -85,7 +85,12 @@ func (s *Service) AcceptFact(ctx stdcontext.Context, ownerID, factID string, now
 	if err := s.recordAction(ctx, ownerID, factID, "accept", &fact, now); err != nil {
 		return Fact{}, err
 	}
-	return s.mustGet(ctx, factID)
+	accepted, err := s.mustGet(ctx, factID)
+	if err != nil {
+		return Fact{}, err
+	}
+	s.embedFactBestEffort(ctx, &accepted)
+	return accepted, nil
 }
 
 func (s *Service) RejectFact(ctx stdcontext.Context, ownerID, factID string, now time.Time) error {
@@ -129,12 +134,18 @@ func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value 
 		return Fact{}, err
 	}
 	for i := range actives {
-		if actives[i].ValueDigest == ValueDigest(value) {
-			if err := s.registry.SetState(ctx, actives[i].ID, StatusActive, "", actives[i].Confidence, true, now); err != nil {
-				return Fact{}, err
-			}
-			return s.mustGet(ctx, actives[i].ID)
+		if actives[i].ValueDigest != ValueDigest(value) {
+			continue
 		}
+		if err := s.registry.SetState(ctx, actives[i].ID, StatusActive, "", actives[i].Confidence, true, now); err != nil {
+			return Fact{}, err
+		}
+		verified, err := s.mustGet(ctx, actives[i].ID)
+		if err != nil {
+			return Fact{}, err
+		}
+		s.embedFactBestEffort(ctx, &verified)
+		return verified, nil
 	}
 	id := FactID(ownerID, category, key, ValueDigest(value))
 	existing, found, err := s.registry.Get(ctx, id)
@@ -170,6 +181,7 @@ func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value 
 	if err := s.recordAction(ctx, ownerID, created.ID, "set", &created, now); err != nil {
 		return Fact{}, err
 	}
+	s.embedFactBestEffort(ctx, &created)
 	return created, nil
 }
 
@@ -195,6 +207,7 @@ func (s *Service) promoteExisting(ctx stdcontext.Context, existing *Fact, active
 	if err := s.recordAction(ctx, existing.OwnerID, promoted.ID, "set", &promoted, now); err != nil {
 		return Fact{}, err
 	}
+	s.embedFactBestEffort(ctx, &promoted)
 	return promoted, nil
 }
 

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/principal"
 )
 
@@ -54,7 +55,7 @@ func (p *vectorPath) search(ctx context.Context, collections []string, request *
 	if err != nil || len(vectors) != 1 {
 		return nil, ModeLexicalFallback
 	}
-	query, ok := normalizeVector(vectors[0], p.settings.Dimensions)
+	query, ok := embedding.Normalize(vectors[0], p.settings.Dimensions)
 	if !ok {
 		return nil, ModeLexicalFallback
 	}

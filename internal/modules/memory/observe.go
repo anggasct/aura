@@ -18,6 +18,7 @@ const (
 
 type Observation struct {
 	Outcome        string
+	Mode           string
 	Summarized     bool
 	Documents      int
 	Screened       int

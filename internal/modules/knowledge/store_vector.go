@@ -3,11 +3,10 @@ package knowledge
 import (
 	"context"
 	"database/sql"
-	"encoding/binary"
 	"encoding/json"
 	"fmt"
-	"math"
 
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/sqlite"
 )
@@ -108,14 +107,13 @@ func (s *SQLiteVectorSource) Page(ctx context.Context, collection, fingerprint s
 		if err := rows.Scan(&rowID, &digest, &blob); err != nil {
 			return VectorPage{}, sqlite.Classify(fmt.Errorf("scan knowledge vector: %w", err))
 		}
-		if len(blob) != dimensions*kbVectorValueBytes {
-			return VectorPage{}, Errorf(ErrorCodeInvalidArgument, "knowledge vector has %d bytes, want %d", len(blob), dimensions*kbVectorValueBytes)
+		vector, err := embedding.Decode(blob, dimensions)
+		if err != nil {
+			return VectorPage{}, fault.Wrap(ErrorCodeInvalidArgument, "knowledge vector is not valid", err)
 		}
 		page.RowIDs = append(page.RowIDs, rowID)
 		page.Digests = append(page.Digests, digest)
-		for i := 0; i < len(blob); i += kbVectorValueBytes {
-			page.Values = append(page.Values, math.Float32frombits(binary.LittleEndian.Uint32(blob[i:])))
-		}
+		page.Values = append(page.Values, vector...)
 	}
 	if err := rows.Err(); err != nil {
 		return VectorPage{}, sqlite.Classify(fmt.Errorf("read knowledge vectors: %w", err))

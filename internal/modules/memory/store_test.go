@@ -307,8 +307,8 @@ func TestMemoryStore_SchemaAppliesLatest(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SchemaVersions(): %v", err)
 	}
-	if latest != taintColumnStepVersion || applied != taintColumnStepVersion {
-		t.Errorf("schema = applied %d latest %d, want %d", applied, latest, taintColumnStepVersion)
+	if latest != embeddingTableStepVersion || applied != embeddingTableStepVersion {
+		t.Errorf("schema = applied %d latest %d, want %d", applied, latest, embeddingTableStepVersion)
 	}
 	var ftsSQL string
 	if err := db.QueryRowContext(t.Context(), `SELECT sql FROM sqlite_master WHERE name = 'memory_document_fts'`).Scan(&ftsSQL); err != nil {

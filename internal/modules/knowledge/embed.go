@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math"
 
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/fault"
 )
 
@@ -294,7 +294,7 @@ func (s *Service) embedBatch(ctx context.Context, collection string, chunks []Pe
 	}
 	writes := make([]VectorWrite, len(chunks))
 	for i := range chunks {
-		unit, ok := normalizeVector(vectors[i], s.embedding.Dimensions)
+		unit, ok := embedding.Normalize(vectors[i], s.embedding.Dimensions)
 		if !ok {
 			return CommitOutcome{}, Errorf(ErrorCodeEmbeddingFailed, "the provider returned a vector that cannot be stored")
 		}
@@ -328,26 +328,4 @@ func embeddingFailure(err error) error {
 		return err
 	}
 	return fault.Wrap(ErrorCodeEmbeddingFailed, "the embedding provider call failed", err)
-}
-
-func normalizeVector(vector []float32, dimensions int) ([]float32, bool) {
-	if len(vector) != dimensions {
-		return nil, false
-	}
-	var sum float64
-	for _, value := range vector {
-		if math.IsNaN(float64(value)) || math.IsInf(float64(value), 0) {
-			return nil, false
-		}
-		sum += float64(value) * float64(value)
-	}
-	norm := math.Sqrt(sum)
-	if norm == 0 || math.IsInf(norm, 0) {
-		return nil, false
-	}
-	unit := make([]float32, len(vector))
-	for i, value := range vector {
-		unit[i] = float32(float64(value) / norm)
-	}
-	return unit, true
 }

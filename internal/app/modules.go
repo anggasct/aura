@@ -63,6 +63,7 @@ import (
 	durablesqlite "github.com/anggasct/aura/internal/platform/durable/sqlite"
 	"github.com/anggasct/aura/internal/platform/effect"
 	"github.com/anggasct/aura/internal/platform/egress"
+	"github.com/anggasct/aura/internal/platform/embedding"
 	"github.com/anggasct/aura/internal/platform/fault"
 	"github.com/anggasct/aura/internal/platform/health"
 	"github.com/anggasct/aura/internal/platform/model"
@@ -351,18 +352,26 @@ func (b *build) buildMemory(ctx context.Context) error {
 		}
 		observer = memoryRecorderObserver(recorder)
 	}
+	embedClient, embedSettings, err := buildMemoryEmbedding(cfg, nil)
+	if err != nil {
+		return err
+	}
 	mod, err := memory.New(ctx, &memory.Deps{
-		Config:      cfg.Memory,
-		DB:          b.db,
-		Sessions:    turnstore.NewSessionService(b.db),
-		TaintMarks:  turnstore.NewTaintReader(b.db),
-		Scopes:      b.registry,
-		Secrets:     secret.New(),
-		Models:      b.models,
-		ModelConfig: &cfg.Models,
-		ModelRoutes: cfg.ModelRoutes,
-		Observer:    observer,
-		Logger:      logger,
+		Config:       cfg.Memory,
+		DB:           b.db,
+		Sessions:     turnstore.NewSessionService(b.db),
+		TaintMarks:   turnstore.NewTaintReader(b.db),
+		Scopes:       b.registry,
+		Secrets:      resolvedAllSecrets(cfg),
+		SecretSource: &strictSecretSource{cfg: cfg},
+		Embedder:     embedClient,
+		Embedding:    embedSettings,
+		Models:       b.models,
+		ModelConfig:  &cfg.Models,
+		ModelRoutes:  cfg.ModelRoutes,
+		Observer:     observer,
+		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
+		Logger:       logger,
 	})
 	if err != nil {
 		return err
@@ -374,7 +383,14 @@ func (b *build) buildMemory(ctx context.Context) error {
 		return nil
 	}
 	if loop := mod.PurgeLoop(); loop != nil {
-		return b.group.Add(server.Background("memory_purge", loop))
+		if err := b.group.Add(server.Background("memory_purge", loop)); err != nil {
+			return err
+		}
+	}
+	if embedLoop := mod.EmbedLoop(); embedLoop != nil {
+		if err := b.group.Add(server.Background("memory_embedding", embedLoop)); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -386,6 +402,7 @@ func memoryRecorderObserver(recorder *telemetry.MemoryRecorder) memory.Observer 
 	return func(ctx context.Context, observation *memory.Observation) {
 		recorder.Record(ctx, &telemetry.MemoryObservation{
 			Outcome:     observation.Outcome,
+			Mode:        observation.Mode,
 			Summarized:  observation.Summarized,
 			Documents:   observation.Documents,
 			Screened:    observation.Screened,
@@ -400,6 +417,10 @@ func (b *build) buildProfile(ctx context.Context) error {
 	if !operationGroupEnabled(cfg, profile.GroupName) {
 		return nil
 	}
+	embedClient, embedSettings, err := buildProfileEmbedding(cfg, nil)
+	if err != nil {
+		return err
+	}
 	mod, err := profile.New(ctx, &profile.Deps{
 		Config:       *cfg.Profile,
 		DB:           b.db,
@@ -409,7 +430,10 @@ func (b *build) buildProfile(ctx context.Context) error {
 		Models:       b.models,
 		ModelConfig:  cfg.Models,
 		ModelRoutes:  cfg.ModelRoutes,
-		Scanner:      appconfig.BuildSecretVault(cfg),
+		Scanner:      resolvedAllSecrets(cfg),
+		SecretSource: &strictSecretSource{cfg: cfg},
+		Embedder:     embedClient,
+		Embedding:    embedSettings,
 		Owner:        cfg.Owner,
 		Meters:       b.meters(),
 		CheckTimeout: time.Duration(cfg.Health.CheckTimeout),
@@ -2439,6 +2463,89 @@ func (s *knowledgeSecrets) Snapshot(_ context.Context) (knowledge.SecretScreen, 
 		return nil, err
 	}
 	return vault, nil
+}
+
+type strictSecretSource struct {
+	cfg *appconfig.Config
+}
+
+func (s *strictSecretSource) Snapshot(_ context.Context) (secret.Screen, error) {
+	vault, err := appconfig.BuildStrictSecretVault(s.cfg)
+	if err != nil {
+		return nil, err
+	}
+	return vault, nil
+}
+
+func resolvedAllSecrets(cfg *appconfig.Config) *secret.Vault {
+	vault := appconfig.BuildSecretVault(cfg)
+	for _, entry := range appconfig.AdditionalConfiguredSecrets(cfg) {
+		if value, err := entry.Resolve(); err == nil && strings.TrimSpace(value) != "" {
+			vault.Set(entry.Name, value)
+		}
+	}
+	return vault
+}
+
+func buildEmbeddingClient(cfg *appconfig.Config, enabled bool, resolver egress.Resolver) (client *embedding.Client, fingerprint string, ec *knowledge.EmbeddingConfig, err error) {
+	if !enabled || cfg == nil || cfg.Knowledge == nil || cfg.Knowledge.Embedding == nil {
+		return nil, "", nil, nil
+	}
+	ec = cfg.Knowledge.Embedding
+	clientCfg := ec.ClientConfig()
+	fingerprint, err = embedding.Fingerprint(&clientCfg)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	credential, resolved := embedding.ResolveCredential(ec.CredentialRef)
+	if !resolved {
+		return nil, fingerprint, ec, nil
+	}
+	client, err = embedding.New(&clientCfg, credential, resolver)
+	if err != nil {
+		return nil, "", nil, err
+	}
+	return client, fingerprint, ec, nil
+}
+
+func buildMemoryEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (memory.Embedder, *memory.EmbeddingSettings, error) {
+	if cfg == nil || !cfg.Memory.EmbeddingEnabled {
+		return nil, nil, nil
+	}
+	client, fingerprint, ec, err := buildEmbeddingClient(cfg, true, resolver)
+	if err != nil || ec == nil {
+		return nil, nil, err
+	}
+	settings := &memory.EmbeddingSettings{
+		Fingerprint:   fingerprint,
+		Dimensions:    ec.Dimensions,
+		BatchSize:     ec.BatchSize,
+		PublicQueries: ec.PublicQueries,
+	}
+	if client == nil {
+		return nil, settings, nil
+	}
+	return client, settings, nil
+}
+
+func buildProfileEmbedding(cfg *appconfig.Config, resolver egress.Resolver) (profile.Embedder, *profile.EmbeddingSettings, error) {
+	if cfg == nil || cfg.Profile == nil || !cfg.Profile.EmbeddingEnabled {
+		return nil, nil, nil
+	}
+	client, fingerprint, ec, err := buildEmbeddingClient(cfg, true, resolver)
+	if err != nil || ec == nil {
+		return nil, nil, err
+	}
+	settings := &profile.EmbeddingSettings{
+		Fingerprint:   fingerprint,
+		Dimensions:    ec.Dimensions,
+		BatchSize:     ec.BatchSize,
+		PublicQueries: ec.PublicQueries,
+	}
+	if client == nil {
+		return nil, settings, nil
+	}
+	return client, settings, nil
 }
 
 type knowledgeActions struct {

@@ -84,6 +84,7 @@ type ServiceOptions struct {
 
 type Service struct {
 	registry      Registry
+	embedder      factEmbedder
 	minConfidence float64
 	scanner       SecretScanner
 	actions       ActionSink
@@ -101,7 +102,18 @@ func NewService(registry Registry, options ServiceOptions) (*Service, error) {
 	if scanner == nil {
 		scanner = rejectAllScanner{}
 	}
-	return &Service{registry: registry, minConfidence: options.MinConfidence, scanner: scanner, actions: options.Actions, observer: options.Observer}, nil
+	var embedder factEmbedder
+	if fe, ok := registry.(factEmbedder); ok {
+		embedder = fe
+	}
+	return &Service{registry: registry, embedder: embedder, minConfidence: options.MinConfidence, scanner: scanner, actions: options.Actions, observer: options.Observer}, nil
+}
+
+func (s *Service) embedFactBestEffort(ctx stdcontext.Context, fact *Fact) {
+	if s == nil || s.embedder == nil || fact == nil {
+		return
+	}
+	s.embedder.EmbedFactBestEffort(ctx, fact)
 }
 
 func ConfidenceV1(evidence int) float64 {
