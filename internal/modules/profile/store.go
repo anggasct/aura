@@ -647,6 +647,7 @@ func (s *SQLiteStore) Promote(ctx context.Context, factID string, expiresAt *tim
 		fact.ConflictsWithID = ""
 		fact.Confidence = 1.0
 		fact.OwnerVerified = true
+		fact.Origin = OriginOwner
 		fact.ExpiresAt = expiresAt
 		fact.UpdatedAt = at
 		return s.UpdateFact(ctx, &fact)

@@ -213,14 +213,23 @@ func TestAProposalAnswersWithTheStoredState(t *testing.T) {
 	}
 }
 
-func TestAnOwnerSetOfAnAgentValueWinsOverTheCandidateAndTheRejection(t *testing.T) {
-	for _, prior := range []string{profile.StatusCandidate, profile.StatusRejected} {
+func TestAnOwnerSetOfAnAgentValueWinsInEveryPriorState(t *testing.T) {
+	for _, prior := range []string{profile.StatusCandidate, profile.StatusRejected, profile.StatusExpired, profile.StatusDeleted} {
 		t.Run(prior, func(t *testing.T) {
 			rig := newOpsRig(t)
 			id := rig.propose(t, "editor", "neovim")
-			if prior == profile.StatusRejected {
+			switch prior {
+			case profile.StatusRejected:
 				if _, err := rig.invoke(t, operation.SurfaceCLI, "profile.reject", `{"id":"`+id+`"}`); err != nil {
 					t.Fatalf("reject: %v", err)
+				}
+			case profile.StatusExpired:
+				if _, err := rig.DB.ExecContext(t.Context(), `UPDATE profile_fact SET status = 'expired' WHERE id = ?`, id); err != nil {
+					t.Fatalf("expire: %v", err)
+				}
+			case profile.StatusDeleted:
+				if _, err := rig.apply(t, operation.SurfaceCLI, "profile.delete", `{"id":"`+id+`"}`); err != nil {
+					t.Fatalf("delete: %v", err)
 				}
 			}
 
@@ -229,8 +238,8 @@ func TestAnOwnerSetOfAnAgentValueWinsOverTheCandidateAndTheRejection(t *testing.
 			}
 
 			fact := rig.fact(t, id)
-			if !fact.OwnerVerified || fact.Status != profile.StatusActive || fact.ConflictsWithID != "" || fact.Confidence != 1.0 {
-				t.Errorf("fact = %+v, want an owner-verified active fact with no conflict", fact)
+			if !fact.OwnerVerified || fact.Status != profile.StatusActive || fact.ConflictsWithID != "" || fact.Confidence != 1.0 || fact.Origin != profile.OriginOwner {
+				t.Errorf("fact = %+v, want an owner-origin, owner-verified active fact with no conflict", fact)
 			}
 			if !strings.Contains(rig.ownerContext(t), "neovim") {
 				t.Error("the owner value is missing from the owner context")

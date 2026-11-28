@@ -120,6 +120,7 @@ func (f *fakeRegistry) Promote(ctx stdcontext.Context, factID string, expiresAt 
 	stored.ConflictsWithID = ""
 	stored.Confidence = 1.0
 	stored.OwnerVerified = true
+	stored.Origin = OriginOwner
 	stored.ExpiresAt = expiresAt
 	stored.UpdatedAt = at
 	return nil

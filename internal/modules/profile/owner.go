@@ -141,7 +141,7 @@ func (s *Service) SetFact(ctx stdcontext.Context, ownerID, category, key, value 
 	if err != nil {
 		return Fact{}, err
 	}
-	if found && existing.OwnerID == ownerID && (existing.Status == StatusCandidate || existing.Status == StatusRejected) {
+	if found && existing.OwnerID == ownerID {
 		return s.promoteExisting(ctx, &existing, actives, expiresAt, now)
 	}
 	fact := Fact{
