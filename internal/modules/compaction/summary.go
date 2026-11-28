@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	stdcontext "context"
 
@@ -129,19 +130,23 @@ func NewService(summarizer Summarizer, store SummaryStore, task, promptVersion s
 	if err != nil {
 		return nil, err
 	}
-	sum := sha256.Sum256([]byte(prompt))
 	return &Service{
 		summarizer:      summarizer,
 		store:           store,
 		task:            task,
 		prompt:          prompt,
 		promptVersion:   promptVersion,
-		promptDigest:    hex.EncodeToString(sum[:]),
+		promptDigest:    promptDigestOf(prompt),
 		maxSourceTokens: maxSourceTokens,
 		maxOutputTokens: maxOutputTokens,
 		counter:         counter,
 		logger:          logger,
 	}, nil
+}
+
+func promptDigestOf(prompt string) string {
+	sum := sha256.Sum256([]byte(prompt))
+	return hex.EncodeToString(sum[:])
 }
 
 func (s *Service) WithObserver(observer Observer) *Service {
@@ -161,6 +166,9 @@ func PromptText(promptVersion string, maxOutputTokens int) (string, error) {
 }
 
 func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target SummaryRange, groups []Group) (*Summary, error) {
+	if s == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "service must not be nil")
+	}
 	if ctx == nil {
 		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
 	}
@@ -174,6 +182,64 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	if len(events) == 0 {
 		return nil, fault.New(ErrorCodeInvalidArgument, "summary range matches no events")
 	}
+	sourceTokens, err := sumCounts(s.counter, eventTexts(events))
+	if err != nil {
+		return nil, err
+	}
+	if sourceTokens <= s.maxSourceTokens {
+		return s.resolveEvents(ctx, sessionID, target.StartSequence, target.EndSequence, events)
+	}
+	chunks, err := splitEventsByTokens(events, s.counter, s.maxSourceTokens, false)
+	if err != nil {
+		return nil, err
+	}
+	if len(chunks) == 1 {
+		return s.resolveEvents(ctx, sessionID, target.StartSequence, target.EndSequence, chunks[0])
+	}
+	resolved := make([]*Summary, 0, len(chunks))
+	for _, chunk := range chunks {
+		sub, err := s.resolveEvents(ctx, sessionID, chunk[0].Sequence, chunk[len(chunk)-1].Sequence, chunk)
+		if err != nil {
+			return nil, err
+		}
+		resolved = append(resolved, sub)
+	}
+	return s.combineChunkSummaries(ctx, sessionID, target, events, sourceTokens, resolved)
+}
+
+func (s *Service) ResolveSpan(ctx stdcontext.Context, sessionID string, target SummaryRange, groups []Group) ([]*Summary, error) {
+	if s == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "service must not be nil")
+	}
+	if ctx == nil {
+		return nil, fault.New(ErrorCodeInvalidArgument, "context must not be nil")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(sessionID) == "" {
+		return nil, fault.New(ErrorCodeInvalidArgument, "session must not be empty")
+	}
+	events := RangeEvents(target, groups)
+	if len(events) == 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary range matches no events")
+	}
+	chunks, err := splitEventsByTokens(events, s.counter, s.maxSourceTokens, true)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*Summary, 0, len(chunks))
+	for _, chunk := range chunks {
+		sub, err := s.resolveEvents(ctx, sessionID, chunk[0].Sequence, chunk[len(chunk)-1].Sequence, chunk)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, sub)
+	}
+	return out, nil
+}
+
+func (s *Service) resolveEvents(ctx stdcontext.Context, sessionID string, startSeq, endSeq uint64, events []Event) (*Summary, error) {
 	digest := sourceDigest(events)
 	sourceTokens, err := sumCounts(s.counter, eventTexts(events))
 	if err != nil {
@@ -182,7 +248,7 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	if sourceTokens > s.maxSourceTokens {
 		return nil, fault.New(ErrorCodeInvalidArgument, "summary source exceeds the token bound")
 	}
-	cached, found, err := s.cached(ctx, sessionID, target, digest)
+	cached, found, err := lookupCachedSummary(ctx, s.store, sessionID, startSeq, endSeq, digest, s.promptVersion, s.promptDigest, s.maxOutputTokens)
 	if err != nil {
 		return nil, err
 	}
@@ -191,8 +257,8 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 		s.observe(ctx, &Observation{
 			Outcome:       OutcomeCacheHit,
 			SessionID:     sessionID,
-			StartSequence: target.StartSequence,
-			EndSequence:   target.EndSequence,
+			StartSequence: startSeq,
+			EndSequence:   endSeq,
 			EventCount:    len(events),
 			SourceTokens:  sourceTokens,
 			SummaryTokens: cached.SummaryTokens,
@@ -225,8 +291,8 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 		s.observe(ctx, &Observation{
 			Outcome:       OutcomeRejected,
 			SessionID:     sessionID,
-			StartSequence: target.StartSequence,
-			EndSequence:   target.EndSequence,
+			StartSequence: startSeq,
+			EndSequence:   endSeq,
 			EventCount:    len(events),
 			SourceTokens:  sourceTokens,
 			PromptVersion: s.promptVersion,
@@ -240,10 +306,10 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	}
 	now := time.Now().UTC()
 	summary := &Summary{
-		ID:            summaryID(sessionID, target.StartSequence, target.EndSequence, digest, result.Producer, s.promptVersion, s.promptDigest),
+		ID:            summaryID(sessionID, startSeq, endSeq, digest, result.Producer, s.promptVersion, s.promptDigest),
 		SessionID:     sessionID,
-		StartSequence: target.StartSequence,
-		EndSequence:   target.EndSequence,
+		StartSequence: startSeq,
+		EndSequence:   endSeq,
 		EventIDs:      eventIDs(events),
 		SourceDigest:  digest,
 		Producer:      result.Producer,
@@ -288,28 +354,186 @@ func (s *Service) ResolveRange(ctx stdcontext.Context, sessionID string, target 
 	return summary, nil
 }
 
-func (s *Service) cached(ctx stdcontext.Context, sessionID string, target SummaryRange, digest string) (*Summary, bool, error) {
-	records, err := s.store.ListSummaries(ctx, sessionID)
+func (s *Service) combineChunkSummaries(ctx stdcontext.Context, sessionID string, target SummaryRange, events []Event, sourceTokens int, chunks []*Summary) (*Summary, error) {
+	merged := SummaryContent{
+		Goals:       []string{},
+		Decisions:   []string{},
+		Constraints: []string{},
+		OpenWork:    []string{},
+		Facts:       []string{},
+	}
+	for _, chunk := range chunks {
+		merged.Goals = appendUniqueStrings(merged.Goals, chunk.Content.Goals)
+		merged.Decisions = appendUniqueStrings(merged.Decisions, chunk.Content.Decisions)
+		merged.Constraints = appendUniqueStrings(merged.Constraints, chunk.Content.Constraints)
+		merged.OpenWork = appendUniqueStrings(merged.OpenWork, chunk.Content.OpenWork)
+		merged.Facts = appendUniqueStrings(merged.Facts, chunk.Content.Facts)
+	}
+	encoded, err := canonicalContent(&merged)
+	if err != nil {
+		return nil, err
+	}
+	validated, err := ValidateContent(encoded, s.maxOutputTokens)
+	if err != nil {
+		sources := make([]string, 0, len(chunks))
+		for _, chunk := range chunks {
+			chunkJSON, cerr := canonicalContent(&chunk.Content)
+			if cerr != nil {
+				return nil, cerr
+			}
+			sources = append(sources, chunkJSON)
+		}
+		res, serr := s.summarizer.Summarize(ctx, &SummarizeRequest{
+			Task:            s.task,
+			Prompt:          s.prompt,
+			Sources:         sources,
+			MaxOutputTokens: s.maxOutputTokens,
+		})
+		if serr != nil {
+			return nil, serr
+		}
+		if res == nil {
+			return nil, fault.New(ErrorCodeSummaryUnavailable, "summarizer returned no result")
+		}
+		validated, err = ValidateContent(res.Text, s.maxOutputTokens)
+		if err != nil {
+			return nil, err
+		}
+	}
+	summaryTokens, err := countedContent(s.counter, validated)
+	if err != nil {
+		return nil, err
+	}
+	digest := sourceDigest(events)
+	producer := chunks[len(chunks)-1].Producer
+	now := time.Now().UTC()
+	return &Summary{
+		ID:            summaryID(sessionID, target.StartSequence, target.EndSequence, digest, producer, s.promptVersion, s.promptDigest),
+		SessionID:     sessionID,
+		StartSequence: target.StartSequence,
+		EndSequence:   target.EndSequence,
+		EventIDs:      eventIDs(events),
+		SourceDigest:  digest,
+		Producer:      producer,
+		PromptVersion: s.promptVersion,
+		PromptDigest:  s.promptDigest,
+		SourceTokens:  sourceTokens,
+		SummaryTokens: summaryTokens,
+		Accounting:    s.counter.Class(),
+		Trust:         TrustDerivedUntrusted,
+		Content:       *validated,
+		GeneratedAt:   now,
+	}, nil
+}
+
+func appendUniqueStrings(dst, src []string) []string {
+	for _, item := range src {
+		if !slices.Contains(dst, item) {
+			dst = append(dst, item)
+		}
+	}
+	return dst
+}
+
+func splitEventsByTokens(events []Event, counter TokenCounter, maxSourceTokens int, truncateSingle bool) ([][]Event, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	var chunks [][]Event
+	var current []Event
+	currentTokens := 0
+	for i := range events {
+		ev := events[i]
+		tokens, err := sumCounts(counter, []string{ev.Text})
+		if err != nil {
+			return nil, err
+		}
+		if tokens > maxSourceTokens {
+			if !truncateSingle {
+				return nil, fault.New(ErrorCodeInvalidArgument, "summary source exceeds the token bound")
+			}
+			ev.Text = truncateTextToTokens(ev.Text, counter, maxSourceTokens)
+			tokens, err = sumCounts(counter, []string{ev.Text})
+			if err != nil {
+				return nil, err
+			}
+			if tokens > maxSourceTokens {
+				return nil, fault.New(ErrorCodeInvalidArgument, "summary source exceeds the token bound")
+			}
+		}
+		if len(current) > 0 && currentTokens+tokens > maxSourceTokens {
+			chunks = append(chunks, current)
+			current = nil
+			currentTokens = 0
+		}
+		current = append(current, ev)
+		currentTokens += tokens
+	}
+	if len(current) > 0 {
+		chunks = append(chunks, current)
+	}
+	return chunks, nil
+}
+
+func truncateTextToTokens(text string, counter TokenCounter, maxTokens int) string {
+	if maxTokens <= 0 || text == "" {
+		return ""
+	}
+	if counter.Count(text) <= maxTokens {
+		return text
+	}
+	lo, hi := 0, len(text)
+	for lo < hi {
+		mid := lo + (hi-lo+1)/2
+		candidate := validUTF8Prefix(text, mid)
+		if counter.Count(candidate) <= maxTokens {
+			lo = mid
+		} else {
+			hi = mid - 1
+		}
+	}
+	return validUTF8Prefix(text, lo)
+}
+
+func validUTF8Prefix(text string, maxBytes int) string {
+	if maxBytes >= len(text) {
+		return text
+	}
+	if maxBytes <= 0 {
+		return ""
+	}
+	head := text[:maxBytes]
+	for head != "" && !utf8.ValidString(head) {
+		head = head[:len(head)-1]
+	}
+	return head
+}
+
+func lookupCachedSummary(ctx stdcontext.Context, store SummaryStore, sessionID string, startSeq, endSeq uint64, digest, promptVersion, promptDigest string, maxOutputTokens int) (*Summary, bool, error) {
+	if store == nil {
+		return nil, false, nil
+	}
+	records, err := store.ListSummaries(ctx, sessionID)
 	if err != nil {
 		return nil, false, err
 	}
 	for i := range records {
 		record := &records[i]
-		if record.StartSequence != target.StartSequence || record.EndSequence != target.EndSequence {
+		if record.StartSequence != startSeq || record.EndSequence != endSeq {
 			continue
 		}
 		summary, err := parsePayload(record.Payload)
 		if err != nil {
 			continue
 		}
-		if summary.SourceDigest != digest || summary.PromptVersion != s.promptVersion || summary.PromptDigest != s.promptDigest {
+		if summary.SourceDigest != digest || summary.PromptVersion != promptVersion || summary.PromptDigest != promptDigest {
 			continue
 		}
 		encoded, err := canonicalContent(&summary.Content)
 		if err != nil {
 			continue
 		}
-		if _, err := ValidateContent(encoded, s.maxOutputTokens); err != nil {
+		if _, err := ValidateContent(encoded, maxOutputTokens); err != nil {
 			continue
 		}
 		summary.ID = record.ID

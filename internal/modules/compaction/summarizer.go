@@ -15,25 +15,52 @@ import (
 const maxSummarizerOutputTokens = 1 << 20
 
 func ResolveProducer(models model.Config, routes model.Routes) (Producer, error) {
-	role := models.Routing["compression"]
-	if strings.TrimSpace(role) == "" {
-		role = "auxiliary"
+	producer, _, err := ResolveProducerForTask("compression", models, routes)
+	return producer, err
+}
+
+func ResolveProducerForTask(task string, models model.Config, routes model.Routes) (Producer, string, error) {
+	task = strings.TrimSpace(task)
+	if task == "" {
+		task = "compression"
 	}
-	route, ok := routes[role]
-	if !ok {
-		return Producer{}, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression route %q is not configured", role))
+	role := strings.TrimSpace(models.Routing[task])
+	if role == "" {
+		if _, ok := routes[task]; ok {
+			role = task
+		} else if _, ok := models.Definitions[task]; ok {
+			role = task
+		} else {
+			role = "auxiliary"
+		}
 	}
-	if len(route.Candidates) == 0 {
-		return Producer{}, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression route %q names no candidate", role))
+	var definition model.Definition
+	var targetName string
+	if route, ok := routes[role]; ok {
+		if len(route.Candidates) == 0 {
+			return Producer{}, "", fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression route %q names no candidate", role))
+		}
+		candidate := route.Candidates[0]
+		def, exists := models.Definitions[candidate]
+		if !exists {
+			return Producer{}, "", fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression candidate %q is not defined", candidate))
+		}
+		definition = def
+		targetName = role
+	} else if def, exists := models.Definitions[role]; exists {
+		definition = def
+		targetName = def.Model
+	} else {
+		return Producer{}, "", fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression route %q is not configured", role))
 	}
-	definition, ok := models.Definitions[route.Candidates[0]]
-	if !ok {
-		return Producer{}, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression candidate %q is not defined", route.Candidates[0]))
+	resolved, err := models.ResolveDefinition(&definition)
+	if err != nil {
+		return Producer{}, "", fault.Wrap(ErrorCodeInvalidArgument, fmt.Sprintf("compression candidate %q cannot be resolved", role), err)
 	}
-	if strings.TrimSpace(definition.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
-		return Producer{}, fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression candidate %q carries no identity", route.Candidates[0]))
+	if strings.TrimSpace(resolved.Protocol) == "" || strings.TrimSpace(definition.Model) == "" {
+		return Producer{}, "", fault.New(ErrorCodeInvalidArgument, fmt.Sprintf("compression candidate %q carries no identity", role))
 	}
-	return Producer{Provider: definition.Protocol, Model: definition.Model}, nil
+	return Producer{Provider: resolved.Protocol, Model: definition.Model}, targetName, nil
 }
 
 type LLMSummarizer struct {

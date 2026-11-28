@@ -67,7 +67,7 @@ func TestSelectNormalKeepsEverythingVerbatim(t *testing.T) {
 			t.Errorf("part = %+v", part)
 		}
 	}
-	if selection.UsedTokens != plan.HeadTokens+plan.TotalEventTokens {
+	if selection.UsedTokens != plan.TotalEventTokens {
 		t.Errorf("used = %d", selection.UsedTokens)
 	}
 }
@@ -163,7 +163,7 @@ func TestSelectKeepsRecentTurnToolResultsVerbatim(t *testing.T) {
 		toolResultEvent(2, "t2", big),
 		toolResultEvent(3, "t3", big),
 	}
-	plan := selectPlan(t, 800, events, Invocation{InvocationID: "inv-new"})
+	plan := selectPlan(t, 702, events, Invocation{InvocationID: "inv-new"})
 	selection, err := Select(selectPolicy(), plan, exactCounter{})
 	if err != nil {
 		t.Fatalf("Select: %v", err)
@@ -193,7 +193,7 @@ func TestSelectProtectsLinkedGroupsInRecentWindow(t *testing.T) {
 		{Sequence: 6, TurnID: "t4", InvocationID: "inv-old", Kind: "tool.completed", CorrelationID: "call-7", Text: strings.Repeat("f", 20)},
 		historyTurn(7, "t5", strings.Repeat("g", 20)),
 	}
-	plan := selectPlan(t, 300, events, Invocation{InvocationID: "inv-new"})
+	plan := selectPlan(t, 220, events, Invocation{InvocationID: "inv-new"})
 	selection, err := Select(selectPolicy(), plan, exactCounter{})
 	if err != nil {
 		t.Fatalf("Select: %v", err)
@@ -217,7 +217,7 @@ func TestSelectBudgetExceededKeepsProtectedWhole(t *testing.T) {
 		historyTurn(1, "t1", strings.Repeat("x", 400)),
 		{Sequence: 2, TurnID: "t2", InvocationID: "inv-new", Kind: "model.delta", Text: strings.Repeat("y", 400)},
 	}
-	plan, err := selectPlanner().Plan(Capability{ID: "m", ContextTokens: 950}, Invocation{InvocationID: "inv-new"}, events)
+	plan, err := selectPlanner().Plan(Capability{ID: "m", ContextTokens: 850}, Invocation{InvocationID: "inv-new"}, events)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}
@@ -234,7 +234,7 @@ func TestSelectHighWaterTriggersEmergencyBeforeFull(t *testing.T) {
 		historyTurn(2, "t2", "recent-a"),
 		historyTurn(3, "t3", "recent-b"),
 	}
-	plan, err := selectPlanner().Plan(Capability{ID: "m", ContextTokens: 1200}, Invocation{}, events)
+	plan, err := selectPlanner().Plan(Capability{ID: "m", ContextTokens: 1120}, Invocation{}, events)
 	if err != nil {
 		t.Fatalf("Plan: %v", err)
 	}

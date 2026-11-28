@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/anggasct/aura/internal/platform/turn"
-	"github.com/anggasct/aura/internal/platform/turn/engine"
-	"github.com/anggasct/aura/internal/platform/turn/store"
+	runtimeengine "github.com/anggasct/aura/internal/platform/turn/engine"
+	turnstore "github.com/anggasct/aura/internal/platform/turn/store"
 
 	"google.golang.org/adk/v2/session"
 )
@@ -23,7 +23,11 @@ type ADKSessionService struct {
 	sessions      SessionPort
 	historyAuthor string
 	leaveOutTurn  string
+	compaction    *sessionCompaction
 	current       atomic.Pointer[adkSession]
+
+	errMu   sync.Mutex
+	loadErr error
 }
 
 type SessionPort interface {
@@ -39,16 +43,56 @@ func NewADKSessionService(sessions SessionPort) (*ADKSessionService, error) {
 	return &ADKSessionService{sessions: sessions}, nil
 }
 
-type adkSession struct {
-	id       string
-	userID   string
-	metadata json.RawMessage
-	events   func() ([]*session.Event, error)
+func (s *ADKSessionService) recordEventsError(err error) {
+	if s == nil || err == nil {
+		return
+	}
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
+	if s.loadErr == nil {
+		s.loadErr = err
+	}
+}
 
-	mu       sync.Mutex
-	appended []*session.Event
-	view     []*session.Event
-	viewed   bool
+func (s *ADKSessionService) clearEventsError() {
+	if s == nil {
+		return
+	}
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
+	s.loadErr = nil
+}
+
+func (s *ADKSessionService) eventsError() error {
+	if s == nil {
+		return nil
+	}
+	s.errMu.Lock()
+	defer s.errMu.Unlock()
+	return s.loadErr
+}
+
+type adkSession struct {
+	id            string
+	userID        string
+	metadata      json.RawMessage
+	events        func() ([]*session.Event, error)
+	loadRaw       func() ([]turn.Event, map[uint64]*session.Event, error)
+	compact       func(step uint64, prior, current []turn.Event, appended []*session.Event) (*CompactionResult, error)
+	onEventsError func(error)
+	onAppend      func()
+
+	mu            sync.Mutex
+	appended      []*session.Event
+	view          []*session.Event
+	viewErr       error
+	viewed        bool
+	priorLoaded   bool
+	priorRaw      []turn.Event
+	priorBySeq    map[uint64]*session.Event
+	compactedBase []*session.Event
+	hasCompacted  bool
+	compactStep   uint64
 }
 
 func (s *adkSession) ID() string                { return s.id }
@@ -65,21 +109,71 @@ func (s *adkSession) State() session.State {
 }
 
 func (s *adkSession) Events() session.Events {
-	return &adkEvents{load: s.merged}
+	return &adkEvents{load: s.merged, onErr: s.onEventsError}
 }
 
 func (s *adkSession) merged() ([]*session.Event, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.viewed {
-		return s.view, nil
+		return s.view, s.viewErr
 	}
-	stored, err := s.events()
+	if s.compact == nil {
+		stored, err := s.events()
+		if err != nil {
+			s.view, s.viewErr, s.viewed = nil, err, true
+			return nil, err
+		}
+		out := mergeEvents(stored, s.appended)
+		s.view, s.viewErr, s.viewed = out, nil, true
+		return out, nil
+	}
+	if !s.priorLoaded {
+		raw, bySeq, err := s.loadRaw()
+		if err != nil {
+			s.view, s.viewErr, s.viewed = nil, err, true
+			return nil, err
+		}
+		s.priorRaw = raw
+		s.priorBySeq = bySeq
+		s.priorLoaded = true
+	}
+	if !s.hasCompacted && len(s.appended) == 0 {
+		out := make([]*session.Event, 0, len(s.priorRaw))
+		for i := range s.priorRaw {
+			out = append(out, s.priorBySeq[s.priorRaw[i].Sequence])
+		}
+		return out, nil
+	}
+	if s.hasCompacted && hasPendingFunctionCall(s.appended) {
+		out := mergeEvents(s.compactedBase, s.appended)
+		s.view, s.viewErr, s.viewed = out, nil, true
+		return out, nil
+	}
+	currentRows := make([]turn.Event, 0, len(s.appended))
+	for _, ev := range s.appended {
+		re, err := turnstore.RuntimeEventFromADK(s.id, "", ev)
+		if err != nil {
+			s.view, s.viewErr, s.viewed = nil, err, true
+			return nil, err
+		}
+		currentRows = append(currentRows, re)
+	}
+	s.compactStep++
+	res, err := s.compact(s.compactStep, s.priorRaw, currentRows, s.appended)
 	if err != nil {
+		s.view, s.viewErr, s.viewed = nil, err, true
 		return nil, err
 	}
-	out := mergeEvents(stored, s.appended)
-	s.view, s.viewed = out, true
+	base, err := materializeCompactedEvents(res, s.priorBySeq)
+	if err != nil {
+		s.view, s.viewErr, s.viewed = nil, err, true
+		return nil, err
+	}
+	s.compactedBase = base
+	s.hasCompacted = true
+	out := mergeEvents(base, s.appended)
+	s.view, s.viewErr, s.viewed = out, nil, true
 	return out, nil
 }
 
@@ -113,9 +207,13 @@ func (s *adkSession) appendInMemory(ev *session.Event) {
 		return
 	}
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.appended = append(s.appended, ev)
-	s.view, s.viewed = nil, false
+	s.view, s.viewErr, s.viewed = nil, nil, false
+	onAppend := s.onAppend
+	s.mu.Unlock()
+	if onAppend != nil {
+		onAppend()
+	}
 }
 
 type adkState struct {
@@ -146,6 +244,7 @@ func (s adkState) All() iter.Seq2[string, any] {
 
 type adkEvents struct {
 	load  func() ([]*session.Event, error)
+	onErr func(error)
 	cache []*session.Event
 	err   error
 }
@@ -161,6 +260,9 @@ func (e *adkEvents) All() iter.Seq[*session.Event] {
 	return func(yield func(*session.Event) bool) {
 		e.loadOnce()
 		if e.err != nil {
+			if e.onErr != nil {
+				e.onErr(e.err)
+			}
 			return
 		}
 		for _, ev := range e.cache {
@@ -216,10 +318,12 @@ func (s *ADKSessionService) Create(ctx context.Context, req *session.CreateReque
 	}
 	return &session.CreateResponse{
 		Session: &adkSession{
-			id:       id,
-			userID:   req.UserID,
-			metadata: metadata,
-			events:   func() ([]*session.Event, error) { return []*session.Event{}, nil },
+			id:            id,
+			userID:        req.UserID,
+			metadata:      metadata,
+			events:        func() ([]*session.Event, error) { return []*session.Event{}, nil },
+			onEventsError: s.recordEventsError,
+			onAppend:      s.clearEventsError,
 		},
 	}, nil
 }
@@ -233,11 +337,23 @@ func (s *ADKSessionService) Get(ctx context.Context, req *session.GetRequest) (*
 		return nil, err
 	}
 	loaded := &adkSession{
-		id:       stored.ID,
-		userID:   stored.OwnerID,
-		metadata: stored.Metadata,
-		events:   func() ([]*session.Event, error) { return s.loadEvents(ctx, stored.ID) },
+		id:            stored.ID,
+		userID:        stored.OwnerID,
+		metadata:      stored.Metadata,
+		events:        func() ([]*session.Event, error) { return s.loadEvents(ctx, stored.ID) },
+		onEventsError: s.recordEventsError,
+		onAppend:      s.clearEventsError,
 	}
+	if s.compaction != nil {
+		cfg := s.compaction
+		loaded.loadRaw = func() ([]turn.Event, map[uint64]*session.Event, error) {
+			return s.loadRawAndADKEvents(ctx, stored.ID)
+		}
+		loaded.compact = func(step uint64, prior, current []turn.Event, appended []*session.Event) (*CompactionResult, error) {
+			return compactWithJournal(ctx, cfg, stored.ID, step, prior, current, appended)
+		}
+	}
+	s.clearEventsError()
 	s.current.Store(loaded)
 	return &session.GetResponse{Session: loaded}, nil
 }
@@ -281,11 +397,24 @@ func (s *ADKSessionService) AppendEvent(ctx context.Context, cur session.Session
 }
 
 func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([]*session.Event, error) {
-	stored, err := s.sessions.ListEvents(ctx, sessionID, 0, maxEventLoad)
+	raw, bySeq, err := s.loadRawAndADKEvents(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
-	events := make([]*session.Event, 0, len(stored))
+	events := make([]*session.Event, 0, len(raw))
+	for i := range raw {
+		events = append(events, bySeq[raw[i].Sequence])
+	}
+	return events, nil
+}
+
+func (s *ADKSessionService) loadRawAndADKEvents(ctx context.Context, sessionID string) ([]turn.Event, map[uint64]*session.Event, error) {
+	stored, err := s.sessions.ListEvents(ctx, sessionID, 0, maxEventLoad)
+	if err != nil {
+		return nil, nil, err
+	}
+	raw := make([]turn.Event, 0, len(stored))
+	bySeq := make(map[uint64]*session.Event, len(stored))
 	for i := range stored {
 		if stored[i].Kind != turnstore.EventKindADK {
 			continue
@@ -295,12 +424,13 @@ func (s *ADKSessionService) loadEvents(ctx context.Context, sessionID string) ([
 		}
 		ev, err := turnstore.RuntimeEventToADK(&stored[i])
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if s.historyAuthor != "" && ev.Author != userAuthor {
 			ev.Author = s.historyAuthor
 		}
-		events = append(events, ev)
+		raw = append(raw, stored[i])
+		bySeq[stored[i].Sequence] = ev
 	}
-	return events, nil
+	return raw, bySeq, nil
 }

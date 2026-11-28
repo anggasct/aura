@@ -76,9 +76,14 @@ func TestMapContextEventToolResults(t *testing.T) {
 	if got := MapEvent(row); !got.ToolResult {
 		t.Errorf("tool.completed not flagged: %+v", got)
 	}
-	row = contextRow("adk_event", `{"content":{"parts":[{"functionResponse":{"id":"call-9","name":"run"}}]}}`)
+	row = contextRow("adk_event", `{"content":{"parts":[{"functionCall":{"id":"call-9","name":"run","args":{"cmd":"ls"}}}]}}`)
+	callEvt := MapEvent(row)
+	if callEvt.ToolResult || callEvt.CorrelationID != "" || !strings.Contains(callEvt.Text, "run") || !strings.Contains(callEvt.Text, `"cmd":"ls"`) {
+		t.Errorf("function call not mapped: %+v", callEvt)
+	}
+	row = contextRow("adk_event", `{"content":{"parts":[{"functionResponse":{"id":"call-9","name":"run","response":{"output":"listed files"}}}]}}`)
 	got := MapEvent(row)
-	if !got.ToolResult || got.CorrelationID != "call-9" {
+	if !got.ToolResult || got.CorrelationID != "" || !strings.Contains(got.Text, "listed files") {
 		t.Errorf("function response not detected: %+v", got)
 	}
 	row = contextRow("message.completed", `{"text":"plain"}`)

@@ -63,6 +63,8 @@ type ADKExecutor struct {
 	providers         []turn.ContextProvider
 	toolBudget        ToolBudget
 	taintObserver     func(context.Context, turn.TaintSource)
+	compactor         HistoryCompactor
+	capabilities      CapabilityLookup
 	clock             func() time.Time
 }
 
@@ -272,10 +274,12 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 			}
 		}()
 		extra := turnContext{
-			blocks:         blocks,
-			knowledgeScope: req.Knowledge,
-			restriction:    req.ToolRestriction,
-			history:        sessionService,
+			blocks:            blocks,
+			knowledgeScope:    req.Knowledge,
+			restriction:       req.ToolRestriction,
+			history:           sessionService,
+			compactionEnabled: x.compactor != nil,
+			checkEventsErr:    sessionService.eventsError,
 		}
 		if req.WebOnly {
 			extra.knowledgeScope = nil
@@ -288,7 +292,28 @@ func (x *ADKExecutor) Execute(ctx context.Context, req *turn.TurnRequest) iter.S
 		}
 		extra.plan = x.planOperations(runCtx, &planInput{definition: &definition, req: req, extra: &extra})
 		runCtx = withOperationPlan(runCtx, extra.plan)
-		adkRunner, err := x.buildRunner(runCtx, sessionService, &definition, recallAttached, x.ownerContextFor(req), &extra)
+		ownerCtx := x.ownerContextFor(req)
+		modelName, resolvedModel, err := x.resolveModelWithName(runCtx, &definition)
+		if err != nil {
+			yield(turn.Event{}, err)
+			return
+		}
+		if x.compactor != nil {
+			systemText := assembleSystemInstruction(&definition, recallAttached, ownerCtx, &extra)
+			if ephemeral := ephemeralBlocksText(extra.blocks); ephemeral != "" {
+				systemText = strings.TrimSpace(systemText + "\n\n" + ephemeral)
+			}
+			sessionService.compaction = &sessionCompaction{
+				compactor:        x.compactor,
+				turnID:           req.TurnID,
+				capability:       x.lookupCapabilities(modelName, resolvedModel),
+				systemText:       systemText,
+				coreTools:        extra.plan.core,
+				operationPlan:    extra.plan,
+				operationBinding: x.binding(),
+			}
+		}
+		adkRunner, err := x.buildRunnerWithModel(runCtx, sessionService, &definition, resolvedModel, recallAttached, ownerCtx, &extra)
 		if err != nil {
 			yield(turn.Event{}, err)
 			return
@@ -443,12 +468,14 @@ func (x *ADKExecutor) ownerContextFor(req *turn.TurnRequest) string {
 }
 
 type turnContext struct {
-	blocks         []turn.ContextBlock
-	knowledgeScope []string
-	restriction    *turn.ToolRestriction
-	history        historyReader
-	plan           *operationPlan
-	webOnly        string
+	blocks            []turn.ContextBlock
+	knowledgeScope    []string
+	restriction       *turn.ToolRestriction
+	history           historyReader
+	plan              *operationPlan
+	webOnly           string
+	compactionEnabled bool
+	checkEventsErr    func() error
 }
 
 func (x *ADKExecutor) collectContextBlocks(ctx context.Context, req *turn.TurnRequest) ([]turn.ContextBlock, error) {
@@ -476,11 +503,7 @@ func (x *ADKExecutor) agentName(definition *auraagent.Definition) string {
 	return cmp.Or(definition.Name, x.appName)
 }
 
-func (x *ADKExecutor) buildRunner(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, recallAttached bool, ownerContext string, extra *turnContext) (*runner.Runner, error) {
-	model, err := x.resolveModel(ctx, definition)
-	if err != nil {
-		return nil, err
-	}
+func (x *ADKExecutor) buildRunnerWithModel(ctx context.Context, sessionService session.Service, definition *auraagent.Definition, model adkmodel.LLM, recallAttached bool, ownerContext string, extra *turnContext) (*runner.Runner, error) {
 	if x.ledger != nil {
 		access := turnAccessFromContext(ctx)
 		wrapped, werr := usage.NewBudgeted(model, x.ledger, x.modelDefinitionID, usage.Attribution{
@@ -799,22 +822,27 @@ func (u *usageTracker) add(ev *session.Event) bool {
 }
 
 func (x *ADKExecutor) resolveModel(ctx context.Context, definition *auraagent.Definition) (adkmodel.LLM, error) {
+	_, llm, err := x.resolveModelWithName(ctx, definition)
+	return llm, err
+}
+
+func (x *ADKExecutor) resolveModelWithName(ctx context.Context, definition *auraagent.Definition) (string, adkmodel.LLM, error) {
 	modelName := x.modelName
 	if definition.ModelRoute != "" {
 		if x.modelForRoute == nil {
-			return nil, invalidArgument("agent model route requires a route resolver")
+			return "", nil, invalidArgument("agent model route requires a route resolver")
 		}
 		routeModel, err := x.modelForRoute(definition.ModelRoute)
 		if err != nil {
-			return nil, fmt.Errorf("resolve model route %q: %w", definition.ModelRoute, err)
+			return "", nil, fmt.Errorf("resolve model route %q: %w", definition.ModelRoute, err)
 		}
 		modelName = routeModel
 	}
 	model, err := x.models.LLM(ctx, modelName)
 	if err != nil {
-		return nil, fmt.Errorf("resolve model %q: %w", modelName, err)
+		return "", nil, fmt.Errorf("resolve model %q: %w", modelName, err)
 	}
-	return model, nil
+	return modelName, model, nil
 }
 
 func (x *ADKExecutor) toolsFor(definition *auraagent.Definition, class principal.Class, origin turn.Origin, extra *turnContext) []tool.Tool {
@@ -903,7 +931,7 @@ func exposesPluginTool(definition *auraagent.Definition, class principal.Class, 
 	return !restricted || auratools.ListsPluginTool(ceiling, toolName, plugin)
 }
 
-func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra *turnContext) (agent.Agent, error) {
+func assembleSystemInstruction(definition *auraagent.Definition, recallAttached bool, ownerContext string, extra *turnContext) string {
 	instruction := definition.Instructions
 	if extra.webOnly != "" {
 		instruction = extra.webOnly
@@ -919,22 +947,37 @@ func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LL
 	if recallAttached {
 		instruction = strings.TrimSpace(instruction) + "\n\n" + turn.RecallEvidenceCaveat
 	}
+	for i := range extra.blocks {
+		if caveat := strings.TrimSpace(extra.blocks[i].Caveat); caveat != "" && (!recallAttached || caveat != turn.RecallEvidenceCaveat) {
+			instruction = strings.TrimSpace(instruction) + "\n\n" + caveat
+		}
+	}
+	if extra.compactionEnabled {
+		instruction = strings.TrimSpace(instruction) + "\n\n" + turn.CompactionSummaryCaveat
+	}
+	return appendTurnProtocol(instruction)
+}
+
+func buildAgent(name string, definition *auraagent.Definition, model adkmodel.LLM, tools []tool.Tool, gate llmagent.BeforeToolCallback, recallAttached bool, ownerContext string, extra *turnContext) (agent.Agent, error) {
+	instruction := assembleSystemInstruction(definition, recallAttached, ownerContext, extra)
 	var toolsets []tool.Toolset
 	if extra.plan != nil && extra.plan.toolset != nil {
 		toolsets = append(toolsets, extra.plan.toolset)
 	}
 	var beforeModel []llmagent.BeforeModelCallback
+	if extra.checkEventsErr != nil {
+		check := extra.checkEventsErr
+		beforeModel = append(beforeModel, func(_ agent.Context, _ *adkmodel.LLMRequest) (*adkmodel.LLMResponse, error) {
+			return nil, check()
+		})
+	}
 	for i := range extra.blocks {
-		if caveat := strings.TrimSpace(extra.blocks[i].Caveat); caveat != "" && (!recallAttached || caveat != turn.RecallEvidenceCaveat) {
-			instruction = strings.TrimSpace(instruction) + "\n\n" + caveat
-		}
 		if extra.blocks[i].Placement == turn.ContextPlacementEphemeral {
 			if content := strings.TrimSpace(extra.blocks[i].Content); content != "" {
 				beforeModel = append(beforeModel, withUntrustedContextPart(content))
 			}
 		}
 	}
-	instruction = appendTurnProtocol(instruction)
 	return llmagent.New(llmagent.Config{
 		Name:                 name,
 		Description:          definition.Description,

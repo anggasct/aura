@@ -121,7 +121,7 @@ func TestContextEvalCorpus(t *testing.T) {
 				t.Errorf("%s: protected retention %.2f below %.2f", session.name, retained, evalProtectedRetention)
 			}
 		}
-		raw := plan.HeadTokens + plan.TotalEventTokens
+		raw := plan.TotalEventTokens
 		if reduction := 1 - float64(selection.UsedTokens)/float64(raw); session.name == "long" && reduction < evalTokenReduction {
 			t.Errorf("%s: token reduction %.2f below %.2f", session.name, reduction, evalTokenReduction)
 		}

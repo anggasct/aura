@@ -36,6 +36,7 @@ import (
 	"github.com/anggasct/aura/internal/channels/terminal"
 	"github.com/anggasct/aura/internal/modules/broadcast"
 	"github.com/anggasct/aura/internal/modules/codeexec"
+	"github.com/anggasct/aura/internal/modules/compaction"
 	personaeval "github.com/anggasct/aura/internal/modules/eval/persona"
 	"github.com/anggasct/aura/internal/modules/fetch"
 	"github.com/anggasct/aura/internal/modules/filesystem"
@@ -133,6 +134,7 @@ type moduleParts struct {
 func (b *build) buildModules(ctx context.Context) error {
 	steps := []func(context.Context) error{
 		b.buildBuiltinTools,
+		b.buildCompaction,
 		b.buildMemory,
 		b.buildProfile,
 		b.buildSkills,
@@ -148,6 +150,92 @@ func (b *build) buildModules(ctx context.Context) error {
 		}
 	}
 	return nil
+}
+
+func (b *build) buildCompaction(ctx context.Context) error {
+	if b.cfg.Context == nil || !b.cfg.Context.Enabled {
+		return nil
+	}
+	store, err := compaction.NewIndexedEventSummaryStore(turnstore.NewEventKindReader(b.db), b.events)
+	if err != nil {
+		return err
+	}
+	mod, err := compaction.New(ctx, &compaction.ModuleDeps{
+		Config:      *b.cfg.Context,
+		Models:      b.models,
+		ModelConfig: b.cfg.Models,
+		ModelRoutes: b.cfg.ModelRoutes,
+		Store:       store,
+		Logger:      b.logger,
+	})
+	if err != nil {
+		return err
+	}
+	b.execOpts = append(b.execOpts, runtimeadk.WithHistoryCompactor(compactionAdapter{mod: mod}))
+	return nil
+}
+
+type compactionAdapter struct {
+	mod *compaction.Module
+}
+
+func (a compactionAdapter) Compact(ctx context.Context, req *runtimeadk.CompactionRequest) (*runtimeadk.CompactionResult, error) {
+	if a.mod == nil || req == nil {
+		return nil, fault.New(turn.ErrorCodeInvalidArgument, "compaction request and module must not be nil")
+	}
+	out, err := a.mod.Compact(ctx, &compaction.CompactInput{
+		SessionID:    req.SessionID,
+		TurnID:       req.TurnID,
+		InvocationID: req.InvocationID,
+		Capability: compaction.Capability{
+			ID:            req.Capability.ID,
+			ContextTokens: req.Capability.ContextTokens,
+			Tokenizer:     req.Capability.Tokenizer,
+		},
+		SystemText:      req.SystemText,
+		ToolText:        req.ToolText,
+		MaxOutputTokens: req.MaxOutputTokens,
+		PriorEvents:     req.PriorEvents,
+		CurrentEvents:   req.CurrentEvents,
+	})
+	if err != nil {
+		if fault.HasCode(err, compaction.ErrorCodeBudgetExceeded) {
+			return nil, fault.Wrap(turn.ErrorCodeContextBudgetExceeded, "context budget exceeded", err)
+		}
+		return nil, err
+	}
+	items := make([]runtimeadk.CompactionItem, 0, len(out.Items))
+	for i := range out.Items {
+		src := &out.Items[i]
+		var projections []runtimeadk.CompactionToolProjection
+		if len(src.Projections) > 0 {
+			projections = make([]runtimeadk.CompactionToolProjection, 0, len(src.Projections))
+			for j := range src.Projections {
+				p := &src.Projections[j]
+				projections = append(projections, runtimeadk.CompactionToolProjection{
+					PartIndex:   p.PartIndex,
+					Digest:      p.Projection.Digest,
+					Bytes:       p.Projection.Bytes,
+					Excerpt:     p.Projection.Excerpt,
+					RefSequence: p.Projection.RefSequence,
+					MediaType:   p.Projection.MediaType,
+				})
+			}
+		}
+		items = append(items, runtimeadk.CompactionItem{
+			Kind:        src.Kind,
+			Sequence:    src.Sequence,
+			Projections: projections,
+			SummaryID:   src.SummaryID,
+			SummaryText: src.SummaryText,
+		})
+	}
+	return &runtimeadk.CompactionResult{
+		Items:      items,
+		Compacted:  out.Compacted,
+		UsedTokens: out.UsedTokens,
+		Effective:  out.Effective,
+	}, nil
 }
 
 func (b *build) buildBuiltinTools(context.Context) error {

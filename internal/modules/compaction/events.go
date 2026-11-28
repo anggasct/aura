@@ -7,13 +7,23 @@ import (
 	"github.com/anggasct/aura/internal/platform/turn"
 )
 
+type eventFunctionCall struct {
+	ID   string          `json:"id"`
+	Name string          `json:"name"`
+	Args json.RawMessage `json:"args"`
+}
+
+type eventFunctionResponse struct {
+	ID       string          `json:"id"`
+	Name     string          `json:"name"`
+	Response json.RawMessage `json:"response"`
+}
+
 type eventContentPart struct {
-	Text             string `json:"text"`
-	FunctionResponse *struct {
-		ID   string `json:"id"`
-		Name string `json:"name"`
-	} `json:"functionResponse"`
-	InlineData *struct {
+	Text             string                 `json:"text"`
+	FunctionCall     *eventFunctionCall     `json:"functionCall"`
+	FunctionResponse *eventFunctionResponse `json:"functionResponse"`
+	InlineData       *struct {
 		MIMEType string `json:"mimeType"`
 	} `json:"inlineData"`
 	FileData *struct {
@@ -56,10 +66,17 @@ func MapEvent(row *turn.Event) Event {
 			if strings.TrimSpace(part.Text) != "" {
 				texts = append(texts, part.Text)
 			}
+			if part.FunctionCall != nil {
+				if len(part.FunctionCall.Args) > 0 {
+					texts = append(texts, part.FunctionCall.Name+string(part.FunctionCall.Args))
+				} else if part.FunctionCall.Name != "" {
+					texts = append(texts, part.FunctionCall.Name)
+				}
+			}
 			if part.FunctionResponse != nil {
 				event.ToolResult = true
-				if event.CorrelationID == "" {
-					event.CorrelationID = part.FunctionResponse.ID
+				if len(part.FunctionResponse.Response) > 0 {
+					texts = append(texts, string(part.FunctionResponse.Response))
 				}
 			}
 			if event.MediaType == "" {
@@ -86,4 +103,29 @@ func MapEvent(row *turn.Event) Event {
 		event.ToolResult = true
 	}
 	return event
+}
+
+type functionResponsePart struct {
+	PartIndex int
+	Raw       string
+}
+
+func extractFunctionResponseParts(raw json.RawMessage) []functionResponsePart {
+	if len(raw) == 0 {
+		return nil
+	}
+	var payload eventPayload
+	if err := json.Unmarshal(raw, &payload); err != nil || payload.Content == nil {
+		return nil
+	}
+	var parts []functionResponsePart
+	for i, part := range payload.Content.Parts {
+		if part.FunctionResponse != nil && len(part.FunctionResponse.Response) > 0 {
+			parts = append(parts, functionResponsePart{
+				PartIndex: i,
+				Raw:       string(part.FunctionResponse.Response),
+			})
+		}
+	}
+	return parts
 }

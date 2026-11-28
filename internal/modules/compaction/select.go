@@ -57,9 +57,14 @@ type SelectionPolicy struct {
 	RecentCompleteTurns int
 	HighWaterRatio      float64
 	MaxExcerptBytes     int
+	SummaryOutputTokens int
 }
 
 func ResolveSelectionPolicy(recentCompleteTurns int, highWaterRatio float64, maxExcerptBytes int) (*SelectionPolicy, error) {
+	return ResolveSelectionPolicyWithSummary(recentCompleteTurns, highWaterRatio, maxExcerptBytes, 0)
+}
+
+func ResolveSelectionPolicyWithSummary(recentCompleteTurns int, highWaterRatio float64, maxExcerptBytes, summaryOutputTokens int) (*SelectionPolicy, error) {
 	if recentCompleteTurns <= 0 {
 		return nil, fault.New(ErrorCodeInvalidArgument, "recent complete turns must be positive")
 	}
@@ -69,10 +74,14 @@ func ResolveSelectionPolicy(recentCompleteTurns int, highWaterRatio float64, max
 	if maxExcerptBytes <= 0 {
 		return nil, fault.New(ErrorCodeInvalidArgument, "max excerpt bytes must be positive")
 	}
+	if summaryOutputTokens < 0 {
+		return nil, fault.New(ErrorCodeInvalidArgument, "summary output tokens must not be negative")
+	}
 	return &SelectionPolicy{
 		RecentCompleteTurns: recentCompleteTurns,
 		HighWaterRatio:      highWaterRatio,
 		MaxExcerptBytes:     maxExcerptBytes,
+		SummaryOutputTokens: summaryOutputTokens,
 	}, nil
 }
 
@@ -87,13 +96,9 @@ func Select(policy *SelectionPolicy, plan *Plan, counter TokenCounter) (*Selecti
 		counter = ConservativeEstimator{}
 	}
 	trigger := int(float64(plan.Budget.Usable) * policy.HighWaterRatio)
-	raw, err := checkedAdd(plan.HeadTokens, plan.TotalEventTokens)
-	if err != nil {
-		return nil, err
-	}
 	groups := copyGroups(plan.Groups)
-	if raw <= trigger && raw <= plan.Budget.Effective {
-		return levelSelection(groups, nil, raw, SelectionNormal), nil
+	if plan.TotalEventTokens <= trigger && plan.TotalEventTokens <= plan.Budget.Effective {
+		return levelSelection(groups, nil, plan.TotalEventTokens, SelectionNormal), nil
 	}
 	protected := markProtected(groups, policy.RecentCompleteTurns)
 	projected, err := projectOversizedToolResults(groups, protected, policy.MaxExcerptBytes, counter)
@@ -110,19 +115,50 @@ func Select(policy *SelectionPolicy, plan *Plan, counter TokenCounter) (*Selecti
 			return nil, err
 		}
 	}
-	reserved, err := checkedAdd(plan.HeadTokens, protectedTokens)
-	if err != nil {
-		return nil, err
-	}
-	if reserved > plan.Budget.Effective {
+	if protectedTokens > plan.Budget.Effective {
 		return nil, fault.New(ErrorCodeBudgetExceeded, "protected content exceeds the validated budget")
 	}
-	remaining := plan.Budget.Effective - reserved
+	remaining := plan.Budget.Effective - protectedTokens
 	included := make(map[int]bool, len(groups))
+	includedOrder := make([]int, 0, len(groups))
+	includedTokens := 0
 	for _, index := range newestFirst(groups, protected) {
-		if groups[index].Tokens <= remaining {
-			included[index] = true
-			remaining -= groups[index].Tokens
+		if groups[index].Tokens > remaining {
+			continue
+		}
+		included[index] = true
+		includedOrder = append(includedOrder, index)
+		remaining -= groups[index].Tokens
+		includedTokens, err = checkedAdd(includedTokens, groups[index].Tokens)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if policy.SummaryOutputTokens > 0 {
+		for len(includedOrder) > 0 {
+			ranges := countOmittedRanges(len(groups), protected, included)
+			if ranges == 0 {
+				break
+			}
+			reserve, err := multiplyTokens(ranges, policy.SummaryOutputTokens)
+			if err != nil {
+				return nil, err
+			}
+			total, err := checkedAdd(protectedTokens, includedTokens)
+			if err != nil {
+				return nil, err
+			}
+			total, err = checkedAdd(total, reserve)
+			if err != nil {
+				return nil, err
+			}
+			if total <= plan.Budget.Effective {
+				break
+			}
+			oldest := includedOrder[len(includedOrder)-1]
+			includedOrder = includedOrder[:len(includedOrder)-1]
+			delete(included, oldest)
+			includedTokens -= groups[oldest].Tokens
 		}
 	}
 	var omitted []int
@@ -132,23 +168,50 @@ func Select(policy *SelectionPolicy, plan *Plan, counter TokenCounter) (*Selecti
 		}
 	}
 	if len(omitted) == 0 && projected == 0 {
-		used, err := checkedAdd(plan.HeadTokens, plan.TotalEventTokens)
-		if err != nil {
-			return nil, err
-		}
-		return levelSelection(copyGroups(plan.Groups), nil, used, SelectionNormal), nil
+		return levelSelection(copyGroups(plan.Groups), nil, plan.TotalEventTokens, SelectionNormal), nil
 	}
-	used, err := checkedAdd(plan.HeadTokens, protectedTokens)
+	used, err := checkedAdd(protectedTokens, includedTokens)
 	if err != nil {
 		return nil, err
 	}
-	for index := range included {
-		used, err = checkedAdd(used, groups[index].Tokens)
+	if len(omitted) > 0 && policy.SummaryOutputTokens > 0 {
+		ranges := countOmittedRanges(len(groups), protected, included)
+		reserve, err := multiplyTokens(ranges, policy.SummaryOutputTokens)
+		if err != nil {
+			return nil, err
+		}
+		avail := plan.Budget.Effective - used
+		used, err = checkedAdd(used, min(reserve, max(avail, 0)))
 		if err != nil {
 			return nil, err
 		}
 	}
 	return levelSelection(groups, omitted, used, SelectionEmergency), nil
+}
+
+func countOmittedRanges(total int, protected, included map[int]bool) int {
+	ranges := 0
+	inOmitted := false
+	for i := range total {
+		omitted := !protected[i] && !included[i]
+		if omitted && !inOmitted {
+			ranges++
+		}
+		inOmitted = omitted
+	}
+	return ranges
+}
+
+func multiplyTokens(count, perRange int) (int, error) {
+	total := 0
+	for range count {
+		next, err := checkedAdd(total, perRange)
+		if err != nil {
+			return 0, err
+		}
+		total = next
+	}
+	return total, nil
 }
 
 func copyGroups(groups []Group) []Group {
