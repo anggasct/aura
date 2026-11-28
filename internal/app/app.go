@@ -1138,6 +1138,7 @@ func (b *build) buildKernel(ctx context.Context) error {
 			func(ctx context.Context, kind string) {
 				taintRecorder.RecordWorkspaceRecord(ctx, kind)
 			},
+			b.logger,
 		)
 	}
 	if err := b.registerLegacyTaint(); err != nil {

@@ -4,6 +4,7 @@ package filesystem
 
 import (
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -20,7 +21,7 @@ func newTaintFSFixture(t *testing.T) (root string, mod *Module, store *workspace
 	root = t.TempDir()
 	db := sqlitetest.OpenMigrated(t, workspace.Schema())
 	store = workspace.NewTaintStore(db)
-	tracker := workspace.NewTracker(root, store, workspace.DefaultScanEntries, nil)
+	tracker := workspace.NewTracker(root, store, workspace.DefaultScanEntries, nil, slog.New(slog.DiscardHandler))
 	mod, err := New(&Deps{Workspace: root, TaintTracker: tracker})
 	if err != nil {
 		t.Fatalf("filesystem.New: %v", err)

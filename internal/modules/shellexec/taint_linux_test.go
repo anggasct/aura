@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,7 +43,7 @@ func newExecTaintRig(t *testing.T, maxEntries int) (root string, store *workspac
 	root = t.TempDir()
 	db := sqlitetest.OpenMigrated(t, workspace.Schema())
 	store = workspace.NewTaintStore(db)
-	tracker = workspace.NewTracker(root, store, maxEntries, nil)
+	tracker = workspace.NewTracker(root, store, maxEntries, nil, slog.New(slog.DiscardHandler))
 	var err error
 	adapter, err = NewAdapter(&Options{
 		Workspace:      root,

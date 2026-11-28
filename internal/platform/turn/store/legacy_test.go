@@ -141,6 +141,14 @@ func TestLegacySessionsAreMarkedOnce(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("legacy-fetched mark count = %d, want 1", count)
 	}
+
+	remaining, err := listUnmarkedLegacySessions(ctx, db)
+	if err != nil {
+		t.Fatalf("listUnmarkedLegacySessions after scan: %v", err)
+	}
+	if len(remaining) != 0 {
+		t.Fatalf("unmarked legacy sessions after first scan = %+v, want none (clean sessions should not rescan)", remaining)
+	}
 }
 
 func TestLegacyDerivationFailsClosedOnAllUntrustedSources(t *testing.T) {

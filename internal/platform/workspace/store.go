@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -516,7 +517,13 @@ func (s *TaintStore) ApplyWalkResults(ctx context.Context, walk WalkResult, sour
 		}
 		return nil
 	})
-	return stats, err
+	if err == nil {
+		return stats, nil
+	}
+	if _, wideErr := s.RecordWorkspaceWide(ctx, source, sessionID); wideErr != nil {
+		return WalkStats{}, errors.Join(err, wideErr)
+	}
+	return WalkStats{Wide: 1}, err
 }
 
 func (s *TaintStore) listFileRowsTx(ctx context.Context, q sqlite.Querier) ([]TaintRecord, error) {

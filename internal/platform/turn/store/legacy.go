@@ -32,6 +32,9 @@ func MarkLegacySessions(ctx context.Context, db *sql.DB, toolMayTaint func(name 
 		}
 		firstSeq, found := turn.FirstLegacyUntrustedSequence(sess.ownerID, events, toolMayTaint)
 		if !found {
+			if err := markLegacySessionChecked(ctx, db, sess.id); err != nil {
+				return nil, err
+			}
 			continue
 		}
 		inserted, err := insertLegacyTaintMark(ctx, db, sess.id, firstSeq)
@@ -116,6 +119,10 @@ func listUnmarkedLegacySessions(ctx context.Context, db *sql.DB) ([]legacySessio
 		AND NOT EXISTS (
 			SELECT 1 FROM runtime_event e WHERE e.session_id = s.id AND e.kind = ?
 		)
+		AND NOT (
+			json_valid(s.metadata_json)
+			AND COALESCE(json_extract(s.metadata_json, '$._legacy_taint_checked'), 0) = 1
+		)
 		ORDER BY s.id ASC`,
 		turn.EventKindSessionTainted,
 	)
@@ -172,6 +179,26 @@ func loadSessionEventsForLegacy(ctx context.Context, db *sql.DB, sessionID strin
 		return nil, classify(fmt.Errorf("iterate legacy events: %w", err))
 	}
 	return events, nil
+}
+
+func markLegacySessionChecked(ctx context.Context, db *sql.DB, sessionID string) error {
+	_, err := sqlite.Conn(ctx, db).ExecContext(ctx, `
+		UPDATE session
+		SET metadata_json = json_set(
+			CASE
+				WHEN json_valid(metadata_json) AND json_type(metadata_json) = 'object' THEN metadata_json
+				ELSE '{}'
+			END,
+			'$._legacy_taint_checked',
+			1
+		)
+		WHERE id = ?`,
+		sessionID,
+	)
+	if err != nil {
+		return classify(fmt.Errorf("mark legacy session checked %s: %w", sessionID, err))
+	}
+	return nil
 }
 
 func insertLegacyTaintMark(ctx context.Context, db *sql.DB, sessionID string, atSequence uint64) (bool, error) {

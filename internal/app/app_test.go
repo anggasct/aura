@@ -199,7 +199,7 @@ func TestCompositionChatRegistersEveryConfiguredEntry(t *testing.T) {
 	t.Setenv("AURA_TEST_MODEL_KEY", "test-key")
 	result := loadCompositionConfig(t, writeChatCompositionConfig(t, "profile:\n  enabled: true\n"))
 	app := buildApp(t, chatCompositionOptions(result, &syncBuffer{}))
-	requireNames(t, "entries", app.group.Names(), []string{"sqlite", "profile_extraction"})
+	requireNames(t, "entries", app.group.Names(), []string{"sqlite", "legacy_taint", "profile_extraction"})
 	if err := app.Close(t.Context()); err != nil {
 		t.Fatalf("Close without Run: %v", err)
 	}

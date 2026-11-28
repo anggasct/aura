@@ -125,10 +125,10 @@ func run(ctx context.Context, request *toolbroker.ToolRequest, constraints appro
 	if runCmd == nil {
 		runCmd = sandbox.Run
 	}
-	effectScope, _ := options.TaintTracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
+	effectScope := options.TaintTracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
 	started := time.Now()
 	sandboxResult, err := runCmd(runCtx, spec, command, commandArgs...)
-	outputTainted, _ := options.TaintTracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
+	outputTainted := options.TaintTracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
 	if err != nil {
 		return toolbroker.ToolResult{}, err
 	}

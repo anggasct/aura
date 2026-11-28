@@ -255,11 +255,11 @@ func adapter(runner *host, tool *Tool, tracker *workspace.Tracker) toolbroker.Ad
 	return func(ctx context.Context, request *toolbroker.ToolRequest, _ approval.Constraints) (toolbroker.ToolResult, error) {
 		var effectScope workspace.EffectScope
 		if tool.Effect {
-			effectScope, _ = tracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
+			effectScope = tracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
 		}
 		output, fail := runner.invoke(ctx, &call{tool: tool, arguments: request.Arguments, idempotencyKey: request.IdempotencyKey})
 		if tool.Effect {
-			_, _ = tracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
+			tracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
 		}
 		if fail != nil {
 			return toolbroker.ToolResult{}, toolFailure(tool, fail)

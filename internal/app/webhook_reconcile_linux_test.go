@@ -35,7 +35,7 @@ func TestCompositionServerRegistersTheWebhookReconcile(t *testing.T) {
 	result := loadCompositionConfig(t, writeCompositionConfig(t, freeLoopbackAddress(t), compositionModelsYAML, webhookServerYAML(t)))
 	app := buildApp(t, serverCompositionOptions(result, &syncBuffer{}))
 	requireNames(t, "entries", app.group.Names(), []string{
-		"sqlite", "telemetry", "memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels",
+		"sqlite", "telemetry", "legacy_taint", "memory_purge", "broadcast_resume", "schedule_resume", "schedule_pass", "turn_recovery", "channels",
 		"durable_host", "turn_engine", "turn_recovery_pass", "workflow_proposal_cards", "webhook_reconcile", "retention_sweeps", "run_retention", "workflow_completion", "persona_eval_schedules",
 	})
 	if err := app.Close(t.Context()); err != nil {

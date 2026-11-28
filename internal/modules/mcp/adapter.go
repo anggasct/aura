@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 
 	"github.com/google/jsonschema-go/jsonschema"
 
@@ -94,9 +95,9 @@ func NewAdapterWithTracker(client *Client, toolName string, maxMessageSize int64
 			defer cancel()
 		}
 
-		effectScope, _ := tracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
+		effectScope := tracker.BeginEffect(ctx, request.Tainted, request.TaintSource, request.SessionID)
 		res, err := client.CallTool(callCtx, toolName, request.Arguments)
-		_, _ = tracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
+		tracker.EndEffect(context.WithoutCancel(ctx), &effectScope)
 		if err != nil {
 			if errors.Is(err, context.DeadlineExceeded) {
 				return toolbroker.ToolResult{}, toolbroker.Errorf(toolbroker.ResultDeadlineExceeded, "tool call timed out")

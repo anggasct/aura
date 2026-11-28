@@ -5,6 +5,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,7 +26,7 @@ func TestTaintedMCPCallRecordsWorkspaceChanges(t *testing.T) {
 	root := t.TempDir()
 	db := sqlitetest.OpenMigrated(t, workspace.Schema())
 	store := workspace.NewTaintStore(db)
-	tracker := workspace.NewTracker(root, store, workspace.DefaultScanEntries, nil)
+	tracker := workspace.NewTracker(root, store, workspace.DefaultScanEntries, nil, slog.New(slog.DiscardHandler))
 
 	server := sdk.NewServer(&sdk.Implementation{Name: "fs-server", Version: "1.0.0"}, nil)
 	sdk.AddTool(server, &sdk.Tool{Name: "drop_file", Description: "writes a file into workspace"}, func(_ context.Context, _ *sdk.CallToolRequest, _ map[string]any) (*sdk.CallToolResult, map[string]any, error) {
