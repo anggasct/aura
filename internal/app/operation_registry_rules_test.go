@@ -176,32 +176,49 @@ func TestEveryOperationToolIsOwnerOnly(t *testing.T) {
 	rig.requireNothingHappened(t, before)
 }
 
-func TestEveryTrustGrantOperationAlwaysAsksTheOwner(t *testing.T) {
-	var trustGrants int
+func TestEveryPrivilegedOperationAlwaysAsksTheOwner(t *testing.T) {
+	var privileged int
 	probe := newRegistryRig(t, nil)
 	registrations := registeredTools(t, probe)
 	for i := range registrations {
 		definition := &registrations[i].Definition
-		if definition.Risk != tools.RiskTrustGrant {
+		if !definition.Privileged() {
 			continue
 		}
-		trustGrants++
+		privileged++
 		name := definition.Name
 		input := probe.sampleInput(t, name)
 
-		t.Run(name+" is refused on a tainted turn without a card", func(t *testing.T) {
-			rig := newRegistryRig(t, nil)
-			before := operationtest.Snapshot(t, rig.DB)
-			request := rig.request(name, input)
-			request.Tainted = true
+		if definition.Risk == tools.RiskTrustGrant {
+			t.Run(name+" is refused on a tainted turn without a card", func(t *testing.T) {
+				rig := newRegistryRig(t, nil)
+				before := operationtest.Snapshot(t, rig.DB)
+				request := rig.request(name, input)
+				request.Tainted = true
 
-			got := rig.Execute(t.Context(), request)
+				got := rig.Execute(t.Context(), request)
 
-			if got.Class != toolbroker.ResultUntrustedInputTrustGrant {
-				t.Fatalf("outcome = %+v, want %s", got, toolbroker.ResultUntrustedInputTrustGrant)
-			}
-			rig.requireNothingHappened(t, before)
-		})
+				if got.Class != toolbroker.ResultUntrustedInputTrustGrant {
+					t.Fatalf("outcome = %+v, want %s", got, toolbroker.ResultUntrustedInputTrustGrant)
+				}
+				rig.requireNothingHappened(t, before)
+			})
+		} else {
+			t.Run(name+" still asks on a tainted turn", func(t *testing.T) {
+				rig := newRegistryRig(t, nil)
+				request := rig.request(name, input)
+				request.Tainted = true
+
+				got := rig.Execute(t.Context(), request)
+
+				if got.Class == toolbroker.ResultUntrustedInputTrustGrant {
+					t.Fatalf("outcome = %+v, a call that is not a trust grant is refused as one", got)
+				}
+				if prompts := rig.Prompts(); len(prompts) != 1 {
+					t.Fatalf("approval cards = %d, want exactly one before anything runs", len(prompts))
+				}
+			})
+		}
 		for _, tracked := range []bool{false, true} {
 			t.Run(name+" asks on every call tracked="+strconv.FormatBool(tracked), func(t *testing.T) {
 				rig := newRegistryRig(t, nil)
@@ -256,7 +273,7 @@ func TestEveryTrustGrantOperationAlwaysAsksTheOwner(t *testing.T) {
 			}
 		})
 	}
-	if trustGrants == 0 {
-		t.Fatal("the registry holds no trust-grant operation to check")
+	if privileged == 0 {
+		t.Fatal("the registry holds no privileged operation to check")
 	}
 }
