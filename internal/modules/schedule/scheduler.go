@@ -97,6 +97,7 @@ type JobEdit struct {
 
 type JobConfirmation struct {
 	ExpectedVersion int64
+	ExpectedState   string
 	Context         string
 }
 

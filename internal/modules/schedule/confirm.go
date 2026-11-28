@@ -55,6 +55,7 @@ func (c *confirmation) lines(route string) []string {
 	lines := []string{
 		"Job: " + job.ID,
 		"Name: " + job.Name,
+		"State: " + job.State,
 		fmt.Sprintf("Schedule: %s (%s)", job.CronExpression, job.Timezone),
 	}
 	if job.WorkflowID != "" {
@@ -119,7 +120,7 @@ func (o *Operations) confirm(ctx context.Context, call *operation.Call) (operati
 		if pending.nothingToDo() || pending.digest(pending.lines(o.routeOf(pending.job.OriginDestination))) != call.PreviewDigest {
 			return operation.Result{}, stalePreview("the job changed after the preview")
 		}
-		confirmed, err := o.service.Confirm(ctx, pending.job.ID, &JobConfirmation{ExpectedVersion: pending.job.Version, Context: pending.context})
+		confirmed, err := o.service.Confirm(ctx, pending.job.ID, &JobConfirmation{ExpectedVersion: pending.job.Version, ExpectedState: pending.job.State, Context: pending.context})
 		if fault.HasCode(err, ErrorCodeOccurrenceConflict) {
 			return operation.Result{}, stalePreview("the job changed after the preview")
 		}

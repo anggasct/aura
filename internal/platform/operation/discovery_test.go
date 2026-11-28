@@ -158,7 +158,7 @@ func searchToolDescription(t *testing.T, rig *operationtest.Rig) string {
 }
 
 func TestOperationDescriptionCarriesTheTrustGrantClause(t *testing.T) {
-	const clause = "A verb marked ^ that grants trust is refused, with no card, when this conversation carries untrusted input"
+	const clause = "A verb marked ^ that grants trust asks with a warning card, or is refused, when this conversation carries untrusted input, at most one card per owner message"
 	for _, rig := range []*operationtest.Rig{terminalRig(t, nil), discoveryRig(t, nil)} {
 		for _, kind := range []operation.TurnKind{operation.TurnAttended, operation.TurnUnattended} {
 			for _, tracked := range []bool{false, true} {

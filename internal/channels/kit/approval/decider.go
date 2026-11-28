@@ -36,6 +36,7 @@ func Decider(channels []Channel) toolbroker.ApprovalDecider {
 				MaxOutputBytes:       prompt.MaxOutputBytes,
 				PolicyVersion:        prompt.PolicyVersion,
 				ReasonCode:           prompt.ReasonCode,
+				TaintSource:          prompt.TaintSource,
 				ExpiresAt:            prompt.ExpiresAt,
 				StandingGrantAllowed: prompt.StandingGrantAllowed,
 			})

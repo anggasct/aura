@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/anggasct/aura/internal/platform/principal"
+	runtimeingress "github.com/anggasct/aura/internal/platform/turn/ingress"
 )
 
 func TestNeutralizeUntrustedMarkers(t *testing.T) {
@@ -123,6 +124,8 @@ func TestStepOneAdmissionSourcesAndLabels(t *testing.T) {
 		"input beats job":      {req: &TurnRequest{Origin: OriginSchedule, InputTainted: true, JobTaint: "x", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceWorkflowInput, wantLabel: "a workflow step"},
 		"job beats web only":   {req: &TurnRequest{Origin: OriginSchedule, JobTaint: "x", JobID: "job-3", WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceScheduleOrigin, wantDetail: "job-3", wantLabel: "a schedule created in a conversation with untrusted content"},
 		"web only beats scope": {req: &TurnRequest{Origin: OriginSchedule, WebOnly: true, Knowledge: []string{"a"}}, wantSource: TaintSourceWebOnly, wantLabel: "a web-only scheduled run"},
+		"relayed telegram":     {req: &TurnRequest{Origin: "telegram:main", Parts: []runtimeingress.InputPart{{Text: "hi", Source: PartSourceRelayed, Detail: "telegram forward"}}}, wantSource: TaintSourceRelayedInput, wantDetail: "telegram forward", wantLabel: "a forwarded or quoted message"},
+		"scope beats relayed":  {req: &TurnRequest{Origin: "telegram:main", Knowledge: []string{"faq"}, Parts: []runtimeingress.InputPart{{Text: "hi", Source: PartSourceRelayed, Detail: "telegram forward"}}}, wantSource: TaintSourceKnowledgeScope, wantLabel: "knowledge attached to this persona"},
 	}
 	for name, tc := range tests {
 		t.Run(name, func(t *testing.T) {
@@ -191,5 +194,21 @@ func TestQuoteUntrustedNameKeepsTheNameInsideOneQuotedToken(t *testing.T) {
 				t.Errorf("QuoteUntrustedName(%q) = %s, want %s", test.input, got, test.want)
 			}
 		})
+	}
+}
+
+func TestCardSourceHostIsPunycode(t *testing.T) {
+	mark := TaintMark{Source: TaintSourceToolResult, Detail: "web_fetch раураl.com"}
+	got := mark.Label()
+	if !strings.HasPrefix(got, "a web_fetch result from xn--") || strings.Contains(got, "раураl") {
+		t.Fatalf("Label() = %q, want punycode host without confusable unicode", got)
+	}
+	validASCII := TaintMark{Source: TaintSourceToolResult, Detail: "web_fetch bücher.example"}.Label()
+	if validASCII != "a web_fetch result from xn--bcher-kva.example" {
+		t.Errorf("Label() = %q, want punycode host", validASCII)
+	}
+	badHost := TaintMark{Source: TaintSourceToolResult, Detail: "web_fetch \x00invalid\u202ehost"}.Label()
+	if strings.Contains(badHost, "\u202e") {
+		t.Errorf("Label() kept unescaped control rune: %q", badHost)
 	}
 }

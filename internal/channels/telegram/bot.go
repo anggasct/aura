@@ -192,6 +192,16 @@ func (m *message) relayed() bool {
 	return len(m.ForwardOrigin) > 0 || m.ForwardDate != 0 || m.ViaBot != nil || m.AutomaticForward
 }
 
+func (m *message) relayedDetail() string {
+	if !m.relayed() {
+		return ""
+	}
+	if m.ViaBot != nil {
+		return "telegram inline bot"
+	}
+	return "telegram forward"
+}
+
 type forumTopicCreation struct{}
 
 type mediaFile struct {

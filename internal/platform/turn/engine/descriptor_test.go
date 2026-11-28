@@ -28,12 +28,17 @@ func callersContext() *turn.UntrustedRecall {
 
 func requestWithEveryFieldSet() *turn.TurnRequest {
 	return &turn.TurnRequest{
-		TurnID:           "turn-full",
-		SessionID:        "session-full",
-		PrincipalID:      "discord:601",
-		PrincipalClass:   principal.ClassTrusted,
-		Origin:           turn.OriginHTTP,
-		Parts:            []runtimeingress.InputPart{{Text: "hello", Image: json.RawMessage(`{"mime":"image/png","data":"aGk="}`)}},
+		TurnID:         "turn-full",
+		SessionID:      "session-full",
+		PrincipalID:    "discord:601",
+		PrincipalClass: principal.ClassTrusted,
+		Origin:         turn.OriginHTTP,
+		Parts: []runtimeingress.InputPart{{
+			Text:   "hello",
+			Image:  json.RawMessage(`{"mime":"image/png","data":"aGk="}`),
+			Source: runtimeingress.PartSourceRelayed,
+			Detail: "telegram forward",
+		}},
 		ReplyContext:     json.RawMessage(`{"channel":"7001"}`),
 		UntrustedContext: callersContext(),
 		RequireRecall:    true,

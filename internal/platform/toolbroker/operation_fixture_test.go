@@ -25,12 +25,13 @@ import (
 )
 
 type operationStub struct {
-	name      string
-	risk      tools.Risk
-	fresh     bool
-	notice    bool
-	sink      bool
-	previewed bool
+	name         string
+	risk         tools.Risk
+	fresh        bool
+	notice       bool
+	sink         bool
+	previewed    bool
+	taintedGrant tools.TaintedGrant
 
 	capabilities []string
 }
@@ -39,7 +40,7 @@ func (s operationStub) definition(tb testing.TB) tools.Definition {
 	tb.Helper()
 	definition := tools.Definition{
 		Name: s.name, Version: tools.Version, Risk: s.risk, Operation: "stub." + s.name,
-		FreshApproval: s.fresh, OwnerNotice: s.notice, ExternalSink: s.sink,
+		FreshApproval: s.fresh, OwnerNotice: s.notice, ExternalSink: s.sink, TaintedGrant: s.taintedGrant,
 		Validator: func(raw json.RawMessage) (json.RawMessage, error) {
 			value, err := tools.DecodeObject(raw)
 			if err != nil {

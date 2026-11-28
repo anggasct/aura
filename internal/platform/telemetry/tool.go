@@ -27,9 +27,11 @@ type ToolObservation struct {
 }
 
 type ToolRecorder struct {
-	tracer   trace.Tracer
-	calls    metric.Int64Counter
-	duration metric.Float64Histogram
+	tracer            trace.Tracer
+	calls             metric.Int64Counter
+	duration          metric.Float64Histogram
+	taintRelief       metric.Int64Counter
+	taintedTrustGrant metric.Int64Counter
 }
 
 func NewToolRecorder(tp trace.TracerProvider, mp metric.MeterProvider) (*ToolRecorder, error) {
@@ -48,7 +50,41 @@ func NewToolRecorder(tp trace.TracerProvider, mp metric.MeterProvider) (*ToolRec
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: create tool duration histogram: %w", err)
 	}
-	return &ToolRecorder{tracer: tp.Tracer(ScopeName), calls: calls, duration: duration}, nil
+	taintRelief, err := meter.Int64Counter(MetricToolBrokerTaintReliefTotal, metric.WithDescription("tainted web tool relief evaluations"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create taint relief counter: %w", err)
+	}
+	taintedTrustGrant, err := meter.Int64Counter(MetricToolBrokerTaintedTrustGrantTotal, metric.WithDescription("tainted trust grant outcomes"))
+	if err != nil {
+		return nil, fmt.Errorf("telemetry: create tainted trust grant counter: %w", err)
+	}
+	return &ToolRecorder{
+		tracer:            tp.Tracer(ScopeName),
+		calls:             calls,
+		duration:          duration,
+		taintRelief:       taintRelief,
+		taintedTrustGrant: taintedTrustGrant,
+	}, nil
+}
+
+func (r *ToolRecorder) RecordTaintRelief(ctx context.Context, toolName, relief, outcome string) {
+	if r == nil || r.taintRelief == nil {
+		return
+	}
+	r.taintRelief.Add(ctx, 1, metric.WithAttributes(
+		attribute.String(AttrAuraToolName, toolName),
+		attribute.String(AttrTaintRelief, relief),
+		attribute.String(AttrOutcome, outcome),
+	))
+}
+
+func (r *ToolRecorder) RecordTaintedTrustGrant(ctx context.Context, outcome string) {
+	if r == nil || r.taintedTrustGrant == nil {
+		return
+	}
+	r.taintedTrustGrant.Add(ctx, 1, metric.WithAttributes(
+		attribute.String(AttrOutcome, outcome),
+	))
 }
 
 func (r *ToolRecorder) Record(ctx context.Context, observation *ToolObservation) {

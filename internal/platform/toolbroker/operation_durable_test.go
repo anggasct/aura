@@ -99,6 +99,7 @@ func TestOperationCallJournalsPolicyPreviewAuthorizationAndExecutionInOrder(t *t
 }
 
 func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
+	declaredTrustGrantStub := operationStub{name: "aura_stub_declared_grant", risk: tools.RiskTrustGrant, previewed: true, taintedGrant: tools.TaintedGrantLabels}
 	cases := []struct {
 		name    string
 		stub    operationStub
@@ -113,7 +114,9 @@ func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
 		{name: "a child origin", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginChild }, class: ResultToolTierDenied, journal: "call-1-0/policy"},
 		{name: "a workflow origin", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginWorkflow }, class: ResultToolTierDenied, journal: "call-1-0/policy"},
 		{name: "an unset origin", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Origin = "" }, class: ResultToolTierDenied, journal: "call-1-0/policy"},
-		{name: "a tainted trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Tainted = true }, class: ResultUntrustedInputTrustGrant, journal: "call-1-0/policy"},
+		{name: "an undeclared tainted trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Tainted = true; r.TrustGrantOrdinal = 1 }, class: ResultUntrustedInputTrustGrant, journal: "call-1-0/policy"},
+		{name: "a second tainted trust grant in one turn", stub: declaredTrustGrantStub, mutate: func(r *ToolRequest) { r.Tainted = true; r.TrustGrantOrdinal = 2 }, class: ResultUntrustedInputTrustGrant, journal: "call-1-0/policy"},
+		{name: "an unattended declared tainted trust grant", stub: declaredTrustGrantStub, mutate: func(r *ToolRequest) { r.Tainted = true; r.TrustGrantOrdinal = 1; r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an unattended trust grant", stub: trustGrantStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "an unattended deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Unattended = true }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
 		{name: "a scheduled deletion", stub: destructiveStub, mutate: func(r *ToolRequest) { r.Origin = turn.OriginSchedule }, class: ResultOwnerTurnRequired, journal: "call-1-0/policy"},
@@ -125,7 +128,7 @@ func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
 		{name: "an attached grant on a fresh approval change", stub: freshStub, mutate: func(r *ToolRequest) { r.Approval = &approval.ApprovalGrant{GrantID: "g"} }, class: ResultFreshApprovalRequired, journal: "call-1-0/policy"},
 	}
 	hosted := startHostedRuntime(t)
-	rig := newDurableOperationRig(t, hosted, &operationOptions{reachable: true}, destructiveStub, trustGrantStub, freshStub, previewedStub)
+	rig := newDurableOperationRig(t, hosted, &operationOptions{reachable: true}, destructiveStub, trustGrantStub, declaredTrustGrantStub, freshStub, previewedStub)
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			request := operationRequest(tc.stub.name, "x")
@@ -187,6 +190,30 @@ func TestPreviewRunsOnlyAfterValidationAndDeterministicRefusals(t *testing.T) {
 		}
 		if previews := rig.previewed.Load(); previews != 1 {
 			t.Errorf("previewer runs = %d, want 1", previews)
+		}
+	})
+	t.Run("a declared tainted trust grant runs the previewer for its warning card", func(t *testing.T) {
+		beforePreviews := rig.previewed.Load()
+		request := operationRequest(declaredTrustGrantStub.name, "x")
+		request.Tainted = true
+		request.TrustGrantOrdinal = 1
+		var outcome callOutcome
+		key := hosted.run(t, func(ctx context.Context, inv durable.Invocation) error {
+			outcome = outcomeOf(rig.broker.Execute(inTurn(ctx, inv), request))
+			return nil
+		})
+		if outcome.class != ResultOK {
+			t.Fatalf("outcome = %+v, want ok", outcome)
+		}
+		if got, want := joinedKeys(hosted.actionRows(t, key)), "call-1-0/policy,call-1-0/preview,call-1-0/authorization,call-1-0/execution"; got != want {
+			t.Errorf("action keys = %s, want %s", got, want)
+		}
+		if rig.previewed.Load() != beforePreviews+1 {
+			t.Errorf("previewer runs = %d, want %d", rig.previewed.Load(), beforePreviews+1)
+		}
+		prompts := rig.decider.asked()
+		if len(prompts) == 0 || prompts[len(prompts)-1].ReasonCode != approval.ReasonUntrustedTrustGrant {
+			t.Errorf("prompt reason = %+v, want %s", prompts, approval.ReasonUntrustedTrustGrant)
 		}
 	})
 }

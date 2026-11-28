@@ -195,8 +195,8 @@ func (s *SQLiteStore) ConfirmJob(ctx context.Context, req *JobConfirmRequest) (J
 	}
 	result, err := sqlite.Conn(ctx, s.db).ExecContext(ctx,
 		`UPDATE scheduled_job SET tainted = 0, taint_source = NULL, context = COALESCE(NULLIF(?, ''), context),
-		version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND state != ?`,
-		req.Context, sqlite.FormatTime(req.At.UTC()), req.ID, req.ExpectedVersion, JobDeleted)
+		version = version + 1, updated_at = ? WHERE id = ? AND version = ? AND state != ? AND (? = '' OR state = ?)`,
+		req.Context, sqlite.FormatTime(req.At.UTC()), req.ID, req.ExpectedVersion, JobDeleted, req.ExpectedState, req.ExpectedState)
 	if err != nil {
 		return Job{}, fault.Wrap(ErrorCodeUnavailable, "confirm schedule job", sqlite.Classify(err))
 	}
