@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"slices"
@@ -203,9 +204,12 @@ func (o *Operations) add(ctx context.Context, call *operation.Call) (operation.R
 	if err := o.ready(call, &in); err != nil {
 		return operation.Result{}, err
 	}
-	prepared, err := o.prepareAdd(ctx, call, &in)
+	prepared, digest, err := o.prepareAdd(ctx, call, &in)
 	if err != nil {
 		return operation.Result{}, moduleFailure(err)
+	}
+	if call.PreviewDigest != "" && call.PreviewDigest != digest {
+		return operation.Result{}, staleSet("the source changed after the preview")
 	}
 	var written IngestResult
 	var applied bool
@@ -235,16 +239,28 @@ func (o *Operations) previewAdd(ctx context.Context, call *operation.Call) (oper
 	if err := o.ready(call, &in); err != nil {
 		return operation.Preview{}, err
 	}
-	line := "fetches the address from this host and stores its text as searchable chunks in collection " + in.Collection
-	if call.HasFile(sourceParam) {
-		file, err := call.File(ctx, sourceParam)
-		if err != nil {
-			return operation.Preview{}, moduleFailure(err)
-		}
-		line = fmt.Sprintf("reads %s (%s, %d bytes) and stores its text as searchable chunks in collection %s",
-			turn.QuoteUntrustedName(file.Name()), mediaTypeLabel(file.MediaType()), file.Size(), in.Collection)
+	if !call.HasFile(sourceParam) {
+		line := addLine(in.Collection, nil)
+		return operation.Preview{Lines: []string{line}, Digest: digestOf(line)}, nil
 	}
-	return operation.Preview{Lines: []string{line}, Digest: digestOf(line)}, nil
+	file, err := call.File(ctx, sourceParam)
+	if err != nil {
+		return operation.Preview{}, moduleFailure(err)
+	}
+	hasher := sha256.New()
+	if _, err := io.Copy(hasher, io.LimitReader(file, MaxSourceBytes+1)); err != nil {
+		return operation.Preview{}, operation.NewError(operation.ErrorCodeSourceUnavailable, "the source cannot be read")
+	}
+	line := addLine(in.Collection, file)
+	return operation.Preview{Lines: []string{line}, Digest: digestOf(line, hex.EncodeToString(hasher.Sum(nil)))}, nil
+}
+
+func addLine(collection string, file operation.File) string {
+	if file == nil {
+		return "fetches the address from this host and stores its text as searchable chunks in collection " + collection
+	}
+	return fmt.Sprintf("reads %s (%s, %d bytes) and stores its text as searchable chunks in collection %s",
+		turn.QuoteUntrustedName(file.Name()), mediaTypeLabel(file.MediaType()), file.Size(), collection)
 }
 
 func mediaTypeLabel(mediaType string) string {
@@ -261,23 +277,26 @@ func sourceAttrs(verb string, result *IngestResult) []any {
 	}
 }
 
-func (o *Operations) prepareAdd(ctx context.Context, call *operation.Call, in *collectionInput) (*Prepared, error) {
+func (o *Operations) prepareAdd(ctx context.Context, call *operation.Call, in *collectionInput) (prepared *Prepared, digest string, err error) {
 	switch {
 	case in.URL != "":
-		return o.service.PrepareURL(ctx, in.Collection, in.URL)
+		prepared, err = o.service.PrepareURL(ctx, in.Collection, in.URL)
+		return prepared, digestOf(addLine(in.Collection, nil)), err
 	case call.HasFile(sourceParam):
 		file, err := call.File(ctx, sourceParam)
 		if err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return o.prepareFrom(ctx, in.Collection, file)
+		hasher := sha256.New()
+		prepared, err = o.prepareFrom(ctx, in.Collection, file, hasher)
+		return prepared, digestOf(addLine(in.Collection, file), hex.EncodeToString(hasher.Sum(nil))), err
 	}
-	return nil, usage("a source or a url is required")
+	return nil, "", usage("a source or a url is required")
 }
 
-func (o *Operations) prepareFrom(ctx context.Context, collection string, file operation.File) (*Prepared, error) {
+func (o *Operations) prepareFrom(ctx context.Context, collection string, file operation.File, content io.Writer) (*Prepared, error) {
 	return o.service.PrepareStream(ctx, collection, &Stream{
-		URI: file.Reference(), Name: file.Name(), MediaType: file.MediaType(), Size: file.Size(), Reader: file,
+		URI: file.Reference(), Name: file.Name(), MediaType: file.MediaType(), Size: file.Size(), Reader: io.TeeReader(file, content),
 	})
 }
 
@@ -385,7 +404,7 @@ func (o *Operations) prepareStored(ctx context.Context, call *operation.Call, co
 			return nil, err
 		}
 		defer func() { _ = file.Close() }()
-		return o.prepareFrom(ctx, collection, file)
+		return o.prepareFrom(ctx, collection, file, io.Discard)
 	})
 }
 

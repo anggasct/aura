@@ -36,6 +36,11 @@ type opsRig struct {
 
 func newOpsRig(t *testing.T) *opsRig {
 	t.Helper()
+	return newOpsRigAnswering(t, nil)
+}
+
+func newOpsRigAnswering(t *testing.T, answer func(ctx context.Context, prompt *toolbroker.ApprovalPrompt) (bool, error)) *opsRig {
+	t.Helper()
 	db := operationtest.OpenDatabase(t, knowledge.Schema())
 	now := time.Now().UTC()
 	if err := turnstore.NewSessionService(db).Create(t.Context(), &turn.Session{ID: otherSessionID, OwnerID: operationtest.OwnerID, CreatedAt: now, UpdatedAt: now}); err != nil {
@@ -53,6 +58,8 @@ func newOpsRig(t *testing.T) *opsRig {
 		Catalogs: []operation.Catalog{knowledge.Catalog()},
 		Bindings: func(*operationtest.Stubs) []operation.Binding { return operations.Bindings() },
 		Files:    &operation.FileDeps{Workspace: workspace, Artifacts: artifacts},
+
+		AnswerCards: answer,
 	})
 	return &opsRig{Rig: rig, kb: kb, workspace: workspace, artifacts: artifacts}
 }

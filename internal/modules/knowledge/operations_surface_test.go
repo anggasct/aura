@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -282,5 +284,90 @@ func TestOnlyTheOperationsThatReachTheNetworkSayTheirCardUsesIt(t *testing.T) {
 	}
 	if seen != 8 {
 		t.Errorf("checked %d knowledge tools, want 8", seen)
+	}
+}
+
+func TestAnApprovedAddIsRefusedWhenTheFileChangedAfterThePreview(t *testing.T) {
+	var rig *opsRig
+	replace := func(context.Context, *toolbroker.ApprovalPrompt) (bool, error) {
+		rig.writeWorkspaceFile(t, "docs/policy.md", "# Policy\nA different document than the one on the card.\n")
+		return true, nil
+	}
+	rig = newOpsRigAnswering(t, replace)
+	rig.writeWorkspaceFile(t, "docs/policy.md", "# Policy\nRefunds are issued within thirty days.\n")
+	request := operationtest.RequestFor(operation.ToolName("kb.add"), json.RawMessage(`{"collection":"support","source":"docs/policy.md"}`), "stale-add")
+	request.Tainted = true
+
+	outcome := rig.Execute(t.Context(), request)
+
+	if outcome.Class == toolbroker.ResultOK || outcome.Err == nil || !strings.Contains(outcome.Err.Error(), "operation_preview_stale") {
+		t.Fatalf("outcome = %+v, want the add refused as stale", outcome)
+	}
+	if sources := rig.sources(t); len(sources) != 0 {
+		t.Errorf("sources = %+v, want nothing stored", sources)
+	}
+	if actions := rig.kb.Ledger.Actions(); len(actions) != 0 {
+		t.Errorf("owner actions = %+v, want none", actions)
+	}
+}
+
+func TestAnApprovedAddIngestsAFileThatDidNotChange(t *testing.T) {
+	cases := []struct {
+		name   string
+		source func(t *testing.T, rig *opsRig) string
+	}{
+		{name: "a workspace file", source: func(t *testing.T, rig *opsRig) string {
+			rig.writeWorkspaceFile(t, "docs/policy.md", "# Policy\nRefunds are issued within thirty days.\n")
+			return "docs/policy.md"
+		}},
+		{name: "an attachment", source: func(t *testing.T, rig *opsRig) string {
+			return "artifact:" + rig.attach(t, operationtest.SessionID, "policy.md", "text/markdown", "# Policy\nRefunds are issued within thirty days.\n")
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rig := newOpsRig(t)
+			request := operationtest.RequestFor(operation.ToolName("kb.add"), json.RawMessage(`{"collection":"support","source":`+quote(tc.source(t, rig))+`}`), "fresh-add")
+			request.Tainted = true
+
+			outcome := rig.Execute(t.Context(), request)
+
+			if err := requireOK(outcome); err != nil {
+				t.Fatalf("add: %v", err)
+			}
+			if sources := rig.sources(t); len(sources) != 1 {
+				t.Errorf("sources = %+v, want the document stored", sources)
+			}
+		})
+	}
+}
+
+func TestThePreviewOfAnAddIsBoundToTheContentOnTheCLI(t *testing.T) {
+	rig := newOpsRig(t)
+	host := filepath.Join(t.TempDir(), "policy.md")
+	if err := os.WriteFile(host, []byte("# Policy\nRefunds are issued within thirty days.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	owner := operation.Caller{Surface: operation.SurfaceCLI, PrincipalID: operationtest.OwnerID, Class: principal.ClassOwner, SessionID: operationtest.SessionID}
+	input := json.RawMessage(`{"collection":"support","source":` + quote(host) + `}`)
+	preview, err := rig.Registry.Preview(t.Context(), "kb.add", &operation.Call{Caller: owner, Input: input})
+	if err != nil || preview.Digest == "" {
+		t.Fatalf("Preview = %+v, %v", preview, err)
+	}
+	again, err := rig.Registry.Preview(t.Context(), "kb.add", &operation.Call{Caller: owner, Input: input})
+	if err != nil || again.Digest != preview.Digest {
+		t.Fatalf("a second Preview = %+v, %v; want the same digest for the same bytes", again, err)
+	}
+
+	if err := os.WriteFile(host, []byte("# Policy\nRefunds are issued within sixty days.\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err = rig.Registry.Invoke(t.Context(), "kb.add", &operation.Call{Caller: owner, Input: input, PreviewDigest: preview.Digest})
+
+	if !fault.HasCode(err, operation.ErrorCodePreviewStale) {
+		t.Fatalf("Invoke = %v, want %s", err, operation.ErrorCodePreviewStale)
+	}
+	if sources := rig.sources(t); len(sources) != 0 {
+		t.Errorf("sources = %+v, want nothing stored", sources)
 	}
 }
